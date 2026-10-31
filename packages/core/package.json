@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "type": "module",
   "exports": {
+    "./personal-access-keys": "./src/personal-access-keys/index.ts",
     "./utils": "./src/utils/index.ts",
     "./utils/slug": "./src/utils/slug.ts",
     "./api": "./src/api/index.ts",

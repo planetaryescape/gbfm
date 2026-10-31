@@ -21,6 +21,8 @@ import { MusicRemindersHandlersLive } from '@/http/music-reminders.handlers'
 import { MusicHandlersLive } from '@/http/music.handlers'
 import { NavigationHandlersLive } from '@/http/navigation.handlers'
 import { NewsletterHandlersLive } from '@/http/newsletter.handlers'
+import { keyRequestRejection, privateKeyResponse } from '@/http/personal-access-key-policy'
+import { PersonalAccessKeyHandlersLive } from '@/http/personal-access-key.handlers'
 import { PostHandlersLive } from '@/http/post.handlers'
 import { ProfileHandlersLive } from '@/http/profile.handlers'
 import { ReleaseHandlersLive } from '@/http/release.handlers'
@@ -35,6 +37,7 @@ import { UploadHandlersLive } from '@/http/upload.handlers'
 import { UserHandlersLive } from '@/http/user.handlers'
 import { Auth } from '@/lib/auth'
 import { LocalRouteTracingLive, localRequestMiddleware } from '@/lib/local-request-tracing'
+import { ActorMiddlewareLive } from '@/middleware/actor.impl'
 import { AuthMiddlewareLive } from '@/middleware/auth.impl'
 import { IdentityResolverLive } from '@/middleware/optional-auth.impl'
 import { prepareAuthRequest } from '@/routes/user/better-auth.routes'
@@ -117,7 +120,7 @@ export const createWebHandler = (options: {
     Layer.provide(InviteHandlersLive),
     Layer.provide(ListeningHandlersLive),
     Layer.provide(ReleaseHandlersLive),
-    Layer.provide(PostHandlersLive),
+    Layer.provide(Layer.mergeAll(PostHandlersLive, PersonalAccessKeyHandlersLive)),
     Layer.provide(AudioHandlersLive),
     Layer.provide(EmailHandlersLive),
     Layer.provide(
@@ -134,7 +137,9 @@ export const createWebHandler = (options: {
     Layer.provide(Layer.mergeAll(UserHandlersLive, UploadHandlersLive)),
     // These middleware services are also yielded directly by built handlers. Keep them in the
     // layer output so toWebHandler can prove no request-time context remains.
-    Layer.provideMerge(Layer.mergeAll(AuthMiddlewareLive, IdentityResolverLive)),
+    Layer.provideMerge(
+      Layer.mergeAll(AuthMiddlewareLive, ActorMiddlewareLive, IdentityResolverLive),
+    ),
   )
 
   const routes =
@@ -173,12 +178,18 @@ export const createWebHandler = (options: {
       Layer.provideMerge(AppLoggerLive.pipe(Layer.provide(appServices))),
     )
 
-  if (options.localTracing) {
-    return HttpRouter.toWebHandler(routes, {
-      disableLogger: true,
-      middleware: localRequestMiddleware,
-    })
+  const web = HttpRouter.toWebHandler(routes, {
+    disableLogger: true,
+    ...(options.localTracing ? { middleware: localRequestMiddleware } : undefined),
+  })
+
+  const handler: typeof web.handler = async (request, ...args) => {
+    const rejection = keyRequestRejection(request)
+
+    if (rejection) return rejection
+
+    return privateKeyResponse(request, await web.handler(request, ...args))
   }
 
-  return HttpRouter.toWebHandler(routes, { disableLogger: true })
+  return { ...web, handler }
 }

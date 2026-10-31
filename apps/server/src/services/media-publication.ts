@@ -1,3 +1,4 @@
+import type { Actor } from '@gbfm/api/middleware/actor'
 import { Effect } from 'effect'
 import type { Definition, Image, ImageReference, Root, RootContent } from 'mdast'
 import remarkDirective from 'remark-directive'
@@ -12,6 +13,7 @@ import type { ObjectStoreClient } from '@/services/storage/object-store-client'
 export interface MediaActor {
   readonly userId: string
   readonly userRole: string
+  readonly credential?: Actor['credential'] | undefined
 }
 
 interface MediaFields {
@@ -148,7 +150,12 @@ export const makeMediaPublication = (
         attached.has(`${prefix}${destination}`) ||
         attached.has(`/user-content/${destination}`)
 
-      if (!actor || (actor.userRole !== 'admin' && owner !== uploader && !alreadyAttached))
+      if (
+        !actor ||
+        ((actor.userRole !== 'admin' || actor.credential?._tag === 'PersonalAccessKey') &&
+          owner !== uploader &&
+          !alreadyAttached)
+      )
         return yield* new UnauthorizedError({
           message: 'Not authorized to attach private media',
         })

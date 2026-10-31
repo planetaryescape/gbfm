@@ -243,6 +243,7 @@
       "name": "@gbfm/api",
       "version": "0.0.1",
       "dependencies": {
+        "@gbfm/core": "workspace:*",
         "@gbfm/rich-content": "workspace:*",
         "@gbfm/site-metadata": "workspace:*",
         "@gbfm/social-card": "workspace:*",

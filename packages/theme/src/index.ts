@@ -13,3 +13,5 @@ export { dark, light, studio } from './tokens/shadcn'
 export type { TypographyTokens } from './tokens/typography'
 
 export { typography } from './tokens/typography'
+
+export { controlMetrics, radii } from './tokens/geometry'

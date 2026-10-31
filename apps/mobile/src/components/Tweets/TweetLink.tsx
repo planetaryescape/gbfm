@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Linking, Pressable, Text } from 'react-native'
+import { Linking, Text } from 'react-native'
 
+import { Button } from '@/components/Button'
 import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 import { tweetLinkUrl } from '@/tweets/tweetContent'
@@ -34,23 +35,7 @@ export function TweetLink({ href, label }: { readonly href: string; readonly lab
 
   return (
     <>
-      <Pressable
-        accessibilityRole='link'
-        accessibilityLabel={label}
-        onPress={() => void open()}
-        style={({ pressed }) => ({
-          minHeight: 44,
-          paddingHorizontal: 12,
-          justifyContent: 'center',
-          borderRadius: 4,
-          borderWidth: 1,
-          borderColor: colors.muted,
-          opacity: pressed ? 0.6 : 1,
-        })}>
-        <Text style={{ color: colors.accent, fontFamily: fonts.monoSemiBold, fontSize: 12 }}>
-          {label} ↗
-        </Text>
-      </Pressable>
+      <Button role='link' label={`${label} ↗`} accessibilityLabel={label} onPress={open} />
       {failed ? (
         <Text
           accessibilityRole='alert'

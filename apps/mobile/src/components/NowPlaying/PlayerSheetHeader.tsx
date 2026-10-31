@@ -1,7 +1,8 @@
-import { Pressable, Text, View } from 'react-native'
+import { radii } from '@gbfm/theme'
+import { View } from 'react-native'
 
+import { Button } from '@/components/Button'
 import { useThemeColors, withAlpha } from '@/theme/colors'
-import { fonts } from '@/theme/fonts'
 
 export function PlayerSheetHeader({ onClose }: { readonly onClose: () => void }) {
   const colors = useThemeColors()
@@ -16,23 +17,13 @@ export function PlayerSheetHeader({ onClose }: { readonly onClose: () => void })
           marginLeft: -18,
           width: 36,
           height: 4,
-          borderRadius: 2,
+          borderRadius: radii.control,
           backgroundColor: withAlpha(colors.muted, 0.45),
         }}
       />
-      <Pressable
-        accessibilityRole='button'
-        accessibilityLabel='Close'
-        onPress={onClose}
-        style={({ pressed }) => ({
-          marginTop: 12,
-          minHeight: 44,
-          justifyContent: 'center',
-          paddingHorizontal: 8,
-          opacity: pressed ? 0.7 : 1,
-        })}>
-        <Text style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 14 }}>Close</Text>
-      </Pressable>
+      <View style={{ marginTop: 12 }}>
+        <Button label='Close' variant='quiet' onPress={onClose} />
+      </View>
     </View>
   )
 }

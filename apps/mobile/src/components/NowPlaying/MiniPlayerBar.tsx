@@ -1,7 +1,6 @@
-import { brandDark } from '@gbfm/theme'
+import { brandDark, radii } from '@gbfm/theme'
 import { useRouter } from 'expo-router'
 import { NativeTabs } from 'expo-router/native-tabs'
-import { SymbolView } from 'expo-symbols'
 import {
   ActivityIndicator,
   DynamicColorIOS as dynamicColorIOS,
@@ -13,6 +12,7 @@ import {
 } from 'react-native'
 
 import { useNowPlaying } from '@/audio/NowPlayingProvider'
+import { Glyph } from '@/icons/Glyph'
 import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 
@@ -20,13 +20,6 @@ const textColor =
   Platform.OS === 'ios'
     ? dynamicColorIOS({ dark: brandDark.overlayText, light: brandDark.bg })
     : brandDark.overlayText
-
-const symbols = {
-  previous: { ios: 'backward.fill', android: 'skip_previous', web: 'skip_previous' },
-  play: { ios: 'play.fill', android: 'play_arrow', web: 'play_arrow' },
-  pause: { ios: 'pause.fill', android: 'pause', web: 'pause' },
-  next: { ios: 'forward.fill', android: 'skip_next', web: 'skip_next' },
-} as const
 
 function Artwork({
   url,
@@ -43,7 +36,7 @@ function Artwork({
         style={{
           width: size,
           height: size,
-          borderRadius: 4,
+          borderRadius: radii.artwork,
           backgroundColor: colors.accentSurface,
         }}
       />
@@ -53,25 +46,15 @@ function Artwork({
   return (
     <Image
       source={{ uri: url }}
-      style={{ width: size, height: size, borderRadius: 4 }}
+      style={{ width: size, height: size, borderRadius: radii.artwork }}
       resizeMode='cover'
     />
   )
 }
 
 export function MiniPlayerBar() {
-  const {
-    track,
-    isPlaying,
-    currentTime,
-    duration,
-    togglePlayback,
-    isBuffering,
-    isLoaded,
-    skipNext,
-    skipPrevious,
-    queue,
-  } = useNowPlaying()
+  const { track, isPlaying, currentTime, duration, togglePlayback, isBuffering, isLoaded } =
+    useNowPlaying()
 
   const router = useRouter()
   const colors = useThemeColors()
@@ -80,10 +63,8 @@ export function MiniPlayerBar() {
 
   if (!track) return null
 
-  const symbolName = isPlaying ? symbols.pause : symbols.play
+  const playGlyph = isPlaying ? 'pause' : 'play'
   const showSpinner = isBuffering || !isLoaded
-  const canSkipPrev = queue.currentIndex > 0
-  const canSkipNext = queue.currentIndex >= 0 && queue.currentIndex + 1 < queue.tracks.length
 
   if (placement === 'inline') {
     return (
@@ -109,21 +90,6 @@ export function MiniPlayerBar() {
         </Pressable>
         <Pressable
           accessibilityRole='button'
-          accessibilityLabel='Previous track'
-          hitSlop={8}
-          onPress={skipPrevious}
-          disabled={!canSkipPrev}
-          style={{
-            width: 28,
-            height: 28,
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: canSkipPrev ? 1 : 0.4,
-          }}>
-          <SymbolView name={symbols.previous} size={14} tintColor={textColor} />
-        </Pressable>
-        <Pressable
-          accessibilityRole='button'
           accessibilityLabel={showSpinner ? 'Loading' : isPlaying ? 'Pause' : 'Play'}
           hitSlop={8}
           onPress={togglePlayback}
@@ -131,23 +97,8 @@ export function MiniPlayerBar() {
           {showSpinner ? (
             <ActivityIndicator size='small' color={textColor} />
           ) : (
-            <SymbolView name={symbolName} size={16} tintColor={textColor} />
+            <Glyph name={playGlyph} size={16} color={textColor} />
           )}
-        </Pressable>
-        <Pressable
-          accessibilityRole='button'
-          accessibilityLabel='Next track'
-          hitSlop={8}
-          onPress={skipNext}
-          disabled={!canSkipNext}
-          style={{
-            width: 28,
-            height: 28,
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: canSkipNext ? 1 : 0.4,
-          }}>
-          <SymbolView name={symbols.next} size={14} tintColor={textColor} />
         </Pressable>
       </View>
     )
@@ -189,21 +140,6 @@ export function MiniPlayerBar() {
         </Pressable>
         <Pressable
           accessibilityRole='button'
-          accessibilityLabel='Previous track'
-          hitSlop={8}
-          onPress={skipPrevious}
-          disabled={!canSkipPrev}
-          style={{
-            width: 32,
-            height: 32,
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: canSkipPrev ? 1 : 0.4,
-          }}>
-          <SymbolView name={symbols.previous} size={16} tintColor={textColor} />
-        </Pressable>
-        <Pressable
-          accessibilityRole='button'
           accessibilityLabel={showSpinner ? 'Loading' : isPlaying ? 'Pause' : 'Play'}
           hitSlop={8}
           onPress={togglePlayback}
@@ -211,23 +147,8 @@ export function MiniPlayerBar() {
           {showSpinner ? (
             <ActivityIndicator size='small' color={textColor} />
           ) : (
-            <SymbolView name={symbolName} size={22} tintColor={textColor} />
+            <Glyph name={playGlyph} size={22} color={textColor} />
           )}
-        </Pressable>
-        <Pressable
-          accessibilityRole='button'
-          accessibilityLabel='Next track'
-          hitSlop={8}
-          onPress={skipNext}
-          disabled={!canSkipNext}
-          style={{
-            width: 32,
-            height: 32,
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: canSkipNext ? 1 : 0.4,
-          }}>
-          <SymbolView name={symbols.next} size={16} tintColor={textColor} />
         </Pressable>
       </View>
       {progress > 0 ? (
@@ -238,7 +159,7 @@ export function MiniPlayerBar() {
             left: 12,
             right: 12,
             height: 2,
-            borderRadius: 1,
+            borderRadius: radii.control,
             overflow: 'hidden',
             backgroundColor:
               Platform.OS === 'ios'

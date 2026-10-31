@@ -1,20 +1,10 @@
 import type { AudioResponse } from '@gbfm/api/audio'
 import { LinearGradient } from 'expo-linear-gradient'
-import { SymbolView } from 'expo-symbols'
 import { ActivityIndicator, Image, Pressable, Text, View } from 'react-native'
 
+import { Glyph } from '@/icons/Glyph'
 import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
-
-const symbols = {
-  warning: {
-    ios: 'exclamationmark.triangle',
-    android: 'warning',
-    web: 'warning',
-  },
-  play: { ios: 'play.fill', android: 'play_arrow', web: 'play_arrow' },
-  pause: { ios: 'pause.fill', android: 'pause', web: 'pause' },
-} as const
 
 // Fixed geometry, mirrored by FeaturedMixSkeleton, so that
 // loading -> loaded/error never shifts layout.
@@ -58,7 +48,7 @@ export function FeaturedMixCard({
             gap: 12,
             padding: 24,
           }}>
-          <SymbolView name={symbols.warning} size={32} tintColor={colors.muted} />
+          <Glyph name='warning' size={32} color={colors.muted} />
           <Text
             style={{
               color: colors.text,
@@ -200,11 +190,7 @@ export function FeaturedMixCard({
           </>
         ) : (
           <>
-            <SymbolView
-              name={isPlaying ? symbols.pause : symbols.play}
-              size={15}
-              tintColor={colors.surface}
-            />
+            <Glyph name={isPlaying ? 'pause' : 'play'} size={16} color={colors.surface} />
             <Text
               style={{
                 color: colors.surface,

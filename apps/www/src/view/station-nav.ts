@@ -18,7 +18,6 @@ export type StationNavProps<M> = {
   readonly nowPlaying: NowPlaying | null
   readonly minimized: boolean
   readonly togglePlay: M
-  readonly nextTrack: M
   readonly openPlayer: M
   readonly openSearch: M
   readonly toggleMenu: M
@@ -33,13 +32,12 @@ const mobileTabs = [
 
 const focusRing = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
-// 32px targets with a highlight underline, so the current section reads without relying on colour.
-const desktopLinkClass = `inline-flex h-8 shrink-0 items-center rounded-sm px-2.5 text-xs font-semibold tracking-wide no-underline transition-colors text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-[current=page]:text-foreground aria-[current=page]:shadow-[inset_0_-2px_0_var(--highlight)] ${focusRing}`
+const desktopLinkClass = `inline-flex h-11 shrink-0 items-center rounded-sm px-2.5 text-xs font-semibold tracking-wide no-underline transition-colors text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-[current=page]:text-foreground aria-[current=page]:shadow-[inset_0_-2px_0_var(--highlight)] ${focusRing}`
 
-const desktopIconButtonClass = `flex size-8 shrink-0 items-center justify-center rounded-sm p-0 transition-colors hover:bg-muted ${focusRing}`
+const desktopIconButtonClass = `btn btn-quiet btn-icon shrink-0 ${focusRing}`
 
 const tabClass =
-  'dock-tab relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-[0.875rem] border-0 bg-transparent p-0 no-underline text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring aria-[current=page]:text-highlight'
+  'dock-tab relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-sm border-0 bg-transparent p-0 no-underline text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring aria-[current=page]:text-highlight'
 
 const tabIconClass = 'size-[22px] shrink-0 [stroke-width:1.75]'
 
@@ -183,14 +181,7 @@ export const stationNav = <M>(h: HtmlBuilder<M>, props: StationNavProps<M>) => {
   const mobile = h.div(
     [h.Class('mobile-dock lg:hidden'), ...(minimized ? [h.DataAttribute('minimized', '')] : [])],
     [
-      mobilePlayer(
-        h,
-        nowPlaying,
-        props.queueResolved,
-        props.openPlayer,
-        props.togglePlay,
-        props.nextTrack,
-      ),
+      mobilePlayer(h, nowPlaying, props.queueResolved, props.openPlayer, props.togglePlay),
       h.nav(
         [h.AriaLabel('Primary'), h.Class('dock-platter dock-tabs')],
         [

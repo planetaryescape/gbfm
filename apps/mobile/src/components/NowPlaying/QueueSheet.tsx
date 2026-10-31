@@ -1,15 +1,12 @@
-import { SymbolView } from 'expo-symbols'
+import { radii } from '@gbfm/theme'
 import { useState } from 'react'
 import { FlatList, Image, Modal, Pressable, Text, View } from 'react-native'
 
 import { useNowPlaying } from '@/audio/NowPlayingProvider'
+import { Button } from '@/components/Button'
+import { Glyph } from '@/icons/Glyph'
 import { useThemeColors, withAlpha } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
-
-const symbols = {
-  remove: { ios: 'xmark', android: 'close', web: 'close' },
-  open: { ios: 'chevron.up', android: 'expand_less', web: 'expand_less' },
-} as const
 
 export function QueueSheet() {
   const { queue, skipTo, removeFromQueue } = useNowPlaying()
@@ -48,7 +45,7 @@ export function QueueSheet() {
           <Text style={{ color: colors.accent, fontFamily: fonts.monoSemiBold, fontSize: 12 }}>
             Open
           </Text>
-          <SymbolView name={symbols.open} size={12} tintColor={colors.accent} />
+          <Glyph name='chevronUp' size={12} color={colors.accent} />
         </View>
       </Pressable>
 
@@ -67,13 +64,13 @@ export function QueueSheet() {
                     alignItems: 'center',
                     gap: 10,
                     padding: 8,
-                    borderRadius: 10,
+                    borderRadius: radii.surface,
                     backgroundColor: isCurrent ? withAlpha(colors.accent, 0.12) : 'transparent',
                   }}>
                   {track.thumbnailUrl ? (
                     <Image
                       source={{ uri: track.thumbnailUrl }}
-                      style={{ width: 36, height: 36, borderRadius: 6 }}
+                      style={{ width: 36, height: 36, borderRadius: radii.artwork }}
                       resizeMode='cover'
                     />
                   ) : (
@@ -81,7 +78,7 @@ export function QueueSheet() {
                       style={{
                         width: 36,
                         height: 36,
-                        borderRadius: 6,
+                        borderRadius: radii.artwork,
                         backgroundColor: withAlpha(colors.muted, 0.2),
                       }}
                     />
@@ -148,16 +145,7 @@ export function QueueSheet() {
               }}>
               {queueLabel}
             </Text>
-            <Pressable accessibilityRole='button' hitSlop={12} onPress={() => setIsOpen(false)}>
-              <Text
-                style={{
-                  color: colors.accent,
-                  fontFamily: fonts.monoSemiBold,
-                  fontSize: 14,
-                }}>
-                Done
-              </Text>
-            </Pressable>
+            <Button label='Done' variant='quiet' onPress={() => setIsOpen(false)} />
           </View>
 
           {queueLength === 0 ? (
@@ -207,7 +195,7 @@ export function QueueSheet() {
                       alignItems: 'center',
                       gap: 12,
                       padding: 10,
-                      borderRadius: 10,
+                      borderRadius: radii.surface,
                       backgroundColor: isCurrent ? withAlpha(colors.accent, 0.14) : colors.surface,
                     }}>
                     <Pressable
@@ -228,7 +216,7 @@ export function QueueSheet() {
                       {track.thumbnailUrl ? (
                         <Image
                           source={{ uri: track.thumbnailUrl }}
-                          style={{ width: 44, height: 44, borderRadius: 6 }}
+                          style={{ width: 44, height: 44, borderRadius: radii.artwork }}
                           resizeMode='cover'
                         />
                       ) : (
@@ -276,7 +264,7 @@ export function QueueSheet() {
                         backgroundColor: withAlpha(colors.muted, 0.18),
                         opacity: pressed ? 0.6 : 1,
                       })}>
-                      <SymbolView name={symbols.remove} size={12} tintColor={colors.muted} />
+                      <Glyph name='close' size={12} color={colors.muted} />
                     </Pressable>
                   </View>
                 )

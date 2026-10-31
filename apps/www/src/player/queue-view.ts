@@ -76,7 +76,7 @@ export const queueSheet = (model: Model, h: H) => {
                                         artworkUrl(current.thumbnailUrl || fallbackArtwork, 160),
                                       ),
                                       h.Alt(current.title),
-                                      h.Class('h-12 w-12 shrink-0 rounded-sm object-cover'),
+                                      h.Class('h-12 w-12 shrink-0 rounded-none object-cover'),
                                     ]),
                                     h.h4(
                                       [
@@ -138,7 +138,7 @@ export const queueSheet = (model: Model, h: H) => {
                                             artworkUrl(track.thumbnailUrl || fallbackArtwork, 96),
                                           ),
                                           h.Alt(''),
-                                          h.Class('h-10 w-10 shrink-0 rounded-sm object-cover'),
+                                          h.Class('h-10 w-10 shrink-0 rounded-none object-cover'),
                                         ]),
                                         h.button(
                                           [

@@ -93,7 +93,14 @@ export const renderResponse = async (request: Request): Promise<Server.EntryResu
     return redirect(`${target.pathname}${target.search}`)
   }
 
-  if (url.pathname === '/tweet') return redirectPage('/tweets')
+  if (url.pathname === '/tweet') {
+    const slug = parseCheckpoint(url.searchParams.get('visit'))
+
+    return redirectPage(slug ? `/tweet/${encodeURIComponent(slug)}` : '/tweets')
+  }
+
+  if (url.pathname === '/tweets' && url.searchParams.get('q') === 'archive')
+    return redirectPage('/tweets')
 
   if (url.pathname === '/tweet/new') return redirectPage('/new/tweet')
 

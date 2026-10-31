@@ -1,10 +1,11 @@
-import { Match } from 'effect'
+import { Match, Predicate } from 'effect'
 import { Text, View } from 'react-native'
 
 import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 import { keyedContent, splitInlineImages, type TweetInline as Inline } from '@/tweets/tweetContent'
 
+import { SwipeExclusion } from './SwipeExclusion'
 import { useTweetLink } from './TweetLink'
 import { TweetImage } from './TweetMedia'
 
@@ -57,6 +58,9 @@ function InlineText({ inlines }: { readonly inlines: ReadonlyArray<Inline> }) {
   return keyedContent(inlines).map(({ item, key }) => <InlineNode key={key} inline={item} />)
 }
 
+const hasLink = (inline: Inline): boolean =>
+  Predicate.isTagged(inline, 'Link') || ('children' in inline && inline.children.some(hasLink))
+
 export function TweetInlineContent({
   inlines,
   size,
@@ -67,24 +71,26 @@ export function TweetInlineContent({
   const colors = useThemeColors()
 
   return (
-    <View style={{ gap: 10 }}>
-      {keyedContent(splitInlineImages(inlines)).map(({ item, key }) =>
-        item.type === 'image' ? (
-          <TweetImage key={key} src={item.image.src} alt={item.image.alt} link={item.link} />
-        ) : (
-          <Text
-            key={key}
-            selectable
-            style={{
-              color: colors.strong,
-              fontFamily: fonts.mono,
-              fontSize: size,
-              lineHeight: size * 1.45,
-            }}>
-            <InlineText inlines={item.inlines} />
-          </Text>
-        ),
-      )}
-    </View>
+    <SwipeExclusion disabled={!inlines.some(hasLink)}>
+      <View style={{ gap: 10 }}>
+        {keyedContent(splitInlineImages(inlines)).map(({ item, key }) =>
+          item.type === 'image' ? (
+            <TweetImage key={key} src={item.image.src} alt={item.image.alt} link={item.link} />
+          ) : (
+            <Text
+              key={key}
+              selectable
+              style={{
+                color: colors.strong,
+                fontFamily: fonts.mono,
+                fontSize: size,
+                lineHeight: size * 1.45,
+              }}>
+              <InlineText inlines={item.inlines} />
+            </Text>
+          ),
+        )}
+      </View>
+    </SwipeExclusion>
   )
 }

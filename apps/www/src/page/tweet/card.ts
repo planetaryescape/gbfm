@@ -30,8 +30,7 @@ export const tweetImages = (screen: MicroPostScreenResponse) =>
 
 type Creator = NonNullable<TweetPost['creators']>[number]
 
-const actionClassName =
-  '-mx-2 inline-flex min-h-8 items-center gap-1.5 rounded-sm px-2 text-xs text-muted-foreground no-underline transition-colors hover:bg-muted/60 hover:text-foreground'
+const actionClassName = 'btn btn-quiet -mx-2'
 
 const snippet = (text: string, max: number) => {
   const flattened = text.replace(/\s+/g, ' ').trim()
@@ -124,9 +123,7 @@ const streamLinks = (links: NonNullable<TweetPost['music']>['links']) =>
           h.Href(link.url),
           h.Target('_blank'),
           h.Rel('noopener noreferrer'),
-          h.Class(
-            'inline-flex h-8 items-center gap-1.5 rounded-sm border border-border px-2.5 text-xs font-medium text-muted-foreground no-underline transition-colors hover:border-border hover:bg-muted hover:text-foreground',
-          ),
+          h.Class('btn'),
         ],
         [
           link.platform === 'spotify' ? spotifyIcon('h-3.5 w-3.5') : h.empty,
@@ -155,7 +152,7 @@ export const musicCard = (
           h.div(
             [
               h.Class(
-                'flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted sm:size-32',
+                'flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-none bg-muted sm:size-32',
               ),
             ],
             [

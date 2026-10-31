@@ -4,9 +4,11 @@ import { Runtime } from 'foldkit'
 // oxlint-disable-next-line import/no-unassigned-import -- Vite emits the document stylesheet from this entry.
 import './styles/main.css'
 import { applicationConfig } from './config'
+import { animatePageTransition } from './navigation-transition'
 import * as Creator from './page/creator'
 import * as Dashboard from './page/dashboard'
 import { startTweetShortcuts } from './page/tweet/navigation'
+import { startTweetSwipes } from './page/tweet/swipe'
 import * as Player from './player'
 import { SpotifyConnectionLive } from './spotify/connection'
 import { subscriptions } from './subscription'
@@ -30,7 +32,7 @@ const application = Runtime.makeApplication({
   subscriptions,
   container: document.getElementById('root'),
   viewTransition: ({ previousModel, model }) =>
-    displayedPath(previousModel) !== displayedPath(model),
+    animatePageTransition(displayedPath(previousModel), displayedPath(model)),
 })
 
 const stopTheme = startTheme()
@@ -38,6 +40,10 @@ const stopTheme = startTheme()
 const stopArtwork = startArtworkFallback()
 
 const stopTweetShortcuts = startTweetShortcuts()
+
+const stopTweetSwipes = startTweetSwipes()
+
+import.meta.hot?.dispose(stopTweetSwipes)
 
 Runtime.hydrate(
   application,

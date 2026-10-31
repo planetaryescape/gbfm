@@ -1,6 +1,7 @@
 - run `bun precommit` to validate your changes. this gives you typecheck, oxlint, and oxfmt
 - work in the `prod` branch unless otherwise specified
 - when changing the Foldkit WWW app, read `FOLDKIT.md` and check the installed framework version before using upstream examples
+- after mobile changes, build and install the verified latest version on the user's physical iPhone before calling the work done; simulator checks alone are not the handoff
 
 ## Agent skills
 

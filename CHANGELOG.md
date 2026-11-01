@@ -1,3 +1,15 @@
+# [2.120.0](https://github.com/planetaryescape/gbfm/compare/v2.119.0...v2.120.0) (2026-11-01)
+
+
+### Bug Fixes
+
+* **reader:** recover navigation and narrow gesture exclusions ([6a7d78c](https://github.com/planetaryescape/gbfm/commit/6a7d78c8ce10e45a498f55f29e2230b7d6e85551))
+
+
+### Features
+
+* **reader:** add cross-platform swipe and month visits ([05b9bc7](https://github.com/planetaryescape/gbfm/commit/05b9bc774a24717d0738388fdcdfcd489d527882))
+
 # [2.119.0](https://github.com/planetaryescape/gbfm/compare/v2.118.0...v2.119.0) (2026-11-01)
 
 

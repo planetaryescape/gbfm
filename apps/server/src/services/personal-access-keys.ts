@@ -1,4 +1,4 @@
-import { Credential, type PersonalAccessKeyActor } from '@gbfm/api/middleware/actor'
+import { ActorUser, Credential, type PersonalAccessKeyActor } from '@gbfm/api/middleware/actor'
 import {
   InvalidKeyCredential,
   KeyAccessDenied,
@@ -13,8 +13,10 @@ import {
   canAuthorWithKey,
   canPublishWithKey,
   KeyEnvironment,
+  KeyId,
   KeyScopes,
 } from '@gbfm/core/personal-access-keys'
+import { Role } from '@gbfm/core/roles'
 import { and, count, desc, eq, gt, isNull, lt, or, sql } from 'drizzle-orm'
 import { Clock, Context, Crypto, Effect, Layer, Redacted, Schema } from 'effect'
 import { HttpApiError } from 'effect/http-api'
@@ -109,11 +111,16 @@ const makePersonalAccessKeys = Effect.gen(function* () {
       db.select().from(user).where(eq(user.id, ownerUserId)).limit(1),
     )
 
+    if (!owner || (owner.banned && (owner.banExpires === null || owner.banExpires.getTime() > now)))
+      return yield* new KeyAccessDenied()
+
+    const role = yield* Schema.decodeUnknownEffect(Role)(owner.role).pipe(
+      Effect.mapError(() => new KeyAccessDenied()),
+    )
+
     if (
-      !owner ||
-      !canAuthorWithKey(owner.role) ||
-      (owner.banned && (owner.banExpires === null || owner.banExpires.getTime() > now)) ||
-      (input.scopes.includes('posts:publish') && !canPublishWithKey(owner.role))
+      !canAuthorWithKey(role) ||
+      (input.scopes.includes('posts:publish') && !canPublishWithKey(role))
     )
       return yield* new KeyAccessDenied()
     const name = input.name.trim()
@@ -251,6 +258,15 @@ const makePersonalAccessKeys = Effect.gen(function* () {
         (found.owner.banExpires === null || found.owner.banExpires.getTime() > now))
     )
       return yield* new InvalidKeyCredential()
+
+    const actorUser = yield* Schema.decodeUnknownEffect(ActorUser)(found.owner).pipe(
+      Effect.mapError(() => new InvalidKeyCredential()),
+    )
+
+    const keyId = yield* Schema.decodeUnknownEffect(KeyId)(found.key.id).pipe(
+      Effect.mapError(() => new KeyStoreUnavailable()),
+    )
+
     const projection = yield* metadata(found.key)
 
     if (found.key.rateWindowStart !== null && found.key.rateWindowStart > window)
@@ -306,9 +322,9 @@ const makePersonalAccessKeys = Effect.gen(function* () {
     }
 
     return {
-      user: found.owner,
+      user: actorUser,
       credential: Credential.PersonalAccessKey({
-        keyId: found.key.id,
+        keyId,
         environment: stage,
         scopes: projection.scopes,
       }),

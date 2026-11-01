@@ -6,7 +6,8 @@ import {
   requiresPublishScope,
   type KeyScope,
 } from '@gbfm/core/personal-access-keys'
-import { Effect, Predicate } from 'effect'
+import { Role } from '@gbfm/core/roles'
+import { Effect, Predicate, Schema } from 'effect'
 
 import type { MediaActor } from '@/services/media-publication'
 
@@ -33,11 +34,15 @@ export const authorizeKeyPostWrite = (
     if (actor?.credential?._tag !== 'PersonalAccessKey') return yield* Effect.void
     const scopes = actor.credential.scopes
 
+    const role = yield* Schema.decodeUnknownEffect(Role)(actor.userRole).pipe(
+      Effect.mapError(() => new KeyAccessDenied()),
+    )
+
     if (
-      !canAuthorWithKey(actor.userRole) ||
+      !canAuthorWithKey(role) ||
       !scopes.includes(operation) ||
       (requiresPublishScope(currentDraft, input.draft ?? currentDraft ?? false) &&
-        (!scopes.includes('posts:publish') || !canPublishWithKey(actor.userRole)))
+        (!scopes.includes('posts:publish') || !canPublishWithKey(role)))
     )
       return yield* new KeyAccessDenied()
 

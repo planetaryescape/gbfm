@@ -24,6 +24,38 @@ const Issued = Schema.Struct({ key: KeyMetadata, secret: Schema.String })
 
 const SignedIn = Schema.Struct({ token: Schema.String })
 
+test('session and key actors reject malformed persisted identity values before authorizing reads', async () => {
+  await using fixture = await setup()
+  const token = await fixture.login('identity-owner', 'editor')
+  const issued = await fixture.issue(token, ['posts:read'])
+  const path = '/api/content/posts/manage'
+
+  for (const credential of [token, issued.secret]) {
+    expect((await fixture.request('GET', path, credential)).status).toBe(200)
+  }
+
+  for (const malformed of [{ role: 'superuser' }, { email: 'not-an-email' }]) {
+    await fixture.db.update(user).set(malformed).where(eq(user.id, 'identity-owner'))
+
+    for (const credential of [token, issued.secret]) {
+      const response = await fixture.request('GET', path, credential)
+      expect(response.status).toBe(401)
+      expect(await response.json()).toEqual({
+        _tag: credential === token ? 'Unauthorized' : 'InvalidKeyCredential',
+      })
+    }
+
+    await fixture.db
+      .update(user)
+      .set({ role: 'editor', email: 'identity-owner@example.test' })
+      .where(eq(user.id, 'identity-owner'))
+  }
+
+  for (const credential of [token, issued.secret]) {
+    expect((await fixture.request('GET', path, credential)).status).toBe(200)
+  }
+})
+
 test('a failed PAT post write rolls back tags, new label definitions and attachment state', async () => {
   await using fixture = await setup()
   const token = await fixture.login('rollback-owner', 'editor')

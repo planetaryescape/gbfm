@@ -3906,7 +3906,7 @@ describe('POST /api/content/posts/preview', () => {
 
     const responses: Array<Response> = []
 
-    for (const role of ['listener', 'creator']) {
+    for (const role of ['user', 'creator']) {
       const userId = `preview-${role}-${crypto.randomUUID()}`
       const token = `token-${userId}`
       await db

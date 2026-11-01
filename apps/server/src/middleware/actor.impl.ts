@@ -1,6 +1,12 @@
-import { ActorMiddleware, AuthenticatedActor, Credential } from '@gbfm/api/middleware/actor'
+import {
+  ActorUser,
+  ActorMiddleware,
+  AuthenticatedActor,
+  Credential,
+  SessionId,
+} from '@gbfm/api/middleware/actor'
 import { InvalidKeyCredential } from '@gbfm/api/personal-access-keys'
-import { Effect, Layer, Redacted } from 'effect'
+import { Effect, Layer, Redacted, Schema } from 'effect'
 import { HttpServerRequest } from 'effect/http'
 import { HttpApiError } from 'effect/http-api'
 
@@ -35,9 +41,17 @@ export const ActorMiddlewareLive = Layer.effect(
 
         if (!session) return yield* new HttpApiError.Unauthorized()
 
+        const user = yield* Schema.decodeUnknownEffect(ActorUser)(session.user).pipe(
+          Effect.mapError(() => new HttpApiError.Unauthorized()),
+        )
+
+        const sessionId = yield* Schema.decodeUnknownEffect(SessionId)(session.session.id).pipe(
+          Effect.mapError(() => new HttpApiError.Unauthorized()),
+        )
+
         return yield* Effect.provideService(httpEffect, AuthenticatedActor, {
-          user: session.user,
-          credential: Credential.Session({ sessionId: session.session.id }),
+          user,
+          credential: Credential.Session({ sessionId }),
         })
       })
   }),

@@ -1,5 +1,10 @@
 import { Schema } from 'effect'
 
+import type { Role } from '../roles'
+
+/** The opaque identity of a stored personal access key. */
+export const KeyId = Schema.String.pipe(Schema.check(Schema.isNonEmpty()), Schema.brand('KeyId'))
+
 export const KeyScope = Schema.Literals([
   'posts:read',
   'posts:create',
@@ -26,10 +31,10 @@ export const KeyScopes = Schema.Array(KeyScope).pipe(
   ),
 )
 
-export const canAuthorWithKey = (role: string | null | undefined) =>
+export const canAuthorWithKey = (role: Role | null | undefined) =>
   role === 'creator' || role === 'editor' || role === 'admin'
 
-export const canPublishWithKey = (role: string | null | undefined) =>
+export const canPublishWithKey = (role: Role | null | undefined) =>
   role === 'editor' || role === 'admin'
 
 export const requiresPublishScope = (currentDraft: boolean | undefined, nextDraft: boolean) =>

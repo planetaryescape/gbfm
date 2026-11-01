@@ -8,6 +8,8 @@ import { Schema } from 'effect'
 
 import resvgWasm from '../assets/resvg.wasm'
 import yogaWasm from '../assets/yoga.wasm'
+import { handleMosaic } from './mosaic-handler'
+import { loadMosaicImage } from './mosaic-image'
 import { renderSocialCard, type SocialCardRenderAssets } from './render'
 
 type Fetcher = {
@@ -260,6 +262,13 @@ export const handleRequest = async (
   env: SocialImageEnv,
   render?: Render,
 ): Promise<Response> => {
+  if (new URL(request.url).pathname === '/internal/mosaic') {
+    return handleMosaic(request, {
+      ...renderAssets(env),
+      loadImage: (url) => loadMosaicImage(url, fetch, { signal: request.signal }),
+    })
+  }
+
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return new Response('Method not allowed', { status: 405, headers: { allow: 'GET, HEAD' } })
   }

@@ -171,6 +171,7 @@ export type TweetCardEntityInput = {
 
 /** Source data required to create a tweet share presentation. */
 export type TweetCardPresentationInput = {
+  readonly artworkUrl?: string | null
   readonly slug: string
   readonly commentary: string
   readonly createdAt: string
@@ -185,10 +186,10 @@ export type TweetCardPresentationInput = {
 const SITE_URL = 'https://goosebumps.fm'
 
 const templateVersions = {
-  ArtworkCard: 'artwork-card-v1',
-  IdentityCard: 'identity-card-v1',
-  EditorialCard: 'editorial-card-v1',
-  TweetCard: 'tweet-card-v2',
+  ArtworkCard: 'artwork-card-v2',
+  IdentityCard: 'identity-card-v2',
+  EditorialCard: 'editorial-card-v2',
+  TweetCard: 'tweet-card-v3',
 } as const satisfies Readonly<Record<SocialCardModel['_tag'], string>>
 
 const eyebrowByKind = {
@@ -295,7 +296,7 @@ export const buildTweetCardPresentation = async (
     entityLabel: entity ? entityLabels[entity.type] : null,
     entityTitle: entity?.title ?? null,
     entityArtists: entity?.artists?.length ? entity.artists.join(', ') : null,
-    coverImageUrl: entity?.coverImageUrl ?? null,
+    coverImageUrl: input.artworkUrl || entity?.coverImageUrl || null,
     url: `${SITE_URL}/tweet/${encodeURIComponent(input.slug)}`,
   })
 

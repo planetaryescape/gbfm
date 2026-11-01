@@ -3,39 +3,15 @@ import {
   type SocialCardFormat,
   type SocialCardModel,
 } from '@gbfm/social-card'
-import { Resvg, initWasm } from '@resvg/resvg-wasm'
+import { Resvg } from '@resvg/resvg-wasm'
 import { Match } from 'effect'
 import QRCode from 'qrcode'
-import satori, { init as initSatori } from 'satori/standalone'
+import satori from 'satori/standalone'
 
+import { initializeRuntime, type SocialCardRenderAssets } from './render-runtime'
 import { socialCardTemplate } from './template'
 
-/** Binary and remote asset loader required by the Worker renderer. */
-export interface SocialCardRenderAssets {
-  readonly loadWasm: (name: 'yoga.wasm' | 'resvg.wasm') => Promise<WebAssembly.Module | ArrayBuffer>
-  readonly loadFont: (
-    name: 'JetBrainsMono-Bold.ttf' | 'JetBrainsMono-ExtraBold.ttf',
-  ) => Promise<ArrayBuffer>
-  readonly loadImage: (url: string) => Promise<string | null>
-}
-
-let runtimeReady: Promise<void> | undefined
-
-const initializeRuntime = (assets: SocialCardRenderAssets) => {
-  if (!runtimeReady) {
-    runtimeReady = Promise.all([
-      assets.loadWasm('yoga.wasm').then(initSatori),
-      assets.loadWasm('resvg.wasm').then(initWasm),
-    ])
-      .then(() => undefined)
-      .catch((error) => {
-        runtimeReady = undefined
-        throw error
-      })
-  }
-
-  return runtimeReady
-}
+export type { SocialCardRenderAssets } from './render-runtime'
 
 const qrDataUrl = async (url: string) => {
   const svg = await QRCode.toString(url, {

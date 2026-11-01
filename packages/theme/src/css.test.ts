@@ -34,6 +34,11 @@ test('all themes serialize the same geometry used by native controls', () => {
     expect(block).toContain(`--radius-artwork: ${radii.artwork}px;`)
     expect(block).toContain(`--control-height: ${controlMetrics.height}px;`)
     expect(block).toContain(`--control-font-size: ${controlMetrics.fontSize}px;`)
+    expect(block).toContain(`--radius-round: ${radii.round}px;`)
+    expect(block).toContain(`--control-padding-inline: ${controlMetrics.paddingInline}px;`)
+    expect(block).toContain(`--control-gap: ${controlMetrics.gap}px;`)
+    expect(block).toContain(`--control-icon-size: ${controlMetrics.iconSize}px;`)
+    expect(block).toContain(`--control-border-width: ${controlMetrics.borderWidth}px;`)
   }
 })
 

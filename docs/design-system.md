@@ -63,6 +63,8 @@ App buttons share a 44px minimum touch height, 14px semibold monospace label, 12
 
 Use `Button` in native and `.btn` with its role modifier in web. Reader-specific wrappers may supply labels and handlers, but must not define another button appearance. Disabled and busy controls remain identifiable; web keeps a visible keyboard focus ring.
 
+Queue track rows remain composite `Pressable` controls so artwork and two-line track metadata form one action; their artwork ensures a minimum 44px height. Queue opening, dismissal, and removal use `Button`.
+
 ### Playback layout
 
 The compact player shows artwork, track identity, and play/pause only. Queue and skip controls live in the expanded player. Keep app navigation and playback visually distinct without adding more fixed layers.

@@ -27,6 +27,7 @@
     --control-gap: 8px;
     --control-font-size: 14px;
     --control-icon-size: 20px;
+    --control-border-width: 1px;
     --highlight: hsl(213 90% 55%);
     --highlight-foreground: #111827;
     --background: hsl(213 50% 93%);
@@ -80,6 +81,7 @@
     --control-gap: 8px;
     --control-font-size: 14px;
     --control-icon-size: 20px;
+    --control-border-width: 1px;
     --highlight: hsl(195 95% 65%);
     --highlight-foreground: #111827;
     --background: hsl(202, 61%, 22%);
@@ -132,6 +134,7 @@
     --control-gap: 8px;
     --control-font-size: 14px;
     --control-icon-size: 20px;
+    --control-border-width: 1px;
     --highlight: hsl(24 100% 63%);
     --highlight-foreground: hsl(36 45% 92%);
     --background: hsl(28 22% 9%);

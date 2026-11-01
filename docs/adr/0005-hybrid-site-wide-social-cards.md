@@ -85,6 +85,19 @@ Static pages use a prebuilt branded 1200×630 image instead of invoking the rend
 - Standalone tracks are supported and tested, but production visual verification depends on a published track page existing.
 - The current mix `og:type` and JSON-LD classification remain a separate metadata-semantics decision.
 
+## HarfBuzz must use precompiled WASM in Workers
+
+Satori 0.33.5 uses HarfBuzz for text shaping. The Bun patch at `patches/harfbuzzjs@0.10.0.patch` imports `hb.wasm` through an ESM entry point and registers the native `free` export directly. The default loader reads the filesystem and compiles a JavaScript callback into WASM at runtime, both of which fail in workerd. The patched loader skips Worker and Node file-loading setup when a precompiled module is supplied, and propagates initialisation errors through the exported promise.
+
+When upgrading Satori or HarfBuzz, keep this patch until the replacement works with precompiled modules and avoids runtime WASM compilation. Verify all three tweet formats and the other layout families with the real bundled fonts:
+
+```sh
+bun --filter @gbfm/social-card test
+bun --filter @gbfm/social-image test
+```
+
+All four layout families use new template versions for the HarfBuzz upgrade, so changed text shaping receives new immutable URLs. Renderer upgrades that change pixels must also change the affected template versions.
+
 ## Future work
 
 - Revisit a dedicated tag/static-page card only if the shared branded image proves insufficient.

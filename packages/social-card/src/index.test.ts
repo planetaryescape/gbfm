@@ -15,6 +15,13 @@ const artworkInput = {
   imageUrl: 'https://cdn.goosebumps.fm/mix.png',
 }
 
+const preHarfBuzzRevisions = {
+  artwork: '257384c7e6c52124',
+  identity: '0b8adac5e42f7a39',
+  editorial: '21b3f1fc990da8a0',
+  tweet: 'd610762aadde571f',
+} as const
+
 describe('social card presentation', () => {
   test('builds one immutable Open Graph image for artwork-led content', async () => {
     const presentation = await buildSocialCardPresentation(artworkInput)
@@ -28,6 +35,7 @@ describe('social card presentation', () => {
       artworkUrl: artworkInput.imageUrl,
     })
     expect(presentation.revision).toMatch(/^[a-f0-9]{16}$/)
+    expect(presentation.revision).not.toBe(preHarfBuzzRevisions.artwork)
     expect(presentation.images).toEqual({
       openGraph: `https://goosebumps.fm/social/cards/mix/${artworkInput.slug}/${presentation.revision}/open-graph.png`,
     })
@@ -66,12 +74,14 @@ describe('social card presentation', () => {
     })
 
     expect(show.model._tag).toBe('IdentityCard')
+    expect(show.revision).not.toBe(preHarfBuzzRevisions.identity)
     expect(show.model).toMatchObject({
       kind: 'show',
       eyebrow: 'Radio show',
       detail: 'Hosted by Guide Fari',
     })
     expect(editorial.model._tag).toBe('EditorialCard')
+    expect(editorial.revision).not.toBe(preHarfBuzzRevisions.editorial)
     expect(editorial.model).toMatchObject({
       kind: 'editorial',
       authors: ['Guide Fari'],
@@ -98,6 +108,7 @@ describe('social card presentation', () => {
     })
 
     expect(presentation.model.kind).toBe('tweet')
+    expect(presentation.revision).not.toBe(preHarfBuzzRevisions.tweet)
     expect(presentation.model._tag).toBe('TweetCard')
     expect(presentation.model.entityLabel).toBe('Album')
     expect(Object.keys(presentation.images)).toEqual(TWEET_CARD_FORMATS)

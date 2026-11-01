@@ -19,7 +19,7 @@
     "otel": "docker compose up jaeger -d",
     "release": "semantic-release",
     "typecheck": "tsgo --noEmit && bun --filter='*' typecheck",
-    "test": "bun run test:alchemy && cd packages/core && bun run test && cd ../theme && bun run test && cd ../player && bun run test && cd ../../apps/mobile && bun run test && cd ../pdf-generator && bun run test && cd ../server && bun run test && cd ../social-image && bun run test && cd ../cdn-router && bun run test",
+    "test": "bun run test:alchemy && bun --filter @gbfm/social-card test && cd packages/core && bun run test && cd ../theme && bun run test && cd ../player && bun run test && cd ../../apps/mobile && bun run test && cd ../pdf-generator && bun run test && cd ../server && bun run test && cd ../social-image && bun run test && cd ../cdn-router && bun run test",
     "test:alchemy": "vitest run alchemy",
     "lint": "bun ./node_modules/oxlint/dist/cli.js alchemy alchemy.run.ts apps/*/src apps/cdn-router packages '*.{js,ts,tsx,jsx}' --no-error-on-unmatched-pattern",
     "lint:fix": "bun ./node_modules/oxlint/dist/cli.js alchemy alchemy.run.ts apps/*/src apps/cdn-router packages '*.{js,ts,tsx,jsx}' --fix --no-error-on-unmatched-pattern",
@@ -76,6 +76,7 @@
   ],
   "patchedDependencies": {
     "@spotify-effect/core@0.6.7": "patches/@spotify-effect%2Fcore@0.6.7.patch",
-    "@spotify-effect/browser@0.6.7": "patches/@spotify-effect%2Fbrowser@0.6.7.patch"
+    "@spotify-effect/browser@0.6.7": "patches/@spotify-effect%2Fbrowser@0.6.7.patch",
+    "harfbuzzjs@0.10.0": "patches/harfbuzzjs@0.10.0.patch"
   }
 }

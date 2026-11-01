@@ -8,10 +8,16 @@ export function useReaderReducedMotion() {
 
   useEffect(() => {
     let active = true
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduced)
+    let changed = false
+
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (value) => {
+      changed = true
+      setReduced(value)
+    })
+
     AccessibilityInfo.isReduceMotionEnabled().then(
       (value) => {
-        if (active) setReduced(value)
+        if (active && !changed) setReduced(value)
       },
       () => {},
     )

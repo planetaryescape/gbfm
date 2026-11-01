@@ -7,7 +7,10 @@ export default function TweetScreen() {
   const { slug } = useLocalSearchParams<{ slug: string }>()
 
   return (
-    <SafeAreaView edges={{ bottom: true, left: true, right: true, top: false }} style={{ flex: 1 }}>
+    <SafeAreaView
+      collapsable={false}
+      edges={{ bottom: true, left: true, right: true, top: false }}
+      style={{ flex: 1 }}>
       <TweetReader initialSlug={slug} />
     </SafeAreaView>
   )

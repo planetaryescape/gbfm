@@ -628,6 +628,10 @@ const updateApplication = (
                 error: 'This page could not be loaded. Please try again.',
               }
             : { ...model, pageCache },
+        commands:
+          model.flags.tweet && TweetReader.concreteSlug(key) && key !== pageKey(model.flags.url)
+            ? [Replace({ href: model.flags.url, expected: key })]
+            : [],
       }
     },
     NavigationCompleted: () => ({ model }),

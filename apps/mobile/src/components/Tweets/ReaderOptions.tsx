@@ -162,7 +162,7 @@ export function ReaderOptions(props: Props) {
                   <View style={{ flex: 1 }}>
                     <ReaderButton
                       label='Surprise me'
-                      disabled={props.busy || !props.navigation || target.kind === 'caught-up'}
+                      disabled={props.busy || target.kind === 'caught-up'}
                       onPress={props.onRandom}
                     />
                   </View>
@@ -175,7 +175,7 @@ export function ReaderOptions(props: Props) {
                 />
                 <ReaderButton
                   label='Reset reading history…'
-                  disabled={props.busy || !props.navigation}
+                  disabled={props.busy}
                   onPress={reset}
                 />
               </>

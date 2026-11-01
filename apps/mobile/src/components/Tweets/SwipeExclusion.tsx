@@ -2,10 +2,13 @@ import { createContext, type PropsWithChildren, useContext } from 'react'
 import { ScrollView, type ScrollViewProps, View } from 'react-native'
 import {
   GestureDetector,
+  GestureStateManager,
+  useNativeGesture,
   usePanGesture,
   type PanGesture,
   type NativeGesture,
 } from 'react-native-gesture-handler'
+import { scheduleOnUI } from 'react-native-worklets'
 
 export const SwipeGestureContext = createContext<{
   readonly pan: PanGesture
@@ -14,9 +17,35 @@ export const SwipeGestureContext = createContext<{
 
 export function ReaderScrollView(props: ScrollViewProps) {
   const gestures = useContext(SwipeGestureContext)
+
+  const horizontal = useNativeGesture({
+    block: gestures?.pan,
+    simultaneousWith: gestures?.scroll,
+    cancelsJSResponder: false,
+  })
+
   const scroll = <ScrollView {...props} />
 
-  return gestures ? <GestureDetector gesture={gestures.scroll}>{scroll}</GestureDetector> : scroll
+  return gestures ? (
+    <GestureDetector gesture={props.horizontal ? horizontal : gestures.scroll}>
+      {scroll}
+    </GestureDetector>
+  ) : (
+    scroll
+  )
+}
+
+/** A nested Text link has no independent native view for a GestureDetector wrapper. */
+export function useInlineSwipeExclusion() {
+  const gestures = useContext(SwipeGestureContext)
+
+  return () => {
+    if (!gestures) return
+    scheduleOnUI((tag: number) => {
+      'worklet'
+      GestureStateManager.fail(tag)
+    }, gestures.pan.handlerTag)
+  }
 }
 
 export function SwipeExclusion({

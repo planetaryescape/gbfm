@@ -2,7 +2,7 @@ import { useAtomSet, useAtomValue } from '@effect/atom-react'
 import { Effect, Redacted } from 'effect'
 import * as Atom from 'effect/reactivity/Atom'
 import { useFocusEffect } from 'expo-router'
-import { type Dispatch, useCallback, useReducer, useRef, useState } from 'react'
+import { type Dispatch, useCallback, useEffect, useReducer, useRef, useState } from 'react'
 
 import { getHttpClient } from '@/api/client'
 import {
@@ -91,6 +91,12 @@ export function useTweetReader(
     revision: 0,
   })
 
+  const savedRef = useRef(saved)
+  useEffect(() => {
+    savedRef.current = saved
+  }, [saved])
+  const lastTarget = useRef<typeof target | null>(null)
+
   const [state, dispatch] = useReducer(reduceReader, initialReaderState)
   const sequence = useRef(0)
   const focused = useRef(false)
@@ -98,6 +104,18 @@ export function useTweetReader(
 
   useFocusEffect(
     useCallback(() => {
+      const resuming = lastTarget.current === target
+      lastTarget.current = target
+
+      const resumedSlug =
+        !initialSlug && resuming ? (savedRef.current[identity] ?? target.slug) : target.slug
+
+      if (resumedSlug !== target.slug) {
+        setTarget((previous) => ({ slug: resumedSlug, revision: previous.revision + 1 }))
+
+        return undefined
+      }
+
       focused.current = true
       const controller = new AbortController()
       const request = ++sequence.current
@@ -125,7 +143,7 @@ export function useTweetReader(
         action.current = null
         pendingAction?.abort()
       }
-    }, [identity, sessionToken, target, remember]),
+    }, [identity, sessionToken, initialSlug, target, remember]),
   )
 
   const go = (target: string | null) => {

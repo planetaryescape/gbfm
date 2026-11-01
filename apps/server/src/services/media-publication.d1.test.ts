@@ -1,5 +1,7 @@
+import { Credential } from '@gbfm/api/middleware/actor'
+import { KeyId } from '@gbfm/core/personal-access-keys'
 import { eq } from 'drizzle-orm'
-import { Effect, Layer, Result } from 'effect'
+import { Effect, Layer, Result, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 
 import { audioTable } from '@/db/audio.schema'
@@ -22,9 +24,9 @@ import { ShowService, ShowServiceLayer } from './show.service'
 import { ObjectStoreClient } from './storage/object-store-client'
 import { UploadAssetServiceLayer } from './upload-asset.service'
 
-const actor = { userId: 'owner', userRole: 'user' }
+const actor = { userId: 'owner', userRole: 'user', credential: undefined }
 
-const collaborator = { userId: 'collaborator', userRole: 'user' }
+const collaborator = { userId: 'collaborator', userRole: 'user', credential: undefined }
 
 const config = {
   ...createConfig(),
@@ -88,6 +90,30 @@ function memoryStorage() {
     },
   }
 }
+
+test('admin PAT cannot newly attach foreign private media but can retain an authorized attachment', async () => {
+  const storage = memoryStorage()
+  const prepare = makeMediaPublication(config, storage.store)
+
+  const keyActor = {
+    ...collaborator,
+    userRole: 'admin',
+    credential: Credential.PersonalAccessKey({
+      keyId: Schema.decodeUnknownSync(KeyId)(crypto.randomUUID()),
+      environment: 'dev',
+      scopes: ['posts:update', 'posts:publish'],
+    }),
+  }
+
+  const data = { thumbnailUrl: assetUrl(imageKey), draft: false }
+  const denied = await Effect.runPromise(prepare(data, keyActor).pipe(Effect.result))
+  expect(Result.isFailure(denied) && denied.failure).toBeInstanceOf(UnauthorizedError)
+  expect(storage.copies).toEqual([])
+  const retained = await Effect.runPromise(prepare(data, keyActor, data))
+  await Effect.runPromise(retained.publish)
+  expect(retained.data.thumbnailUrl).toBe(assetUrl(publicKey(imageKey)))
+  expect(storage.copies).toEqual([{ source: imageKey, destination: publicKey(imageKey) }])
+})
 
 async function harness() {
   const resource = await createMigratedD1Database()

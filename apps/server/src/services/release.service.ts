@@ -144,7 +144,7 @@ const createEffect = (
   Effect.gen(function* () {
     yield* validateCanonicalContent(data.content)
     const db = yield* Database
-    const publication = yield* media(data, { userId, userRole })
+    const publication = yield* media(data, { userId, userRole, credential: undefined })
     const { tags, ...releaseData } = publication.data
 
     const labelRecords = yield* Effect.tryPromise({
@@ -264,7 +264,13 @@ const updateEffect = (
 
     yield* requireCreatorOrAdmin('label', existingRelease.labelId, userId, userRole)
     yield* validateCanonicalContent(data.content)
-    const publication = yield* media(data, { userId, userRole }, existingRelease)
+
+    const publication = yield* media(
+      data,
+      { userId, userRole, credential: undefined },
+      existingRelease,
+    )
+
     const { tags, ...releaseData } = publication.data
 
     if (data.labelId && data.labelId !== existingRelease.labelId) {

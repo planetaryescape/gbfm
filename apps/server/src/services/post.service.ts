@@ -1,3 +1,5 @@
+import type { Actor } from '@gbfm/api/middleware/actor'
+import { KeyAccessDenied, type KeyInputInvalid } from '@gbfm/api/personal-access-keys'
 import { LINK_STATUS } from '@gbfm/core/status'
 import type { RichContentDocument } from '@gbfm/rich-content/schema'
 import type { TweetCardEntityInput, TweetCardPresentationInput } from '@gbfm/social-card'
@@ -23,6 +25,7 @@ import { Context, Effect, Layer, Match } from 'effect'
 import { user as usersTable } from '@/db/auth.schema'
 import { postIdsForCreator } from '@/db/creator-membership'
 import { blueskyPostSources } from '@/db/external-account.schema'
+import { guardedPostUpdate } from '@/db/guarded-post-update'
 import {
   hasEntityLabel,
   hasEntityLabelLike,
@@ -62,10 +65,12 @@ import {
   type S3Error,
 } from '@/errors'
 import { checkCreatorAuthorship, requireCreatorOrAdmin } from '@/lib/authorization'
+import { authorizeKeyPostWrite } from '@/lib/key-post-authorization'
 import { MdxService, validateCanonicalContent } from '@/lib/mdx'
 import { createPaginationMetadata, type PaginationMetadata } from '@/lib/pagination'
 import { ConfigService } from '@/services/config.service'
 import {
+  attachedMediaUrls,
   makeMediaPublication,
   type MediaActor,
   type MediaPublication,
@@ -73,7 +78,11 @@ import {
 import { SentryService } from '@/services/sentry.service'
 import { ObjectStoreClient } from '@/services/storage/object-store-client'
 import { toSlug } from '@/services/to-slug'
-import { markAttachedAssets, UploadAssetService } from '@/services/upload-asset.service'
+import {
+  keyFromAssetUrl,
+  markAttachedAssets,
+  UploadAssetService,
+} from '@/services/upload-asset.service'
 
 export const POST_SOURCE_FILTERS = ['bluesky', 'native'] as const
 
@@ -123,6 +132,7 @@ export interface PostService {
     },
     userId: string,
     userRole: string,
+    access?: 'owned' | 'role',
   ) => Effect.Effect<
     { data: Array<SelectMdxCompiledPost>; pagination: PaginationMetadata },
     DatabaseError
@@ -134,6 +144,7 @@ export interface PostService {
     slug: string,
     userId: string,
     userRole: string,
+    access?: 'owned' | 'role',
   ) => Effect.Effect<SelectMdxCompiledPost, DatabaseError | NotFoundError | UnauthorizedError>
   readonly getEditorials: (options: {
     limit: number
@@ -219,6 +230,8 @@ export interface PostService {
     actor?: MediaActor,
   ) => Effect.Effect<
     SelectPost,
+    | KeyAccessDenied
+    | KeyInputInvalid
     | DatabaseError
     | ConflictError
     | ValidationError
@@ -272,9 +285,17 @@ export interface PostService {
     userId: string,
     userRole: string,
     data: Partial<InsertPost> & { creatorIds?: Array<string> },
+    credential?: Actor['credential'],
   ) => Effect.Effect<
     SelectMdxCompiledPost,
-    DatabaseError | NotFoundError | UnauthorizedError | ValidationError | S3Error
+    | DatabaseError
+    | NotFoundError
+    | UnauthorizedError
+    | ValidationError
+    | S3Error
+    | KeyAccessDenied
+    | KeyInputInvalid
+    | ConflictError
   >
   /** Renders draft source through the publishing pipeline without storing it. */
   readonly renderPreview: (content: string) => Effect.Effect<RichContentDocument>
@@ -562,7 +583,7 @@ const getPostRowsEffect = (
     musicEntityId?: string
     readerId?: string
   },
-  actor?: { userId: string; userRole: string },
+  actor?: { userId: string; userRole: string; access?: 'owned' | 'role' | undefined },
 ) =>
   Effect.gen(function* () {
     const db = yield* Database
@@ -580,7 +601,7 @@ const getPostRowsEffect = (
     const visibilityCondition = Match.value(actor).pipe(
       Match.when(undefined, () => readablePosts(db, options.readerId)),
       Match.when(
-        (currentActor) => currentActor.userRole === 'admin',
+        (currentActor) => currentActor.userRole === 'admin' && currentActor.access !== 'owned',
         () => undefined,
       ),
       Match.orElse((currentActor) => postIdsForCreator(db, currentActor.userId)),
@@ -665,7 +686,7 @@ const getPostRowsEffect = (
 const getAllEffect = (
   options: Parameters<typeof getPostRowsEffect>[0],
   mdx: MdxService,
-  actor?: { userId: string; userRole: string },
+  actor?: { userId: string; userRole: string; access?: 'owned' | 'role' | undefined },
 ) =>
   Effect.gen(function* () {
     const db = yield* Database
@@ -1925,6 +1946,7 @@ const createEffect = (
 ) =>
   Effect.gen(function* () {
     const db = yield* Database
+    yield* authorizeKeyPostWrite(actor, 'posts:create', { ...data, creatorIds })
     const normalizedData = normalizePostData(data, data.type)
     yield* validatePostData(normalizedData)
     yield* validateCanonicalContent(normalizedData.content)
@@ -1948,26 +1970,77 @@ const createEffect = (
     const result = yield* Effect.tryPromise({
       try: async () => {
         await db.batch([
-          db.insert(postsTable).values({ ...dataWithSlug, id }),
+          actor?.credential?._tag === 'PersonalAccessKey'
+            ? db.insert(postsTable).select(
+                db
+                  .select({
+                    id: sql<string>`${id}`.as('id'),
+                    description: sql<string | null>`${dataWithSlug.description ?? null}`.as(
+                      'description',
+                    ),
+                    thumbnailUrl: sql<string | null>`${dataWithSlug.thumbnailUrl ?? null}`.as(
+                      'thumbnailUrl',
+                    ),
+                    bannerImageUrl: sql<string | null>`${dataWithSlug.bannerImageUrl ?? null}`.as(
+                      'bannerImageUrl',
+                    ),
+                    slug: sql<string>`${dataWithSlug.slug}`.as('slug'),
+                    createdAt: sql<Date>`${Date.now()}`.as('createdAt'),
+                    updatedAt: sql<Date>`${Date.now()}`.as('updatedAt'),
+                    draft: sql<boolean>`${dataWithSlug.draft ? 1 : 0}`.as('draft'),
+                    title: sql<string | null>`${dataWithSlug.title ?? null}`.as('title'),
+                    content: sql<string | null>`${dataWithSlug.content ?? null}`.as('content'),
+                    type: sql<PostType | null>`${dataWithSlug.type ?? null}`.as('type'),
+                    musicEntityType: sql<string | null>`${dataWithSlug.musicEntityType ?? null}`.as(
+                      'musicEntityType',
+                    ),
+                    musicEntityId: sql<string | null>`${dataWithSlug.musicEntityId ?? null}`.as(
+                      'musicEntityId',
+                    ),
+                    parentPostId: sql<string | null>`${dataWithSlug.parentPostId ?? null}`.as(
+                      'parentPostId',
+                    ),
+                    rootPostId: sql<string | null>`${dataWithSlug.rootPostId ?? null}`.as(
+                      'rootPostId',
+                    ),
+                    depth: sql<number>`${dataWithSlug.depth ?? 0}`.as('depth'),
+                    quotedPostId: sql<string | null>`${dataWithSlug.quotedPostId ?? null}`.as(
+                      'quotedPostId',
+                    ),
+                  })
+                  .from(sql`(SELECT 1)`)
+                  .where(sql`NOT EXISTS (SELECT 1 FROM posts WHERE slug = ${dataWithSlug.slug})`),
+              )
+            : db.insert(postsTable).values({ ...dataWithSlug, id }),
           ...(creatorIds.length > 0
             ? [
-                db
-                  .insert(postCreators)
-                  .values(creatorIds.map((creatorId) => ({ postId: id, creatorId }))),
+                actor?.credential?._tag === 'PersonalAccessKey'
+                  ? db.insert(postCreators).select(
+                      db
+                        .select({
+                          postId: postsTable.id,
+                          creatorId: sql<string>`${actor.userId}`.as('creator_id'),
+                        })
+                        .from(postsTable)
+                        .where(eq(postsTable.id, id)),
+                    )
+                  : db
+                      .insert(postCreators)
+                      .values(creatorIds.map((creatorId) => ({ postId: id, creatorId }))),
               ]
             : []),
         ])
         const rows = await db.select().from(postsTable).where(eq(postsTable.id, id)).limit(1)
         const post = rows[0]
 
-        if (!post) throw new Error('Failed to create post')
+        if (!post) return null
 
         if (tags !== undefined) await replaceEntityLabels(db, 'post', post.id, { tags })
 
         return post
       },
       catch: (error) => {
-        const errorMessage = getErrorMessage(error)
+        const errorMessage = getErrorMessage(error).toLowerCase()
 
         if (errorMessage.includes('unique constraint')) {
           return new ConflictError({
@@ -1990,6 +2063,12 @@ const createEffect = (
         })
       },
     })
+
+    if (!result)
+      return yield* new ConflictError({
+        message: 'Post with this slug already exists',
+        resource: 'post',
+      })
 
     yield* Effect.annotateCurrentSpan('postId', result.id)
     yield* Effect.annotateCurrentSpan('postType', result.type)
@@ -2116,7 +2195,11 @@ const createMicroPostReplyEffect = (
     yield* validatePostData(normalizedData)
     yield* validateCanonicalContent(normalizedData.content)
 
-    const publication = yield* media(normalizedData, { userId: actorUserId, userRole: 'user' })
+    const publication = yield* media(normalizedData, {
+      userId: actorUserId,
+      userRole: 'user',
+      credential: undefined,
+    })
 
     const replyData: InsertPost = {
       ...publication.data,
@@ -2461,6 +2544,7 @@ const updateEffect = (
   rawData: Partial<InsertPost> & { creatorIds?: Array<string> },
   mdx: MdxService,
   media: MediaPublication,
+  credential?: Actor['credential'],
 ) =>
   Effect.gen(function* () {
     const db = yield* Database
@@ -2485,7 +2569,19 @@ const updateEffect = (
       })
     }
 
-    yield* requireCreatorOrAdmin('post', existingPost.id, userId, userRole)
+    const actor = { userId, userRole, credential }
+
+    if (credential?._tag === 'PersonalAccessKey') {
+      if (!(yield* checkCreatorAuthorship('post', existingPost.id, userId)))
+        return yield* new NotFoundError({ message: 'Post not found', resource: 'post', id: slug })
+      yield* authorizeKeyPostWrite(actor, 'posts:update', rawData, existingPost.draft)
+
+      if (rawData.type !== undefined && rawData.type !== existingPost.type)
+        return yield* new KeyAccessDenied()
+    } else {
+      yield* requireCreatorOrAdmin('post', existingPost.id, userId, userRole)
+    }
+
     yield* validateCanonicalContent(rawData.content)
 
     // Thread structure (parentPostId/rootPostId/depth) must never be
@@ -2502,21 +2598,34 @@ const updateEffect = (
 
     const publication = yield* media(
       normalizePostData(updateData, nextPostData.type),
-      { userId, userRole },
+      actor,
       existingPost,
     )
 
     const normalizedUpdateData = publication.data
     let updatedPost = existingPost
+    const config = yield* ConfigService
 
-    if (Object.keys(normalizedUpdateData).length > 0) {
+    const nextMedia = { ...existingPost, ...normalizedUpdateData }
+
+    const assetKeys = attachedMediaUrls(nextMedia).flatMap((url) => {
+      const key = url ? keyFromAssetUrl(url, config.urls.bucketRouter) : null
+
+      return key === null
+        ? []
+        : [key.startsWith('public/') ? `private/${key.slice('public/'.length)}` : key]
+    })
+
+    if (Object.keys(normalizedUpdateData).length > 0 || credential?._tag === 'PersonalAccessKey') {
       const updatedRecords = yield* Effect.tryPromise({
         try: () =>
-          db
-            .update(postsTable)
-            .set({ ...normalizedUpdateData, updatedAt: new Date() })
-            .where(eq(postsTable.id, existingPost.id))
-            .returning(),
+          credential?._tag === 'PersonalAccessKey'
+            ? guardedPostUpdate(db, existingPost, userId, normalizedUpdateData, tags, assetKeys)
+            : db
+                .update(postsTable)
+                .set({ ...normalizedUpdateData, updatedAt: new Date() })
+                .where(eq(postsTable.id, existingPost.id))
+                .returning(),
         catch: (error) =>
           new DatabaseError({
             message: `Failed to update post: ${getErrorMessage(error)}`,
@@ -2526,6 +2635,12 @@ const updateEffect = (
       })
 
       if (!updatedRecords[0]) {
+        if (credential?._tag === 'PersonalAccessKey')
+          return yield* new ConflictError({
+            message: 'Post changed during update',
+            resource: 'post',
+          })
+
         return yield* new DatabaseError({
           message: 'Failed to update post',
           operation: 'update',
@@ -2538,10 +2653,11 @@ const updateEffect = (
       // An image attached via an edit form (not just at create time) still
       // needs its upload_assets row moved out of 'pending', or it looks
       // reclaimable to a future cleanup job despite being in use.
-      yield* markAttachedAssets('posts', updatedPost.id, [
-        updatedPost.thumbnailUrl,
-        updatedPost.bannerImageUrl,
-      ])
+      if (credential?._tag !== 'PersonalAccessKey')
+        yield* markAttachedAssets('posts', updatedPost.id, [
+          updatedPost.thumbnailUrl,
+          updatedPost.bannerImageUrl,
+        ])
     }
 
     if (creatorIds && creatorIds.length > 0) {
@@ -2564,7 +2680,7 @@ const updateEffect = (
       })
     }
 
-    if (tags !== undefined) {
+    if (tags !== undefined && credential?._tag !== 'PersonalAccessKey') {
       yield* Effect.tryPromise({
         try: () => replaceEntityLabels(db, 'post', updatedPost.id, { tags }),
         catch: (error) =>
@@ -2594,13 +2710,46 @@ export const PostServiceLayer = Layer.effect(
 
     return {
       getAll: (opts) => provideDb(getAllEffect(opts, mdx)),
-      getAllForEdit: (opts, userId, userRole) =>
-        provideDb(getAllEffect(opts, mdx, { userId, userRole })),
+      getAllForEdit: (opts, userId, userRole, access) =>
+        provideDb(getAllEffect(opts, mdx, { userId, userRole, access })),
       getBySlug: (slug) => provideDb(getBySlugEffect(slug, mdx)),
-      getBySlugForEdit: (slug, userId, userRole) =>
+      getBySlugForEdit: (slug, userId, userRole, access) =>
         provideDb(
           Effect.gen(function* () {
+            if (access === 'owned') {
+              const rows = yield* Effect.tryPromise({
+                try: () =>
+                  db
+                    .select({ id: postsTable.id })
+                    .from(postsTable)
+                    .where(and(eq(postsTable.slug, slug), postIdsForCreator(db, userId)))
+                    .limit(1),
+                catch: () =>
+                  new DatabaseError({
+                    message: 'Could not read owned post',
+                    operation: 'select',
+                    table: 'posts',
+                  }),
+              })
+
+              if (!rows.length)
+                return yield* new NotFoundError({
+                  message: 'Post not found',
+                  resource: 'post',
+                  id: slug,
+                })
+            }
+
             const post = yield* getBySlugEffect(slug, mdx, true)
+
+            if (access === 'owned' && !(yield* checkCreatorAuthorship('post', post.id, userId))) {
+              return yield* new NotFoundError({
+                message: 'Post not found',
+                resource: 'post',
+                id: slug,
+              })
+            }
+
             yield* requireCreatorOrAdmin('post', post.id, userId, userRole)
 
             return post
@@ -2633,8 +2782,8 @@ export const PostServiceLayer = Layer.effect(
       getMicroPostReplies: (parentSlug, opts) =>
         provideDb(getMicroPostRepliesEffect(parentSlug, opts, mdx)),
       getMicroPostThread: (slug, opts) => provideDb(getMicroPostThreadEffect(slug, opts, mdx)),
-      update: (slug, userId, userRole, data) =>
-        provideDb(updateEffect(slug, userId, userRole, data, mdx, media)).pipe(
+      update: (slug, userId, userRole, data, credential) =>
+        provideDb(updateEffect(slug, userId, userRole, data, mdx, media, credential)).pipe(
           Effect.provideService(ConfigService, config),
           Effect.provideService(UploadAssetService, uploadAssetService),
         ),

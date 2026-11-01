@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./mosaic": "./src/mosaic.ts",
     "./schema": "./src/schema.ts",
     "./source": "./src/source.ts",
     "./media": "./src/media.ts",

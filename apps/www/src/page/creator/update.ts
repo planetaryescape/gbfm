@@ -7,6 +7,7 @@ import {
   CancelUpload,
   Diagnose,
   FindMusicReferences,
+  GenerateMosaic,
   PauseUpload,
   PersistDraft,
   RenderPreview,
@@ -20,7 +21,8 @@ import {
 } from './command'
 import { initialModel } from './init'
 import { Message } from './message'
-import { draftValidationError, keyOf, type Model } from './model'
+import { draftValidationError, keyOf, MosaicState, type Model } from './model'
+import { mosaicSource } from './mosaic'
 import type { CreatorDraft, CreatorService } from './services'
 import type { CreatorUpload } from './upload/runtime'
 
@@ -150,6 +152,40 @@ export const update = (
   message: Message,
 ): Update.Return<Model, Message, CreatorService | CreatorUpload> =>
   Message.match<Update.Return<Model, Message, CreatorService | CreatorUpload>>(message, {
+    MosaicRequested: () =>
+      model.authorized &&
+      (model.phase === 'writing' || model.phase === 'reviewing') &&
+      !MosaicState.guards.Generating(model.mosaic)
+        ? {
+            model: {
+              ...model,
+              mosaic: MosaicState.cases.Generating.make({ content: mosaicSource(model.draft) }),
+            },
+            commands: [GenerateMosaic({ content: mosaicSource(model.draft) })],
+          }
+        : { model },
+    MosaicGenerated: ({ content, url }) => ({
+      model:
+        MosaicState.guards.Generating(model.mosaic) && model.mosaic.content === content
+          ? { ...model, mosaic: MosaicState.cases.Ready.make({ content, url }) }
+          : model,
+    }),
+    MosaicFailed: ({ content, message }) => ({
+      model:
+        MosaicState.guards.Generating(model.mosaic) && model.mosaic.content === content
+          ? { ...model, mosaic: MosaicState.cases.Failed.make({ message }) }
+          : model,
+    }),
+    MosaicAccepted: () =>
+      MosaicState.guards.Ready(model.mosaic) &&
+      (model.phase === 'writing' || model.phase === 'reviewing') &&
+      model.authorized
+        ? changed(
+            { ...model, mosaic: MosaicState.cases.Idle.make({}) },
+            { ...model.draft, thumbnailUrl: model.mosaic.url },
+          )
+        : { model },
+    MosaicDismissed: () => ({ model: { ...model, mosaic: MosaicState.cases.Idle.make({}) } }),
     Changed: ({ field, value }) => changed(model, { ...model.draft, [field]: value }),
     AuthorQueryChanged: ({ value }) => ({
       model: { ...model, authorQuery: value, authorSearch: 'idle', authorResults: [] },

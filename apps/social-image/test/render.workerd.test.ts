@@ -39,14 +39,21 @@ const assets: SocialCardRenderAssets = {
 }
 
 describe('tweet card renderer in workerd', () => {
-  test('renders a PNG with deployed static assets', async () => {
+  test.each([
+    ['openGraph', 1200, 630],
+    ['poster', 1080, 1350],
+    ['sleeve', 1080, 1920],
+  ] as const)('renders a %s PNG with deployed static assets', async (format, width, height) => {
     expect(yogaWasm).toBeInstanceOf(WebAssembly.Module)
     expect(resvgWasm).toBeInstanceOf(WebAssembly.Module)
-    const png = await renderSocialCard(model, 'openGraph', assets)
+    const png = await renderSocialCard(model, format, assets)
 
     expect(png.subarray(0, 8)).toEqual(
       new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     )
+    const header = new DataView(png.buffer, png.byteOffset, png.byteLength)
+    expect(header.getUint32(16)).toBe(width)
+    expect(header.getUint32(20)).toBe(height)
   })
 
   test.each([

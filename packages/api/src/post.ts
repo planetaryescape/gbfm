@@ -3,7 +3,9 @@ import { Schema } from 'effect'
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup } from 'effect/http-api'
 
 import { MusicServiceUnavailableHttpError } from './errors'
+import { ActorMiddleware } from './middleware/actor'
 import { AuthMiddleware } from './middleware/auth'
+import { KeyAccessDenied, KeyInputInvalid } from './personal-access-keys'
 
 const UuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -345,8 +347,8 @@ export const PostGroup = /* @__PURE__ */ (() =>
       HttpApiEndpoint.get('getPostsForEdit', '/api/content/posts/manage', {
         query: ManagePostsQuery,
         success: GetPostsResponse,
-        error: [HttpApiError.Unauthorized, HttpApiError.InternalServerError],
-      }).middleware(AuthMiddleware),
+        error: [HttpApiError.Unauthorized, HttpApiError.InternalServerError, KeyAccessDenied],
+      }).middleware(ActorMiddleware),
     )
     .add(
       HttpApiEndpoint.get('getPostTags', '/api/content/posts/tags', {
@@ -480,28 +482,35 @@ export const PostGroup = /* @__PURE__ */ (() =>
       HttpApiEndpoint.get('getPostBySlugForEdit', '/api/content/posts/:slug/edit', {
         params: SlugParam,
         success: CompiledPostResponse,
-        error: [HttpApiError.NotFound, HttpApiError.Unauthorized, HttpApiError.InternalServerError],
-      }).middleware(AuthMiddleware),
+        error: [
+          HttpApiError.NotFound,
+          HttpApiError.Unauthorized,
+          HttpApiError.InternalServerError,
+          KeyAccessDenied,
+        ],
+      }).middleware(ActorMiddleware),
     )
     .add(
       HttpApiEndpoint.post('previewPostContent', '/api/content/posts/preview', {
         payload: PreviewPostContentInput,
         success: PreviewPostContentResponse,
-        error: [HttpApiError.Forbidden],
-      }).middleware(AuthMiddleware),
+        error: [HttpApiError.Forbidden, KeyAccessDenied],
+      }).middleware(ActorMiddleware),
     )
     .add(
       HttpApiEndpoint.post('createPost', '/api/content/post', {
         payload: CreatePostInput,
         success: PostResponse,
         error: [
+          KeyAccessDenied,
+          KeyInputInvalid,
           ValidationHttpError,
           HttpApiError.Forbidden,
           HttpApiError.Conflict,
           HttpApiError.NotFound,
           HttpApiError.InternalServerError,
         ],
-      }).middleware(AuthMiddleware),
+      }).middleware(ActorMiddleware),
     )
     .add(
       HttpApiEndpoint.post('resolvePostMusic', '/api/content/posts/:id/resolve-music-entity', {
@@ -525,12 +534,15 @@ export const PostGroup = /* @__PURE__ */ (() =>
         payload: UpdatePostInput,
         success: CompiledPostResponse,
         error: [
+          KeyAccessDenied,
+          KeyInputInvalid,
+          HttpApiError.Conflict,
           ValidationHttpError,
           HttpApiError.NotFound,
           HttpApiError.Unauthorized,
           HttpApiError.InternalServerError,
         ],
-      }).middleware(AuthMiddleware),
+      }).middleware(ActorMiddleware),
     )
     .add(
       HttpApiEndpoint.get('getPostsByTag', '/api/content/tag/:tag', {

@@ -119,7 +119,7 @@ export const ShowsHandlersLive = HttpApiBuilder.group(Api, 'shows', (handlers) =
             .create(
               omitUndefined({ ...showData, tags: tags ? [...tags] : undefined }),
               finalHostIds,
-              { userId: user.id, userRole: user.role ?? 'user' },
+              { userId: user.id, userRole: user.role ?? 'user', credential: undefined },
             )
             .pipe(
               Effect.catchTag('ConflictError', () => new HttpApiError.Conflict()),

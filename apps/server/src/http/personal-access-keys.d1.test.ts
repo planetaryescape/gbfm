@@ -298,7 +298,7 @@ test('concurrent issuance enforces the active-key cap and retry identity in D1',
   expect(await fixture.db.select().from(personalAccessKeys)).toHaveLength(10)
 })
 
-test('expiry, environment mismatch and malformed stored scopes fail closed', async () => {
+test('expiry, environment mismatch and malformed stored key metadata fail closed', async () => {
   await using fixture = await setup()
   const token = await fixture.login('lifecycle', 'editor')
   const issued = await fixture.issue(token, ['posts:read'])
@@ -306,11 +306,37 @@ test('expiry, environment mismatch and malformed stored scopes fail closed', asy
   expect(
     (await fixture.request('GET', path, issued.secret.replace('_dev_', '_prod_'))).status,
   ).toBe(401)
-  await fixture.db
-    .update(personalAccessKeys)
-    .set({ scopes: '["unknown:scope"]' })
-    .where(eq(personalAccessKeys.id, issued.key.id))
-  expect((await fixture.request('GET', path, issued.secret)).status).toBe(503)
+
+  for (const malformed of [
+    { scopes: '["unknown:scope"]' },
+    { id: 'not-a-key-uuid' },
+    { name: 'Hidden\ncontrol character' },
+  ]) {
+    await fixture.db
+      .update(personalAccessKeys)
+      .set(malformed)
+      .where(eq(personalAccessKeys.ownerUserId, 'lifecycle'))
+
+    for (const response of [
+      await fixture.request('GET', path, issued.secret),
+      await fixture.request('GET', '/api/user/api-keys', token),
+    ]) {
+      expect(response.status).toBe(503)
+      expect(await response.json()).toHaveProperty('_tag', 'KeyStoreUnavailable')
+    }
+
+    await fixture.db
+      .update(personalAccessKeys)
+      .set({ id: issued.key.id, name: issued.key.name, scopes: '["posts:read"]' })
+      .where(eq(personalAccessKeys.ownerUserId, 'lifecycle'))
+  }
+
+  expect((await fixture.request('GET', path, issued.secret)).status).toBe(200)
+  expect((await fixture.request('GET', '/api/user/api-keys', token)).status).toBe(200)
+  expect((await fixture.request('DELETE', '/api/user/api-keys/not-a-uuid', token)).status).toBe(400)
+  expect(
+    (await fixture.request('DELETE', `/api/user/api-keys/${crypto.randomUUID()}`, token)).status,
+  ).toBe(404)
   const now = Date.now()
   await fixture.db
     .update(personalAccessKeys)

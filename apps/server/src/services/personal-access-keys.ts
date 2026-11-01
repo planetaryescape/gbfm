@@ -1,14 +1,15 @@
-import { ActorUser, Credential, type PersonalAccessKeyActor } from '@gbfm/api/middleware/actor'
+import { Credential, PersonalAccessKeyActor } from '@gbfm/api/middleware/actor'
 import {
   InvalidKeyCredential,
   KeyAccessDenied,
-  KeyInputInvalid,
   KeyIssuanceConflict,
   KeyLimitReached,
+  KeyMetadata,
   KeyRateLimited,
   KeyStoreUnavailable,
   type IssueKeyInput,
 } from '@gbfm/api/personal-access-keys'
+import type { UserId } from '@gbfm/core/identity'
 import {
   canAuthorWithKey,
   canPublishWithKey,
@@ -49,8 +50,6 @@ const metadata = (row: KeyRow) =>
     if (
       !/^[0-9a-f]{64}$/.test(row.secretHash) ||
       !new RegExp(`^gbfm_pat_v1_${environment}_[A-Za-z0-9_-]{6}$`).test(row.displayPrefix) ||
-      !row.name.trim() ||
-      row.name.length > 80 ||
       ![row.createdAt, row.expiresAt, row.revokedAt, row.lastUsedAt].every(
         (date) => date === null || Number.isFinite(date.getTime()),
       ) ||
@@ -70,7 +69,7 @@ const metadata = (row: KeyRow) =>
       return yield* new KeyStoreUnavailable()
     }
 
-    return {
+    return yield* Schema.decodeUnknownEffect(KeyMetadata)({
       id: row.id,
       ownerUserId: row.ownerUserId,
       name: row.name,
@@ -81,7 +80,7 @@ const metadata = (row: KeyRow) =>
       expiresAt: row.expiresAt.toISOString(),
       revokedAt: row.revokedAt?.toISOString() ?? null,
       lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
-    }
+    }).pipe(Effect.mapError(() => new KeyStoreUnavailable()))
   })
 
 const makePersonalAccessKeys = Effect.gen(function* () {
@@ -100,10 +99,10 @@ const makePersonalAccessKeys = Effect.gen(function* () {
       Effect.map((bytes) => [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')),
     )
 
-  const owned = (ownerUserId: string, stage: string) =>
+  const owned = (ownerUserId: UserId, stage: KeyEnvironment) =>
     and(eq(keys.ownerUserId, ownerUserId), eq(keys.environment, stage))
 
-  const issue = Effect.fn('keys.issue')(function* (ownerUserId: string, input: IssueKeyInput) {
+  const issue = Effect.fn('keys.issue')(function* (ownerUserId: UserId, input: IssueKeyInput) {
     const stage = yield* environment
     const now = yield* clock.currentTimeMillis
 
@@ -125,7 +124,6 @@ const makePersonalAccessKeys = Effect.gen(function* () {
       return yield* new KeyAccessDenied()
     const name = input.name.trim()
 
-    if (!name) return yield* new KeyInputInvalid()
     const id = yield* crypto.randomUUIDv4().pipe(Effect.orDie)
     const bytes = yield* crypto.randomBytes(32).pipe(Effect.orDie)
 
@@ -162,7 +160,13 @@ const makePersonalAccessKeys = Effect.gen(function* () {
           .limit(1),
       )
 
-      if (existing) return yield* new KeyIssuanceConflict({ keyId: existing.id })
+      if (existing) {
+        const keyId = yield* Schema.decodeUnknownEffect(KeyId)(existing.id).pipe(
+          Effect.mapError(() => new KeyStoreUnavailable()),
+        )
+
+        return yield* new KeyIssuanceConflict({ keyId })
+      }
 
       return yield* new KeyLimitReached()
     }
@@ -176,7 +180,7 @@ const makePersonalAccessKeys = Effect.gen(function* () {
   })
 
   const list = Effect.fn('keys.list')(function* (
-    ownerUserId: string,
+    ownerUserId: UserId,
     limit: number,
     offset: number,
   ) {
@@ -209,7 +213,7 @@ const makePersonalAccessKeys = Effect.gen(function* () {
     }
   })
 
-  const revoke = Effect.fn('keys.revoke')(function* (ownerUserId: string, keyId: string) {
+  const revoke = Effect.fn('keys.revoke')(function* (ownerUserId: UserId, keyId: KeyId) {
     const stage = yield* environment
     const now = yield* clock.currentTimeMillis
 
@@ -259,13 +263,9 @@ const makePersonalAccessKeys = Effect.gen(function* () {
     )
       return yield* new InvalidKeyCredential()
 
-    const actorUser = yield* Schema.decodeUnknownEffect(ActorUser)(found.owner).pipe(
-      Effect.mapError(() => new InvalidKeyCredential()),
-    )
-
-    const keyId = yield* Schema.decodeUnknownEffect(KeyId)(found.key.id).pipe(
-      Effect.mapError(() => new KeyStoreUnavailable()),
-    )
+    const actorUser = yield* Schema.decodeUnknownEffect(PersonalAccessKeyActor.fields.user)(
+      found.owner,
+    ).pipe(Effect.mapError(() => new InvalidKeyCredential()))
 
     const projection = yield* metadata(found.key)
 
@@ -324,7 +324,7 @@ const makePersonalAccessKeys = Effect.gen(function* () {
     return {
       user: actorUser,
       credential: Credential.PersonalAccessKey({
-        keyId,
+        keyId: projection.id,
         environment: stage,
         scopes: projection.scopes,
       }),

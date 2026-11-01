@@ -1,4 +1,13 @@
-import { KeyEnvironment, KeyScopes } from '@gbfm/core/personal-access-keys'
+import { UserId } from '@gbfm/core/identity'
+import {
+  KeyDisplayPrefix,
+  KeyEnvironment,
+  KeyId,
+  KeyIssuanceId,
+  KeyName,
+  KeyScopes,
+  KeyTimestamp,
+} from '@gbfm/core/personal-access-keys'
 import { Schema } from 'effect'
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema } from 'effect/http-api'
 
@@ -42,7 +51,7 @@ export class KeyLimitReached extends Schema.TaggedError<KeyLimitReached>()(
 
 export class KeyIssuanceConflict extends Schema.TaggedError<KeyIssuanceConflict>()(
   'KeyIssuanceConflict',
-  { keyId: Schema.String },
+  { keyId: KeyId },
   { httpApiStatus: 409 },
 ) {}
 
@@ -54,38 +63,21 @@ export const KeyErrors = [
 ]
 
 export const KeyMetadata = Schema.Struct({
-  id: Schema.String,
-  ownerUserId: Schema.String,
-  name: Schema.String,
+  id: KeyId,
+  ownerUserId: UserId,
+  name: KeyName,
   environment: KeyEnvironment,
   scopes: KeyScopes,
-  displayPrefix: Schema.String,
-  createdAt: Schema.String,
-  expiresAt: Schema.String,
-  revokedAt: Schema.NullOr(Schema.String),
-  lastUsedAt: Schema.NullOr(Schema.String),
+  displayPrefix: KeyDisplayPrefix,
+  createdAt: KeyTimestamp,
+  expiresAt: KeyTimestamp,
+  revokedAt: Schema.NullOr(KeyTimestamp),
+  lastUsedAt: Schema.NullOr(KeyTimestamp),
 })
 
 export const IssueKeyInput = Schema.Struct({
-  requestId: Schema.String.pipe(
-    Schema.check(
-      Schema.isPattern(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-      ),
-    ),
-  ),
-  name: Schema.String.pipe(
-    Schema.check(
-      Schema.makeFilter(
-        (name) =>
-          name.length >= 1 &&
-          name.length <= 80 &&
-          name
-            .split('')
-            .every((character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127),
-      ),
-    ),
-  ),
+  requestId: KeyIssuanceId,
+  name: KeyName,
   scopes: KeyScopes,
   expiresInSeconds: Schema.optional(
     Schema.Number.pipe(
@@ -136,7 +128,7 @@ export const PersonalAccessKeyGroup = HttpApiGroup.make('personalAccessKeys')
   )
   .add(
     HttpApiEndpoint.delete('revokeKey', '/api/user/api-keys/:id', {
-      params: { id: Schema.String },
+      params: { id: KeyId },
       success: HttpApiSchema.NoContent,
       error: [KeyStoreUnavailable, HttpApiError.NotFound, KeyAccessDenied],
     }).middleware(AuthMiddleware),

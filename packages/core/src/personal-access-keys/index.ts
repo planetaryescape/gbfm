@@ -2,8 +2,52 @@ import { Schema } from 'effect'
 
 import type { Role } from '../roles'
 
-/** The opaque identity of a stored personal access key. */
-export const KeyId = Schema.String.pipe(Schema.check(Schema.isNonEmpty()), Schema.brand('KeyId'))
+/** The server-generated UUID identity of a personal access key. */
+export const KeyId = Schema.String.pipe(Schema.check(Schema.isUUID(4)), Schema.brand('KeyId'))
+
+export type KeyId = typeof KeyId.Type
+
+/** A client-generated UUID identifying one issuance attempt. */
+export const KeyIssuanceId = Schema.String.pipe(
+  Schema.check(
+    Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+  ),
+  Schema.brand('KeyIssuanceId'),
+)
+
+/** A nonblank key label without control characters, bounded for display and storage. */
+export const KeyName = Schema.String.pipe(
+  Schema.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(80),
+    Schema.makeFilter(
+      (name) =>
+        name.trim().length > 0 &&
+        name
+          .split('')
+          .every((character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127),
+    ),
+  ),
+  Schema.brand('KeyName'),
+)
+
+/** The canonical UTC timestamp representation used in key metadata. */
+export const KeyTimestamp = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter((value) => {
+      const date = new Date(value)
+
+      return Number.isFinite(date.getTime()) && date.toISOString() === value
+    }),
+  ),
+  Schema.brand('KeyTimestamp'),
+)
+
+/** A display-only token prefix, never an authentication credential. */
+export const KeyDisplayPrefix = Schema.String.pipe(
+  Schema.check(Schema.isPattern(/^gbfm_pat_v1_(?:dev|prod)_[A-Za-z0-9_-]{6}$/)),
+  Schema.brand('KeyDisplayPrefix'),
+)
 
 export const KeyScope = Schema.Literals([
   'posts:read',

@@ -1,23 +1,10 @@
+import { EmailAddress, SessionId, UserId } from '@gbfm/core/identity'
 import { KeyEnvironment, KeyId, KeyScopes } from '@gbfm/core/personal-access-keys'
 import { Role } from '@gbfm/core/roles'
 import { Context, Data, Schema } from 'effect'
 import { HttpApiError, HttpApiMiddleware } from 'effect/http-api'
 
 import { KeyErrors } from '../personal-access-keys'
-
-/** Opaque auth identities are non-empty, but are not necessarily UUIDs. */
-export const UserId = Schema.String.pipe(Schema.check(Schema.isNonEmpty()), Schema.brand('UserId'))
-
-export const SessionId = Schema.String.pipe(
-  Schema.check(Schema.isNonEmpty()),
-  Schema.brand('SessionId'),
-)
-
-/** An email address supplied by the authentication provider. */
-export const EmailAddress = Schema.String.pipe(
-  Schema.check(Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)),
-  Schema.brand('EmailAddress'),
-)
 
 /** The parsed user projection shared by session and personal-key actors. */
 export const ActorUser = Schema.Struct({
@@ -31,7 +18,7 @@ export type ActorUser = typeof ActorUser.Type
 
 /** A personal-key actor reconstructed from persisted credentials. */
 export const PersonalAccessKeyActor = Schema.Struct({
-  user: ActorUser,
+  user: ActorUser.pipe(Schema.fieldsAssign({ role: Role })),
   credential: Schema.Struct({
     _tag: Schema.Literal('PersonalAccessKey'),
     keyId: KeyId,

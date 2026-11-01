@@ -3,9 +3,9 @@ import {
   ActorMiddleware,
   AuthenticatedActor,
   Credential,
-  SessionId,
 } from '@gbfm/api/middleware/actor'
 import { InvalidKeyCredential } from '@gbfm/api/personal-access-keys'
+import { SessionId } from '@gbfm/core/identity'
 import { Effect, Layer, Redacted, Schema } from 'effect'
 import { HttpServerRequest } from 'effect/http'
 import { HttpApiError } from 'effect/http-api'

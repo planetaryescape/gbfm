@@ -1,9 +1,10 @@
 import { Api } from '@gbfm/api/api'
 import { AuthSession } from '@gbfm/api/middleware/auth'
 import { IssueKeyInput, KeyAccessDenied, KeyInputInvalid } from '@gbfm/api/personal-access-keys'
+import { UserId } from '@gbfm/core/identity'
 import { Clock, Effect, Redacted, Schema } from 'effect'
 import { HttpServerRequest } from 'effect/http'
-import { HttpApiBuilder } from 'effect/http-api'
+import { HttpApiBuilder, HttpApiError } from 'effect/http-api'
 
 import { hasSessionCookie } from '@/http/personal-access-key-policy'
 import { Auth } from '@/lib/auth'
@@ -54,15 +55,22 @@ export const PersonalAccessKeyHandlersLive = HttpApiBuilder.group(
 
           const now = yield* Clock.currentTimeMillis
 
-          if (
-            !session ||
-            session.session.impersonatedBy ||
-            session.session.createdAt.getTime() > now ||
-            now - session.session.createdAt.getTime() > 600000
-          )
+          if (!session || session.session.impersonatedBy) return yield* new KeyAccessDenied()
+
+          const createdAt = yield* Schema.decodeUnknownEffect(Schema.Date)(
+            session.session.createdAt,
+          ).pipe(Effect.mapError(() => new KeyAccessDenied()))
+
+          if (createdAt.getTime() > now || now - createdAt.getTime() > 600000)
             return yield* new KeyAccessDenied()
+
           const keys = yield* PersonalAccessKeys
-          const issued = yield* keys.issue(session.user.id, payload)
+
+          const ownerUserId = yield* Schema.decodeUnknownEffect(UserId)(session.user.id).pipe(
+            Effect.mapError(() => new KeyAccessDenied()),
+          )
+
+          const issued = yield* keys.issue(ownerUserId, payload)
 
           return { key: issued.key, secret: Redacted.value(issued.secret) }
         }),
@@ -72,7 +80,11 @@ export const PersonalAccessKeyHandlersLive = HttpApiBuilder.group(
           const { user } = yield* AuthSession
           const keys = yield* PersonalAccessKeys
 
-          return yield* keys.list(user.id, query.limit ?? 20, query.offset ?? 0)
+          const ownerUserId = yield* Schema.decodeUnknownEffect(UserId)(user.id).pipe(
+            Effect.mapError(() => new HttpApiError.Unauthorized()),
+          )
+
+          return yield* keys.list(ownerUserId, query.limit ?? 20, query.offset ?? 0)
         }),
       )
       .handle('revokeKey', ({ params }) =>
@@ -81,7 +93,11 @@ export const PersonalAccessKeyHandlersLive = HttpApiBuilder.group(
           const { user } = yield* AuthSession
           const keys = yield* PersonalAccessKeys
 
-          return yield* keys.revoke(user.id, params.id)
+          const ownerUserId = yield* Schema.decodeUnknownEffect(UserId)(user.id).pipe(
+            Effect.mapError(() => new HttpApiError.Unauthorized()),
+          )
+
+          return yield* keys.revoke(ownerUserId, params.id)
         }),
       ),
 )

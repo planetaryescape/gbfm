@@ -13,7 +13,11 @@ export class AuthSession extends Context.Service<
       readonly email: string
       readonly role?: string | null | undefined
     }
-    readonly session: { readonly id: string }
+    readonly session: {
+      readonly id: string
+      readonly createdAt: Date
+      readonly impersonatedBy?: string | null | undefined
+    }
   }
 >()('api/AuthSession') {}
 

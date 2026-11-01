@@ -7,7 +7,6 @@ import { HttpServerRequest } from 'effect/http'
 import { HttpApiBuilder, HttpApiError } from 'effect/http-api'
 
 import { hasSessionCookie } from '@/http/personal-access-key-policy'
-import { Auth } from '@/lib/auth'
 import { browserOrigins } from '@/lib/browser-origins'
 import { ConfigService } from '@/services/config.service'
 import { PersonalAccessKeys } from '@/services/personal-access-keys'
@@ -46,16 +45,10 @@ export const PersonalAccessKeyHandlersLive = HttpApiBuilder.group(
             Effect.mapError(() => new KeyInputInvalid()),
           )
 
-          const auth = yield* Auth
-
-          const session = yield* Effect.tryPromise({
-            try: () => auth.api.getSession({ headers: new Headers(request.headers) }),
-            catch: () => new KeyAccessDenied(),
-          })
-
+          const session = yield* AuthSession
           const now = yield* Clock.currentTimeMillis
 
-          if (!session || session.session.impersonatedBy) return yield* new KeyAccessDenied()
+          if (session.session.impersonatedBy) return yield* new KeyAccessDenied()
 
           const createdAt = yield* Schema.decodeUnknownEffect(Schema.Date)(
             session.session.createdAt,

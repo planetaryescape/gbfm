@@ -1,8 +1,12 @@
-import { KeyMetadata } from '@gbfm/api/personal-access-keys'
+import { OtelTracer, Resource } from '@effect/opentelemetry'
+import { IssueKeyInput, KeyMetadata } from '@gbfm/api/personal-access-keys'
+import { UserId } from '@gbfm/core/identity'
 import type { KeyScope } from '@gbfm/core/personal-access-keys'
+import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base'
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node'
 import { hashPassword } from 'better-auth/crypto'
 import { eq, sql } from 'drizzle-orm'
-import { Clock, Effect, Layer, Redacted, Schema } from 'effect'
+import { Clock, Crypto, Effect, Layer, Logger, Redacted, Schema } from 'effect'
 import { expect, test } from 'vitest'
 
 import { account, session, user } from '@/db/auth.schema'
@@ -23,6 +27,377 @@ import { createMigratedD1Database } from '@/test/migrate-d1'
 const Issued = Schema.Struct({ key: KeyMetadata, secret: Schema.String })
 
 const SignedIn = Schema.Struct({ token: Schema.String })
+
+test('session lookup infrastructure failure is not reported as invalid credentials', async () => {
+  await using f = await setup()
+  const token = await f.login('session-outage', 'editor')
+  await f.db.run(sql`DROP TABLE session`)
+  const response = await f.request('GET', '/api/content/posts/manage', token)
+  expect(response.status).toBe(500)
+  expect((await response.text()).includes(token)).toBe(false)
+})
+
+test('a concurrent minute rollover is admitted, but a genuinely future stored window fails closed', async () => {
+  await using f = await setup()
+  const token = await f.login('rollover', 'editor')
+  const issued = await f.issue(token, ['posts:read'])
+  const minute = (Math.floor(Date.now() / 60000) + 1) * 60000
+  let now = minute - 1
+
+  const clock = Layer.succeed(Clock.Clock, {
+    currentTimeMillis: Effect.sync(() => now),
+    currentTimeMillisUnsafe: () => now,
+    currentTimeNanos: Effect.sync(() => BigInt(now) * 1000000n),
+    currentTimeNanosUnsafe: () => BigInt(now) * 1000000n,
+    monotonicTimeNanos: Effect.sync(() => BigInt(now) * 1000000n),
+    monotonicTimeNanosUnsafe: () => BigInt(now) * 1000000n,
+    sleep: () => Effect.void,
+  })
+
+  const gate = gatedPostDatabase(
+    f.database,
+    'before',
+    /^select .*personal_access_keys.*inner join/i,
+  )
+
+  const live = PersonalAccessKeysLive.pipe(
+    Layer.provide(
+      Layer.mergeAll(DatabaseLayer(gate.database), ConfigServiceLayer, CryptoLive, clock),
+    ),
+  )
+
+  const authenticate = () =>
+    Effect.runPromise(
+      withTestLayer(
+        Effect.gen(function* () {
+          const keys = yield* PersonalAccessKeys
+
+          return yield* keys.authenticate(Redacted.make(issued.secret)).pipe(Effect.result)
+        }),
+        live,
+      ),
+    )
+
+  const pending = authenticate()
+
+  try {
+    await gate.reached
+    await f.db
+      .update(personalAccessKeys)
+      .set({ rateWindowStart: minute, rateRequestCount: 1 })
+      .where(eq(personalAccessKeys.id, issued.key.id))
+    now = minute + 1
+    gate.release()
+    expect(await pending).toHaveProperty('_tag', 'Success')
+    expect((await f.db.select().from(personalAccessKeys))[0]?.rateRequestCount).toBe(2)
+    await f.db
+      .update(personalAccessKeys)
+      .set({ rateWindowStart: minute + 60000 })
+      .where(eq(personalAccessKeys.id, issued.key.id))
+    expect(await authenticate()).toHaveProperty('failure._tag', 'KeyStoreUnavailable')
+  } finally {
+    gate.release()
+    await pending
+  }
+})
+
+test('transport rejects malformed, ambiguous and oversized PATs without anonymous fallback', async () => {
+  await using f = await setup()
+
+  for (const [token, path, status] of [
+    ['gbfm_pat_bad!', '/api/content/posts/manage', 401],
+    ['gbfm_pat_bad, Bearer other', '/api/content/posts/manage', 400],
+    [`gbfm_pat_${'x'.repeat(1008)}`, '/api/content/posts/manage', 401],
+    [`gbfm_pat_${'x'.repeat(1009)}`, '/api/content/posts/manage', 431],
+    ['gbfm_pat_bad', '/health', 403],
+    ['gbfm_pat_bad', '/unknown', 403],
+  ] as const) {
+    const response = await f.request('GET', path, token)
+    expect(response.status).toBe(status)
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+    expect(response.headers.get('set-cookie')).toBeNull()
+  }
+})
+
+test('HTTP rate-limit header matches the remaining window in the error body', async () => {
+  await using f = await setup()
+  const token = await f.login('rate-header', 'editor')
+  const issued = await f.issue(token, ['posts:read'])
+  let response: Response | undefined
+
+  // If the minute turns between seeding and HTTP dispatch, seed the new minute once more.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await f.db
+      .update(personalAccessKeys)
+      .set({ rateWindowStart: Math.floor(Date.now() / 60000) * 60000, rateRequestCount: 60 })
+      .where(eq(personalAccessKeys.id, issued.key.id))
+    response = await f.request('GET', '/api/content/posts/manage', issued.secret)
+
+    if (response.status === 429) break
+  }
+
+  expect(response?.status).toBe(429)
+
+  const body = Schema.decodeUnknownSync(Schema.Struct({ retryAfterSeconds: Schema.Number }))(
+    await response?.json(),
+  )
+
+  expect(response?.headers.get('retry-after')).toBe(String(body.retryAfterSeconds))
+  expect(body.retryAfterSeconds).toBeGreaterThanOrEqual(1)
+  expect(body.retryAfterSeconds).toBeLessThanOrEqual(60)
+})
+
+test('PAT slug validation and collision guards leave existing posts and labels intact', async () => {
+  await using f = await setup()
+  const token = await f.login('slug-owner', 'editor')
+  const key = await f.issue(token, ['posts:create', 'posts:update'])
+  const body = { type: 'micro', content: 'Original', draft: true }
+
+  for (const slug of ['first', 'second'])
+    expect(
+      (await f.request('POST', '/api/content/post', key.secret, { ...body, slug })).status,
+    ).toBe(200)
+
+  const duplicate = await f.request('POST', '/api/content/post', key.secret, {
+    ...body,
+    slug: 'first',
+  })
+
+  expect(duplicate.status).toBe(409)
+  expect(await duplicate.json()).toHaveProperty('_tag', 'Conflict')
+
+  for (const slug of ['Bad-Slug', 'bad/slug', 'bad slug'])
+    expect(
+      (await f.request('PATCH', '/api/content/posts/first', key.secret, { slug })).status,
+    ).toBe(422)
+  expect(
+    (
+      await f.request('PATCH', '/api/content/posts/first', key.secret, {
+        slug: 'second',
+        tags: ['must-not-attach'],
+      })
+    ).status,
+  ).toBe(409)
+  expect(
+    await f.db.select().from(labelsTable).where(eq(labelsTable.name, 'must-not-attach')),
+  ).toHaveLength(0)
+  expect(
+    (await f.request('PATCH', '/api/content/posts/first', key.secret, { slug: 'renamed' })).status,
+  ).toBe(200)
+  expect((await f.db.select().from(postsTable)).map((p) => p.slug).sort()).toEqual([
+    'renamed',
+    'second',
+  ])
+})
+
+test('guarded PAT writes advance future revisions and attach only owned Markdown uploads', async () => {
+  await using f = await setup()
+  const token = await f.login('asset-owner', 'editor')
+  await f.login('asset-other', 'editor')
+  const key = await f.issue(token, ['posts:create', 'posts:update'])
+  expect(
+    (
+      await f.request('POST', '/api/content/post', key.secret, {
+        slug: 'assets',
+        type: 'micro',
+        content: 'Original',
+        draft: true,
+      })
+    ).status,
+  ).toBe(200)
+  const future = Date.now() + 3600000
+  await f.db
+    .update(postsTable)
+    .set({ updatedAt: new Date(future) })
+    .where(eq(postsTable.slug, 'assets'))
+  await f.db.insert(uploadAssetsTable).values(
+    ['owner', 'other'].map((suffix) => ({
+      userId: `asset-${suffix}`,
+      key: `${suffix}.png`,
+      bucket: 'user-content-dev',
+      assetType: 'image' as const,
+      status: 'uploaded' as const,
+      expiresAt: new Date(future),
+    })),
+  )
+  expect(
+    (
+      await f.request('PATCH', '/api/content/posts/assets', key.secret, {
+        content:
+          '![own](https://cdn.goosebumps.fm/user-content/owner.png)\n![foreign](https://cdn.goosebumps.fm/user-content/other.png)',
+      })
+    ).status,
+  ).toBe(200)
+  const [post] = await f.db.select().from(postsTable).where(eq(postsTable.slug, 'assets'))
+  expect(post?.updatedAt.getTime()).toBe(future + 1)
+  const assets = await f.db.select().from(uploadAssetsTable)
+  expect(assets.find((a) => a.userId === 'asset-owner')).toMatchObject({
+    status: 'attached',
+    attachedToId: post?.id,
+  })
+  expect(assets.find((a) => a.userId === 'asset-other')).toMatchObject({
+    status: 'uploaded',
+    attachedToId: null,
+  })
+})
+
+test('D1 rejects invalid key expiry, rate bounds and mismatched window/count pairs', async () => {
+  await using f = await setup()
+  const token = await f.login('constraints', 'editor')
+  await f.issue(token, ['posts:read'])
+  const [row] = await f.db.select().from(personalAccessKeys)
+  expect(row).toBeDefined()
+
+  if (!row) return
+
+  for (const changes of [
+    { expiresAt: new Date(row.createdAt.getTime()) },
+    { expiresAt: new Date(row.createdAt.getTime() + 7776000001) },
+    { rateRequestCount: -1 },
+    { rateRequestCount: 61 },
+    { rateWindowStart: null, rateRequestCount: 1 },
+    { rateWindowStart: 60000, rateRequestCount: 0 },
+  ]) {
+    const query = f.db
+      .insert(personalAccessKeys)
+      .values({
+        ...row,
+        id: crypto.randomUUID(),
+        issuanceRequestId: crypto.randomUUID(),
+        secretHash: crypto.randomUUID(),
+        ...changes,
+      })
+      .toSQL()
+
+    await expect(
+      f.database
+        .prepare(query.sql)
+        .bind(...query.params)
+        .run(),
+    ).rejects.toThrow(/CHECK constraint failed/)
+  }
+
+  expect(await f.db.select().from(personalAccessKeys)).toHaveLength(1)
+})
+
+test('role changes during issuance report access denial rather than a key limit', async () => {
+  await using f = await setup()
+  await f.login('issuance-race', 'editor')
+
+  const cryptoLive = Layer.succeed(
+    Crypto.Crypto,
+    Crypto.make({
+      randomBytes: (size) => crypto.getRandomValues(new Uint8Array(size)),
+      digest: (algorithm, data) =>
+        Effect.promise(async () => {
+          // Real persistence change at the crypto seam, after the owner read and before INSERT.
+          await f.db.update(user).set({ role: 'user' }).where(eq(user.id, 'issuance-race'))
+
+          return new Uint8Array(await crypto.subtle.digest(algorithm, data))
+        }),
+    }),
+  )
+
+  const live = PersonalAccessKeysLive.pipe(
+    Layer.provide(Layer.mergeAll(DatabaseLayer(f.database), ConfigServiceLayer, cryptoLive)),
+  )
+
+  const result = await Effect.runPromise(
+    withTestLayer(
+      Effect.gen(function* () {
+        const keys = yield* PersonalAccessKeys
+
+        return yield* keys
+          .issue(
+            yield* Schema.decodeUnknownEffect(UserId)('issuance-race'),
+            yield* Schema.decodeUnknownEffect(IssueKeyInput)({
+              requestId: crypto.randomUUID(),
+              name: 'Race',
+              scopes: ['posts:read'],
+            }),
+          )
+          .pipe(Effect.result)
+      }),
+      live,
+    ),
+  )
+
+  expect(result).toHaveProperty('failure._tag', 'KeyAccessDenied')
+  expect(await f.db.select().from(personalAccessKeys)).toHaveLength(0)
+})
+
+test('key lifecycle logs and exported spans never contain credentials or their hashes', async () => {
+  await using f = await setup()
+  await f.login('telemetry-owner', 'editor')
+  const logs: Array<unknown> = []
+  const exporter = new InMemorySpanExporter()
+  const provider = new NodeTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] })
+  provider.register()
+
+  const live = PersonalAccessKeysLive.pipe(
+    Layer.provide(Layer.mergeAll(DatabaseLayer(f.database), ConfigServiceLayer, CryptoLive)),
+  )
+
+  try {
+    const result = await Effect.runPromise(
+      withTestLayer(
+        Effect.gen(function* () {
+          const keys = yield* PersonalAccessKeys
+          const owner = yield* Schema.decodeUnknownEffect(UserId)('telemetry-owner')
+
+          const issued = yield* keys.issue(
+            owner,
+            yield* Schema.decodeUnknownEffect(IssueKeyInput)({
+              requestId: crypto.randomUUID(),
+              name: 'Telemetry fixture',
+              scopes: ['posts:read'],
+            }),
+          )
+
+          yield* keys.authenticate(issued.secret)
+          yield* keys.list(owner, 20, 0)
+          yield* keys.revoke(owner, issued.key.id)
+          yield* keys.authenticate(issued.secret).pipe(Effect.ignore)
+
+          return issued
+        }),
+        Layer.mergeAll(
+          live,
+          Logger.layer([Logger.make(({ message }) => logs.push(message))]),
+          OtelTracer.layerGlobal.pipe(
+            Layer.provide(Resource.layer({ serviceName: 'key-security-test' })),
+          ),
+        ),
+      ),
+    )
+
+    await provider.forceFlush()
+    expect(logs.flat().join(' ')).toContain('key.issued')
+    const spans = exporter.getFinishedSpans()
+    expect(spans.some((span) => span.name === 'keys.issue')).toBe(true)
+
+    const captured = JSON.stringify({
+      logs,
+      spans: spans.map((s) => ({
+        name: s.name,
+        attributes: s.attributes,
+        events: s.events,
+        status: s.status,
+      })),
+    })
+
+    const [row] = await f.db.select().from(personalAccessKeys)
+
+    for (const sensitive of [
+      Redacted.value(result.secret),
+      `Bearer ${Redacted.value(result.secret)}`,
+      row?.secretHash ?? 'missing-hash',
+    ])
+      expect(captured.includes(sensitive)).toBe(false)
+  } finally {
+    await provider.shutdown()
+  }
+})
 
 test('session and key actors reject malformed persisted identity values before authorizing reads', async () => {
   await using fixture = await setup()

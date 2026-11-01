@@ -13,7 +13,7 @@ import type { ObjectStoreClient } from '@/services/storage/object-store-client'
 export interface MediaActor {
   readonly userId: string
   readonly userRole: string
-  readonly credential?: Actor['credential'] | undefined
+  readonly credential: Actor['credential'] | undefined
 }
 
 interface MediaFields {

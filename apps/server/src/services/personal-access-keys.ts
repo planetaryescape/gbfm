@@ -168,6 +168,18 @@ const makePersonalAccessKeys = Effect.gen(function* () {
         return yield* new KeyIssuanceConflict({ keyId })
       }
 
+      const [currentOwner] = yield* storage(() =>
+        db.select().from(user).where(eq(user.id, ownerUserId)).limit(1),
+      )
+
+      if (
+        !currentOwner ||
+        currentOwner.role !== owner.role ||
+        (currentOwner.banned &&
+          (currentOwner.banExpires === null || currentOwner.banExpires.getTime() > now))
+      )
+        return yield* new KeyAccessDenied()
+
       return yield* new KeyLimitReached()
     }
 
@@ -242,8 +254,6 @@ const makePersonalAccessKeys = Effect.gen(function* () {
     if (!new RegExp(`^gbfm_pat_v1_${stage}_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$`).test(raw))
       return yield* new InvalidKeyCredential()
     const hash = yield* digest(token)
-    const now = yield* clock.currentTimeMillis
-    const window = Math.floor(now / 60000) * 60000
 
     const [found] = yield* storage(() =>
       db
@@ -253,6 +263,10 @@ const makePersonalAccessKeys = Effect.gen(function* () {
         .where(and(eq(keys.secretHash, hash), eq(keys.environment, stage)))
         .limit(1),
     )
+
+    // Sample after the read: another request may have advanced the window while D1 was pending.
+    const now = yield* clock.currentTimeMillis
+    const window = Math.floor(now / 60000) * 60000
 
     if (
       !found ||

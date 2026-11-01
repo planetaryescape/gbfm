@@ -23,12 +23,19 @@ export const personalKeyToken = (headers: Headers) => {
 
 export const keyRequestRejection = (request: Request): Response | undefined => {
   if (!isPersonalKeyRequest(request.headers)) return undefined
-  const token = personalKeyToken(request.headers)
 
   const reject = (status: number, tag: string) =>
     Response.json({ _tag: tag }, { status, headers: { 'cache-control': 'private, no-store' } })
 
-  if (hasSessionCookie(request.headers) || !token || request.headers.has('x-api-key'))
+  const authorization = request.headers.get('authorization') ?? ''
+
+  if (authorization.length > 1024) return reject(431, 'KeyCredentialTooLarge')
+
+  if (
+    hasSessionCookie(request.headers) ||
+    authorization.includes(',') ||
+    request.headers.has('x-api-key')
+  )
     return reject(400, 'AmbiguousCredential')
   const pathname = new URL(request.url).pathname
 
@@ -36,6 +43,8 @@ export const keyRequestRejection = (request: Request): Response | undefined => {
 
   if (!postKeyRoutes.some(([method, path]) => request.method === method && path.test(pathname)))
     return reject(403, 'KeyEndpointDenied')
+
+  if (!personalKeyToken(request.headers)) return reject(401, 'InvalidKeyCredential')
 
   return undefined
 }
@@ -48,8 +57,6 @@ export const privateKeyResponse = (request: Request, response: Response): Respon
     return response
   const headers = new Headers(response.headers)
   headers.set('cache-control', 'private, no-store')
-
-  if (response.status === 429) headers.set('retry-after', '60')
 
   return new Response(response.body, {
     status: response.status,

@@ -7,7 +7,7 @@ import {
 import { InvalidKeyCredential } from '@gbfm/api/personal-access-keys'
 import { SessionId } from '@gbfm/core/identity'
 import { Effect, Layer, Redacted, Schema } from 'effect'
-import { HttpServerRequest } from 'effect/http'
+import { HttpServerRequest, HttpServerResponse } from 'effect/http'
 import { HttpApiError } from 'effect/http-api'
 
 import { isPersonalKeyRequest, personalKeyToken } from '@/http/personal-access-key-policy'
@@ -36,8 +36,17 @@ export const ActorMiddlewareLive = Layer.effect(
 
         const session = yield* Effect.tryPromise({
           try: () => auth.api.getSession({ headers }),
-          catch: () => new HttpApiError.Unauthorized(),
-        })
+          catch: () => new HttpApiError.InternalServerError(),
+        }).pipe(
+          Effect.tapError(() =>
+            Effect.logError('auth.session_lookup_failed', {
+              method: request.method,
+              // Dependency errors may contain credentials; never record the raw cause or URL.
+              credentialKind: 'session',
+            }),
+          ),
+          Effect.orDie,
+        )
 
         if (!session) return yield* new HttpApiError.Unauthorized()
 
@@ -53,6 +62,16 @@ export const ActorMiddlewareLive = Layer.effect(
           user,
           credential: Credential.Session({ sessionId }),
         })
-      })
+      }).pipe(
+        Effect.catchTag('KeyRateLimited', (error) =>
+          HttpServerResponse.json(
+            { _tag: error._tag, retryAfterSeconds: error.retryAfterSeconds },
+            {
+              status: 429,
+              headers: { 'retry-after': String(error.retryAfterSeconds) },
+            },
+          ).pipe(Effect.orDie),
+        ),
+      )
   }),
 )

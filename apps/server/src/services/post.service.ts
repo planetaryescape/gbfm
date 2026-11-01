@@ -70,6 +70,7 @@ import { MdxService, validateCanonicalContent } from '@/lib/mdx'
 import { createPaginationMetadata, type PaginationMetadata } from '@/lib/pagination'
 import { ConfigService } from '@/services/config.service'
 import {
+  attachedMediaUrls,
   makeMediaPublication,
   type MediaActor,
   type MediaPublication,
@@ -2013,16 +2014,26 @@ const createEffect = (
             : db.insert(postsTable).values({ ...dataWithSlug, id }),
           ...(creatorIds.length > 0
             ? [
-                db
-                  .insert(postCreators)
-                  .values(creatorIds.map((creatorId) => ({ postId: id, creatorId }))),
+                actor?.credential?._tag === 'PersonalAccessKey'
+                  ? db.insert(postCreators).select(
+                      db
+                        .select({
+                          postId: postsTable.id,
+                          creatorId: sql<string>`${actor.userId}`.as('creator_id'),
+                        })
+                        .from(postsTable)
+                        .where(eq(postsTable.id, id)),
+                    )
+                  : db
+                      .insert(postCreators)
+                      .values(creatorIds.map((creatorId) => ({ postId: id, creatorId }))),
               ]
             : []),
         ])
         const rows = await db.select().from(postsTable).where(eq(postsTable.id, id)).limit(1)
         const post = rows[0]
 
-        if (!post) throw new Error('Failed to create post')
+        if (!post) return null
 
         if (tags !== undefined) await replaceEntityLabels(db, 'post', post.id, { tags })
 
@@ -2052,6 +2063,12 @@ const createEffect = (
         })
       },
     })
+
+    if (!result)
+      return yield* new ConflictError({
+        message: 'Post with this slug already exists',
+        resource: 'post',
+      })
 
     yield* Effect.annotateCurrentSpan('postId', result.id)
     yield* Effect.annotateCurrentSpan('postType', result.type)
@@ -2178,7 +2195,11 @@ const createMicroPostReplyEffect = (
     yield* validatePostData(normalizedData)
     yield* validateCanonicalContent(normalizedData.content)
 
-    const publication = yield* media(normalizedData, { userId: actorUserId, userRole: 'user' })
+    const publication = yield* media(normalizedData, {
+      userId: actorUserId,
+      userRole: 'user',
+      credential: undefined,
+    })
 
     const replyData: InsertPost = {
       ...publication.data,
@@ -2587,7 +2608,7 @@ const updateEffect = (
 
     const nextMedia = { ...existingPost, ...normalizedUpdateData }
 
-    const assetKeys = [nextMedia.thumbnailUrl, nextMedia.bannerImageUrl].flatMap((url) => {
+    const assetKeys = attachedMediaUrls(nextMedia).flatMap((url) => {
       const key = url ? keyFromAssetUrl(url, config.urls.bucketRouter) : null
 
       return key === null

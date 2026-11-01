@@ -47,8 +47,8 @@ export const authorizeKeyPostWrite = (
       return yield* new KeyAccessDenied()
 
     if (
-      operation === 'posts:create' &&
-      (!input.slug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.slug))
+      (operation === 'posts:create' && !input.slug) ||
+      (input.slug !== undefined && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.slug))
     )
       return yield* new KeyInputInvalid()
 

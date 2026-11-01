@@ -1,6 +1,6 @@
 # Bounded delivery slices
 
-Status: **planned, not authorized or started**. The specification itself is the execution plan. There are no tickets, commits, migrations, or deployed changes attached to these slices.
+Status: **slices 1 and 2 implemented together in PR #416**. Slice 3 remains deferred. Migration `0012_personal_access_keys.sql` is included and tested on disposable D1; production application and deployment are separate operations. The sections below retain the original delivery rationale, with the current issuance boundary called out explicitly.
 
 ## Slice 1: issue, use, and revoke a draft-authoring key
 
@@ -9,8 +9,8 @@ Deliver one end-to-end capability: a recent real session issues a limited key, t
 - Contracts: [D001/D002/D005](02-alternatives.md), management and actor/storage contracts in [03](03-contracts.md), draft/read rows of [matrix](authorization-matrix.md).
 - Files: shared values/API schemas, management handlers, service/repository/schema/replay, gate/actor wiring, draft post policy, tests and tested bootstrap runbook in [05](05-file-map.md).
 - Acceptance: real local HTTP sign-in -> issue -> draft create -> owner read -> update -> revoke -> 401; no fake session, no foreign data, no production writes, no secret in persisted metadata/logs. All excluded endpoint attempts are blocked. Expiry, stage clone, rate/issuance concurrency and lost issue response are proven.
-- Interim boundary: issuance accepts only `posts:read`, `posts:create`, `posts:update`. Publish, image, and music scopes are not issuable yet. Public create/update via a key is denied, including default-public input. Existing session behavior stays intact.
-- Approval boundary: implementation and schema changes need separate explicit authorization. Tests use throwaway D1; deployment/production issuance are not part of the merge criterion.
+- Current boundary (slices 1 and 2 together): issuance accepts `posts:read`, `posts:create`, `posts:update`, and `posts:publish` (editor/admin only). Image and music scopes remain unissuable. Public writes, including default-public input, require publish scope plus editor/admin. Existing session behavior stays intact.
+- Approval boundary: implementation and the migration were authorized. Tests use throwaway D1; deployment/production issuance are not part of the merge criterion.
 
 This is the largest slice because authentication cannot ship without revocation, exclusions, and leakage protection. Do not split it into a public issuance endpoint followed later by safety controls.
 

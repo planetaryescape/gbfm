@@ -186,7 +186,18 @@ export const createWebHandler = (options: {
   const handler: typeof web.handler = async (request, ...args) => {
     const rejection = keyRequestRejection(request)
 
-    if (rejection) return rejection
+    if (rejection) {
+      // This outer boundary deliberately precedes routing, including raw Better Auth routes.
+      // Record a fixed-shape security event without the URL, headers, credential or raw reason.
+      Effect.runSync(
+        Effect.logWarning('key.admission.denied', {
+          method: request.method,
+          status: rejection.status,
+        }),
+      )
+
+      return rejection
+    }
 
     return privateKeyResponse(request, await web.handler(request, ...args))
   }

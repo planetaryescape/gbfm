@@ -18,15 +18,11 @@ export const KeyIssuanceId = Schema.String.pipe(
 /** A nonblank key label without control characters, bounded for display and storage. */
 export const KeyName = Schema.String.pipe(
   Schema.check(
-    Schema.isMinLength(1),
-    Schema.isMaxLength(80),
-    Schema.makeFilter(
-      (name) =>
-        name.trim().length > 0 &&
-        name
-          .split('')
-          .every((character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127),
-    ),
+    Schema.makeFilter((name) => {
+      const length = Array.from(name.trim()).length
+
+      return length >= 1 && length <= 80 && !/\p{Cc}/u.test(name)
+    }),
   ),
   Schema.brand('KeyName'),
 )

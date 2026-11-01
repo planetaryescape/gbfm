@@ -1,6 +1,6 @@
 # File map and ownership
 
-Status: proposed implementation map. Only this specification folder is created by the current task. Paths in the tables below are future work, not files already implemented.
+Status: slices 1 and 2 are implemented in PR #416. This map retains the planned ownership boundaries, not a claim that each proposed file was created. Storage is part of `services/personal-access-keys.ts`, tests extend existing suites, and the operations guide lives in this folder. Music resolution and image upload entries are deferred slice 3 work; they are not enabled by this PR. See PROGRESS.md for shipped behavior and verification.
 
 ## Files to add
 
@@ -15,8 +15,8 @@ Status: proposed implementation map. Only this specification folder is created b
 | `apps/server/src/middleware/actor.impl.ts` | Existing-session or PAT resolution for opted-in handlers, supplying only AuthenticatedActor |
 | `apps/server/src/http/personal-access-key-policy.ts` | Exact endpoint registry, credential parsing/admission gate, key-specific cache policy, management CSRF/session-age boundary |
 | `apps/server/src/http/personal-access-key.handlers.ts` | Management HTTP parsing/projection; secret unwrap only for first issue response |
-| `apps/server/drizzle-d1/NNNN_personal_access_keys.sql` | Next available hand-written flat migration, only after explicit schema approval; number allocated at implementation time |
-| `docs/operations/personal-access-keys.md` | Future tested issuance/rotation/revocation runbook; local-client bootstrap and incident response |
+| `apps/server/drizzle-d1/0012_personal_access_keys.sql` | Hand-written flat migration included by this PR, replayed only on disposable D1 during tests |
+| `docs/specs/personal-access-keys/OPERATIONS.md` | Implemented issuance/rotation/revocation runbook; local-client bootstrap and incident response |
 
 The inspected core manifest depends only on Effect; API has no current core dependency. Add the explicit `@gbfm/api -> @gbfm/core` workspace edge for shared key values and keep core independent of API/server. Export the new core key module and API management/actor modules through their existing package export maps. Service/HTTP-specific errors remain at their owning boundary. No new package is introduced.
 
@@ -57,4 +57,4 @@ The inspected core manifest depends only on Effect; API has no current core depe
 | [apps/server/src/http/routes.blackbox.test.ts](../../../apps/server/src/http/routes.blackbox.test.ts), [global-middleware.test.ts](../../../apps/server/src/http/global-middleware.test.ts), [auth.d1.test.ts](../../../apps/server/src/lib/auth.d1.test.ts) | Session regressions, raw/optional router exclusion, cookie conflicts, error/status/cache/redaction contracts |
 | [apps/server/src/db/relational-queries.smoke.test.ts](../../../apps/server/src/db/relational-queries.smoke.test.ts) | Any newly introduced relational query shape, including admin-key owner filtering |
 
-No test file or migration is created in this documentation task. No files are deleted. No external dependency is added; only the proposed internal workspace edge changes package metadata. No resource declaration changes are planned; if real D1 or presign constraints require a change, document and obtain approval for that scope before expanding implementation.
+The implementation adds migration 0012, the core key-policy suite and HTTP/D1 lifecycle coverage, and extends existing regression suites. No external dependency or resource declaration is added; API depends on core through an explicit workspace edge. Deferred presign/platform work requires its own review before expanding this scope.

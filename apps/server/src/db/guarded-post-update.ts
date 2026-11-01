@@ -19,6 +19,9 @@ export const guardedPostUpdate = async (
     eq(postsTable.updatedAt, existing.updatedAt),
     eq(postsTable.draft, existing.draft),
     postIdsForCreator(db, userId),
+    data.slug === undefined
+      ? undefined
+      : sql`NOT EXISTS (SELECT 1 FROM posts AS collision WHERE collision.slug = ${data.slug} AND collision.id <> ${existing.id})`,
   )
 
   const authorized = exists(db.select({ id: postsTable.id }).from(postsTable).where(predicate))
@@ -74,13 +77,14 @@ export const guardedPostUpdate = async (
         and(
           inArray(uploadAssetsTable.key, [...assetKeys]),
           eq(uploadAssetsTable.status, 'uploaded'),
+          eq(uploadAssetsTable.userId, userId),
           authorized,
         ),
       ),
     ...labelWrites,
     db
       .update(postsTable)
-      .set({ ...data, updatedAt: new Date() })
+      .set({ ...data, updatedAt: new Date(Math.max(Date.now(), existing.updatedAt.getTime() + 1)) })
       .where(predicate)
       .returning(),
   ])

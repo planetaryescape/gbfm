@@ -1,6 +1,10 @@
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types'
 
-export const gatedPostDatabase = (database: D1Database, phase: 'before' | 'after') => {
+export const gatedPostDatabase = (
+  database: D1Database,
+  phase: 'before' | 'after',
+  queryPattern = /^update "posts" /i,
+) => {
   const reached = Promise.withResolvers<void>()
   const released = Promise.withResolvers<void>()
   let paused = false
@@ -27,7 +31,7 @@ export const gatedPostDatabase = (database: D1Database, phase: 'before' | 'after
       readonly underlying: D1PreparedStatement,
       readonly query: string,
     ) {
-      this.writesPost = /^update "posts" /i.test(query)
+      this.writesPost = queryPattern.test(query)
     }
     bind(...values: Parameters<D1PreparedStatement['bind']>): D1PreparedStatement {
       return new Statement(this.underlying.bind(...values), this.query)

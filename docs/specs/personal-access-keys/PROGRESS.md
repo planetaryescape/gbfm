@@ -17,11 +17,11 @@ Implementation was subsequently authorized in the dedicated `feat/personal-acces
 ### Contract differences and remaining evidence
 
 - Several proposed denial variants use the common `KeyAccessDenied` response. Unknown/excluded PAT routes return 403 before authentication. Mixed credentials return 400. Strict issuance excess properties return 422; framework schema failures return 400.
-- Rate-limit responses include an exact remaining-window value in the JSON error and a conservative 60-second `Retry-After` header.
+- Rate-limit responses include the same exact remaining-window value in the JSON error and `Retry-After` header.
 - Storage mechanics live in `PersonalAccessKeys`, rather than a separate repository service.
-- Lifecycle events are logged without secrets. The full planned security-event taxonomy and captured exporter/log secret-leak tests have not been implemented.
+- Lifecycle events are logged without secrets. Captured Effect logs and OpenTelemetry spans cover issuance, authentication, listing and revocation and assert that neither credentials nor digests appear. Outer gate denials emit a fixed-shape security event without URLs or credentials. The full proposed security-event taxonomy remains deferred.
 - The focused tests cover real password bootstrap, sign-out independence, issuance replay, owner/admin isolation, role changes, bans, revocation, expiry, environment separation, invalid stored scopes, strict inputs, stale/impersonated sessions, excluded routes, concurrent issuance and rate claims.
-- The full matrix-generated exclusion suite, deterministic revocation/write interleavings, and private-media admin fixture remain outstanding. Do not treat the complete layer-6 test plan as satisfied.
+- The private-media admin fixture verifies that PATs cannot newly attach a foreign private original, while authorized existing attachments can be retained. The full matrix-generated exclusion suite and deterministic revocation/write interleavings remain outstanding. Do not treat the complete layer-6 test plan as satisfied.
 - PAT updates now commit the guarded post row, label definitions/associations, and upload attachment bookkeeping in one D1 batch. Object-store publication remains a post-commit side effect of an authorized publication; it is not part of the D1 transaction. Session write semantics are unchanged.
 
 See [Operations](OPERATIONS.md) for the implemented API workflow and deployment boundary.
@@ -33,11 +33,21 @@ See [Operations](OPERATIONS.md) for the implemented API workflow and deployment 
 | `bun precommit` | Passed, including formatting, lint and all workspace typechecks; existing Effect warnings remain |
 | Server `test:unit` | 70 files, 678 tests passed |
 | Server `test:d1` | 31 files, 148 tests passed, including twelve PAT tests |
-| Core `test` | 7 files, 30 tests passed |
+| Core `test` | Historical count was incorrect; see the review-remediation verification record below |
 | API `test` | 4 files, 30 tests passed |
 | `git diff --check` | Passed |
 
-The final D1 run includes the guarded slug insert, exact-result ownership recheck, strict issuance decode, retained-row validation, and fixed-clock concurrent rate test. No production services were used by these tests.
+That earlier D1 run included the guarded slug insert, exact-result ownership recheck, strict issuance decode, retained-row validation, and fixed-clock concurrent rate test. No production services were used by these tests.
+
+### Review remediation, 2026-11-01
+
+- PAT update slugs use the create format rule and an atomic collision predicate. Duplicate creates no longer rely on a creator foreign-key error. Collision tests verify that rejected renames do not mutate labels.
+- Guarded writes advance `updatedAt` strictly, even if the retained timestamp is ahead of wall time. Markdown images join thumbnail/banner references in attachment bookkeeping, restricted to uploads owned by the key actor. Admin-key private-media denial and retained-attachment behavior have explicit regression coverage.
+- Key labels reject Unicode controls, measure trimmed code points, and retain the 80-character bound. The role guard refines to branded `Role`; the core suite covers roles, scope dependencies and every draft/public transition.
+- Issuance uses the middleware's session context. Role-loss races report access denial. The authentication clock is sampled after the primary read so a concurrent minute rollover is valid; an actually future stored minute still fails closed. Rate headers and bodies share the computed delay.
+- Transport tests cover malformed credentials, duplicate credentials, the 1,024/1,025-character header boundary, and default-deny on public and unknown routes. Session-store failure returns a scrubbed 500 with a safe diagnostic, not an invalid-credential response.
+- Captured lifecycle logs and exported spans exclude tokens and hashes. Direct D1 inserts verify expiry, rate-count and paired-window CHECK constraints.
+- Verification: `bun precommit` passed; full server suite passed 678 unit and 166 D1 tests. The final PAT file then passed 22 tests, including the added session-store outage test. Core passed 16 tests across seven files; API passed 30 tests across four files. No production services were used.
 
 ### P1 review fix: atomic PAT update metadata
 

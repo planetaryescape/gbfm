@@ -353,7 +353,13 @@ const updateEffect = (
 
     yield* requireCreatorOrAdmin('show', existingShow.id, userId, userRole)
     yield* validateCanonicalContent(data.content)
-    const publication = yield* media(data, { userId, userRole }, existingShow)
+
+    const publication = yield* media(
+      data,
+      { userId, userRole, credential: undefined },
+      existingShow,
+    )
+
     const { hostIds, tags, ...updateData } = publication.data
 
     const updatedRecords = yield* Effect.tryPromise({

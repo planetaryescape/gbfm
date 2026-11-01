@@ -14,7 +14,9 @@ const roleRank = {
   admin: 3,
 } satisfies Record<(typeof ROLES)[number], number>
 
-export const isRole = (value: string): value is (typeof ROLES)[number] => Schema.is(Role)(value)
+export const isRole = (value: string): value is Role => Schema.is(Role)(value)
+
+const ranks = new Map<string, number>(Object.entries(roleRank))
 
 export function hasMinRole(
   userRole: string | null | undefined,
@@ -22,7 +24,7 @@ export function hasMinRole(
 ): boolean {
   if (!userRole || !isRole(userRole)) return false
 
-  return roleRank[userRole] >= roleRank[minRole]
+  return (ranks.get(userRole) ?? -1) >= roleRank[minRole]
 }
 
 export const canCreatePosts = (userRole: string | null | undefined): boolean =>

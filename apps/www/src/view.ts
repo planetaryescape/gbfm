@@ -238,7 +238,6 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
               }
             : null,
           togglePlay: Message.GotPlayerMessage({ message: Player.Message.TogglePlayPause() }),
-          nextTrack: Message.GotPlayerMessage({ message: Player.Message.Next() }),
           expandNav: Message.NavMinimizeChanged({ minimized: false }),
           openPlayer: Message.GotPlayerMessage({ message: Player.Message.ToggleFullscreen() }),
           openSearch: Message.GotSearchMessage({ message: Search.Message.Opened() }),

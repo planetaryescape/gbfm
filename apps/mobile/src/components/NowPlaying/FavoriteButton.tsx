@@ -2,9 +2,8 @@ import { Pressable } from 'react-native'
 import Svg, { Path } from 'react-native-svg'
 
 import { FavoriteStatus, TrackFavorite } from '@/favorites/favoriteState'
+import { glyphs } from '@/icons/glyphs'
 import { useThemeColors, withAlpha } from '@/theme/colors'
-
-const heartPath = 'M3 5H9V8H15V5H21V14H18V17H15V20H9V17H6V14H3Z'
 
 type ButtonPresentation = {
   readonly label: string
@@ -74,7 +73,7 @@ export function FavoriteButton({
       })}>
       <Svg width={24} height={24} viewBox='0 0 24 24' accessibilityElementsHidden>
         <Path
-          d={heartPath}
+          d={glyphs.heart.stroke}
           fill={filled ? colors.accent : 'none'}
           stroke={filled ? colors.accent : withAlpha(colors.muted, 0.9)}
           strokeWidth={2}

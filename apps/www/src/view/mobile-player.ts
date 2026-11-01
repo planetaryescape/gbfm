@@ -12,8 +12,7 @@ export type NowPlaying = {
   readonly progress: number
 }
 
-const glyphButton =
-  'flex size-11 shrink-0 items-center justify-center rounded-[0.75rem] border-0 bg-transparent p-0 text-foreground transition-[transform,background-color] active:scale-90 active:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-40'
+const glyphButton = 'btn btn-quiet btn-icon shrink-0 text-foreground'
 
 export const mobilePlayer = <M>(
   h: HtmlBuilder<M>,
@@ -21,7 +20,6 @@ export const mobilePlayer = <M>(
   queueResolved: boolean,
   openPlayer: M,
   togglePlay: M,
-  next: M,
 ) => {
   if (!current && queueResolved) return h.empty
 
@@ -38,7 +36,7 @@ export const mobilePlayer = <M>(
           h.Disabled(!current),
           h.OnClick(openPlayer),
           h.Class(
-            'flex h-full min-w-0 flex-1 items-center gap-3 rounded-[0.875rem] border-0 bg-transparent py-0 pl-2 pr-1 text-left text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+            'flex h-full min-w-0 flex-1 items-center gap-3 rounded-sm border-0 bg-transparent py-0 pl-2 pr-1 text-left text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
           ),
         ],
         [
@@ -48,11 +46,11 @@ export const mobilePlayer = <M>(
                 '',
                 '40px',
                 false,
-                'size-10 shrink-0 rounded-[0.5rem] object-cover shadow-sm',
+                'size-10 shrink-0 rounded-none object-cover shadow-sm',
               )
             : h.span([
                 h.Class(
-                  'size-10 shrink-0 rounded-[0.5rem] bg-muted bg-cover bg-center [background-image:var(--queued-art)]',
+                  'size-10 shrink-0 rounded-none bg-muted bg-cover bg-center [background-image:var(--queued-art)]',
                 ),
               ]),
           h.span(
@@ -81,16 +79,6 @@ export const mobilePlayer = <M>(
           h.Class(glyphButton),
         ],
         [lucide(current?.isPlaying ? iconPaths.pause : iconPaths.play, 'size-6 fill-current')],
-      ),
-      h.button(
-        [
-          h.Type('button'),
-          h.AriaLabel('Next track'),
-          h.Disabled(!current?.hasNext),
-          h.OnClick(next),
-          h.Class(`${glyphButton} dock-player-next mr-1`),
-        ],
-        [lucide(iconPaths.skipForward, 'size-6 fill-current')],
       ),
       current
         ? h.div(

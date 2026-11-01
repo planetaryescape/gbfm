@@ -14,7 +14,7 @@ See [FOLDKIT.md](../FOLDKIT.md) for runtime, navigation, and folder conventions.
 
 ## Visual language
 
-- Prefer rectangular surfaces, sharp corners, and visible borders. The base radius is `0px`.
+- Prefer rectangular surfaces and restrained rounding. Geometry lives in `packages/theme/src/tokens/geometry.ts`, exported as numbers for native and generated CSS variables for web. Do not invent radii in individual components.
 - Use high-contrast dark surfaces with cyan/green accents from the shared theme. Do not copy old palette values into components or introduce new theme selectors without a product requirement.
 - Prefer semantic classes such as `bg-card`, `text-foreground`, `text-muted-foreground`, `border-border`, `text-highlight`, and `ring-ring`. Existing `gb-*` classes map to the same shared brand variables in WWW.
 - Keep secondary metadata readable. Use muted text, not near-invisible contrast.
@@ -41,6 +41,33 @@ done
 ```
 
 ## Interaction and states
+
+### Geometry and controls
+
+| Role | Radius |
+| --- | --- |
+| Album artwork | 0px |
+| Buttons, inputs, cards | 4px |
+| Sheets, popovers, floating navigation containers | 12px |
+| Avatars, progress thumbs, primary circular playback control | Circular |
+
+OS-owned iOS tab bars, navigation headers, alerts, and sheet chrome retain their system shapes. They are platform exceptions, not examples for app-owned controls. Small grips and progress tracks may use the control radius.
+
+App buttons share a 44px minimum touch height, 14px semibold monospace label, 12px inline padding, 8px content gap, and 20px leading icon. Use the same roles on both platforms:
+
+- Primary: filled accent, contrasting label, one next action per group.
+- Secondary: surface fill and a subtle border.
+- Quiet: transparent, no visible border until focused or pressed. Use for navigation and dismissal.
+- Destructive: danger fill and contrasting label, reserved for confirmed destructive actions.
+- Icon-only: the same 44px target and an explicit accessible label.
+
+Use `Button` in native and `.btn` with its role modifier in web. Reader-specific wrappers may supply labels and handlers, but must not define another button appearance. Disabled and busy controls remain identifiable; web keeps a visible keyboard focus ring.
+
+Queue track rows remain composite `Pressable` controls so artwork and two-line track metadata form one action; their artwork ensures a minimum 44px height. Queue opening, dismissal, and removal use `Button`.
+
+### Playback layout
+
+The compact player shows artwork, track identity, and play/pause only. Queue and skip controls live in the expanded player. Keep app navigation and playback visually distinct without adding more fixed layers.
 
 - Motion confirms interactivity: small lifts, border emphasis, subtle image scaling, and short transitions. Respect reduced motion.
 - Keep keyboard focus visible. Label controls, name icon-only actions, preserve native input types, and make disabled/loading states clear.

@@ -39,9 +39,10 @@
   --font-jetbrains:
     JetBrainsMono, ui-monospace, monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     Liberation Mono, Courier New;
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
+  --radius-sm: var(--radius-control);
+  --radius-md: var(--radius-surface);
+  --radius-lg: var(--radius-surface);
+  --radius-xl: var(--radius-overlay);
   --scale-101: 1.01;
   --scale-102: 1.02;
   --scale-103: 1.03;
@@ -723,7 +724,7 @@
   overflow: hidden;
   pointer-events: auto;
   border: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent);
-  border-radius: 1.125rem;
+  border-radius: var(--radius-overlay);
   background: color-mix(in oklab, var(--background) 82%, transparent);
   box-shadow: 0 12px 32px -12px rgb(0 0 0 / 0.5);
   -webkit-backdrop-filter: blur(24px) saturate(1.6);
@@ -1146,7 +1147,7 @@
   overflow: hidden;
   background: var(--background);
   border-top: 1px solid var(--border);
-  border-radius: 0.75rem 0.75rem 0 0;
+  border-radius: var(--radius-overlay) var(--radius-overlay) 0 0;
   padding: 0 max(0.5rem, env(safe-area-inset-right)) max(0.75rem, env(safe-area-inset-bottom))
     max(0.5rem, env(safe-area-inset-left));
   box-shadow: 0 -8px 32px #0003;
@@ -1617,88 +1618,111 @@
 }
 /* Buttons: one hierarchy for actions across the site. Default is secondary; primary marks the
    single next step; quiet is for low-emphasis or destructive-adjacent actions. */
-.btn {
-  display: inline-flex;
-  min-height: 2.5rem;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0 1rem;
-  border: 1px solid var(--border);
-  border-radius: calc(var(--radius) - 2px);
-  background: var(--card);
-  color: var(--foreground);
-  font-size: 0.875rem;
-  font-weight: 600;
-  line-height: 1;
-  text-decoration: none;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background-color 150ms ease-out,
-    border-color 150ms ease-out,
-    color 150ms ease-out;
-}
-.btn:hover:not(:disabled, [aria-disabled='true']) {
-  border-color: color-mix(in srgb, var(--foreground) 40%, var(--border));
-  background: var(--muted);
-  color: var(--foreground);
-}
-.btn:active:not(:disabled, [aria-disabled='true']) {
-  background: color-mix(in srgb, var(--muted) 80%, var(--foreground));
-}
-.btn-primary {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-.btn-primary:hover:not(:disabled, [aria-disabled='true']) {
-  border-color: color-mix(in srgb, var(--primary) 85%, var(--foreground));
-  background: color-mix(in srgb, var(--primary) 85%, var(--foreground));
-  color: var(--primary-foreground);
-}
-.btn-primary:active:not(:disabled, [aria-disabled='true']) {
-  background: color-mix(in srgb, var(--primary) 75%, var(--foreground));
-}
-.btn-quiet {
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted-foreground);
-}
-.btn-sm {
-  min-height: 2rem;
-  padding: 0 0.75rem;
-  font-size: 0.75rem;
-}
-.btn-icon {
-  width: 2.5rem;
-  padding: 0;
-}
-.btn:disabled,
-.btn[aria-disabled='true'] {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.btn[aria-busy='true'] {
-  cursor: progress;
-}
-.btn:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-  box-shadow: none;
-}
-@media (pointer: coarse) {
+@layer components {
   .btn {
-    min-height: 2.75rem;
+    display: inline-flex;
+    min-height: var(--control-height);
+    min-width: var(--control-height);
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    gap: var(--control-gap);
+    padding: 0 var(--control-padding-inline);
+    border: var(--control-border-width) solid var(--border);
+    border-radius: var(--radius-control);
+    background: var(--card);
+    color: var(--foreground);
+    font-size: var(--control-font-size);
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color 150ms ease-out,
+      border-color 150ms ease-out,
+      color 150ms ease-out;
+  }
+  .btn:hover:not(:disabled, [aria-disabled='true']) {
+    border-color: color-mix(in srgb, var(--foreground) 40%, var(--border));
+    background: var(--muted);
+    color: var(--foreground);
+  }
+  .btn:active:not(:disabled, [aria-disabled='true']) {
+    background: color-mix(in srgb, var(--muted) 80%, var(--foreground));
+  }
+  .btn-primary {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+  .btn-primary:hover:not(:disabled, [aria-disabled='true']) {
+    border-color: color-mix(in srgb, var(--primary) 85%, var(--foreground));
+    background: color-mix(in srgb, var(--primary) 85%, var(--foreground));
+    color: var(--primary-foreground);
+  }
+  .btn-primary:active:not(:disabled, [aria-disabled='true']) {
+    background: color-mix(in srgb, var(--primary) 75%, var(--foreground));
+  }
+  .btn-quiet {
+    border-color: transparent;
+    background: transparent;
+    color: var(--muted-foreground);
+  }
+  .btn-destructive {
+    border-color: var(--destructive);
+    background: var(--destructive);
+    color: var(--destructive-foreground);
+  }
+  .btn-destructive:hover:not(:disabled, [aria-disabled='true']) {
+    background: color-mix(in srgb, var(--destructive) 85%, var(--foreground));
+    color: var(--destructive-foreground);
+  }
+  .player-primary-control {
+    width: 4.5rem;
+    height: 4.5rem;
+    padding: 0;
+    border-radius: var(--radius-round);
   }
   .btn-sm {
-    min-height: 2.5rem;
+    min-height: var(--control-height);
+    padding: 0 0.75rem;
+    font-size: var(--control-font-size);
   }
   .btn-icon {
-    width: 2.75rem;
+    width: var(--control-height);
+    padding: 0;
+  }
+  .btn:disabled,
+  .btn[aria-disabled='true'] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn[aria-busy='true'] {
+    cursor: progress;
+  }
+  .btn:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    box-shadow: none;
+  }
+  @media (pointer: coarse) {
+    .btn {
+      min-height: 2.75rem;
+    }
+    .btn-sm {
+      min-height: var(--control-height);
+    }
+    .btn-icon {
+      width: 2.75rem;
+    }
   }
 }
+
+.artwork {
+  border-radius: var(--radius-artwork);
+}
+
 .creator-page {
   max-width: 1280px;
   padding-top: 0;

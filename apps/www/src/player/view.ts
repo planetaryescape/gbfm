@@ -53,7 +53,7 @@ const dragAttributes = (h: H, allowControls = false) => [
   h.OnPointerDown(onDragStart(Message.PlayerDragStarted, allowControls)),
 ]
 
-const transportButton = `${ghostButton} rounded-[0.875rem] text-foreground transition-[transform,background-color] hover:bg-foreground/10 active:scale-90`
+const transportButton = 'btn btn-quiet btn-icon text-foreground'
 
 const backdrop = (h: H, current: QueueTrackType) =>
   h.div(
@@ -121,27 +121,27 @@ const transportControls = (h: H, isPlaying: boolean) =>
           h.Type('button'),
           h.OnClick(Message.Previous()),
           h.AriaLabel('Previous track'),
-          h.Class(`${transportButton} size-14`),
+          h.Class(transportButton),
         ],
-        [lucide(iconPaths.skipBack, 'size-8 fill-current')],
+        [lucide(iconPaths.skipBack, 'size-[26px] fill-current')],
       ),
       h.button(
         [
           h.Type('button'),
           h.OnClick(Message.TogglePlayPause()),
           h.AriaLabel(isPlaying ? 'Pause' : 'Play'),
-          h.Class(`${transportButton} size-[4.5rem]`),
+          h.Class('btn btn-primary player-primary-control'),
         ],
-        [lucide(isPlaying ? iconPaths.pause : iconPaths.play, 'size-12 fill-current')],
+        [lucide(isPlaying ? iconPaths.pause : iconPaths.play, 'size-[30px] fill-current')],
       ),
       h.button(
         [
           h.Type('button'),
           h.OnClick(Message.Next()),
           h.AriaLabel('Next track'),
-          h.Class(`${transportButton} size-14`),
+          h.Class(transportButton),
         ],
-        [lucide(iconPaths.skipForward, 'size-8 fill-current')],
+        [lucide(iconPaths.skipForward, 'size-[26px] fill-current')],
       ),
     ],
   )
@@ -265,7 +265,7 @@ const fullscreen = (model: Model, h: H, current: QueueTrackType, inputs: ViewInp
                     h.Draggable(false),
                     ...(playback.isPlaying ? [] : [h.DataAttribute('paused', '')]),
                     h.Class(
-                      'player-artwork max-h-full max-w-full rounded-[0.75rem] object-contain shadow-2xl',
+                      'player-artwork max-h-full max-w-full rounded-none object-contain shadow-2xl',
                     ),
                   ]),
                 ],

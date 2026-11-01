@@ -1,5 +1,5 @@
+import { radii } from '@gbfm/theme'
 import { useRouter } from 'expo-router'
-import { SymbolView } from 'expo-symbols'
 import { useRef } from 'react'
 import type { AccessibilityActionEvent, LayoutChangeEvent } from 'react-native'
 import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native'
@@ -9,16 +9,9 @@ import { NowPlayingTitle } from '@/components/NowPlaying/NowPlayingTitle'
 import { PlayerSheetHeader } from '@/components/NowPlaying/PlayerSheetHeader'
 import { QueueSheet } from '@/components/NowPlaying/QueueSheet'
 import { Screen } from '@/components/Screen'
+import { Glyph } from '@/icons/Glyph'
 import { useThemeColors, withAlpha } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
-
-const symbols = {
-  previous: { ios: 'backward.end.fill', android: 'skip_previous', web: 'skip_previous' },
-  play: { ios: 'play.fill', android: 'play_arrow', web: 'play_arrow' },
-  pause: { ios: 'pause.fill', android: 'pause', web: 'pause' },
-  next: { ios: 'forward.end.fill', android: 'skip_next', web: 'skip_next' },
-  artwork: { ios: 'music.note', android: 'music_note', web: 'music_note' },
-} as const
 
 const SEEK_STEP_SECONDS = 15
 
@@ -92,7 +85,7 @@ export default function NowPlaying() {
             <View
               style={{
                 aspectRatio: 1,
-                borderRadius: 12,
+                borderRadius: radii.artwork,
                 overflow: 'hidden',
                 borderWidth: 1,
                 borderColor: withAlpha(colors.accent, 0.2),
@@ -111,11 +104,7 @@ export default function NowPlaying() {
                 />
               ) : (
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                  <SymbolView
-                    name={symbols.artwork}
-                    size={48}
-                    tintColor={withAlpha(colors.muted, 0.6)}
-                  />
+                  <Glyph name='sleeve' size={48} color={withAlpha(colors.muted, 0.6)} />
                 </View>
               )}
             </View>
@@ -204,7 +193,7 @@ export default function NowPlaying() {
                   justifyContent: 'center',
                   opacity: !canSkipPrev ? 0.35 : pressed ? 0.6 : 1,
                 })}>
-                <SymbolView name={symbols.previous} size={26} tintColor={colors.accent} />
+                <Glyph name='previous' size={26} color={colors.accent} />
               </Pressable>
 
               <Pressable
@@ -216,17 +205,17 @@ export default function NowPlaying() {
                   height: 72,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  borderRadius: 36,
-                  backgroundColor: colors.accent,
+                  borderRadius: radii.round,
+                  backgroundColor: colors.controls.primary,
                   opacity: pressed ? 0.85 : 1,
                 })}>
                 {isBuffering ? (
-                  <ActivityIndicator size='large' color={colors.onAccent} />
+                  <ActivityIndicator size='large' color={colors.controls.primaryForeground} />
                 ) : (
-                  <SymbolView
-                    name={isPlaying ? symbols.pause : symbols.play}
+                  <Glyph
+                    name={isPlaying ? 'pause' : 'play'}
                     size={30}
-                    tintColor={colors.onAccent}
+                    color={colors.controls.primaryForeground}
                   />
                 )}
               </Pressable>
@@ -244,7 +233,7 @@ export default function NowPlaying() {
                   justifyContent: 'center',
                   opacity: !canSkipNext ? 0.35 : pressed ? 0.6 : 1,
                 })}>
-                <SymbolView name={symbols.next} size={26} tintColor={colors.accent} />
+                <Glyph name='next' size={26} color={colors.accent} />
               </Pressable>
             </View>
 

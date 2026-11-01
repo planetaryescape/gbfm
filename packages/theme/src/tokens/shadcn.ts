@@ -1,3 +1,5 @@
+import { radii } from './geometry'
+
 export interface SemanticTokens {
   highlight: string
   highlightForeground: string
@@ -55,7 +57,7 @@ export const light: SemanticTokens = {
   border: 'hsl(213 25% 84%)',
   input: 'hsl(213 25% 82%)',
   ring: 'hsl(213 60% 35%)',
-  radius: '0px',
+  radius: `${radii.surface}px`,
 }
 
 export const dark: SemanticTokens = {
@@ -85,7 +87,7 @@ export const dark: SemanticTokens = {
   border: 'hsl(215 20% 32%)',
   input: 'hsl(215 30% 18%)',
   ring: 'hsl(195 75% 75%)',
-  radius: '0px',
+  radius: `${radii.surface}px`,
 }
 
 export const studio: SemanticTokens = {
@@ -115,5 +117,5 @@ export const studio: SemanticTokens = {
   border: 'hsl(39 26% 34%)',
   input: 'hsl(31 20% 20%)',
   ring: 'hsl(24 100% 63%)',
-  radius: '2px',
+  radius: `${radii.surface}px`,
 }

@@ -22,6 +22,11 @@ for (const viewport of [
     await expect(icon).toHaveCSS('height', '44px')
     await expect(control.locator('.episode-play-number')).toHaveText('001')
 
+    await expect(page.locator('img.artwork').first()).toBeVisible()
+    for (const artwork of await page.locator('img.artwork').all()) {
+      await expect(artwork).toHaveCSS('border-radius', '0px')
+    }
+
     const pageWidth = await page.evaluate(() => ({
       viewport: innerWidth,
       content: document.documentElement.scrollWidth,
@@ -56,7 +61,7 @@ for (const viewport of [
     await expect(pause).toHaveAttribute('aria-pressed', 'true')
     await mini.getByRole('button', { name: 'Pause', exact: true }).click()
     await expect(control).toHaveAttribute('aria-pressed', 'false')
-    await expect(mini.getByRole('button', { name: 'Next track', exact: true })).toBeDisabled()
+    await expect(mini.getByRole('button', { name: 'Next track', exact: true })).toHaveCount(0)
     await mini.getByRole('button', { name: 'Now playing', exact: true }).click()
     await expect(player).toBeVisible()
     await expect(panel).not.toHaveAttribute('data-transition')
@@ -119,23 +124,26 @@ test('restored long titles leave compact playback controls reachable', async ({ 
   }, title)
   await page.goto('/shows/e2e-local-radio')
   const mini = page.getByRole('region', { name: 'Mini player', exact: true })
-  const next = mini.getByRole('button', { name: 'Next track', exact: true })
+  const play = mini.getByRole('button', { name: 'Play', exact: true })
   await expect(mini).toContainText(title)
-  await expect(next).toBeEnabled()
+  await expect(play).toBeEnabled()
+  await expect(mini.getByRole('button', { name: 'Next track', exact: true })).toHaveCount(0)
   await page.evaluate(() => {
     document.querySelector('main')?.style.setProperty('min-height', '200vh')
     window.scrollBy(0, 200)
   })
   await expect(page.locator('.mobile-dock')).toHaveAttribute('data-minimized', '')
-  await expect(next).toHaveCSS('width', '44px')
+  await expect(play).toHaveCSS('width', '44px')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-  await next.click()
-  await expect(mini).toContainText('Next local transmission')
-  await expect(next).toBeDisabled()
   await mini.getByRole('button', { name: 'Now playing', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: 'Now playing', exact: true })).toContainText(
-    'Next local transmission',
+  const player = page.getByRole('dialog', { name: 'Now playing', exact: true })
+  const next = player.getByRole('button', { name: 'Next track', exact: true })
+  await expect(next).toHaveCSS(
+    'color',
+    await page.locator('body').evaluate((body) => getComputedStyle(body).color),
   )
+  await next.click()
+  await expect(player).toContainText('Next local transmission')
 })
 
 test('desktop retains episode numbers and reveals playback on keyboard focus', async ({

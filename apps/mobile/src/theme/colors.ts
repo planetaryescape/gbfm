@@ -1,9 +1,20 @@
-import { brandDark, brandLight } from '@gbfm/theme'
+import { brandDark, brandLight, dark, light, type SemanticTokens } from '@gbfm/theme'
 import { useColorScheme } from 'react-native'
 
 import { useColorSchemePreference } from '@/store/preferences'
 
 export type ThemeColors = {
+  readonly controls: Pick<
+    SemanticTokens,
+    | 'primary'
+    | 'primaryForeground'
+    | 'card'
+    | 'foreground'
+    | 'border'
+    | 'muted'
+    | 'destructive'
+    | 'destructiveForeground'
+  >
   readonly background: string
   readonly accent: string
   readonly muted: string
@@ -23,6 +34,7 @@ export type ThemeColors = {
 }
 
 const darkColors: ThemeColors = {
+  controls: dark,
   background: brandDark.bg,
   accent: brandDark['pastel-green-1'],
   muted: brandDark['pastel-green-2'],
@@ -42,6 +54,7 @@ const darkColors: ThemeColors = {
 }
 
 const lightColors: ThemeColors = {
+  controls: light,
   background: brandLight.bg,
   accent: brandLight['pastel-green-1'],
   muted: brandLight['pastel-green-2'],

@@ -185,10 +185,10 @@ export type TweetCardPresentationInput = {
 const SITE_URL = 'https://goosebumps.fm'
 
 const templateVersions = {
-  ArtworkCard: 'artwork-card-v1',
-  IdentityCard: 'identity-card-v1',
-  EditorialCard: 'editorial-card-v1',
-  TweetCard: 'tweet-card-v2',
+  ArtworkCard: 'artwork-card-v2',
+  IdentityCard: 'identity-card-v2',
+  EditorialCard: 'editorial-card-v2',
+  TweetCard: 'tweet-card-v3',
 } as const satisfies Readonly<Record<SocialCardModel['_tag'], string>>
 
 const eyebrowByKind = {

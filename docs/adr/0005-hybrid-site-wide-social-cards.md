@@ -92,8 +92,11 @@ Satori 0.33.5 uses HarfBuzz for text shaping. The Bun patch at `patches/harfbuzz
 When upgrading Satori or HarfBuzz, keep this patch until the replacement works with precompiled modules and avoids runtime WASM compilation. Verify all three tweet formats and the other layout families with the real bundled fonts:
 
 ```sh
+bun --filter @gbfm/social-card test
 bun --filter @gbfm/social-image test
 ```
+
+All four layout families use new template versions for the HarfBuzz upgrade, so changed text shaping receives new immutable URLs. Renderer upgrades that change pixels must also change the affected template versions.
 
 ## Future work
 

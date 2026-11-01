@@ -26,4 +26,5 @@ export const geometryCSS = {
   controlGap: `${controlMetrics.gap}px`,
   controlFontSize: `${controlMetrics.fontSize}px`,
   controlIconSize: `${controlMetrics.iconSize}px`,
+  controlBorderWidth: `${controlMetrics.borderWidth}px`,
 } as const

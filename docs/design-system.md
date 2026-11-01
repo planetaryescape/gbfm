@@ -63,6 +63,8 @@ App buttons share a 44px minimum touch height, 14px semibold monospace label, 12
 
 Use `Button` in native and `.btn` with its role modifier in web. Reader-specific wrappers may supply labels and handlers, but must not define another button appearance. Disabled and busy controls remain identifiable; web keeps a visible keyboard focus ring.
 
+Queue track rows remain composite `Pressable` controls so artwork and two-line track metadata form one action; their artwork ensures a minimum 44px height. Queue opening, dismissal, and removal use `Button`.
+
 ### Reader and playback layout
 
 Tweet navigation belongs with the tweet, not in a third persistent bottom bar. Reading options expose chronological navigation, next unread, latest, random, and the month grid. Horizontal swipes provide another route between tweets; visible options and accessibility actions remain available. Swipes never replace ordinary scrolling, media controls, or OS edge navigation.

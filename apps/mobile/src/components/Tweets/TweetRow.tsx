@@ -6,6 +6,7 @@ import { withAlpha, useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 import { replyCountLabel } from '@/tweets/tweetText'
 
+import { SwipeExclusion } from './SwipeExclusion'
 import { TweetAuthor } from './TweetAuthor'
 import { TweetBody } from './TweetBody'
 
@@ -29,13 +30,15 @@ export function TweetRow({ tweet }: { tweet: Tweet }) {
         borderBottomWidth: 1,
         borderBottomColor: withAlpha(colors.muted, 0.25),
       }}>
-      <Pressable
-        accessibilityRole='button'
-        accessibilityLabel='Open tweet thread'
-        onPress={openThread}
-        style={{ minHeight: 44, justifyContent: 'center' }}>
-        <TweetAuthor creator={tweet.creators?.[0]} createdAt={tweet.createdAt} />
-      </Pressable>
+      <SwipeExclusion>
+        <Pressable
+          accessibilityRole='button'
+          accessibilityLabel='Open tweet thread'
+          onPress={openThread}
+          style={{ minHeight: 44, justifyContent: 'center' }}>
+          <TweetAuthor creator={tweet.creators?.[0]} createdAt={tweet.createdAt} />
+        </Pressable>
+      </SwipeExclusion>
       <TweetBody tweet={tweet} size='sm' />
       {meta.length > 0 ? (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
@@ -46,15 +49,17 @@ export function TweetRow({ tweet }: { tweet: Tweet }) {
           ))}
         </View>
       ) : null}
-      <Pressable
-        accessibilityRole='button'
-        accessibilityLabel='View tweet thread'
-        onPress={openThread}
-        style={{ minHeight: 44, justifyContent: 'center' }}>
-        <Text style={{ color: colors.accent, fontFamily: fonts.mono, fontSize: 12 }}>
-          View thread →
-        </Text>
-      </Pressable>
+      <SwipeExclusion>
+        <Pressable
+          accessibilityRole='button'
+          accessibilityLabel='View tweet thread'
+          onPress={openThread}
+          style={{ minHeight: 44, justifyContent: 'center' }}>
+          <Text style={{ color: colors.accent, fontFamily: fonts.mono, fontSize: 12 }}>
+            View thread →
+          </Text>
+        </Pressable>
+      </SwipeExclusion>
     </View>
   )
 }

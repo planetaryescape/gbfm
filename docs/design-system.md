@@ -65,7 +65,13 @@ Use `Button` in native and `.btn` with its role modifier in web. Reader-specific
 
 Queue track rows remain composite `Pressable` controls so artwork and two-line track metadata form one action; their artwork ensures a minimum 44px height. Queue opening, dismissal, and removal use `Button`.
 
-### Playback layout
+### Reader and playback layout
+
+Tweet navigation belongs with the tweet, not in a third persistent bottom bar. Reading options expose chronological navigation, next unread, latest, random, and the month grid. Horizontal swipes provide another route between tweets; visible options and accessibility actions remain available. Swipes never replace ordinary scrolling, media controls, or OS edge navigation.
+
+Tweet content follows a horizontal drag while reader options and playback stay anchored. Release below the acceptance threshold springs back; accepted gestures briefly shift the current tweet and bring the next tweet in from the opposite side. Archive boundaries resist the drag instead of accepting it. Reduced motion keeps the same navigation rules without spatial movement.
+
+The shared swipe policy accepts 25% of viewport width, clamped to 80–160px. A flick needs at least 32px of movement, 0.55px/ms of release velocity, and enough projected travel to cross that threshold. Web samples the last 100ms; native uses the recognizer's release velocity rather than coalesced event delivery timing. Holding loses momentum and reversing cancels a commit. A long press before horizontal movement is not a swipe. Native uses Gesture Handler and Reanimated to track touches and animate on the UI thread; web owns transient transforms in the touch adapter.
 
 The compact player shows artwork, track identity, and play/pause only. Queue and skip controls live in the expanded player. Keep app navigation and playback visually distinct without adding more fixed layers.
 

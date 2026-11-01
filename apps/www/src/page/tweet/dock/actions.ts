@@ -5,12 +5,11 @@ import { Message } from '../../../message'
 import { iconPaths, lucide } from '../../../view/icons'
 import * as Reader from '../reader'
 
-const baseButton =
-  'inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-sm border px-3 text-sm no-underline transition-colors'
+const baseButton = 'btn'
 
-export const primaryButton = `${baseButton} w-full border-highlight/50 bg-highlight/10 text-highlight hover:bg-highlight/20`
+export const primaryButton = `${baseButton} btn-primary w-full`
 
-export const secondaryButton = `${baseButton} border-border bg-card/60 text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40`
+export const secondaryButton = baseButton
 
 const resetForm = (h: HtmlBuilder<Message>, slug: string, label: string, className: string) =>
   h.form(
@@ -128,15 +127,11 @@ export const readerActions = (
               h.button(
                 [
                   h.Type('submit'),
-                  h.AriaLabel('Random unread'),
+                  h.AriaLabel('Surprise me'),
                   h.Disabled(caughtUp),
                   h.Class(`${secondaryButton} w-full cursor-pointer`),
                 ],
-                [
-                  lucide(iconPaths.shuffle, 'h-4 w-4'),
-                  'Random',
-                  h.span([h.Class('hidden sm:inline')], [' unread']),
-                ],
+                [lucide(iconPaths.shuffle, 'h-4 w-4'), 'Surprise me'],
               ),
             ],
           ),
@@ -150,7 +145,7 @@ export const readerActions = (
               h.summary(
                 [
                   h.Class(
-                    'cursor-pointer list-none py-1 text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden',
+                    'btn btn-quiet w-full cursor-pointer list-none [&::-webkit-details-marker]:hidden',
                   ),
                 ],
                 ['Reset reading history…'],
@@ -166,12 +161,7 @@ export const readerActions = (
                     [h.Class('m-0 text-xs text-muted-foreground')],
                     ['Mark every tweet as unread again and start from the latest.'],
                   ),
-                  resetForm(
-                    h,
-                    input.slug,
-                    'Reset',
-                    `${baseButton} border-destructive bg-destructive/25 text-foreground hover:bg-destructive/40`,
-                  ),
+                  resetForm(h, input.slug, 'Reset', `${baseButton} btn-destructive`),
                 ],
               ),
             ],

@@ -6,6 +6,8 @@ import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 import { tweetLinkUrl } from '@/tweets/tweetContent'
 
+import { SwipeExclusion } from './SwipeExclusion'
+
 export function useTweetLink(href: string) {
   const [failed, setFailed] = useState(false)
 
@@ -35,7 +37,9 @@ export function TweetLink({ href, label }: { readonly href: string; readonly lab
 
   return (
     <>
-      <Button role='link' label={`${label} ↗`} accessibilityLabel={label} onPress={open} />
+      <SwipeExclusion>
+        <Button role='link' label={`${label} ↗`} accessibilityLabel={label} onPress={open} />
+      </SwipeExclusion>
       {failed ? (
         <Text
           accessibilityRole='alert'

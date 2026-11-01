@@ -2441,6 +2441,20 @@
 .detail-actions {
   margin: 2rem 0;
 }
+[data-tweet-swipe] .prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-links: var(--foreground);
+  --tw-prose-quotes: var(--foreground);
+}
+.tweet-swipe-viewport {
+  overflow: clip;
+  min-height: 55dvh;
+}
+[data-tweet-motion][data-swipe-phase] {
+  will-change: transform, opacity;
+}
 @layer components {
   .rich-content {
     overflow-wrap: anywhere;

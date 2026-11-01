@@ -1,3 +1,4 @@
+import { radii } from '@gbfm/theme'
 import { useState } from 'react'
 import { Image, Text, View } from 'react-native'
 
@@ -39,7 +40,7 @@ export function TweetMusicCard({ music }: { music: TweetMusic }) {
   return (
     <View
       style={{
-        borderRadius: 4,
+        borderRadius: radii.surface,
         borderWidth: 1,
         borderColor: colors.muted,
         backgroundColor: colors.surface,
@@ -50,7 +51,7 @@ export function TweetMusicCard({ music }: { music: TweetMusic }) {
           <Image
             source={{ uri: entity.coverImageUrl }}
             accessibilityLabel={`${entity.title} cover`}
-            style={{ width: COVER_SIZE, height: COVER_SIZE, borderRadius: 4 }}
+            style={{ width: COVER_SIZE, height: COVER_SIZE, borderRadius: radii.artwork }}
             resizeMode='cover'
             onError={() => setFailed(true)}
           />
@@ -59,7 +60,7 @@ export function TweetMusicCard({ music }: { music: TweetMusic }) {
             style={{
               width: COVER_SIZE,
               height: COVER_SIZE,
-              borderRadius: 4,
+              borderRadius: radii.artwork,
               backgroundColor: colors.background,
             }}
           />

@@ -5,16 +5,19 @@ import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 import { keyedContent, splitInlineImages, type TweetInline as Inline } from '@/tweets/tweetContent'
 
+import { useInlineSwipeExclusion } from './SwipeExclusion'
 import { useTweetLink } from './TweetLink'
 import { TweetImage } from './TweetMedia'
 
 function InlineLink({ inline }: { readonly inline: Extract<Inline, { readonly _tag: 'Link' }> }) {
   const colors = useThemeColors()
   const { open, failed } = useTweetLink(inline.href)
+  const excludeSwipe = useInlineSwipeExclusion()
 
   return (
     <Text
       accessibilityRole='link'
+      onPressIn={excludeSwipe}
       onPress={(event) => {
         event.stopPropagation()
         void open()

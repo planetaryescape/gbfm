@@ -1,11 +1,12 @@
 import { Match } from 'effect'
 import type { ReactNode } from 'react'
-import { ScrollView, Text, View } from 'react-native'
+import { Text, View } from 'react-native'
 
 import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 import { keyedContent, type TweetBlock } from '@/tweets/tweetContent'
 
+import { ReaderScrollView } from './SwipeExclusion'
 import { TweetInlineContent } from './TweetInline'
 import { TweetExternalCard } from './TweetMedia'
 import { TweetMusicCard } from './TweetMusicCard'
@@ -48,7 +49,7 @@ function Block({ block, size }: { readonly block: TweetBlock; readonly size: num
     ),
     ThematicBreak: () => <View style={{ height: 1, backgroundColor: colors.muted }} />,
     Table: ({ rows }) => (
-      <ScrollView horizontal>
+      <ReaderScrollView horizontal>
         <View style={{ gap: 8 }}>
           {keyedContent(rows).map(({ item: row, key }) => (
             <View key={key} style={{ flexDirection: 'row', gap: 16 }}>
@@ -60,7 +61,7 @@ function Block({ block, size }: { readonly block: TweetBlock; readonly size: num
             </View>
           ))}
         </View>
-      </ScrollView>
+      </ReaderScrollView>
     ),
     MusicEmbed: ({ music, blurb, showTracks }) => (
       <View style={{ gap: 10 }}>

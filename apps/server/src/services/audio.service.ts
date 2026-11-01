@@ -459,10 +459,16 @@ const createEffect = (
     yield* validateAudioArtists(data.artistIds)
     const db = yield* Database
     const idempotencyFingerprint = yield* createAudioFingerprint(data, creatorIds)
+
     // thumbnailUrl is intentionally left as-is (NULL when not provided): the
     // show's artwork is resolved at read time instead of copied here, so
     // episodes stay in sync when a show's art changes later.
-    const publication = yield* media(data, { userId: actorId, userRole: actorRole ?? 'user' })
+    const publication = yield* media(data, {
+      userId: actorId,
+      userRole: actorRole ?? 'user',
+      credential: undefined,
+    })
+
     const { tags, artistIds, ...audioData } = publication.data
     const id = crypto.randomUUID()
 
@@ -646,7 +652,12 @@ const updateEffect = (
     yield* validateCanonicalContent(data.content)
     yield* validateAudioArtists(data.artistIds)
 
-    const publication = yield* media(data, { userId, userRole }, existingAudio)
+    const publication = yield* media(
+      data,
+      { userId, userRole, credential: undefined },
+      existingAudio,
+    )
+
     const { creatorIds, tags, artistIds, ...updateData } = publication.data
     let updatedAudio = existingAudio
 

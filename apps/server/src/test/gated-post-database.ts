@@ -31,7 +31,7 @@ export const gatedPostDatabase = (
       readonly underlying: D1PreparedStatement,
       readonly query: string,
     ) {
-      this.writesPost = queryPattern.test(query)
+      this.writesPost = new RegExp(queryPattern.source, queryPattern.flags).test(query)
     }
     bind(...values: Parameters<D1PreparedStatement['bind']>): D1PreparedStatement {
       return new Statement(this.underlying.bind(...values), this.query)

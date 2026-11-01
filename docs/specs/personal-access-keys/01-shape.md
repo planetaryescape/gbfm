@@ -28,7 +28,7 @@ Only `Authorization: Bearer <key>` carries a personal key. No query parameter, c
 
 A PAT bearer plus a Better Auth session cookie is an ambiguous credential: return 400 before handler execution. Non-auth cookies do not cause a conflict. Detect real Better Auth cookie names using its configured cookie machinery, including secure/chunked forms. Existing non-PAT bearer-plus-cookie precedence remains Better Auth's behavior. Do not introduce a second session precedence policy.
 
-The gate covers `/auth/*`, optional-auth navigation, plain router paths, and HttpApi routes. It wraps final request dispatch explicitly; it does not depend on `Layer.mergeAll` global-middleware ordering. Every non-allowlisted route, including unknown routes, returns 403 for a PAT attempt without a key lookup. Unknown routes without PATs retain their existing 404 behavior. Allowed routes verify the key and return generic 401 on credential failure.
+The gate covers `/auth/*`, optional-auth navigation, plain router paths, and HttpApi routes. It wraps final request dispatch explicitly; it does not depend on `Layer.mergeAll` global-middleware ordering. After the size, ambiguity, and path-encoding checks above, every non-allowlisted route, including unknown routes, returns 403 for a PAT attempt without a key lookup. Unknown routes without PATs retain their existing 404 behavior. Allowed routes verify the key and return generic 401 on credential failure.
 
 Use exact method and canonical route identity, never a broad `/api/content/*` prefix. Reject ambiguous encoded separators/dot segments for PAT requests. A route registry and tests bind each opted-in endpoint to its credential policy. CORS preflights contain no credential and remain unchanged.
 

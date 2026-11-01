@@ -238,12 +238,12 @@ Creation binds ownership to self before calling the policy. Existing post operat
 
 Implement errors using `Schema.TaggedError` and finite safe fields. New HTTP error bodies use `{ _tag, ...safeFields }` with schema-defined HTTP status. No raw cause, input, secret, digest, user email, or arbitrary library message is serialized.
 
-The outer admission gate runs before HttpApi dispatch. Its `AmbiguousCredential` (400), `KeyCredentialTooLarge` (431), and `KeyEndpointDenied` (403) responses are transport-only `{ _tag }` JSON, not compiled domain errors or endpoint-schema registrations. The tagged-error and endpoint-declaration rules apply to failures inside the API.
+The outer admission gate runs before HttpApi dispatch. Its `AmbiguousCredential` (400), `KeyCredentialTooLarge` (431), and `KeyEndpointDenied` (403) responses are transport-only `{ _tag }` JSON, not compiled domain errors or endpoint-schema registrations. `AmbiguousCredential` also rejects percent-encoded or double-slash paths before route matching. The tagged-error and endpoint-declaration rules apply to failures inside the API.
 
 | Domain/error tag | HTTP | Safe fields / meaning |
 | --- | --- | --- |
 | `InvalidKeyCredential` | 401 | None; identical for invalid, expired, revoked, wrong stage, missing/deleted/banned owner |
-| `AmbiguousCredential` | 400 | None; multiple auth methods or duplicate header |
+| `AmbiguousCredential` | 400 | None; multiple auth methods, duplicate header, or percent-encoded/double-slash path |
 | `KeyCredentialTooLarge` | 431 | None; PAT Authorization header exceeds 1,024 characters |
 | `KeyInputInvalid` | 422 | `field` from finite request-field names; invalid value not echoed |
 | `SessionReauthenticationRequired` | 403 | None; issue only |

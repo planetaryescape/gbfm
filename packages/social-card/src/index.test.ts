@@ -23,6 +23,35 @@ const preHarfBuzzRevisions = {
 } as const
 
 describe('social card presentation', () => {
+  test('uses saved mosaic artwork in tweet exports without changing attached music', async () => {
+    const input = {
+      slug: 'mosaic-check',
+      commentary: 'Listening notes',
+      createdAt: '2026-10-31T12:00:00.000Z',
+      creator: null,
+      entity: {
+        type: 'album' as const,
+        title: 'Album',
+        artists: ['Artist'],
+        coverImageUrl: 'https://i.scdn.co/original.png',
+      },
+    }
+
+    const original = await buildTweetCardPresentation(input)
+
+    const mosaic = await buildTweetCardPresentation({
+      ...input,
+      artworkUrl: 'https://cdn.goosebumps.fm/user-content/mosaic.png',
+    })
+
+    expect(original.model.coverImageUrl).toBe(input.entity.coverImageUrl)
+    expect(mosaic.model.coverImageUrl).toBe('https://cdn.goosebumps.fm/user-content/mosaic.png')
+    expect(mosaic.model.entityTitle).toBe('Album')
+    expect(mosaic.revision).not.toBe(original.revision)
+    expect(
+      (await buildTweetCardPresentation({ ...input, artworkUrl: '' })).model.coverImageUrl,
+    ).toBe(input.entity.coverImageUrl)
+  })
   test('builds one immutable Open Graph image for artwork-led content', async () => {
     const presentation = await buildSocialCardPresentation(artworkInput)
 

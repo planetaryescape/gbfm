@@ -4444,6 +4444,26 @@ describe('GET /api/social-cards/tweet/:slug', () => {
       )
       expect(metadata.image.url).toBe(body.images.openGraph)
       expect(metadata.title).toContain('This commentary identifies the rendered card')
+      const mosaicUrl = 'https://cdn.goosebumps.fm/user-content/public/fixture/mosaic.png'
+      await db.update(postsTable).set({ thumbnailUrl: mosaicUrl }).where(eq(postsTable.id, post.id))
+
+      const mosaicResponse = await webHandler.handler(
+        new Request(`http://localhost/api/social-cards/tweet/${slug}`),
+      )
+
+      expect(mosaicResponse.status).toBe(200)
+      const mosaic = await decodeResponseBody(TweetCardPresentation, mosaicResponse)
+      expect(mosaic.model.coverImageUrl).toBe(mosaicUrl)
+      expect(mosaic.model.entityTitle).toBe(body.model.entityTitle)
+      expect(mosaic.revision).not.toBe(body.revision)
+
+      const updatedMetadata = await webHandler.handler(
+        new Request(`http://localhost/api/site-metadata/tweet/${slug}`),
+      )
+
+      expect((await decodeResponseBody(SiteMetadata, updatedMetadata)).image.url).toBe(
+        mosaic.images.openGraph,
+      )
     } finally {
       await db.delete(postCreators).where(eq(postCreators.postId, post.id))
       await db.delete(postsTable).where(eq(postsTable.id, post.id))

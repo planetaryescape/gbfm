@@ -128,6 +128,7 @@ export interface CreatorOperations {
     content: string,
   ) => Effect.Effect<typeof RichContentDocument.Type, CreatorRequestError>
   readonly uploadImage: (file: File) => Effect.Effect<string, CreatorUploadError>
+  readonly generateMosaic: (content: string) => Effect.Effect<File, CreatorRequestError>
 }
 
 export class CreatorService extends Context.Service<CreatorService, CreatorOperations>()(
@@ -256,6 +257,55 @@ const json = (body: JsonBody): RequestInit => ({
 const draftKey = (key: string) => `gbfm:creator:${key}`
 
 export const CreatorServiceLive = Layer.succeed(CreatorService, {
+  generateMosaic: (content) =>
+    Effect.tryPromise({
+      try: async (signal) => {
+        const response = await fetch('/actions/mosaic', {
+          method: 'POST',
+          credentials: 'include',
+          signal,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ content }),
+        })
+
+        if (!response.ok)
+          throw new CreatorRequestError({
+            operation: 'generate mosaic',
+            status: response.status,
+            message:
+              response.status === 422
+                ? 'No usable images found. Add album artwork or images from a supported image host. Private uploads are not used.'
+                : response.status === 401 || response.status === 403
+                  ? 'Sign in with permission to create posts before generating artwork.'
+                  : 'Could not generate the mosaic. Your existing artwork has not changed.',
+          })
+
+        if (response.headers.get('content-type') !== 'image/png')
+          throw new CreatorRequestError({
+            operation: 'generate mosaic',
+            status: null,
+            message: 'The mosaic service returned an invalid image.',
+          })
+        const revision = response.headers.get('x-mosaic-revision')
+
+        if (!revision || !/^[a-f0-9]{16}$/.test(revision))
+          throw new CreatorRequestError({
+            operation: 'generate mosaic',
+            status: null,
+            message: 'The mosaic service returned an invalid revision.',
+          })
+
+        return new File([await response.blob()], `mosaic-${revision}.png`, { type: 'image/png' })
+      },
+      catch: (cause) =>
+        cause instanceof CreatorRequestError
+          ? cause
+          : new CreatorRequestError({
+              operation: 'generate mosaic',
+              status: null,
+              message: 'Could not reach the mosaic service. Your existing artwork has not changed.',
+            }),
+    }),
   findMusicReferences: (entityType, entityId, offset) =>
     requestJson(
       'find music references',
@@ -405,7 +455,7 @@ export const CreatorServiceLive = Layer.succeed(CreatorService, {
             slug,
             description: draft.kind === 'post' ? draft.description : undefined,
             content: draft.content.trim() || null,
-            thumbnailUrl: draft.kind === 'post' ? draft.thumbnailUrl : undefined,
+            thumbnailUrl: draft.thumbnailUrl,
             tags: draft.tags,
             draft: !publish,
             type: draft.kind,

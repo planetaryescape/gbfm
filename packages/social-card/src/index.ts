@@ -171,6 +171,7 @@ export type TweetCardEntityInput = {
 
 /** Source data required to create a tweet share presentation. */
 export type TweetCardPresentationInput = {
+  readonly artworkUrl?: string | null
   readonly slug: string
   readonly commentary: string
   readonly createdAt: string
@@ -295,7 +296,7 @@ export const buildTweetCardPresentation = async (
     entityLabel: entity ? entityLabels[entity.type] : null,
     entityTitle: entity?.title ?? null,
     entityArtists: entity?.artists?.length ? entity.artists.join(', ') : null,
-    coverImageUrl: entity?.coverImageUrl ?? null,
+    coverImageUrl: input.artworkUrl || entity?.coverImageUrl || null,
     url: `${SITE_URL}/tweet/${encodeURIComponent(input.slug)}`,
   })
 

@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "type": "module",
   "exports": {
+    "./http/read-limited-body": "./src/http/read-limited-body.ts",
     "./utils": "./src/utils/index.ts",
     "./utils/slug": "./src/utils/slug.ts",
     "./api": "./src/api/index.ts",

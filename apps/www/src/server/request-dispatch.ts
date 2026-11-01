@@ -8,6 +8,7 @@ import { parseRoute, Route } from '../route'
 import { handleBrowserTelemetry } from '../telemetry/server'
 import { apiRequest } from './api'
 import { handleFormAction, redirect } from './form-actions'
+import { handleMosaicGeneration } from './mosaic'
 import { loadPageData } from './page-data'
 import { createPageResponse } from './page-response'
 
@@ -65,6 +66,31 @@ export const renderResponse = async (request: Request): Promise<Server.EntryResu
     const { env } = await import('cloudflare:workers')
 
     return Server.Responded(await env.SOCIAL_IMAGES.fetch(ownedRequest))
+  }
+
+  if (url.pathname === '/actions/mosaic') {
+    return Server.Responded(
+      await handleMosaicGeneration(
+        ownedRequest,
+        (content) =>
+          apiRequest(ownedRequest, '/api/content/posts/preview', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ content }),
+          }),
+        async (renderRequest) => {
+          if (import.meta.env.DEV) {
+            const { renderMosaicInDevelopment } = await import('./mosaic-dev')
+
+            return renderMosaicInDevelopment(renderRequest)
+          }
+
+          const { env } = await import('cloudflare:workers')
+
+          return env.SOCIAL_IMAGES.fetch(renderRequest)
+        },
+      ),
+    )
   }
 
   if (

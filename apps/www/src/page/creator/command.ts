@@ -162,6 +162,23 @@ export const UploadArtwork = Command.define('Creator.UploadArtwork', {
     ),
 })
 
+export const GenerateMosaic = Command.define('Creator.GenerateMosaic', {
+  args: { content: Schema.String },
+  messages: [Message.MosaicGenerated, Message.MosaicFailed],
+  execute: ({ content }) =>
+    Effect.gen(function* () {
+      const service = yield* CreatorService
+      const file = yield* service.generateMosaic(content)
+      const url = yield* service.uploadImage(file)
+
+      return Message.MosaicGenerated({ content, url })
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(Message.MosaicFailed({ content, message: error.message })),
+      ),
+    ),
+})
+
 export const UploadAudio = Command.define('Creator.UploadAudio', {
   args: { file: Schema.NullOr(Schema.instanceOf(File)) },
   messages: [

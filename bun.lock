@@ -173,6 +173,8 @@
       "name": "@gbfm/social-image",
       "version": "0.0.1",
       "dependencies": {
+        "@gbfm/core": "workspace:*",
+        "@gbfm/rich-content": "workspace:*",
         "@gbfm/social-card": "workspace:*",
         "@resvg/resvg-wasm": "2.6.2",
         "effect": "4.0.6",

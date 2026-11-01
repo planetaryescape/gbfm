@@ -1878,6 +1878,9 @@
 .creator-quote {
   align-content: start;
 }
+.creator-metadata {
+  align-items: start;
+}
 .upload-progress {
   display: grid;
   justify-items: start;
@@ -2097,6 +2100,30 @@
   height: 1px;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
+}
+.creator-mosaic {
+  display: grid;
+  gap: 0.75rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+.creator-mosaic p {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.creator-mosaic > div {
+  display: grid;
+  gap: 0.75rem;
+}
+.creator-mosaic img {
+  aspect-ratio: 1;
+  height: auto;
+  max-width: 24rem;
+}
+.creator-mosaic button {
+  min-height: 2.75rem;
+  white-space: normal;
 }
 .creator-quote blockquote,
 .creator-review blockquote {

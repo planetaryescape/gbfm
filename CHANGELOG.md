@@ -1,3 +1,10 @@
+# [2.118.0](https://github.com/planetaryescape/gbfm/compare/v2.117.0...v2.118.0) (2026-11-01)
+
+
+### Features
+
+* **artwork:** generate saved mosaics from post media ([0638487](https://github.com/planetaryescape/gbfm/commit/0638487daf16c4e4c98d27192acff151a963a323))
+
 # [2.117.0](https://github.com/planetaryescape/gbfm/compare/v2.116.0...v2.117.0) (2026-10-30)
 
 

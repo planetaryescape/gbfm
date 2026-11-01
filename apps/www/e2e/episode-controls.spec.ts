@@ -22,6 +22,7 @@ for (const viewport of [
     await expect(icon).toHaveCSS('height', '44px')
     await expect(control.locator('.episode-play-number')).toHaveText('001')
 
+    await expect(page.locator('img.artwork').first()).toBeVisible()
     for (const artwork of await page.locator('img.artwork').all()) {
       await expect(artwork).toHaveCSS('border-radius', '0px')
     }

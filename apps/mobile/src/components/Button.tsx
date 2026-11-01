@@ -12,6 +12,7 @@ type ButtonProps = {
   readonly variant?: 'primary' | 'secondary' | 'quiet' | 'destructive'
   readonly disabled?: boolean
   readonly busy?: boolean
+  readonly selected?: boolean
   readonly accessibilityLabel?: string
   readonly role?: 'button' | 'link'
 } & (
@@ -25,6 +26,7 @@ export function Button({
   variant = 'secondary',
   disabled = false,
   busy = false,
+  selected,
   accessibilityLabel,
   role = 'button',
   glyph,
@@ -45,7 +47,7 @@ export function Button({
     <Pressable
       accessibilityRole={role}
       accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ disabled: blocked, busy }}
+      accessibilityState={{ disabled: blocked, busy, selected }}
       disabled={blocked}
       onPress={onPress}
       style={({ pressed }) => ({

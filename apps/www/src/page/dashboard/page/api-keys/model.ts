@@ -35,6 +35,7 @@ export const Message = defineMessageUnion({
   Failed: { message: Schema.String },
   Issued: {},
   PasswordRequested: {},
+  PasswordCancelled: {},
   PasswordVerificationStarted: {},
   PasswordVerificationFailed: { message: Schema.String },
   GotPasswordDialogMessage: { message: Dialog.Message },

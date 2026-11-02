@@ -11,6 +11,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
   messages: [
     Message.Issued,
     Message.PasswordRequested,
+    Message.PasswordCancelled,
     Message.PasswordVerificationStarted,
     Message.PasswordVerificationFailed,
   ],
@@ -18,6 +19,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
     Stream.callback<
       | typeof Message.Issued.Type
       | typeof Message.PasswordRequested.Type
+      | typeof Message.PasswordCancelled.Type
       | typeof Message.PasswordVerificationStarted.Type
       | typeof Message.PasswordVerificationFailed.Type
     >((messages) =>
@@ -110,10 +112,31 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
           if (event.target.closest('[data-key-copy]')) Queue.offerUnsafe(requests, 'copy')
         }
 
+        const keydown = (event: Event) => {
+          if (
+            !live ||
+            !(event instanceof KeyboardEvent) ||
+            event.key !== 'Escape' ||
+            event.defaultPrevented
+          )
+            return
+          const target = event.composedPath()[0]
+
+          if (
+            !(target instanceof HTMLInputElement || target instanceof HTMLButtonElement) ||
+            !target.form?.matches('[data-key-password-form]')
+          )
+            return
+          event.preventDefault()
+          event.stopPropagation()
+          Queue.offerUnsafe(messages, Message.PasswordCancelled())
+        }
+
         yield* Effect.acquireRelease(
           Effect.sync(() => {
             element.addEventListener('submit', submit)
             element.addEventListener('click', click)
+            element.addEventListener('keydown', keydown)
             element.addEventListener('close', closed, true)
             window.addEventListener('pagehide', clear)
           }),
@@ -122,6 +145,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
               clear()
               element.removeEventListener('submit', submit)
               element.removeEventListener('click', click)
+              element.removeEventListener('keydown', keydown)
               element.removeEventListener('close', closed, true)
               window.removeEventListener('pagehide', clear)
             }),

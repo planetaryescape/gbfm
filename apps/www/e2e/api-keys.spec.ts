@@ -121,3 +121,63 @@ test('admins can choose publication and invalid permissions are rejected locally
     0,
   )
 })
+
+test('password confirmation stays open across backdrop clicks and browser focus changes', async ({
+  page,
+}) => {
+  await signIn(page, 'creator')
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Autofill interaction')
+  await page.getByRole('checkbox', { name: 'Read your posts' }).check()
+  await page.getByRole('button', { name: 'Create key', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Confirm your password', exact: true })
+  await expect(dialog).toBeVisible()
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('blur'))
+    window.dispatchEvent(new Event('focus'))
+  })
+  await expect(dialog).toBeVisible()
+  await page.mouse.click(4, 4)
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(dialog).not.toBeVisible()
+})
+
+test('Escape from an external autofill popup does not dismiss password confirmation', async ({
+  page,
+}) => {
+  await signIn(page, 'creator')
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('External autofill popup')
+  await page.getByRole('checkbox', { name: 'Read your posts' }).check()
+  await page.getByRole('button', { name: 'Create key', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Confirm your password', exact: true })
+  await expect(dialog).toBeVisible()
+  await page.evaluate(() => {
+    const host = document.createElement('div')
+    host.id = 'e2e-autofill-popup'
+    host.style.cssText = 'position:fixed;top:8px;left:8px;z-index:2147483647'
+    const shadow = host.attachShadow({ mode: 'open' })
+    const button = document.createElement('button')
+    button.textContent = 'Use saved password'
+    button.addEventListener('click', () => {
+      const password = document.querySelector('[data-key-password-form] input[name="password"]')
+
+      if (password instanceof HTMLInputElement) {
+        password.value = 'autofilled-disposable-password'
+        password.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+    })
+    shadow.append(button)
+    document.documentElement.append(host)
+    button.focus()
+  })
+  await page.getByRole('button', { name: 'Use saved password' }).click()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('textbox', { name: 'Password', exact: true })).toHaveValue(
+    'autofilled-disposable-password',
+  )
+  await page.evaluate(() => document.getElementById('e2e-autofill-popup')?.remove())
+  await dialog.getByRole('textbox', { name: 'Password', exact: true }).focus()
+  await page.keyboard.press('Escape')
+  await expect(dialog).not.toBeVisible()
+})

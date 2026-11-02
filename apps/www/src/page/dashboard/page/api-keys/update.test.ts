@@ -30,7 +30,9 @@ describe('API key management', () => {
     expect(
       update(failed, Message.GotPasswordDialogMessage({ message: Dialog.Message.RequestedClose() }))
         .model.passwordDialog.isOpen,
-    ).toBe(false)
+    ).toBe(true)
+    expect(update(failed, Message.PasswordCancelled()).model.passwordDialog.isOpen).toBe(false)
+    expect(update(verifying, Message.PasswordCancelled()).model.passwordDialog.isOpen).toBe(true)
   })
 
   const id = Schema.decodeUnknownSync(KeyId)('c63400ba-984d-4d4e-91ce-3b1722cc28f2')

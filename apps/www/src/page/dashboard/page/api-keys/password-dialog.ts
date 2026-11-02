@@ -9,12 +9,13 @@ export const passwordDialog = (model: Model, h: HtmlBuilder<Message>) =>
     model: model.passwordDialog,
     view: Dialog.view,
     viewInputs: {
-      toView: ({ dialog, backdrop, panel, title, description, isVisible }) =>
+      hasDescription: true,
+      toView: ({ dialog, panel, title, description, isVisible }) =>
         h.dialog(
           [...dialog, h.Class('overlay-dialog'), h.DataAttribute('key-password-dialog', '')],
           isVisible
             ? [
-                h.div([...backdrop, h.Class('absolute inset-0 bg-black/80')]),
+                h.div([h.Class('absolute inset-0 bg-black/80')]),
                 h.section(
                   [
                     ...panel,
@@ -63,11 +64,7 @@ export const passwordDialog = (model: Model, h: HtmlBuilder<Message>) =>
                                 h.Type('button'),
                                 h.Class('btn btn-quiet'),
                                 h.Disabled(model.verifyingPassword),
-                                h.OnClick(
-                                  Message.GotPasswordDialogMessage({
-                                    message: Dialog.Message.RequestedClose(),
-                                  }),
-                                ),
+                                h.OnClick(Message.PasswordCancelled()),
                               ],
                               ['Cancel'],
                             ),

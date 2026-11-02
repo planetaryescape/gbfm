@@ -51,8 +51,19 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
     PasswordVerificationFailed: ({ message }) => ({
       model: { ...model, verifyingPassword: false, passwordError: message },
     }),
+    PasswordCancelled: () => {
+      if (model.verifyingPassword) return { model }
+      const child = Dialog.update(model.passwordDialog, Dialog.Message.RequestedClose())
+
+      return {
+        model: { ...model, passwordDialog: child.model, passwordError: null },
+        commands: Command.mapMessages(child.commands ?? [], (message) =>
+          Message.GotPasswordDialogMessage({ message }),
+        ),
+      }
+    },
     GotPasswordDialogMessage: ({ message }) => {
-      if (model.verifyingPassword && Predicate.isTagged(message, 'RequestedClose')) return { model }
+      if (Predicate.isTagged(message, 'RequestedClose')) return { model }
       const child = Dialog.update(model.passwordDialog, message)
 
       return {

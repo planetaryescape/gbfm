@@ -152,6 +152,10 @@ describe('Tweet reader navigation ownership', () => {
     const initial = init(a).model
     const hydrated = update(initial, Message.ClientStarted())
     expect(hydrated.model.tweetReader.checkpoint).toBe('a')
+    expect(
+      update(hydrated.model, changed('https://gbfm.co.za/tweet/latest')).model.tweetReader
+        .returnSlug,
+    ).toBe('a')
 
     const withoutCheckpoint = {
       ...hydrated.model,

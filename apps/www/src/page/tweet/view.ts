@@ -18,6 +18,7 @@ import {
 import { readerHeader } from './dock'
 import { tweetHeading } from './heading'
 import { readerNotices } from './notices'
+import { readingProgress } from './progress-view'
 
 export const view = (model: Model, h: HtmlBuilder<Message>) => {
   const screen = model.flags.tweet
@@ -31,7 +32,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>) => {
       ],
     )
   const neighbours = model.interactive ? model.tweetReader.neighbours : model.flags.neighbours
-  const chronological = model.flags.neighbours ?? neighbours
+  const chronological = neighbours ?? model.flags.neighbours
   const older = chronological?.older
   const post = screen.post
   const principal = model.flags.principal
@@ -66,6 +67,10 @@ export const view = (model: Model, h: HtmlBuilder<Message>) => {
     [
       h.DataAttribute('tweet-swipe', post.slug),
       h.DataAttribute('swipe-ready', chronological ? 'true' : 'false'),
+      h.DataAttribute(
+        'reading-status',
+        model.interactive ? model.tweetReader.metadataStatus : 'loading',
+      ),
       h.Class('max-w-3xl px-4 pt-6 pb-8 mx-auto'),
     ],
     [
@@ -84,6 +89,13 @@ export const view = (model: Model, h: HtmlBuilder<Message>) => {
         ],
       ),
       readerNotices(model, h, post.slug),
+      readingProgress(
+        h,
+        model.interactive &&
+          model.tweetReader.metadataStatus === 'ready' &&
+          Boolean(neighbours?.newerUnread),
+        model.tweetReader.returnSlug,
+      ),
       h.div(
         [h.Class('tweet-swipe-viewport')],
         [

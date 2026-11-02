@@ -357,9 +357,10 @@ test('a modified Latest click opens a separate tab without changing the current 
   ])
 
   await other.waitForURL(/\/tweet\/(?!latest|e2e-archive-one)[^?]+$/)
+  await expect(other.locator('[data-tweet-swipe]')).toHaveAttribute('data-reading-status', 'ready')
   await expect(page).toHaveURL(/\/tweet\/e2e-archive-one$/)
   expect(await page.evaluate(() => localStorage.getItem('gbfm:tweet-checkpoint:anonymous'))).toBe(
-    'e2e-archive-one',
+    new URL(other.url()).pathname.split('/').pop(),
   )
   await other.close()
 })

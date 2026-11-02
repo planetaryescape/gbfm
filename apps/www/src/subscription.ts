@@ -6,6 +6,7 @@ import { Message } from './message'
 import type { Model } from './model'
 import { navMinimizeEvents } from './nav-scroll'
 import * as Creator from './page/creator'
+import { readerRefreshEvents } from './page/tweet/refresh'
 import * as Player from './player'
 import * as Search from './search'
 import { dragEvents } from './sheet-drag'
@@ -61,10 +62,28 @@ const authSubscriptions = Subscription.make<Model, Message>()((entry) => ({
   ),
 }))
 
+const readerSubscriptions = Subscription.make<Model, Message>()((entry) => ({
+  readerRefresh: entry(
+    { active: Schema.Boolean },
+    {
+      modelToDependencies: (model) => ({
+        active: model.interactive && model.tweetReader.current !== null,
+      }),
+      dependenciesToStream: ({ active }) =>
+        active
+          ? readerRefreshEvents.pipe(
+              Stream.map((message) => Message.GotTweetReaderMessage({ message })),
+            )
+          : Stream.empty,
+    },
+  ),
+}))
+
 export const subscriptions = Subscription.aggregate(
   menuSubscriptions,
   navSubscriptions,
   authSubscriptions,
+  readerSubscriptions,
   Subscription.lift(Search.subscriptions)<Model, Message>({
     read: (model) => Option.some(model.search),
     toParentMessage: (message) => Message.GotSearchMessage({ message }),

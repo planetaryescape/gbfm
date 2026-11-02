@@ -50,6 +50,7 @@ export const Model = Schema.Struct({
   identity: Schema.String,
   checkpoint: Schema.NullOr(Checkpoint),
   resumeSlug: Schema.NullOr(Checkpoint),
+  returnSlug: Schema.NullOr(Checkpoint),
   current: Schema.NullOr(Checkpoint),
   navigationId: Schema.Number,
   revision: Schema.Number,
@@ -172,6 +173,7 @@ export const init = (identity: string): Model => ({
   identity,
   checkpoint: null,
   resumeSlug: null,
+  returnSlug: null,
   current: null,
   navigationId: 0,
   revision: 0,
@@ -221,7 +223,12 @@ export const visit = (
 ): Update.Return<Model, Message> => {
   if (model.current === slug && model.navigationId === navigationId)
     return {
-      model: { ...model, checkpoint: slug, resumeSlug: null },
+      model: {
+        ...model,
+        checkpoint: slug,
+        resumeSlug: null,
+        returnSlug: model.returnSlug === slug ? null : model.returnSlug,
+      },
       commands: [StoreCheckpoint({ slug, identity: model.identity })],
     }
 
@@ -240,6 +247,7 @@ export const visit = (
     ...model,
     checkpoint: slug,
     resumeSlug: null,
+    returnSlug: model.returnSlug === slug ? null : model.returnSlug,
     current: slug,
     navigationId,
     neighbours,

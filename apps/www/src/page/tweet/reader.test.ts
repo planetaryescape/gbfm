@@ -15,6 +15,21 @@ const neighbours = Schema.decodeUnknownSync(MicroPostNeighboursResponse)({
 })
 
 describe('Tweet reader', () => {
+  it('keeps a return point through newer tweets and clears it only after returning', () => {
+    const latest = visit(
+      { ...init('anonymous'), returnSlug: 'archive' },
+      'latest-post',
+      1,
+      neighbours,
+      null,
+    ).model
+
+    expect(latest.returnSlug).toBe('archive')
+    expect(latest.checkpoint).toBe('latest-post')
+    const newer = visit(latest, 'another-new-post', 2, neighbours, null).model
+    expect(newer.returnSlug).toBe('archive')
+    expect(visit(newer, 'archive', 3, neighbours, null).model.returnSlug).toBeNull()
+  })
   it('chooses older unread first, newer second, and only authoritative zero is caught up', () => {
     expect(nextUnread(neighbours)).toEqual(UnreadTarget.Older({ slug: 'a' }))
     expect(nextUnread({ ...neighbours, olderUnread: null })).toEqual(

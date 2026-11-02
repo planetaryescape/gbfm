@@ -483,6 +483,10 @@ const updateApplication = (
           current: null,
           neighbours: null,
           navigationId,
+          returnSlug:
+            url.pathname === '/tweet/latest'
+              ? (model.tweetReader.returnSlug ?? model.tweetReader.current)
+              : model.tweetReader.returnSlug,
           resumeSlug:
             TweetReader.concreteSlug(href) === model.tweetReader.resumeSlug
               ? model.tweetReader.resumeSlug

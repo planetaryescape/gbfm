@@ -183,7 +183,7 @@
 .gbfm-dashboard :is(input[type='checkbox'], input[type='radio']) {
   accent-color: var(--dash-accent);
 }
-.gbfm-dashboard button {
+.gbfm-dashboard button:where(:not(.btn)) {
   min-height: 44px;
   padding: 0.5rem 0.875rem;
   font-size: 0.875rem;
@@ -197,7 +197,7 @@
     background-color 120ms ease,
     border-color 120ms ease;
 }
-.gbfm-dashboard button:hover {
+.gbfm-dashboard button:where(:not(.btn)):hover {
   background: var(--dash-hover);
   border-color: color-mix(in srgb, var(--dash-fg) 35%, var(--border));
 }

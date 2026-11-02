@@ -117,10 +117,12 @@ function Reader({
         onClose={() => setOptions(false)}
         onGo={go}
         onRandom={() => {
+          setEntering(null)
           setOptions(false)
           reader.random()
         }}
         onReset={() => {
+          setEntering(null)
           setOptions(false)
           reader.reset()
         }}

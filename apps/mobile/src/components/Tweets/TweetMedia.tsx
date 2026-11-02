@@ -24,7 +24,7 @@ export function TweetImage({
   const uri = tweetLinkUrl(src)
 
   return (
-    <SwipeExclusion>
+    <SwipeExclusion disabled={!link}>
       <View style={{ gap: 8 }}>
         {failed || !uri || !uri.startsWith('http') ? (
           <Text style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 13 }}>

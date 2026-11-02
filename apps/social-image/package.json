@@ -8,12 +8,14 @@
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@gbfm/core": "workspace:*",
+    "@gbfm/rich-content": "workspace:*",
     "@gbfm/social-card": "workspace:*",
     "@resvg/resvg-wasm": "2.6.2",
     "effect": "4.0.6",
     "qrcode": "1.5.4",
     "react": "19.2.7",
-    "satori": "0.19.3"
+    "satori": "0.33.5"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.7",

@@ -184,6 +184,7 @@ const showPage = (
         metadata: flags.metadata,
         noindex:
           flags.status !== 200 ||
+          flags.items.some((item) => item.draft) ||
           Route.guards.Dashboard(next.model.route) ||
           Route.guards.Composer(next.model.route) ||
           Route.guards.Auth(next.model.route) ||
@@ -627,6 +628,10 @@ const updateApplication = (
                 error: 'This page could not be loaded. Please try again.',
               }
             : { ...model, pageCache },
+        commands:
+          model.flags.tweet && TweetReader.concreteSlug(key) && key !== pageKey(model.flags.url)
+            ? [Replace({ href: model.flags.url, expected: key })]
+            : [],
       }
     },
     NavigationCompleted: () => ({ model }),

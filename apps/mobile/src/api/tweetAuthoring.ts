@@ -51,12 +51,10 @@ export const saveTweet = Effect.fn('saveTweet')(
     return yield* client
       .createPost({ payload })
       .pipe(
-        Effect.catch((cause) =>
-          Predicate.isTagged(cause, 'Conflict')
-            ? client
-                .getPostBySlugForEdit({ params: { slug: draft.slug } })
-                .pipe(Effect.flatMap(() => update()))
-            : Effect.fail(cause),
+        Effect.catchTag('Conflict', () =>
+          client
+            .getPostBySlugForEdit({ params: { slug: draft.slug } })
+            .pipe(Effect.flatMap(() => update())),
         ),
       )
   },

@@ -290,6 +290,22 @@ const [editorial] = await database
 
 if (!editorial) throw new Error('Local E2E editorial was not seeded')
 
+const [editorialDraft] = await database
+  .insert(postsTable)
+  .values({
+    slug: 'e2e-private-listening-notes',
+    title: 'Unpublished listening notes',
+    description: 'A private draft in the same reading layout as a published story.',
+    content: `## Still listening\n\nThese **private listening notes** belong to the local creator.\n\n::track{url="${editorialSpotifyUrl}"}`,
+    type: 'post',
+    draft: true,
+  })
+  .returning()
+
+if (!editorialDraft) throw new Error('Local E2E editorial draft was not seeded')
+
+await database.insert(postCreators).values({ postId: editorialDraft.id, creatorId: creator.id })
+
 for (const post of [rootPost, editorial]) {
   await replaceEntityLabels(database, 'post', post.id, { tags: ['local-music'] })
 }

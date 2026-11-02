@@ -248,7 +248,10 @@ const presentationForPost = (kind: 'editorial' | 'tweet' | 'post', slug: string,
 
     if (post.type === 'micro') {
       const input = yield* service.getTweetCardInput(post)
-      const socialCard = yield* Effect.promise(() => buildTweetCardPresentation(input))
+
+      const socialCard = yield* Effect.promise(() =>
+        buildTweetCardPresentation({ ...input, artworkUrl: post.thumbnailUrl }),
+      )
 
       return withGeneratedImage(metadata, socialCard)
     }

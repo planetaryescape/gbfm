@@ -1,7 +1,10 @@
 import { Api } from '@gbfm/api/api'
+import { AuthenticatedActor } from '@gbfm/api/middleware/actor'
 import { AuthSession } from '@gbfm/api/middleware/auth'
 import {
   GetEditorialPostsResponse,
+  GetEditorialSummariesResponse,
+  CompiledEditorialPostResponse,
   GetEditorialTagsResponse,
   GetMicroTagsResponse,
   GetPostTagsResponse,
@@ -9,11 +12,15 @@ import {
   ValidationHttpError,
 } from '@gbfm/api/post'
 import { canCreatePosts } from '@gbfm/core/roles'
-import { Effect, Schema } from 'effect'
+import { Effect, Predicate, Schema } from 'effect'
 import { HttpServerResponse } from 'effect/http'
 import { HttpApiBuilder, HttpApiError } from 'effect/http-api'
 
-import { dieOnDatabaseError as makeDieOnDatabaseError } from '@/http/handler-utils'
+import {
+  dieOnDatabaseError as makeDieOnDatabaseError,
+  getOptionalActor,
+} from '@/http/handler-utils'
+import { requireKeyScope } from '@/lib/key-post-authorization'
 import { omitUndefined } from '@/lib/omit-undefined'
 import { resolvePostMusic } from '@/services/post-music-resolution'
 import { PostService } from '@/services/post.service'
@@ -86,7 +93,9 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
     )
     .handle('getPostsForEdit', ({ query }) =>
       Effect.gen(function* () {
-        const { user } = yield* AuthSession
+        const actor = yield* AuthenticatedActor
+        const { user } = actor
+        yield* requireKeyScope(actor, ['posts:read'])
         const svc = yield* PostService
 
         const result = yield* dieOnDatabaseError(
@@ -101,6 +110,7 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
             }),
             user.id,
             user.role ?? 'user',
+            Predicate.isTagged(actor.credential, 'PersonalAccessKey') ? 'owned' : 'role',
           ),
         )
 
@@ -169,6 +179,7 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
     .handle('getEditorialSummaries', ({ query }) =>
       Effect.gen(function* () {
         const svc = yield* PostService
+        const actor = yield* getOptionalActor
 
         const result = yield* dieOnDatabaseError(
           svc.getEditorialSummaries(
@@ -176,24 +187,45 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
               limit: query.limit ?? 20,
               offset: query.offset ?? 0,
               tag: query.tag,
+              readerId: actor?.userId,
             }),
           ),
         )
 
-        return { data: result.data.map(toDateStrings), pagination: result.pagination }
+        const body = yield* Schema.encodeEffect(GetEditorialSummariesResponse)({
+          data: result.data.map(toDateStrings),
+          pagination: result.pagination,
+        }).pipe(Effect.orDie)
+
+        return (yield* HttpServerResponse.json(body).pipe(Effect.orDie)).pipe(
+          HttpServerResponse.setHeader('Cache-Control', 'private, no-store'),
+          HttpServerResponse.setHeader('Vary', 'Cookie, Authorization'),
+        )
       }),
     )
     .handle('getEditorialPostBySlug', ({ params }) =>
       Effect.gen(function* () {
         const svc = yield* PostService
+        const actor = yield* getOptionalActor
 
         const post = yield* dieOnDatabaseError(
           svc
-            .getEditorialBySlug(params.slug)
+            .getEditorialBySlug(params.slug, actor?.userId)
             .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
         )
 
-        return toDateStrings(post)
+        const body = yield* Schema.encodeEffect(CompiledEditorialPostResponse)(
+          toDateStrings(post),
+        ).pipe(Effect.orDie)
+
+        const response = (yield* HttpServerResponse.json(body).pipe(Effect.orDie)).pipe(
+          HttpServerResponse.setHeader('Cache-Control', 'private, no-store'),
+          HttpServerResponse.setHeader('Vary', 'Cookie, Authorization'),
+        )
+
+        return post.draft
+          ? HttpServerResponse.setHeader(response, 'X-Robots-Tag', 'noindex, nofollow')
+          : response
       }),
     )
     .handle('getMicroPosts', ({ query }) =>
@@ -444,14 +476,23 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
     )
     .handle('getPostBySlugForEdit', ({ params }) =>
       Effect.gen(function* () {
-        const { user } = yield* AuthSession
+        const actor = yield* AuthenticatedActor
+        const { user } = actor
+        yield* requireKeyScope(actor, ['posts:read'])
         const svc = yield* PostService
 
         const post = yield* dieOnDatabaseError(
-          svc.getBySlugForEdit(params.slug, user.id, user.role ?? 'user').pipe(
-            Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
-            Effect.catchTag('UnauthorizedError', () => new HttpApiError.Unauthorized()),
-          ),
+          svc
+            .getBySlugForEdit(
+              params.slug,
+              user.id,
+              user.role ?? 'user',
+              Predicate.isTagged(actor.credential, 'PersonalAccessKey') ? 'owned' : 'role',
+            )
+            .pipe(
+              Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
+              Effect.catchTag('UnauthorizedError', () => new HttpApiError.Unauthorized()),
+            ),
         )
 
         return toDateStrings(post)
@@ -459,7 +500,9 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
     )
     .handle('previewPostContent', ({ payload }) =>
       Effect.gen(function* () {
-        const { user } = yield* AuthSession
+        const actor = yield* AuthenticatedActor
+        const { user } = actor
+        yield* requireKeyScope(actor, ['posts:create', 'posts:update'])
 
         if (!canCreatePosts(user.role)) return yield* new HttpApiError.Forbidden()
 
@@ -470,7 +513,8 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
     )
     .handle('createPost', ({ payload }) =>
       Effect.gen(function* () {
-        const { user } = yield* AuthSession
+        const actor = yield* AuthenticatedActor
+        const { user } = actor
 
         if (!canCreatePosts(user.role)) {
           return yield* new HttpApiError.Forbidden()
@@ -486,7 +530,7 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
             .create(
               omitUndefined({ ...postData, tags: postData.tags ? [...postData.tags] : undefined }),
               finalCreatorIds,
-              { userId: user.id, userRole: user.role ?? 'user' },
+              { userId: user.id, userRole: user.role ?? 'user', credential: actor.credential },
             )
             .pipe(
               Effect.catchTag('ConflictError', () => new HttpApiError.Conflict()),
@@ -526,7 +570,8 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
     )
     .handle('updatePostBySlug', ({ params, payload }) =>
       Effect.gen(function* () {
-        const { user } = yield* AuthSession
+        const actor = yield* AuthenticatedActor
+        const { user } = actor
         const { tags, creatorIds, ...updateData } = payload
 
         const svc = yield* PostService
@@ -542,8 +587,10 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
                 ...(tags && { tags: [...tags] }),
                 ...(creatorIds && { creatorIds: [...creatorIds] }),
               }),
+              actor.credential,
             )
             .pipe(
+              Effect.catchTag('ConflictError', () => new HttpApiError.Conflict()),
               Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
               Effect.catchTag('UnauthorizedError', () => new HttpApiError.Unauthorized()),
               Effect.catchTag('S3Error', () => new HttpApiError.InternalServerError()),

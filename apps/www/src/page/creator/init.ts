@@ -3,7 +3,7 @@ import type { Update } from 'foldkit'
 
 import { Hydrate } from './command'
 import type { Message } from './message'
-import { keyOf, type Model } from './model'
+import { keyOf, MosaicState, type Model } from './model'
 import type { CreatorKind, CreatorService } from './services'
 
 export interface InitInput {
@@ -63,6 +63,7 @@ export const initialModel = ({ kind, editSlug, creatorId, authorized }: InitInpu
   musicReferencesHasMore: false,
   resolvingPostMusic: false,
   postMusicNotice: null,
+  mosaic: MosaicState.cases.Idle.make({}),
   quotePreview: null,
   uploadPercent: 0,
   uploadState: 'idle',

@@ -4,7 +4,6 @@ import { FlatList, Image, Modal, Pressable, Text, View } from 'react-native'
 
 import { useNowPlaying } from '@/audio/NowPlayingProvider'
 import { Button } from '@/components/Button'
-import { Glyph } from '@/icons/Glyph'
 import { useThemeColors, withAlpha } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 
@@ -18,36 +17,13 @@ export function QueueSheet() {
 
   return (
     <View style={{ gap: 4 }}>
-      <Pressable
-        accessibilityRole='button'
+      <Button
+        label={queueLabel}
         accessibilityLabel='Open queue'
-        hitSlop={8}
+        variant='quiet'
+        glyph='chevronUp'
         onPress={() => setIsOpen(true)}
-        style={({ pressed }) => ({
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingVertical: 6,
-          paddingHorizontal: 2,
-          opacity: pressed ? 0.6 : 1,
-        })}>
-        <Text
-          style={{
-            color: colors.muted,
-            fontFamily: fonts.monoSemiBold,
-            fontSize: 11,
-            textTransform: 'uppercase',
-            letterSpacing: 2,
-          }}>
-          {queueLabel}
-        </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <Text style={{ color: colors.accent, fontFamily: fonts.monoSemiBold, fontSize: 12 }}>
-            Open
-          </Text>
-          <Glyph name='chevronUp' size={12} color={colors.accent} />
-        </View>
-      </Pressable>
+      />
 
       {queueLength > 0 ? (
         <View style={{ gap: 4 }}>
@@ -224,7 +200,7 @@ export function QueueSheet() {
                           style={{
                             width: 44,
                             height: 44,
-                            borderRadius: 6,
+                            borderRadius: radii.artwork,
                             backgroundColor: withAlpha(colors.muted, 0.25),
                           }}
                         />
@@ -250,22 +226,13 @@ export function QueueSheet() {
                         </Text>
                       </View>
                     </Pressable>
-                    <Pressable
-                      accessibilityRole='button'
-                      accessibilityLabel={`Remove ${track.title} from queue`}
-                      hitSlop={8}
+                    <Button
+                      label={`Remove ${track.title} from queue`}
+                      variant='quiet'
+                      glyph='close'
+                      iconOnly
                       onPress={() => removeFromQueue(index)}
-                      style={({ pressed }) => ({
-                        width: 30,
-                        height: 30,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: 15,
-                        backgroundColor: withAlpha(colors.muted, 0.18),
-                        opacity: pressed ? 0.6 : 1,
-                      })}>
-                      <Glyph name='close' size={12} color={colors.muted} />
-                    </Pressable>
+                    />
                   </View>
                 )
               }}

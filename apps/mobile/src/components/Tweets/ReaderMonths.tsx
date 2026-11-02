@@ -34,6 +34,7 @@ export function ReaderMonths({
             key={value}
             label={value}
             primary={value === year}
+            selected={value === year}
             onPress={() => setYear(value)}
           />
         ))}

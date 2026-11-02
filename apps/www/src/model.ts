@@ -51,6 +51,7 @@ export const ContentItem = Schema.Struct({
   creators: AudioResponse.fields.creators,
   tags: ReleaseResponse.fields.tags,
   streamingLinks: ReleaseResponse.fields.streamingLinks,
+  draft: Schema.optional(Schema.Boolean),
 })
 
 export type ContentItem = typeof ContentItem.Type

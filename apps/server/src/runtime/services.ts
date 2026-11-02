@@ -2,11 +2,13 @@ import { Layer } from 'effect'
 
 import type { Database } from '@/db/layer'
 import { AuthLive } from '@/lib/auth'
+import { CryptoLive } from '@/lib/crypto'
 import { MdxServiceCatalogLayer } from '@/lib/mdx'
 import {
   EditorialListCacheUnavailableLayer,
   type EditorialListCache,
 } from '@/services/editorial-list-cache'
+import { PersonalAccessKeysLive } from '@/services/personal-access-keys'
 import type { SentryService } from '@/services/sentry.service'
 import type { SitemapCache } from '@/services/sitemap-cache'
 
@@ -117,6 +119,7 @@ export const AppLayer = ({
   )
 
   const BaseServicesLayer = Layer.mergeAll(
+    PersonalAccessKeysLive.pipe(Layer.provide(CryptoLive)),
     EmailDeliveryWithDependencies,
     FavoriteServiceLayer,
     SpotifyServiceLayer.pipe(Layer.provide(configLive)),

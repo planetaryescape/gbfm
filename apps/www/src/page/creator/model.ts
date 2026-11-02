@@ -7,6 +7,13 @@ import { CreatorDraftSchema as Draft, CreatorIdentity, MusicReference } from './
 
 export const Kind = Schema.Literals(['micro', 'post', 'mix'])
 
+export const MosaicState = Schema.TaggedUnion({
+  Idle: {},
+  Generating: { content: Schema.String },
+  Ready: { url: Schema.String, content: Schema.String },
+  Failed: { message: Schema.String },
+})
+
 export const Model = Schema.Struct({
   draft: Draft,
   reviewDialog: Dialog.Model,
@@ -48,6 +55,7 @@ export const Model = Schema.Struct({
   musicReferencesHasMore: Schema.Boolean,
   resolvingPostMusic: Schema.Boolean,
   postMusicNotice: Schema.NullOr(Schema.String),
+  mosaic: MosaicState,
   quotePreview: Schema.NullOr(Schema.String),
   uploadPercent: Schema.Number,
   uploadState: Schema.Literals(['idle', 'running', 'pausing', 'paused', 'failed', 'cancelling']),

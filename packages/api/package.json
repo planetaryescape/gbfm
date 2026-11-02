@@ -4,6 +4,8 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./personal-access-keys": "./src/personal-access-keys.ts",
+    "./middleware/actor": "./src/middleware/actor.ts",
     "./api": "./src/api.ts",
     "./admin": "./src/admin.ts",
     "./health": "./src/health.ts",
@@ -37,6 +39,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@gbfm/core": "workspace:*",
     "@gbfm/rich-content": "workspace:*",
     "@gbfm/social-card": "workspace:*",
     "@gbfm/site-metadata": "workspace:*",

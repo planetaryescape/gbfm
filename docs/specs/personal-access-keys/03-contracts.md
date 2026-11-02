@@ -1,6 +1,6 @@
 # Contracts: personal access keys
 
-Status: proposed. TypeScript sketches describe intended contracts, not compiled implementation. Use installed Effect **4.0.6**, local `Context.Service`, `Schema.TaggedError`, `HttpApiGroup`, and `HttpApiEndpoint` conventions. No new package is required by the recommended design.
+Status: implementation contract for PR #416, with architectural sketches retained below. Compiled schemas and services are authoritative where a sketch uses a proposed type or finer-grained error; see PROGRESS.md for those differences. The installed Effect version is **4.0.6**. No external package was added.
 
 ## Domain values and actor
 
@@ -19,8 +19,6 @@ const KeyScope = Schema.Literals([
   'posts:create',
   'posts:update',
   'posts:publish',
-  'music:resolve',
-  'uploads:images:create',
 ])
 
 type KeyId = typeof KeyId.Type
@@ -126,7 +124,7 @@ Token format: `gbfm_pat_v1_<prod|dev>_<43-character base64url random secret>`. G
 
 Keep the secret wrapped in `Redacted` after parsing/generation. Unwrap only in the digest adapter or the single create-response encoder. Persist nothing that can recover it. User-chosen low-entropy keys and BYOK are disallowed. There is no pepper to rotate and no dependency on `BETTER_AUTH_SECRET`; SHA-256 is appropriate here because the input is 256 bits of random secret, not a password.
 
-Proposed table **`personal_access_keys`**, documented only, not a migration in this change:
+Shipped table **`personal_access_keys`**, added by migration `0012_personal_access_keys.sql`:
 
 | SQL column | Type / constraints | TypeScript field |
 | --- | --- | --- |
@@ -147,11 +145,11 @@ Proposed table **`personal_access_keys`**, documented only, not a migration in t
 
 Indexes: unique hash; unique owner/environment/issuance ID; index owner/environment/created_at for listing and active-count filtering. Retain expired/revoked rows for account lifetime in v1; no cleanup scheduler or reactivation. User deletion cascades; a later retention change needs a separate policy decision. DB checks enforce timestamp and counter shape, JSON array shape, and paired null window/zero count; the row parser also rejects unknown scopes, invalid dependencies, malformed hash/prefix, and expiry beyond the 90-day maximum. A corrupt row is a storage failure, never broadened access.
 
-Drizzle uses explicit snake_case literals and camelCase fields, with `integer(..., { mode: 'timestamp_ms' })`. Extend exports and test replay only when implementation/migration work is authorized. Use the existing flat, hand-written `apps/server/drizzle-d1/` migration chain, never `drizzle push` or migration generators. No schema or data is changed by this spec.
+Drizzle uses explicit snake_case literals and camelCase fields, with `integer(..., { mode: 'timestamp_ms' })`. Exports and disposable test replay include migration 0012. It follows the flat, hand-written `apps/server/drizzle-d1/` chain; no generator or `drizzle push` is used. Tests apply it only to disposable D1, not production.
 
 ### Environment binding
 
-Parse `ConfigService.app.stage` at composition into the closed key environment. Verify stage, token namespace, and stored environment agree. Do not infer trust from a host header. Prod/dev use distinct D1 resources and secrets never move between them. A prod database copied into dev still rejects prod tokens, even with identical user IDs and hashes. Do not relabel imported rows. Local dev key issuance uses only its local DB; a dev token from another DB is simply unknown.
+Only the exact stages `prod` and `dev` enable keys, mapping to the same-named token namespace. Every other stage (including `local`, `d1-staging`, empty and unknown strings) fails closed with `KeyStoreUnavailable` (503) when a key operation runs, not at startup. Session routes remain available. Verify stage, token namespace, and stored environment agree; never infer trust from a host header or relabel imported rows. A production database copied into dev still rejects prod tokens. Dev issuance uses its configured local DB; a dev key from another database is simply unknown.
 
 ## Service and adapter contracts
 
@@ -240,10 +238,13 @@ Creation binds ownership to self before calling the policy. Existing post operat
 
 Implement errors using `Schema.TaggedError` and finite safe fields. New HTTP error bodies use `{ _tag, ...safeFields }` with schema-defined HTTP status. No raw cause, input, secret, digest, user email, or arbitrary library message is serialized.
 
+The outer admission gate runs before HttpApi dispatch. Its `AmbiguousCredential` (400), `KeyCredentialTooLarge` (431), and `KeyEndpointDenied` (403) responses are transport-only `{ _tag }` JSON, not compiled domain errors or endpoint-schema registrations. `AmbiguousCredential` also rejects percent-encoded or double-slash paths before route matching. The tagged-error and endpoint-declaration rules apply to failures inside the API.
+
 | Domain/error tag | HTTP | Safe fields / meaning |
 | --- | --- | --- |
 | `InvalidKeyCredential` | 401 | None; identical for invalid, expired, revoked, wrong stage, missing/deleted/banned owner |
-| `AmbiguousCredential` | 400 | None; multiple auth methods or duplicate header |
+| `AmbiguousCredential` | 400 | None; multiple auth methods, duplicate header, or percent-encoded/double-slash path |
+| `KeyCredentialTooLarge` | 431 | None; PAT Authorization header exceeds 1,024 characters |
 | `KeyInputInvalid` | 422 | `field` from finite request-field names; invalid value not echoed |
 | `SessionReauthenticationRequired` | 403 | None; issue only |
 | `KeyScopeDenied` | 403 | `requiredScopes: KeyScope[]` |

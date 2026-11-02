@@ -9,6 +9,7 @@ import { imageSource } from '../../view/artwork'
 import { richContentView } from '../../view/rich-content/render'
 import { Message } from './message'
 import { draftValidationError, TWEET_MAX_LENGTH, type Model } from './model'
+import { mosaicView } from './mosaic-view'
 import { review } from './review-view'
 
 export interface ViewInputs {
@@ -383,29 +384,28 @@ const metadata = (model: Model, h: Builder, busy: boolean, principal: Principal 
   h.section(
     [h.Class('creator-metadata'), h.AriaLabel('Post details')],
     [
-      model.draft.kind === 'post'
-        ? h.div(
-            [h.Key('editorial-artwork'), h.Class('creator-artwork')],
-            [
-              h.span([], ['Artwork']),
-              model.draft.thumbnailUrl
-                ? h.img([imageSource(model.draft.thumbnailUrl), h.Alt('Editorial artwork preview')])
-                : h.label(
-                    [h.Class('creator-artwork-upload')],
-                    [
-                      h.span([], ['Upload artwork']),
-                      h.input([
-                        h.Type('file'),
-                        h.Accept('image/*'),
-                        h.Disabled(busy),
-                        h.OnFileChange((files) => Message.ArtworkChosen({ files: [...files] })),
-                      ]),
-                    ],
-                  ),
-              field(h, 'Artwork URL', model.draft.thumbnailUrl, 'thumbnailUrl', 'Artwork URL'),
-            ],
-          )
-        : h.empty,
+      h.div(
+        [h.Key('post-artwork'), h.Class('creator-artwork')],
+        [
+          h.span([], ['Artwork']),
+          model.draft.thumbnailUrl
+            ? h.img([imageSource(model.draft.thumbnailUrl), h.Alt('Post artwork preview')])
+            : h.label(
+                [h.Class('creator-artwork-upload')],
+                [
+                  h.span([], ['Upload artwork']),
+                  h.input([
+                    h.Type('file'),
+                    h.Accept('image/*'),
+                    h.Disabled(busy),
+                    h.OnFileChange((files) => Message.ArtworkChosen({ files: [...files] })),
+                  ]),
+                ],
+              ),
+          field(h, 'Artwork URL', model.draft.thumbnailUrl, 'thumbnailUrl', 'Artwork URL'),
+          mosaicView(model, h, busy),
+        ],
+      ),
       h.div(
         [h.Key('metadata-fields'), h.Class('creator-metadata-fields')],
         [

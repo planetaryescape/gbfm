@@ -173,7 +173,7 @@ export const LoadPage = Command.define('Navigation.Load', {
   execute: ({ href, navigationId }) =>
     Effect.sync(() => window.dispatchEvent(new Event('gbfm:navigation-start'))).pipe(
       Effect.andThen(fetchPage(href)),
-      Effect.tap(() =>
+      Effect.ensuring(
         Effect.sync(() => {
           requestAnimationFrame(() =>
             requestAnimationFrame(() => window.dispatchEvent(new Event('gbfm:navigation-end'))),

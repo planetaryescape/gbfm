@@ -7,13 +7,19 @@ const ready = async (page: Page, slug: string) => {
   await expect(page.locator('[data-tweet-motion]')).not.toHaveAttribute('data-swipe-phase', /.+/)
 }
 
-const drag = (page: Page, phase: 'start' | 'move' | 'end' | 'cancel', x: number, time: number) =>
+const drag = (
+  page: Page,
+  phase: 'start' | 'move' | 'end' | 'cancel',
+  x: number,
+  time: number,
+  y = 250,
+) =>
   page.evaluate(
-    ({ phase, x, time }) => {
+    ({ phase, x, time, y }) => {
       const target = document.querySelector('article')
 
       if (!target) throw new Error('Missing article')
-      const touch = { identifier: 7, target, clientX: x, clientY: 250 }
+      const touch = { identifier: 7, target, clientX: x, clientY: y }
 
       const event = new Event(
         { start: 'touchstart', move: 'touchmove', end: 'touchend', cancel: 'touchcancel' }[phase],
@@ -26,9 +32,48 @@ const drag = (page: Page, phase: 'start' | 'move' | 'end' | 'cancel', x: number,
         timeStamp: { value: time },
       })
       target.dispatchEvent(event)
+
+      return event.defaultPrevented
     },
-    { phase, x, time },
+    { phase, x, time, y },
   )
+
+test('a horizontal drag yields scrolling after a vertical deviation', async ({ page }) => {
+  await page.goto('/tweet/e2e-archive-one')
+  await ready(page, 'e2e-archive-one')
+  await drag(page, 'start', 150, 0)
+  expect(await drag(page, 'move', 200, 100)).toBe(true)
+  expect(await drag(page, 'move', 220, 200, 300)).toBe(false)
+  await drag(page, 'end', 270, 300, 300)
+  await ready(page, 'e2e-archive-one')
+  await expect(page).toHaveURL(/\/tweet\/e2e-archive-one$/)
+})
+
+test('a failed swipe request restores the current post and allows another swipe', async ({
+  page,
+}) => {
+  let failures = 0
+  await page.route('**/tweet/e2e-archive-two**', (route) => {
+    failures++
+
+    return route.abort('failed')
+  })
+  await page.goto('/tweet/e2e-archive-one')
+  await ready(page, 'e2e-archive-one')
+  const prefetchFailures = failures
+  await drag(page, 'start', 150, 0)
+  await drag(page, 'move', 190, 40)
+  await drag(page, 'end', 190, 50)
+  await expect.poll(() => failures).toBeGreaterThan(prefetchFailures)
+  await expect(page).toHaveURL(/\/tweet\/e2e-archive-one$/)
+  await ready(page, 'e2e-archive-one')
+  await expect(page.locator('[data-tweet-motion]')).toHaveCSS('transform', 'none')
+  await page.unroute('**/tweet/e2e-archive-two**')
+  await drag(page, 'start', 150, 1000)
+  await drag(page, 'move', 190, 1040)
+  await drag(page, 'end', 190, 1050)
+  await ready(page, 'e2e-archive-two')
+})
 
 test('tweet follows the finger and springs back below the slow-drag threshold', async ({
   page,
@@ -62,13 +107,16 @@ test('a slow swipe keeps the current post visible while the next request is wait
     requested = resolve
   })
 
-  await page.route('**/tweet/e2e-archive-two*', async (route) => {
+  let navigating = false
+  await page.route('**/tweet/e2e-archive-two**', async (route) => {
+    if (!navigating) return route.abort()
     requested()
     await waiting
     await route.continue()
   })
   await page.goto('/tweet/e2e-archive-one')
   await ready(page, 'e2e-archive-one')
+  navigating = true
   await drag(page, 'start', 150, 0)
 
   for (let step = 1; step <= 12; step++) {

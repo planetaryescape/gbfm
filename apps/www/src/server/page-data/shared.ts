@@ -67,6 +67,7 @@ export const contentItems = (payload: Schema.Json, path: string): ReadonlyArray<
         ),
         href: `${path}/${encodeURIComponent(slug)}`,
         meta: text(item.releaseDate, text(item.createdAt)) || null,
+        draft: item.draft === true,
       },
     ]
   })

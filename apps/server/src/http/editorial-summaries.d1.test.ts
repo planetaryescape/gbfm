@@ -140,7 +140,7 @@ test('summary route returns the published editorial metadata without provider re
     expect(summary.pagination).toEqual(full.pagination)
     expect(summary.data).toEqual(
       full.data.map(
-        ({ id, slug, title, thumbnailUrl, description, createdAt, updatedAt, creators, tags }) => ({
+        ({
           id,
           slug,
           title,
@@ -150,6 +150,18 @@ test('summary route returns the published editorial metadata without provider re
           updatedAt,
           creators,
           tags,
+          draft,
+        }) => ({
+          id,
+          slug,
+          title,
+          thumbnailUrl,
+          description,
+          createdAt,
+          updatedAt,
+          creators,
+          tags,
+          draft,
         }),
       ),
     )

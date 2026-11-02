@@ -2,11 +2,54 @@ import { describe, expect, it } from 'vitest'
 
 import { init, initialModel } from './init'
 import { Message } from './message'
-import { draftValidationError } from './model'
+import { draftValidationError, MosaicState } from './model'
 import { update } from './update'
 
 describe('creator model', () => {
   const input = { kind: 'micro' as const, editSlug: null, creatorId: 'user-1', authorized: true }
+
+  it('previews a mosaic without replacing artwork until accepted, and preserves it across edits', () => {
+    const model = { ...initialModel(input), phase: 'writing' as const }
+    const draft = { ...model.draft, thumbnailUrl: 'original.png', content: 'First version' }
+    const pending = update({ ...model, draft }, Message.MosaicRequested())
+    expect(pending.commands?.[0]?.name).toBe('Creator.GenerateMosaic')
+    expect(update(pending.model, Message.MosaicRequested()).commands).toBeUndefined()
+
+    const ready = update(
+      pending.model,
+      Message.MosaicGenerated({ content: draft.content, url: 'mosaic.png' }),
+    ).model
+
+    expect(ready.draft.thumbnailUrl).toBe('original.png')
+    const accepted = update(ready, Message.MosaicAccepted())
+    expect(accepted.model.draft.thumbnailUrl).toBe('mosaic.png')
+    expect(accepted.commands?.[0]?.name).toBe('Creator.PersistDraft')
+    expect(
+      update(accepted.model, Message.Changed({ field: 'content', value: 'New version' })).model
+        .draft.thumbnailUrl,
+    ).toBe('mosaic.png')
+    expect(update(ready, Message.MosaicDismissed()).model.draft.thumbnailUrl).toBe('original.png')
+  })
+
+  it('ignores dismissed or mismatched generation results and leaves artwork alone on failure', () => {
+    const model = { ...initialModel(input), phase: 'writing' as const }
+    const pending = update(model, Message.MosaicRequested()).model
+
+    const failed = update(
+      pending,
+      Message.MosaicFailed({ content: '', message: 'No images' }),
+    ).model
+
+    expect(MosaicState.guards.Failed(failed.mosaic)).toBe(true)
+    expect(failed.draft).toEqual(model.draft)
+    expect(
+      update(pending, Message.MosaicGenerated({ content: 'old request', url: 'stale.png' })).model,
+    ).toEqual(pending)
+    const dismissed = update(pending, Message.MosaicDismissed()).model
+    expect(
+      update(dismissed, Message.MosaicGenerated({ content: '', url: 'stale.png' })).model,
+    ).toEqual(dismissed)
+  })
 
   it('initializes with a named hydration command', () => {
     const result = init(input)

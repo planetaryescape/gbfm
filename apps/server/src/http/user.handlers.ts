@@ -111,6 +111,7 @@ export const UserHandlersLive = HttpApiBuilder.group(Api, 'user', (handlers) =>
           makeMediaPublication(config, store)(updateData, {
             userId: user.id,
             userRole: user.role ?? 'user',
+            credential: undefined,
           }).pipe(
             Effect.catchTag('UnauthorizedError', () => new HttpApiError.Unauthorized()),
             Effect.catchTag('ValidationError', () => new HttpApiError.BadRequest()),
@@ -228,6 +229,7 @@ export const UserHandlersLive = HttpApiBuilder.group(Api, 'user', (handlers) =>
           makeMediaPublication(config, store)(updateData, {
             userId: user.id,
             userRole: user.role ?? 'user',
+            credential: undefined,
           }).pipe(
             Effect.catchTag('UnauthorizedError', () => new HttpApiError.Unauthorized()),
             Effect.catchTag('ValidationError', () => new HttpApiError.BadRequest()),

@@ -12,6 +12,7 @@ import { formatDate } from '../../view/format-date'
 import { iconPaths, lucide } from '../../view/icons'
 import { richContent } from '../../view/rich-content/fallback'
 import { richContentView } from '../../view/rich-content/render'
+import { draftNotice } from './draft-notice'
 
 const kindLabel = (kind: string) =>
   Match.value(kind).pipe(
@@ -231,6 +232,7 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
     [h.Class('content-detail mx-auto max-w-5xl px-4 pb-32 pt-6')],
     [
       breadcrumbs([...ancestors(item, kind).map(crumbLink), crumbCurrent(item.slug)]),
+      kind === 'editorial' && item.draft ? draftNotice(h, item.slug) : h.empty,
       masthead(h, item, kind),
       controls(model, h, item),
       item.description

@@ -3,6 +3,9 @@
   "version": "0.0.1",
   "type": "module",
   "exports": {
+    "./identity": "./src/identity.ts",
+    "./personal-access-keys": "./src/personal-access-keys/index.ts",
+    "./http/read-limited-body": "./src/http/read-limited-body.ts",
     "./utils": "./src/utils/index.ts",
     "./utils/slug": "./src/utils/slug.ts",
     "./api": "./src/api/index.ts",

@@ -86,7 +86,7 @@ export const startTweetSwipes = () => {
     const touch = Array.from(event.touches).find((touch) => touch.identifier === active?.identifier)
     const gesture = touch ? moveReaderSwipe(active.gesture, point(event, touch)) : null
 
-    if (!gesture) {
+    if (!gesture || gesture.maxVertical > 40) {
       clear()
       motion.rebound()
 

@@ -46,12 +46,15 @@ export const createPageResponse = async (
   } = page
 
   const { status, title } = flags
+  const containsDraft = flags.items.some((item) => item.draft)
 
   const headers = new Headers({
     'cache-control': 'private, no-store',
     'x-request-id': requestId,
     'server-timing': `foldkit;dur=${(performance.now() - startedAt).toFixed(1)}`,
   })
+
+  if (containsDraft) headers.set('x-robots-tag', 'noindex, nofollow')
 
   for (const cookie of [
     ...identity.cookies,
@@ -77,32 +80,35 @@ export const createPageResponse = async (
       ? metadataKind.get(route.kind)
       : undefined
 
-  const publicMetadata =
-    flags.metadata ??
-    (showDetailSlug && response?.ok
-      ? showMetadata
-      : tweetData && status === 200
-        ? await (tweetData.metadata?.ok
-            ? tweetData.metadata
-                .json()
-                .then((value) => Option.getOrNull(Schema.decodeUnknownOption(SiteMetadata)(value)))
-                .catch(() => null)
-            : null)
-        : kind && Route.guards.Detail(route) && status === 200
-          ? await apiRequest(
-              ownedRequest,
-              `/api/site-metadata/${kind}/${encodeURIComponent(route.slug)}`,
-              { method: 'GET' },
-            )
-              .then(async (response) =>
-                response.ok
-                  ? Option.getOrNull(
-                      Schema.decodeUnknownOption(SiteMetadata)(await response.json()),
-                    )
-                  : null,
+  const publicMetadata = containsDraft
+    ? null
+    : (flags.metadata ??
+      (showDetailSlug && response?.ok
+        ? showMetadata
+        : tweetData && status === 200
+          ? await (tweetData.metadata?.ok
+              ? tweetData.metadata
+                  .json()
+                  .then((value) =>
+                    Option.getOrNull(Schema.decodeUnknownOption(SiteMetadata)(value)),
+                  )
+                  .catch(() => null)
+              : null)
+          : kind && Route.guards.Detail(route) && status === 200
+            ? await apiRequest(
+                ownedRequest,
+                `/api/site-metadata/${kind}/${encodeURIComponent(route.slug)}`,
+                { method: 'GET' },
               )
-              .catch(() => null)
-          : null)
+                .then(async (response) =>
+                  response.ok
+                    ? Option.getOrNull(
+                        Schema.decodeUnknownOption(SiteMetadata)(await response.json()),
+                      )
+                    : null,
+                )
+                .catch(() => null)
+            : null))
 
   const sourceMetadata =
     publicMetadata ??
@@ -153,6 +159,7 @@ export const createPageResponse = async (
       .join('')
 
   const privatePage =
+    containsDraft ||
     Route.guards.Dashboard(route) ||
     Route.guards.Composer(route) ||
     Route.guards.Auth(route) ||

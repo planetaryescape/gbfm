@@ -22,6 +22,12 @@ for (const viewport of [
     await expect(icon).toHaveCSS('height', '44px')
     await expect(control.locator('.episode-play-number')).toHaveText('001')
 
+    await expect(page.locator('img.artwork').first()).toBeVisible()
+
+    for (const artwork of await page.locator('img.artwork').all()) {
+      await expect(artwork).toHaveCSS('border-radius', '0px')
+    }
+
     const pageWidth = await page.evaluate(() => ({
       viewport: innerWidth,
       content: document.documentElement.scrollWidth,
@@ -132,7 +138,12 @@ test('restored long titles leave compact playback controls reachable', async ({ 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await mini.getByRole('button', { name: 'Now playing', exact: true }).click()
   const player = page.getByRole('dialog', { name: 'Now playing', exact: true })
-  await player.getByRole('button', { name: 'Next track', exact: true }).click()
+  const next = player.getByRole('button', { name: 'Next track', exact: true })
+  await expect(next).toHaveCSS(
+    'color',
+    await page.locator('body').evaluate((body) => getComputedStyle(body).color),
+  )
+  await next.click()
   await expect(player).toContainText('Next local transmission')
 })
 

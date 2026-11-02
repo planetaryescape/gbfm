@@ -24,11 +24,11 @@ PAT bearer -> key service -> primary D1 -> current owner
 
 ## Credential selection
 
-Only `Authorization: Bearer <key>` carries a personal key. No query parameter, cookie, JSON-body key, custom header, or URL userinfo. Prefix matching is case-sensitive; bearer scheme parsing follows HTTP rules. Reject duplicate/comma-joined credentials and malformed reserved-prefix tokens. Bound header size before parsing.
+Only `Authorization: Bearer <key>` carries a personal key. No query parameter, cookie, JSON-body key, custom header, or URL userinfo. Token validation is case-sensitive; bearer scheme parsing follows HTTP rules. Duplicate/comma-joined credentials and mixed session/PAT credentials return 400 `AmbiguousCredential`. PAT Authorization headers exceeding 1,024 characters return 431 `KeyCredentialTooLarge` before parsing. On allowlisted routes a malformed reserved-prefix credential returns 401 `InvalidKeyCredential`; non-allowlisted routes return 403 `KeyEndpointDenied` without credential validation.
 
 A PAT bearer plus a Better Auth session cookie is an ambiguous credential: return 400 before handler execution. Non-auth cookies do not cause a conflict. Detect real Better Auth cookie names using its configured cookie machinery, including secure/chunked forms. Existing non-PAT bearer-plus-cookie precedence remains Better Auth's behavior. Do not introduce a second session precedence policy.
 
-The gate covers `/auth/*`, optional-auth navigation, plain router paths, and HttpApi routes. It must wrap the final request dispatch explicitly; do not depend on `Layer.mergeAll` global-middleware ordering, which [routes.ts](../../../apps/server/src/http/routes.ts) already calls out as non-contractual. Known excluded endpoints return 403 for a well-formed PAT attempt; unknown routes remain 404. No key lookup is needed to reject an excluded route. Allowed routes verify the key and return generic 401 on credential failure.
+The gate covers `/auth/*`, optional-auth navigation, plain router paths, and HttpApi routes. It wraps final request dispatch explicitly; it does not depend on `Layer.mergeAll` global-middleware ordering. After the size, ambiguity, and path-encoding checks above, every non-allowlisted route, including unknown routes, returns 403 for a PAT attempt without a key lookup. Unknown routes without PATs retain their existing 404 behavior. Allowed routes verify the key and return generic 401 on credential failure.
 
 Use exact method and canonical route identity, never a broad `/api/content/*` prefix. Reject ambiguous encoded separators/dot segments for PAT requests. A route registry and tests bind each opted-in endpoint to its credential policy. CORS preflights contain no credential and remain unchanged.
 

@@ -1,3 +1,47 @@
+# [2.120.0](https://github.com/planetaryescape/gbfm/compare/v2.119.0...v2.120.0) (2026-11-01)
+
+
+### Bug Fixes
+
+* **reader:** recover navigation and narrow gesture exclusions ([6a7d78c](https://github.com/planetaryescape/gbfm/commit/6a7d78c8ce10e45a498f55f29e2230b7d6e85551))
+
+
+### Features
+
+* **reader:** add cross-platform swipe and month visits ([05b9bc7](https://github.com/planetaryescape/gbfm/commit/05b9bc774a24717d0738388fdcdfcd489d527882))
+
+# [2.119.0](https://github.com/planetaryescape/gbfm/compare/v2.118.0...v2.119.0) (2026-11-01)
+
+
+### Bug Fixes
+
+* **auth:** close scoped-key review gaps ([9221ff7](https://github.com/planetaryescape/gbfm/commit/9221ff7d1eafbcff088264c6dda95405647efd10))
+* **auth:** keep admission specs and race gates precise ([cd73ec5](https://github.com/planetaryescape/gbfm/commit/cd73ec5b1c05524a4918ab6039a91cf20f15cbf9))
+* **auth:** parse branded actor identities at auth boundaries ([44adce1](https://github.com/planetaryescape/gbfm/commit/44adce1eeb954130aa25debc4fc1e66a8c7dfda4))
+* **auth:** preserve key domain contracts through management flows ([a5ee534](https://github.com/planetaryescape/gbfm/commit/a5ee5343d085c7d892066d38f9c75be93f214931))
+* **design:** expose selection and require artwork in checks ([1ec84ff](https://github.com/planetaryescape/gbfm/commit/1ec84ff2b942c43db63855d19a6a264bd8c60523))
+* **design:** preserve control overrides and square artwork ([c0cf0d1](https://github.com/planetaryescape/gbfm/commit/c0cf0d1d496080e88800c8432e3381bdfa587ae9))
+
+
+### Features
+
+* **auth:** add scoped personal access keys for post authoring ([4f1e88c](https://github.com/planetaryescape/gbfm/commit/4f1e88c390199555dbc8394fd514ce1cb21cc60b))
+* **design:** share controls and simplify player chrome ([141e218](https://github.com/planetaryescape/gbfm/commit/141e218309fd62d436c95cff8fb6d849249d5cb2))
+
+# [2.118.0](https://github.com/planetaryescape/gbfm/compare/v2.117.0...v2.118.0) (2026-11-01)
+
+
+### Features
+
+* **artwork:** generate saved mosaics from post media ([0638487](https://github.com/planetaryescape/gbfm/commit/0638487daf16c4e4c98d27192acff151a963a323))
+
+# [2.117.0](https://github.com/planetaryescape/gbfm/compare/v2.116.0...v2.117.0) (2026-10-30)
+
+
+### Features
+
+* **editorial:** let authors read their drafts ([ff29dbf](https://github.com/planetaryescape/gbfm/commit/ff29dbf7ffd0cb87955c18e1399710cab6018ac6))
+
 # [2.116.0](https://github.com/planetaryescape/gbfm/compare/v2.115.3...v2.116.0) (2026-10-29)
 
 

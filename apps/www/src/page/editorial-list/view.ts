@@ -5,6 +5,7 @@ import type { ContentItem } from '../../model'
 import { artwork } from '../../view/artwork'
 import { formatDate } from '../../view/format-date'
 import { iconPaths, lucide } from '../../view/icons'
+import { draftBadge } from '../content/draft-notice'
 
 const recency = (label: 'new' | 'recent') =>
   h.div(
@@ -84,7 +85,7 @@ const listItem = (item: ContentItem, renderedAt: number) => {
       h.div(
         [h.Class('flex-1 min-w-0')],
         [
-          label ? recency(label) : h.empty,
+          item.draft ? draftBadge(h) : label ? recency(label) : h.empty,
           h.a(
             [
               h.Href(item.href),
@@ -134,6 +135,12 @@ export const view = (
   h.div(
     [h.Class('max-w-2xl mx-auto px-4 py-8')],
     [
+      items.some((item) => item.draft)
+        ? h.p(
+            [h.Class('mb-4 text-sm text-muted-foreground')],
+            ['Your drafts are marked below. They are only visible to their authors.'],
+          )
+        : h.empty,
       failure
         ? h.p([h.Role('alert'), h.Class('py-8 text-sm text-muted-foreground')], [failure])
         : h.empty,

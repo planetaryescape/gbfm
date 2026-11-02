@@ -57,12 +57,12 @@ export const Replace = Command.define('Navigation.Replace', {
 })
 
 export const ResetTweetEntry = Command.define('TweetReader.ResetEntry', {
-  args: { expected: Schema.String },
+  args: { expected: Schema.String, identity: Schema.String },
   messages: [Message.NavigationCompleted],
-  execute: ({ expected }) =>
+  execute: ({ expected, identity }) =>
     Effect.gen(function* () {
       if (pageKey(location.href) === expected) {
-        yield* StoreCheckpoint({ slug: null }).effect
+        yield* StoreCheckpoint({ slug: null, identity }).effect
         yield* Navigation.replaceUrl('/tweet/latest')
       }
 

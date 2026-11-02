@@ -151,7 +151,7 @@ test('hard Tweets entry preserves resume intent without marking latest and prefe
   await page.goto('/tweet/e2e-archive-one')
   expect((await prefetched).ok()).toBe(true)
   await expect
-    .poll(() => page.evaluate(() => sessionStorage.getItem('gbfm:tweet-checkpoint')))
+    .poll(() => page.evaluate(() => localStorage.getItem('gbfm:tweet-checkpoint:anonymous')))
     .toBe('e2e-archive-one')
   const writes: Array<string> = []
   page.on('request', (request) => {
@@ -161,7 +161,7 @@ test('hard Tweets entry preserves resume intent without marking latest and prefe
   await page.goto('/tweets')
   await expect(page).toHaveURL(/\/tweet\/e2e-archive-one$/)
   await expect
-    .poll(() => page.evaluate(() => sessionStorage.getItem('gbfm:tweet-checkpoint')))
+    .poll(() => page.evaluate(() => localStorage.getItem('gbfm:tweet-checkpoint:anonymous')))
     .toBe('e2e-archive-one')
   expect(writes).not.toContain(`/api/content/posts/micro/${latest.split('/').pop()}/seen`)
 })
@@ -170,7 +170,9 @@ test('a deleted automatic checkpoint falls back once, but a direct missing URL s
   page,
 }) => {
   await page.goto('/about')
-  await page.evaluate(() => sessionStorage.setItem('gbfm:tweet-checkpoint', 'e2e-deleted-tweet'))
+  await page.evaluate(() =>
+    localStorage.setItem('gbfm:tweet-checkpoint:anonymous', 'e2e-deleted-tweet'),
+  )
   await page.goto('/tweets')
   await expect(page).toHaveURL(/\/tweet\/(?!latest|e2e-deleted-tweet)[^?]+$/)
   await expect(
@@ -182,20 +184,20 @@ test('a deleted automatic checkpoint falls back once, but a direct missing URL s
   await expect(page.getByRole('link', { name: 'Latest', exact: true })).toBeVisible()
 })
 
-test('storage denial degrades to latest and independent tabs do not share checkpoints', async ({
+test('storage denial degrades to latest and new tabs resume the same account checkpoint', async ({
   page,
   context,
 }) => {
   await page.goto('/tweet/e2e-archive-one')
   await expect
-    .poll(() => page.evaluate(() => sessionStorage.getItem('gbfm:tweet-checkpoint')))
+    .poll(() => page.evaluate(() => localStorage.getItem('gbfm:tweet-checkpoint:anonymous')))
     .toBe('e2e-archive-one')
   const other = await context.newPage()
   await other.goto('/tweets')
-  await expect(other).toHaveURL(/\/tweet\/(?!latest|e2e-archive-one)[^?]+$/)
+  await expect(other).toHaveURL(/\/tweet\/e2e-archive-one$/)
   await other.close()
   await page.addInitScript(() => {
-    Object.defineProperty(window, 'sessionStorage', {
+    Object.defineProperty(window, 'localStorage', {
       get() {
         throw new DOMException('Storage denied', 'SecurityError')
       },
@@ -282,14 +284,14 @@ test('starting over resets reading history and opens the latest tweet', async ({
 test('network failure during resume preserves the checkpoint', async ({ page }) => {
   await page.goto('/tweet/e2e-archive-one')
   await expect
-    .poll(() => page.evaluate(() => sessionStorage.getItem('gbfm:tweet-checkpoint')))
+    .poll(() => page.evaluate(() => localStorage.getItem('gbfm:tweet-checkpoint:anonymous')))
     .toBe('e2e-archive-one')
   await page.route('**/tweet/e2e-archive-one?__data=1', (route) => route.abort())
   await page.goto('/tweets')
   await expect(
     page.getByText('This page could not be loaded. Please try again.', { exact: true }),
   ).toBeVisible()
-  expect(await page.evaluate(() => sessionStorage.getItem('gbfm:tweet-checkpoint'))).toBe(
+  expect(await page.evaluate(() => localStorage.getItem('gbfm:tweet-checkpoint:anonymous'))).toBe(
     'e2e-archive-one',
   )
 })
@@ -356,7 +358,7 @@ test('a modified Latest click opens a separate tab without changing the current 
 
   await other.waitForURL(/\/tweet\/(?!latest|e2e-archive-one)[^?]+$/)
   await expect(page).toHaveURL(/\/tweet\/e2e-archive-one$/)
-  expect(await page.evaluate(() => sessionStorage.getItem('gbfm:tweet-checkpoint'))).toBe(
+  expect(await page.evaluate(() => localStorage.getItem('gbfm:tweet-checkpoint:anonymous'))).toBe(
     'e2e-archive-one',
   )
   await other.close()
@@ -396,7 +398,7 @@ test('late prefetched and loaded tweet responses cannot change a superseding pag
   await page.waitForLoadState('networkidle')
   await expect(page).toHaveURL(/\/about$/)
   await expect(page.getByRole('heading', { name: 'About', exact: true })).toBeVisible()
-  expect(await page.evaluate(() => sessionStorage.getItem('gbfm:tweet-checkpoint'))).toBe(
+  expect(await page.evaluate(() => localStorage.getItem('gbfm:tweet-checkpoint:anonymous'))).toBe(
     'e2e-archive-one',
   )
 })

@@ -1,21 +1,11 @@
 import { MicroPostNeighboursResponse, MicroPostSeenResponse } from '@gbfm/api/navigation'
-import { Data, Effect, Option, Schema } from 'effect'
+import { Data, Effect, Schema } from 'effect'
 import { Command, type Update } from 'foldkit'
 import { defineMessageUnion } from 'foldkit/message'
 
-export const checkpointKey = 'gbfm:tweet-checkpoint'
+import { Checkpoint, parseCheckpoint, readPosition, savePosition } from './position'
 
-export const Checkpoint = Schema.String.check(
-  Schema.isPattern(/^(?!.*[\s/?#\\])\P{C}+$/u),
-  Schema.isMinLength(1),
-  Schema.isMaxLength(512),
-)
-
-export const parseCheckpoint = (value: string | null | undefined) => {
-  const slug = Option.getOrNull(Schema.decodeUnknownOption(Checkpoint)(value))
-
-  return slug && !['latest', 'new', '.', '..'].includes(slug) ? slug : null
-}
+export { Checkpoint, parseCheckpoint } from './position'
 
 export const isEntry = (href: string) => {
   const url = new URL(href, 'https://goosebumps.fm')
@@ -75,7 +65,11 @@ export const Model = Schema.Struct({
 export type Model = typeof Model.Type
 
 export const Message = defineMessageUnion({
-  EntryResolved: { slug: Schema.NullOr(Checkpoint), navigationId: Schema.Number },
+  EntryResolved: {
+    slug: Schema.NullOr(Checkpoint),
+    navigationId: Schema.Number,
+    identity: Schema.String,
+  },
   Stored: {},
   Seen: { slug: Schema.String, identity: Schema.String },
   SeenFailed: { slug: Schema.String, identity: Schema.String },
@@ -99,29 +93,24 @@ export const Message = defineMessageUnion({
 export type Message = typeof Message.Type
 
 export const ResolveEntry = Command.define('TweetReader.ResolveEntry', {
-  args: { checkpoint: Schema.NullOr(Checkpoint), navigationId: Schema.Number },
+  args: {
+    checkpoint: Schema.NullOr(Checkpoint),
+    navigationId: Schema.Number,
+    identity: Schema.String,
+  },
   messages: [Message.EntryResolved],
-  execute: ({ checkpoint, navigationId }) =>
-    Effect.sync(() => {
-      let slug = checkpoint
-
-      try {
-        slug = checkpoint ?? parseCheckpoint(sessionStorage.getItem(checkpointKey))
-      } catch {}
-
-      return Message.EntryResolved({ slug, navigationId })
-    }),
+  execute: ({ checkpoint, navigationId, identity }) =>
+    Effect.sync(() =>
+      Message.EntryResolved({ slug: checkpoint ?? readPosition(identity), navigationId, identity }),
+    ),
 })
 
 export const StoreCheckpoint = Command.define('TweetReader.StoreCheckpoint', {
-  args: { slug: Schema.NullOr(Checkpoint) },
+  args: { slug: Schema.NullOr(Checkpoint), identity: Schema.String },
   messages: [Message.Stored],
-  execute: ({ slug }) =>
+  execute: ({ slug, identity }) =>
     Effect.sync(() => {
-      try {
-        if (slug) sessionStorage.setItem(checkpointKey, slug)
-        else sessionStorage.removeItem(checkpointKey)
-      } catch {}
+      savePosition(identity, slug)
 
       return Message.Stored()
     }),
@@ -233,7 +222,7 @@ export const visit = (
   if (model.current === slug && model.navigationId === navigationId)
     return {
       model: { ...model, checkpoint: slug, resumeSlug: null },
-      commands: [StoreCheckpoint({ slug })],
+      commands: [StoreCheckpoint({ slug, identity: model.identity })],
     }
 
   const neighbours =
@@ -263,7 +252,10 @@ export const visit = (
       ? refresh(next)
       : beginSeen(next, slug)
 
-  return { ...seen, commands: [StoreCheckpoint({ slug }), ...(seen.commands ?? [])] }
+  return {
+    ...seen,
+    commands: [StoreCheckpoint({ slug, identity: model.identity }), ...(seen.commands ?? [])],
+  }
 }
 
 export const update = (model: Model, message: Message): Update.Return<Model, Message> =>

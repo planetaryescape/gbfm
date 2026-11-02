@@ -219,12 +219,28 @@ describe('Tweet reader navigation ownership', () => {
 
     const entering = update(initial, changed('https://gbfm.co.za/tweets')).model
     expect(entering.loading).toBe(true)
+    expect(
+      update(
+        entering,
+        Message.GotTweetReaderMessage({
+          message: Reader.Message.EntryResolved({
+            slug: 'other-account',
+            navigationId: entering.navigationId,
+            identity: 'other',
+          }),
+        }),
+      ),
+    ).toEqual({ model: entering })
     const departed = update(entering, changed('https://gbfm.co.za/about')).model
     expect(
       update(
         departed,
         Message.GotTweetReaderMessage({
-          message: Reader.Message.EntryResolved({ slug: 'a', navigationId: entering.navigationId }),
+          message: Reader.Message.EntryResolved({
+            slug: 'a',
+            navigationId: entering.navigationId,
+            identity: 'anonymous',
+          }),
         }),
       ),
     ).toEqual({ model: departed })

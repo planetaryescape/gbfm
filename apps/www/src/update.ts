@@ -83,9 +83,7 @@ const acceptTweet = (model: Model, initial = false): Update.Return<Model, Messag
   const identity = model.flags.principal?.id ?? 'anonymous'
 
   const reader =
-    identity === model.tweetReader.identity
-      ? model.tweetReader
-      : { ...TweetReader.init(identity), checkpoint: model.tweetReader.checkpoint }
+    identity === model.tweetReader.identity ? model.tweetReader : TweetReader.init(identity)
 
   const visited = TweetReader.visit(
     reader,
@@ -151,9 +149,7 @@ const showPage = (
       accountMenu: model.accountMenu,
       search: model.search,
       pageCache: identityChanged ? next.model.pageCache : model.pageCache,
-      tweetReader: identityChanged
-        ? { ...next.model.tweetReader, checkpoint: model.tweetReader.checkpoint }
-        : model.tweetReader,
+      tweetReader: identityChanged ? next.model.tweetReader : model.tweetReader,
       interactive: model.interactive,
       navigationId,
       navigationPrincipalId: model.navigationPrincipalId,
@@ -220,6 +216,7 @@ const updateApplication = (
             commands: [
               Command.mapMessage(
                 TweetReader.ResolveEntry({
+                  identity: model.tweetReader.identity,
                   checkpoint: model.tweetReader.checkpoint,
                   navigationId: model.navigationId,
                 }),
@@ -233,6 +230,7 @@ const updateApplication = (
       if (Predicate.isTagged(message, 'EntryResolved')) {
         if (
           message.navigationId !== model.navigationId ||
+          message.identity !== model.tweetReader.identity ||
           !TweetReader.isEntry(model.pendingPath ?? model.flags.url)
         )
           return { model }
@@ -502,7 +500,11 @@ const updateApplication = (
             ),
             ...(model.creator.uploadState === 'running' ? [PauseCreatorUpload()] : []),
             Command.mapMessage(
-              TweetReader.ResolveEntry({ checkpoint: model.tweetReader.checkpoint, navigationId }),
+              TweetReader.ResolveEntry({
+                checkpoint: model.tweetReader.checkpoint,
+                navigationId,
+                identity: model.tweetReader.identity,
+              }),
               (message) => Message.GotTweetReaderMessage({ message }),
             ),
           ],
@@ -578,7 +580,7 @@ const updateApplication = (
             ...model,
             tweetReader: { ...model.tweetReader, checkpoint: null, resumeSlug: null },
           },
-          commands: [ResetTweetEntry({ expected: key })],
+          commands: [ResetTweetEntry({ expected: key, identity: model.tweetReader.identity })],
         }
 
       const sourceCache: PageCache =

@@ -1,4 +1,6 @@
 import { brandDark, brandLight } from '@gbfm/theme/tokens'
+import { Effect } from 'effect'
+import { useState } from 'react'
 import { Pressable, Text, useColorScheme, View } from 'react-native'
 
 import {
@@ -20,6 +22,7 @@ const choices: ReadonlyArray<{
 export function AppearanceSection() {
   const preference = useColorSchemePreference()
   const setPreference = useSetColorSchemePreference()
+  const [error, setError] = useState<string | null>(null)
   const systemColorScheme = useColorScheme()
   const isDark = (preference === 'system' ? systemColorScheme : preference) !== 'light'
   const colors = isDark ? brandDark : brandLight
@@ -37,7 +40,16 @@ export function AppearanceSection() {
             accessibilityRole='radio'
             accessibilityState={{ selected }}
             key={choice.value}
-            onPress={() => setPreference(choice.value)}
+            onPress={() =>
+              Effect.runSync(
+                setPreference(choice.value).pipe(
+                  Effect.match({
+                    onSuccess: () => setError(null),
+                    onFailure: () => setError('Could not save your appearance choice. Try again.'),
+                  }),
+                ),
+              )
+            }
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',
@@ -79,6 +91,11 @@ export function AppearanceSection() {
           </Pressable>
         )
       })}
+      {error ? (
+        <Text accessibilityRole='alert' style={{ color: colors.error }}>
+          {error}
+        </Text>
+      ) : null}
     </View>
   )
 }

@@ -44,7 +44,7 @@ export default function TabsLayout() {
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name='profile' contentStyle={{ backgroundColor: colors.background }}>
         <NativeTabs.Trigger.Icon src={tabIcons.profile} renderingMode='template' />
-        <NativeTabs.Trigger.Label>Profile</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   )

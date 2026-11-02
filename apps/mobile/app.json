@@ -8,6 +8,7 @@
       "output": "static"
     },
     "plugins": [
+      "./plugins/with-signing-team",
       "expo-router",
       "expo-splash-screen",
       "expo-secure-store",
@@ -21,7 +22,26 @@
       ],
       "expo-font",
       "expo-status-bar",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-sharing",
+        {
+          "ios": {
+            "enabled": true,
+            "appGroupId": "group.fm.goosebumps.gbfm.sharing",
+            "extensionBundleIdentifier": "fm.goosebumps.gbfm.share",
+            "activationRule": {
+              "supportsText": true,
+              "supportsWebUrlWithMaxCount": 10
+            }
+          },
+          "android": {
+            "enabled": true,
+            "singleShareMimeTypes": ["text/plain", "text/uri-list"],
+            "multipleShareMimeTypes": ["text/plain", "text/uri-list"]
+          }
+        }
+      ]
     ],
     "name": "gbfm",
     "slug": "gbfm",

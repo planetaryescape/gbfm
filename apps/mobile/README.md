@@ -46,6 +46,24 @@ The preview profile creates an internally distributed Release build with the pro
 
 The app identifier is `fm.goosebumps.gbfm`, and the signing team is `78328YPS5M`.
 
+For a connected, trusted iPhone, build and install a standalone app locally with Expo CLI:
+
+```sh
+EXPO_PUBLIC_API_URL=https://api.goosebumps.fm bunx expo run:ios --device --configuration Release --no-bundler
+```
+
+## Tweet authoring and incoming shares
+
+Choose **Write a tweet** from Tweets or Settings. The tweet has the same 255-character limit as the web composer, with an optional longer Markdown body, tags, and an album, track, or playlist attachment. Publishing requires the existing creator permissions and a confirmation. **Save private draft to account** saves without publishing.
+
+Local drafts save as you type, are scoped to the signed-in account, and survive restarts. A share received while signed out stays as a guest draft and joins your account draft after sign-in. New shares append without replacing existing text. Settings can discard the current account's local draft without deleting server content.
+
+The `expo-sharing` config plugin enables incoming text and URL shares on iOS and Android. On iPhone, use another app's Share menu, then choose **gbfm**. Add it through **More** if needed. Files, photos, audio files, and videos are not accepted in this slice. Music service URLs can be attached through the composer's music-link field.
+
+This requires a native rebuild, not an OTA update or Expo Go. The iOS extension is `fm.goosebumps.gbfm.share` and uses the App Group `group.fm.goosebumps.gbfm.sharing`. Both targets must be provisioned on the configured Apple team. Expo's plugin declares the extension to EAS automatically. Local signing must use team `78328YPS5M` for both targets, not Expo CLI's automatically selected certificate from another team.
+
+Settings remains available while signed out. Appearance choices persist across restarts. Sign-out and Spotify disconnection both ask for confirmation.
+
 ## SDK maintenance
 
 ```sh

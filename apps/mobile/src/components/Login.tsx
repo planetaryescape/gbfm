@@ -1,7 +1,8 @@
 import { typography } from '@gbfm/theme'
 import { Effect, Match } from 'effect'
 import { useRouter } from 'expo-router'
-import { useState } from 'react'
+import { useHeaderHeight } from 'expo-router/react-navigation'
+import { type ComponentRef, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -18,7 +19,7 @@ import { Screen } from '@/components/Screen'
 import { useSetAuth } from '@/store/auth'
 import { useThemeColors } from '@/theme/colors'
 
-export default function Login() {
+export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -27,6 +28,8 @@ export default function Login() {
   const router = useRouter()
   const setAuth = useSetAuth()
   const colors = useThemeColors()
+  const headerHeight = useHeaderHeight()
+  const passwordInput = useRef<ComponentRef<typeof TextInput>>(null)
   const canSubmit = email.trim().length > 0 && password.length > 0 && !isSubmitting
 
   const handleLogin = () => {
@@ -37,7 +40,7 @@ export default function Login() {
 
     const runLogin = login({ email: email.trim(), password }).pipe(
       Effect.tap(setAuth),
-      Effect.tap(() => Effect.sync(() => router.replace('/profile'))),
+      Effect.tap(() => Effect.sync(() => (onSignedIn ? onSignedIn() : router.replace('/profile')))),
       Effect.catch((error) =>
         Effect.sync(() => {
           setErrorMessage(
@@ -56,12 +59,14 @@ export default function Login() {
   }
 
   return (
-    <Screen>
+    <Screen topInset={false}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={headerHeight}
         style={{ flex: 1 }}>
         <ScrollView
           keyboardShouldPersistTaps='handled'
+          keyboardDismissMode='on-drag'
           contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 24 }}>
           <View style={{ gap: 32 }}>
             <View style={{ gap: 12 }}>
@@ -107,6 +112,8 @@ export default function Login() {
                   autoCorrect={false}
                   keyboardType='email-address'
                   onChangeText={setEmail}
+                  onSubmitEditing={() => passwordInput.current?.focus()}
+                  submitBehavior='submit'
                   placeholder='you@example.com'
                   placeholderTextColor={`${colors.text}99`}
                   returnKeyType='next'
@@ -130,6 +137,7 @@ export default function Login() {
                 </Text>
                 <View>
                   <TextInput
+                    ref={passwordInput}
                     accessibilityLabel='Password'
                     autoCapitalize='none'
                     autoComplete='current-password'

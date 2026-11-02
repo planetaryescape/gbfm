@@ -1,4 +1,4 @@
-import { Text, TouchableOpacity, View } from 'react-native'
+import { Alert, Text, TouchableOpacity, View } from 'react-native'
 
 import {
   SpotifyConnectionState,
@@ -11,17 +11,6 @@ import { SpotifyToast, useSpotifyToast } from '@/spotify/SpotifyToast'
 import { useThemeColors } from '@/theme/colors'
 
 import { SpotifyPasteAndPlay } from './SpotifyPasteAndPlay'
-
-const formatExpiresIn = (expiresAt: number) => {
-  const diff = expiresAt - Date.now()
-
-  if (diff <= 0) return 'expired'
-  const minutes = Math.floor(diff / 60_000)
-
-  if (minutes < 60) return `~${minutes}m`
-
-  return `~${Math.floor(minutes / 60)}h ${minutes % 60}m`
-}
 
 export function SpotifySection() {
   const connection = useSpotifyConnection((state) => state)
@@ -52,13 +41,18 @@ export function SpotifySection() {
               {connection.profile?.display_name ?? connection.profile?.id ?? 'Connected'}
             </Text>
             <Text style={{ color: colors.muted, fontSize: 13, marginTop: 2 }}>
-              Token expires {formatExpiresIn(connection.session.accessTokenExpiresAt)}
+              Connected for playback and music links
             </Text>
           </View>
           <TouchableOpacity
             accessibilityRole='button'
             accessibilityLabel='Disconnect Spotify'
-            onPress={disconnect}
+            onPress={() =>
+              Alert.alert('Disconnect Spotify?', 'You can reconnect at any time.', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Disconnect', style: 'destructive', onPress: disconnect },
+              ])
+            }
             style={{
               borderColor: colors.error,
               borderWidth: 1,

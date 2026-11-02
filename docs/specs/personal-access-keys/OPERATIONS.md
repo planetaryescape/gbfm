@@ -2,7 +2,9 @@
 
 ## Availability
 
-This branch implements draft authoring and explicitly scoped publication. It has not been deployed. Migration `apps/server/drizzle-d1/0012_personal_access_keys.sql` must be reviewed and applied through the normal separately authorized deployment process before the feature is used outside disposable tests.
+This branch implements draft authoring and explicitly scoped publication. A read-only production check on 2026-11-02 confirmed that `0012_personal_access_keys.sql` was applied at `2026-11-01 19:46:14` UTC. Its recorded SHA-256 hash matches `apps/server/drizzle-d1/0012_personal_access_keys.sql`, and the `personal_access_keys` table exists. This check did not issue credentials, inspect key records, change data, or establish which API version is deployed.
+
+The web app now provides **Dashboard → Settings → API keys** at `/dashboard/api-keys` for creation, metadata listing and confirmed revocation. The new UI has been verified locally, not deployed as part of this work. Creating a key requires authoring access and a sign-in within the last ten minutes. Publication permission is offered only to editors and admins. The secret is shown once, with copy and dismissal controls; it stays outside Foldkit models, messages, SSR and browser storage, and is cleared when the form unmounts.
 
 Only `dev` and `prod` stages issue or accept keys. An unsupported stage fails closed.
 

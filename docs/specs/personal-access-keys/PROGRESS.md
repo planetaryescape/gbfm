@@ -2,7 +2,14 @@
 
 ## Status: Implementation available for review
 
-Implementation was subsequently authorized in the dedicated `feat/personal-access-keys` worktree. Production migrations, issuance, publication, and deployment remain unauthorized. The design records below describe the intended acceptance bar; they are not proof that every planned test has run.
+Implementation was subsequently authorized in the dedicated `feat/personal-access-keys` worktree. The migration was later applied to production, as verified below. No production issuance, publication, migration or deployment was performed in the web UI task. The design records below describe the intended acceptance bar; they are not proof that every planned test has run.
+
+## Web management and production migration check, 2026-11-02
+
+- Verified production migration history read-only: `0012_personal_access_keys.sql` was applied at `2026-11-01 19:46:14` UTC, its hash matches the local file, and `personal_access_keys` exists. No key records were read. The earlier operations note claiming that this migration was still pending was stale.
+- Added `/dashboard/api-keys` under Settings, with scope and expiry selection, one-time secret display/copy/dismissal, paginated metadata, refresh, role-aware creation and confirmed revocation. Existing API permissions and session requirements are unchanged.
+- Issuance runs in a scoped Foldkit Mount. Secrets are redacted at the HTTP adapter boundary and never enter app models, messages, SSR, browser storage or command arguments. Dismissal, unmount, page hide and historical-view pause clear the displayed secret.
+- Verification: `bun precommit` passed; all 337 WWW unit tests passed; WWW production build passed; six Playwright journeys passed across Mobile Chrome and Mobile Safari against a disposable local D1 database. Desktop and narrow-screen layouts were also checked with agent-browser. No push or deployment was performed.
 
 ## Implementation, 2026-10-31
 

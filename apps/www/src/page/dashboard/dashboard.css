@@ -168,24 +168,38 @@
   padding: 0.5rem 0.625rem;
   font-size: 1rem;
   line-height: 1.4;
-  border: 1px solid var(--dash-line);
-  background: var(--dash-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--dash-control-radius);
+  background: color-mix(in srgb, var(--background) 60%, var(--card));
   color: var(--dash-fg);
+  transition: border-color 120ms ease;
+}
+.gbfm-dashboard :is(input, select, textarea):hover {
+  border-color: color-mix(in srgb, var(--dash-fg) 35%, var(--border));
+}
+.gbfm-dashboard :is(input, select, textarea):focus {
+  border-color: var(--dash-accent);
+}
+.gbfm-dashboard :is(input[type='checkbox'], input[type='radio']) {
+  accent-color: var(--dash-accent);
 }
 .gbfm-dashboard button {
   min-height: 44px;
   padding: 0.5rem 0.875rem;
   font-size: 0.875rem;
   line-height: 1.4;
-  border: 1px solid var(--dash-line);
+  border: 1px solid var(--border);
+  border-radius: var(--dash-control-radius);
   background: transparent;
   color: var(--dash-fg);
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
 }
 .gbfm-dashboard button:hover {
-  background: var(--dash-fg);
-  color: var(--dash-bg);
-  border-color: var(--dash-fg);
+  background: var(--dash-hover);
+  border-color: color-mix(in srgb, var(--dash-fg) 35%, var(--border));
 }
 .gbfm-dashboard button:disabled {
   opacity: 0.45;
@@ -453,13 +467,14 @@
 
 .gbfm-dashboard .dashboard-button-primary {
   justify-self: start;
-  background: var(--dash-fg);
-  color: var(--dash-bg);
-  border-color: var(--dash-fg);
+  background: var(--dash-accent);
+  color: var(--highlight-foreground);
+  border-color: var(--dash-accent);
   font-weight: 700;
 }
 .gbfm-dashboard .dashboard-button-primary:hover {
-  background: color-mix(in srgb, var(--dash-fg) 85%, var(--dash-bg));
+  background: color-mix(in srgb, var(--dash-accent) 85%, var(--dash-fg));
+  border-color: color-mix(in srgb, var(--dash-accent) 85%, var(--dash-fg));
 }
 .gbfm-dashboard .dashboard-button-quiet {
   flex-shrink: 0;
@@ -467,7 +482,8 @@
   color: var(--dash-muted);
 }
 .gbfm-dashboard .dashboard-button-quiet:hover {
-  background: color-mix(in srgb, var(--dash-fg) 6%, transparent);
+  background: var(--dash-hover);
+  border-color: transparent;
   color: var(--dash-fg);
 }
 @media (pointer: fine) {
@@ -669,7 +685,8 @@
   display: inline-flex;
   max-width: 100%;
   overflow-x: auto;
-  border: 1px solid var(--dash-line);
+  border: 1px solid var(--border);
+  border-radius: var(--dash-control-radius);
   scrollbar-width: none;
 }
 .admin-segmented::-webkit-scrollbar {
@@ -682,6 +699,7 @@
   min-height: 2rem;
   padding: 0 0.625rem;
   border: 0;
+  border-radius: 0;
   background: transparent;
   color: var(--dash-muted);
   font-size: 0.8125rem;
@@ -868,7 +886,8 @@
   align-items: center;
   min-height: 2rem;
   padding: 0 0.625rem;
-  border: 1px solid var(--dash-line);
+  border: 1px solid var(--border);
+  border-radius: var(--dash-control-radius);
   background: transparent;
   color: var(--dash-fg);
   font-size: 0.8125rem;
@@ -900,9 +919,10 @@
   align-items: center;
   min-height: 2.25rem;
   padding: 0 0.875rem;
-  border: 1px solid var(--dash-fg);
-  background: var(--dash-fg);
-  color: var(--dash-bg);
+  border: 1px solid var(--dash-accent);
+  border-radius: var(--dash-control-radius);
+  background: var(--dash-accent);
+  color: var(--highlight-foreground);
   font-weight: 700;
   list-style: none;
   cursor: pointer;
@@ -911,12 +931,13 @@
   display: none;
 }
 .admin-drawer-secondary > summary {
-  border-color: var(--dash-line);
+  border-color: var(--border);
   background: transparent;
   color: var(--dash-fg);
   font-weight: 600;
 }
 .admin-drawer[open] > summary {
+  border-color: var(--border);
   background: transparent;
   color: var(--dash-fg);
 }
@@ -959,7 +980,8 @@
   align-items: center;
   min-height: 2rem;
   padding: 0 0.625rem;
-  border: 1px solid var(--dash-line);
+  border: 1px solid var(--border);
+  border-radius: var(--dash-control-radius);
   font-size: 0.8125rem;
   list-style: none;
   cursor: pointer;
@@ -1054,9 +1076,10 @@
   align-items: center;
   min-height: 2.25rem;
   padding: 0 0.875rem;
-  border: 1px solid var(--dash-fg);
-  background: var(--dash-fg);
-  color: var(--dash-bg);
+  border: 1px solid var(--dash-accent);
+  border-radius: var(--dash-control-radius);
+  background: var(--dash-accent);
+  color: var(--highlight-foreground);
   font-weight: 700;
   text-decoration: none;
 }

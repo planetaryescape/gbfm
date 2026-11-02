@@ -1,10 +1,13 @@
 .gbfm-dashboard {
   --dash-bg: var(--background);
-  --dash-panel: var(--card);
+  --dash-panel: color-mix(in srgb, var(--card) 55%, var(--background));
   --dash-fg: var(--foreground);
   --dash-muted: var(--muted-foreground);
-  --dash-line: var(--border);
+  --dash-line: color-mix(in srgb, var(--border) 65%, transparent);
   --dash-accent: var(--highlight);
+  --dash-hover: color-mix(in srgb, var(--foreground) 7%, transparent);
+  --dash-radius: calc(var(--radius-surface) * 2);
+  --dash-control-radius: var(--radius-control);
   display: flex;
   flex-direction: column;
   min-height: calc(100dvh - 3.5rem - env(safe-area-inset-bottom));
@@ -138,6 +141,7 @@
   box-sizing: border-box;
   padding: 1.25rem;
   border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
   background: var(--dash-panel);
 }
 .dashboard-panel h2 {
@@ -237,6 +241,8 @@
 .dashboard-forbidden {
   padding: 1.25rem;
   border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-panel);
 }
 .dashboard-error {
   border-color: #a43b3b;
@@ -315,6 +321,8 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
+  background: var(--dash-panel);
 }
 .comms-stats > div {
   display: grid;
@@ -345,7 +353,9 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1px;
   margin: 0;
+  overflow: hidden;
   border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
   background: var(--dash-line);
 }
 .admin-stats > div {
@@ -353,8 +363,8 @@
   flex-direction: column-reverse;
   justify-content: flex-end;
   gap: 0.125rem;
-  padding: 0.75rem 1rem;
-  background: var(--dash-bg);
+  padding: 0.875rem 1rem;
+  background: var(--dash-panel);
 }
 .admin-stats dt {
   color: var(--dash-muted);
@@ -381,7 +391,12 @@
   gap: 0.375rem;
   padding: 0.875rem 1rem;
   border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
   background: var(--dash-panel);
+  transition: border-color 120ms ease;
+}
+.admin-tasks > li:hover {
+  border-color: var(--border);
 }
 .admin-tasks h2 {
   margin: 0;
@@ -608,7 +623,16 @@
 .admin-frame {
   min-width: 0;
   border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
   background: var(--dash-panel);
+}
+.admin-frame > :first-child,
+.admin-frame > .admin-table-wrap:first-child th:first-child {
+  border-top-left-radius: calc(var(--dash-radius) - 1px);
+}
+.admin-frame > :first-child,
+.admin-frame > .admin-table-wrap:first-child th:last-child {
+  border-top-right-radius: calc(var(--dash-radius) - 1px);
 }
 .admin-toolbar {
   display: flex;
@@ -900,6 +924,7 @@
   margin-top: 0.5rem;
   padding: 1rem;
   border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
   background: var(--dash-panel);
 }
 .admin-header:has(.admin-drawer[open]) .admin-header-actions {
@@ -954,8 +979,10 @@
   gap: 0.5rem;
   width: 17rem;
   padding: 0.75rem;
-  border: 1px solid var(--dash-line);
-  background: var(--dash-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--dash-radius);
+  background: var(--card);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--shadow) 28%, transparent);
   text-align: left;
   white-space: normal;
 }
@@ -1037,6 +1064,7 @@
   margin: 0;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--dash-line);
+  border-radius: var(--dash-radius);
   background: var(--dash-panel);
 }
 @media (pointer: coarse) {

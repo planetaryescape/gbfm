@@ -1,5 +1,6 @@
+import * as Dialog from '@foldkit/ui/dialog'
 import { KeyId } from '@gbfm/core/personal-access-keys'
-import { Effect, Schema } from 'effect'
+import { Effect, Predicate, Schema } from 'effect'
 import { Command, type Update } from 'foldkit'
 
 import { Message, type Model } from './model'
@@ -29,6 +30,38 @@ const Revoke = Command.define('PersonalAccessKeys.Revoke', {
 
 export const update = (model: Model, message: Message): Update.Return<Model, Message, KeyService> =>
   Message.match<Update.Return<Model, Message, KeyService>>(message, {
+    PasswordRequested: () => {
+      const child = Dialog.update(model.passwordDialog, Dialog.Message.RequestedOpen())
+
+      return {
+        model: {
+          ...model,
+          passwordDialog: child.model,
+          passwordError: null,
+          verifyingPassword: false,
+        },
+        commands: Command.mapMessages(child.commands ?? [], (message) =>
+          Message.GotPasswordDialogMessage({ message }),
+        ),
+      }
+    },
+    PasswordVerificationStarted: () => ({
+      model: { ...model, verifyingPassword: true, passwordError: null },
+    }),
+    PasswordVerificationFailed: ({ message }) => ({
+      model: { ...model, verifyingPassword: false, passwordError: message },
+    }),
+    GotPasswordDialogMessage: ({ message }) => {
+      if (model.verifyingPassword && Predicate.isTagged(message, 'RequestedClose')) return { model }
+      const child = Dialog.update(model.passwordDialog, message)
+
+      return {
+        model: { ...model, passwordDialog: child.model },
+        commands: Command.mapMessages(child.commands ?? [], (message) =>
+          Message.GotPasswordDialogMessage({ message }),
+        ),
+      }
+    },
     Refresh: ({ offset }) =>
       model.phase === 'revoking'
         ? { model }
@@ -38,14 +71,26 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
           },
     Loaded: ({ page }) => ({ model: { ...model, page, phase: 'ready', error: null } }),
     Failed: ({ message }) => ({ model: { ...model, phase: 'ready', error: message } }),
-    Issued: () => ({
-      model: {
-        ...model,
-        phase: 'loading',
-        notice: 'Key created. Save the secret below before leaving this page.',
-      },
-      commands: [Load({ offset: 0 })],
-    }),
+    Issued: () => {
+      const child = Dialog.update(model.passwordDialog, Dialog.Message.RequestedClose())
+
+      return {
+        model: {
+          ...model,
+          phase: 'loading',
+          notice: 'Key created. Save the secret below before leaving this page.',
+          passwordDialog: child.model,
+          verifyingPassword: false,
+          passwordError: null,
+        },
+        commands: [
+          Load({ offset: 0 }),
+          ...Command.mapMessages(child.commands ?? [], (message) =>
+            Message.GotPasswordDialogMessage({ message }),
+          ),
+        ],
+      }
+    },
     ConfirmRevoke: ({ id }) =>
       model.phase === 'ready' && model.page?.data.some((key) => key.id === id && !key.revokedAt)
         ? { model: { ...model, confirming: id, notice: null } }

@@ -303,7 +303,7 @@ export const view = defineView<Model, typeof Message.Type, ViewInputs>((model, i
         slotId: 'api-keys',
         view: ApiKeys.view,
         model: model.apiKeys,
-        viewInputs: { role },
+        viewInputs: { role, userId: model.principal.id },
         toParentMessage: (message) => Message.GotApiKeyMessage({ message }),
       }),
     )

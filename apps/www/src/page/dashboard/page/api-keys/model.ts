@@ -1,3 +1,4 @@
+import * as Dialog from '@foldkit/ui/dialog'
 import { KeyId } from '@gbfm/core/personal-access-keys'
 import { Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
@@ -10,6 +11,9 @@ export const Model = Schema.Struct({
   confirming: Schema.NullOr(KeyId),
   error: Schema.NullOr(Schema.String),
   notice: Schema.NullOr(Schema.String),
+  passwordDialog: Dialog.Model,
+  verifyingPassword: Schema.Boolean,
+  passwordError: Schema.NullOr(Schema.String),
 })
 
 export type Model = typeof Model.Type
@@ -20,6 +24,9 @@ export const initialModel: Model = {
   confirming: null,
   error: null,
   notice: null,
+  passwordDialog: Dialog.init({ id: 'api-key-password', focusSelector: 'input[type="password"]' }),
+  verifyingPassword: false,
+  passwordError: null,
 }
 
 export const Message = defineMessageUnion({
@@ -27,6 +34,10 @@ export const Message = defineMessageUnion({
   Loaded: { page: KeyPage },
   Failed: { message: Schema.String },
   Issued: {},
+  PasswordRequested: {},
+  PasswordVerificationStarted: {},
+  PasswordVerificationFailed: { message: Schema.String },
+  GotPasswordDialogMessage: { message: Dialog.Message },
   ConfirmRevoke: { id: KeyId },
   CancelRevoke: {},
   Revoke: {},

@@ -18,6 +18,121 @@ const metadata = {
 }
 
 describe('personal key API adapter', () => {
+  it('renews only the current account session using the supplied password', async () => {
+    const requests: Array<{
+      path: string
+      credentials?: RequestCredentials
+      passwordProvided: boolean
+    }> = []
+
+    const layer = makeKeyServiceLayer(async (input, init) => {
+      const path = input instanceof Request ? input.url : input.toString()
+      requests.push({
+        path,
+        credentials: init?.credentials,
+        passwordProvided:
+          Schema.is(Schema.String)(init?.body) && init.body.includes('disposable-password'),
+      })
+
+      return path === '/auth/get-session'
+        ? Response.json({ user: { id: 'owner', email: 'owner@example.test' }, session: {} })
+        : Response.json({ token: 'not-read-or-exposed', user: { id: 'owner' } })
+    })
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(layer)
+        yield* Context.get(context, KeyService).confirmPassword(
+          'owner',
+          Redacted.make('disposable-password'),
+        )
+      }).pipe(Effect.scoped),
+    )
+    expect(requests).toEqual([
+      { path: '/auth/get-session', credentials: 'same-origin', passwordProvided: false },
+      { path: '/auth/sign-in/email', credentials: 'same-origin', passwordProvided: true },
+      { path: '/auth/get-session', credentials: 'same-origin', passwordProvided: false },
+    ])
+  })
+
+  for (const session of [
+    { user: { id: 'other', email: 'other@example.test' }, session: {} },
+    { user: { id: 'owner', email: 'owner@example.test' }, session: { impersonatedBy: 'admin' } },
+  ])
+    it('does not reauthenticate a different or impersonated account', async () => {
+      const paths: Array<string> = []
+
+      const layer = makeKeyServiceLayer(async (input) => {
+        paths.push(input instanceof Request ? input.url : input.toString())
+
+        return Response.json(session)
+      })
+
+      const error = await Effect.runPromise(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(layer)
+
+          return yield* Context.get(context, KeyService).confirmPassword(
+            'owner',
+            Redacted.make('disposable-password'),
+          )
+        }).pipe(Effect.scoped, Effect.flip),
+      )
+
+      expect(error.message).toContain('account session changed')
+      expect(paths).toEqual(['/auth/get-session'])
+    })
+
+  it('rejects an account change during password confirmation', async () => {
+    let reads = 0
+
+    const layer = makeKeyServiceLayer(async (input) => {
+      if (input === '/auth/sign-in/email') return Response.json({ token: 'ignored-token' })
+      reads += 1
+
+      return Response.json({
+        user: { id: reads === 1 ? 'owner' : 'other', email: 'owner@example.test' },
+        session: {},
+      })
+    })
+
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(layer)
+
+        return yield* Context.get(context, KeyService).confirmPassword(
+          'owner',
+          Redacted.make('disposable-password'),
+        )
+      }).pipe(Effect.scoped, Effect.flip),
+    )
+
+    expect(error.message).toContain('account session changed')
+  })
+
+  it('reports invalid passwords without reading or exposing the authentication body', async () => {
+    const layer = makeKeyServiceLayer(async (input) =>
+      input === '/auth/get-session'
+        ? Response.json({ user: { id: 'owner', email: 'owner@example.test' }, session: {} })
+        : new Response('private-auth-payload', { status: 401 }),
+    )
+
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(layer)
+
+        return yield* Context.get(context, KeyService).confirmPassword(
+          'owner',
+          Redacted.make('disposable-password'),
+        )
+      }).pipe(Effect.scoped, Effect.flip),
+    )
+
+    expect(error.message).toBe('Incorrect password. Try again.')
+    expect(JSON.stringify(error)).not.toContain('private-auth-payload')
+    expect(JSON.stringify(error)).not.toContain('disposable-password')
+  })
+
   it('decodes metadata, isolates the secret, and uses same-origin uncached requests', async () => {
     const requests: Array<{ path: string; init?: RequestInit }> = []
 
@@ -73,7 +188,7 @@ describe('personal key API adapter', () => {
       ),
     )
 
-    expect(result).toContain('10 minutes')
+    expect(result).toContain('authoring permissions')
     expect(result).not.toContain('private-server-payload')
   })
 

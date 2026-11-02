@@ -1,3 +1,4 @@
+import * as Dialog from '@foldkit/ui/dialog'
 import { KeyId } from '@gbfm/core/personal-access-keys'
 import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
@@ -7,6 +8,31 @@ import { KeyPage } from './service'
 import { update } from './update'
 
 describe('API key management', () => {
+  it('opens password confirmation without storing a password and prevents closing during issuance', () => {
+    const opened = update(initialModel, Message.PasswordRequested()).model
+    expect(opened.passwordDialog.isOpen).toBe(true)
+    expect(Object.keys(opened)).not.toContain('password')
+    const verifying = update(opened, Message.PasswordVerificationStarted()).model
+    expect(
+      update(
+        verifying,
+        Message.GotPasswordDialogMessage({ message: Dialog.Message.RequestedClose() }),
+      ).model.passwordDialog.isOpen,
+    ).toBe(true)
+
+    const failed = update(
+      verifying,
+      Message.PasswordVerificationFailed({ message: 'Incorrect password. Try again.' }),
+    ).model
+
+    expect(failed.passwordError).toBe('Incorrect password. Try again.')
+    expect(failed.verifyingPassword).toBe(false)
+    expect(
+      update(failed, Message.GotPasswordDialogMessage({ message: Dialog.Message.RequestedClose() }))
+        .model.passwordDialog.isOpen,
+    ).toBe(false)
+  })
+
   const id = Schema.decodeUnknownSync(KeyId)('c63400ba-984d-4d4e-91ce-3b1722cc28f2')
 
   const page = Schema.decodeUnknownSync(KeyPage)({

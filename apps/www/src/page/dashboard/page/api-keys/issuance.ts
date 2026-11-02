@@ -3,17 +3,35 @@ import { Context, Effect, Layer, Queue, Redacted, Schema, Stream } from 'effect'
 import { Mount } from 'foldkit'
 
 import { Message } from './model'
+import { showSecret } from './secret-display'
 import { KeyService, KeyServiceLive } from './service'
 
 export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
-  messages: [Message.Issued],
-  execute: ({ element, viewStateChanges }) =>
-    Stream.callback<typeof Message.Issued.Type>((messages) =>
+  args: { userId: Schema.String },
+  messages: [
+    Message.Issued,
+    Message.PasswordRequested,
+    Message.PasswordVerificationStarted,
+    Message.PasswordVerificationFailed,
+  ],
+  execute: ({ element, userId, viewStateChanges }) =>
+    Stream.callback<
+      | typeof Message.Issued.Type
+      | typeof Message.PasswordRequested.Type
+      | typeof Message.PasswordVerificationStarted.Type
+      | typeof Message.PasswordVerificationFailed.Type
+    >((messages) =>
       Effect.gen(function* () {
-        if (!(element instanceof HTMLFormElement)) return
+        const form = element.querySelector('[data-key-create-form]')
+
+        if (!(form instanceof HTMLFormElement)) return
         const context = yield* Layer.build(KeyServiceLive)
         const service = Context.get(context, KeyService)
-        const requests = yield* Queue.unbounded<FormData | 'dismiss' | 'copy'>()
+
+        const requests = yield* Queue.unbounded<
+          FormData | { readonly password: Redacted.Redacted } | 'dismiss' | 'copy'
+        >()
+
         const host = element.querySelector('[data-key-secret]')
         const status = element.querySelector('[data-key-status]')
         const submitButton = element.querySelector('button[type="submit"]')
@@ -27,20 +45,59 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
         let busy = false
         let live = false
         let secret: Redacted.Redacted | null = null
+        let pending: IssueKeyInput | null = null
+        let verifying = false
 
         const clear = () => {
           secret = null
+          pending = null
+          busy = false
+          submitButton.disabled = !live || verifying
           host.replaceChildren()
+          const password = element.querySelector('input[type="password"]')
+
+          if (password instanceof HTMLInputElement) password.value = ''
         }
 
-        const submit = (event: SubmitEvent) => {
+        const submit = (event: Event) => {
           event.preventDefault()
 
-          if (!live || busy || secret) return
+          if (!live || secret) return
+
+          if (
+            event.target instanceof HTMLFormElement &&
+            event.target.matches('[data-key-password-form]')
+          ) {
+            const password = event.target.querySelector('input[type="password"]')
+
+            if (!pending || verifying || !(password instanceof HTMLInputElement) || !password.value)
+              return
+            verifying = true
+            const value = Redacted.make(password.value)
+            password.value = ''
+            Queue.offerUnsafe(requests, { password: value })
+
+            return
+          }
+
+          if (event.target !== form || busy) return
           busy = true
           submitButton.disabled = true
-          status.textContent = 'Creating key…'
-          Queue.offerUnsafe(requests, new FormData(element))
+          Queue.offerUnsafe(requests, new FormData(form))
+        }
+
+        const closed = (event: Event) => {
+          if (
+            !(event.target instanceof HTMLDialogElement) ||
+            !event.target.matches('[data-key-password-dialog]') ||
+            verifying ||
+            secret
+          )
+            return
+          pending = null
+          busy = false
+          submitButton.disabled = !live
+          status.textContent = ''
         }
 
         const click = (event: Event) => {
@@ -57,6 +114,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
           Effect.sync(() => {
             element.addEventListener('submit', submit)
             element.addEventListener('click', click)
+            element.addEventListener('close', closed, true)
             window.addEventListener('pagehide', clear)
           }),
           () =>
@@ -64,6 +122,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
               clear()
               element.removeEventListener('submit', submit)
               element.removeEventListener('click', click)
+              element.removeEventListener('close', closed, true)
               window.removeEventListener('pagehide', clear)
             }),
         )
@@ -112,46 +171,73 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
                 return
               }
 
-              yield* Schema.decodeUnknownEffect(IssueKeyInput)({
-                requestId: crypto.randomUUID(),
-                name: request.get('name'),
-                scopes: request.getAll('scopes'),
-                expiresInSeconds: Number(request.get('expiresInSeconds')),
-              }).pipe(
-                Effect.mapError(() => ({
-                  message:
-                    'Enter a name of up to 80 characters and select permissions. Publishing also requires create or update permission.',
-                })),
-                Effect.flatMap((input) => service.issue(input)),
+              if (request instanceof FormData) {
+                yield* Schema.decodeUnknownEffect(IssueKeyInput)({
+                  requestId: crypto.randomUUID(),
+                  name: request.get('name'),
+                  scopes: request.getAll('scopes'),
+                  expiresInSeconds: Number(request.get('expiresInSeconds')),
+                }).pipe(
+                  Effect.mapError(() => ({
+                    message:
+                      'Enter a name of up to 80 characters and select permissions. Publishing also requires create or update permission.',
+                  })),
+                  Effect.match({
+                    onFailure: (error) => {
+                      status.textContent = error.message
+                      busy = false
+                      submitButton.disabled = false
+                    },
+                    onSuccess: (input) => {
+                      pending = input
+                      status.textContent = 'Confirm your password to create this key.'
+                      Queue.offerUnsafe(messages, Message.PasswordRequested())
+                    },
+                  }),
+                )
+
+                return
+              }
+
+              const input = pending
+
+              if (!input || !live) return
+              Queue.offerUnsafe(messages, Message.PasswordVerificationStarted())
+
+              yield* service.confirmPassword(userId, request.password).pipe(
+                Effect.flatMap(() =>
+                  pending === input && live ? service.issue(input) : Effect.succeed(null),
+                ),
                 Effect.match({
                   onFailure: (error) => {
-                    status.textContent = error.message
-                    busy = false
-                    submitButton.disabled = false
+                    verifying = false
+                    status.textContent = 'Key not created.'
+                    Queue.offerUnsafe(
+                      messages,
+                      Message.PasswordVerificationFailed({ message: error.message }),
+                    )
+                    const password = element.querySelector('input[type="password"]')
+
+                    if (password instanceof HTMLInputElement) password.focus()
                   },
                   onSuccess: (issued) => {
+                    verifying = false
+                    pending = null
+
+                    if (!issued) {
+                      busy = false
+                      submitButton.disabled = !live
+                      Queue.offerUnsafe(
+                        messages,
+                        Message.PasswordVerificationFailed({
+                          message: 'Confirmation was cancelled. Close this dialog and try again.',
+                        }),
+                      )
+
+                      return
+                    }
+
                     secret = issued.secret
-                    const label = document.createElement('label')
-                    label.textContent = 'New API key secret'
-                    const input = document.createElement('input')
-                    input.readOnly = true
-                    input.autocomplete = 'off'
-                    input.spellcheck = false
-                    input.value = Redacted.value(issued.secret)
-                    label.append(input)
-                    const warning = document.createElement('p')
-                    warning.textContent =
-                      'Copy this now. It is shown only once and disappears when you leave this page.'
-                    const copy = document.createElement('button')
-                    copy.type = 'button'
-                    copy.className = 'btn btn-secondary'
-                    copy.dataset.keyCopy = ''
-                    copy.textContent = 'Copy key'
-                    const dismiss = document.createElement('button')
-                    dismiss.type = 'button'
-                    dismiss.className = 'btn btn-quiet'
-                    dismiss.dataset.keyDismiss = ''
-                    dismiss.textContent = 'I saved my key'
 
                     if (!live) {
                       secret = null
@@ -163,12 +249,10 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
                       return
                     }
 
-                    host.replaceChildren(warning, label, copy, dismiss)
+                    showSecret(host, issued.secret)
                     status.textContent = 'Key created.'
                     busy = false
                     Queue.offerUnsafe(messages, Message.Issued())
-                    input.focus()
-                    input.select()
                   },
                 }),
               )

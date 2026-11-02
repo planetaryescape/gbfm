@@ -24,7 +24,11 @@ export const initialModel: Model = {
   confirming: null,
   error: null,
   notice: null,
-  passwordDialog: Dialog.init({ id: 'api-key-password', focusSelector: 'input[type="password"]' }),
+  passwordDialog: Dialog.init({
+    id: 'api-key-password',
+    focusSelector: 'input[type="password"]',
+    allowedOutsideSelectors: ['com-1password-button', 'com-1password-menu'],
+  }),
   verifyingPassword: false,
   passwordError: null,
 }

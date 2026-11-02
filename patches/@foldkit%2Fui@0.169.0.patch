@@ -1,0 +1,125 @@
+diff --git a/dist/dialog/index.d.ts b/dist/dialog/index.d.ts
+index 5dced64cdc068316991d94f746d5c9f5988dfb08..cd24321df420386fec25219f82d16974b8491cce 100644
+--- a/dist/dialog/index.d.ts
++++ b/dist/dialog/index.d.ts
+@@ -15,6 +15,7 @@ export declare const Model: Schema.Struct<{
+         readonly transitionGeneration: Schema.Number;
+     }>;
+     readonly maybeFocusSelector: Schema.Option<Schema.String>;
++    readonly allowedOutsideSelectors: Schema.optional<Schema.$Array<Schema.String>>;
+ }>;
+ export type Model = typeof Model.Type;
+ /** Union of all messages the dialog component can produce. */
+@@ -77,6 +78,7 @@ export type InitConfig = Readonly<{
+      *  own, or a descendant selector. Takes precedence over `initialFocus`. With
+      *  neither set, focus falls to the first focusable element. */
+     focusSelector?: string;
++    allowedOutsideSelectors?: ReadonlyArray<string>;
+ }>;
+ /** Creates a closed dialog model from a config. Use `boot` when the Dialog
+  *  should open as the application starts. */
+@@ -105,6 +107,7 @@ type UpdateReturn = Update.ReturnWithOutMessage<Model, Message, OutMessage>;
+ export declare const ShowDialog: Command.CommandDefinitionWithArgs<"ShowDialog", {
+     id: Schema.String;
+     focusSelector: Schema.String;
++    allowedOutsideSelectors: Schema.optional<Schema.$Array<Schema.String>>;
+ }, Effect.Effect<{
+     readonly _tag: "SucceededShowDialog";
+ } | {
+@@ -118,6 +121,7 @@ export declare const ShowDialog: Command.CommandDefinitionWithArgs<"ShowDialog",
+ export declare const AcquireResources: Mount.MountDefinitionWithArgs<"AcquireResources", {
+     id: Schema.String;
+     focusSelector: Schema.String;
++    allowedOutsideSelectors: Schema.optional<Schema.$Array<Schema.String>>;
+ }, {
+     readonly _tag: "SucceededAcquireResources";
+ } | {
+@@ -158,6 +162,7 @@ export declare const update: (model: Model, message: Message) => Readonly<{
+             readonly transitionGeneration: number;
+         };
+         readonly maybeFocusSelector: Option.Option<string>;
++        readonly allowedOutsideSelectors?: ReadonlyArray<string>;
+     };
+     commands?: Update.Commands<{
+         readonly _tag: "RequestedOpen";
+diff --git a/dist/dialog/index.js b/dist/dialog/index.js
+index 29c444f6f3ad23a49b85a07a91bddbed944ff351..88a188339df4f7e5ea8f907cf6d83a75d57db2ed 100644
+--- a/dist/dialog/index.js
++++ b/dist/dialog/index.js
+@@ -23,6 +23,7 @@ export const Model = Schema.Struct({
+     isAnimated: Schema.Boolean,
+     animation: Animation.Model,
+     maybeFocusSelector: Schema.Option(Schema.String),
++    allowedOutsideSelectors: Schema.optional(Schema.Array(Schema.String)),
+ });
+ // MESSAGE
+ /** Union of all messages the dialog component can produce. */
+@@ -54,6 +55,7 @@ export const init = (config) => (__foldkitBrandViewResult(({
+         id: `${config.id}-panel`,
+     }),
+     maybeFocusSelector: Option.fromNullishOr(config.focusSelector),
++    allowedOutsideSelectors: config.allowedOutsideSelectors,
+ }), "@foldkit/ui/dialog/index.js#init"));
+ // UPDATE
+ const dialogSelector = (id) => __foldkitBrandViewResult((idSelector(id)), "@foldkit/ui/dialog/index.js#dialogSelector");
+@@ -63,12 +65,12 @@ export const initialFocusMarkerAttribute = 'foldkit-dialog-initial-focus';
+ /** Selector for {@link initialFocusMarkerAttribute}, focused against the open
+  *  dialog when no `focusSelector` is configured. */
+ export const initialFocusMarkerSelector = `[data-${initialFocusMarkerAttribute}]`;
+-const acquireDialogResources = (id, focusSelector) => __foldkitBrandViewResult((Effect.uninterruptibleMask(restore => __foldkitBrandViewResult((restore(Dom.showDialog(dialogSelector(id), {
++const acquireDialogResources = (id, focusSelector, allowedOutsideSelectors = []) => __foldkitBrandViewResult((Effect.uninterruptibleMask(restore => __foldkitBrandViewResult((restore(Dom.showDialog(dialogSelector(id), {
+     focusSelector,
+     isModal: true,
+-    allowedOutsideSelectors: [`#${DEVTOOLS_HOST_ID}`],
++    allowedOutsideSelectors: [`#${DEVTOOLS_HOST_ID}`, ...allowedOutsideSelectors],
+ })).pipe(Effect.tap(isAcquired => (__foldkitBrandViewResult((isAcquired ? Dom.lockScroll : Effect.void), "@foldkit/ui/dialog/index.js#anonymous~2"))))), "@foldkit/ui/dialog/index.js#anonymous"))), "@foldkit/ui/dialog/index.js#acquireDialogResources");
+-const acquireDialogResourcesResult = (id, focusSelector) => __foldkitBrandViewResult((acquireDialogResources(id, focusSelector).pipe(Effect.as(Message.SucceededShowDialog()), Effect.catch(() => __foldkitBrandViewResult((Effect.succeed(Message.FailedShowDialog())), "@foldkit/ui/dialog/index.js#anonymous~3")))), "@foldkit/ui/dialog/index.js#acquireDialogResourcesResult");
++const acquireDialogResourcesResult = (id, focusSelector, allowedOutsideSelectors) => __foldkitBrandViewResult((acquireDialogResources(id, focusSelector, allowedOutsideSelectors).pipe(Effect.as(Message.SucceededShowDialog()), Effect.catch(() => __foldkitBrandViewResult((Effect.succeed(Message.FailedShowDialog())), "@foldkit/ui/dialog/index.js#anonymous~3")))), "@foldkit/ui/dialog/index.js#acquireDialogResourcesResult");
+ /** Opens the native dialog element through `Dom.showDialog`, then locks page
+  *  scroll when that call acquired the dialog resources. `Dom.showDialog`
+  *  makes the background inert while leaving DevTools available as a separate
+@@ -84,9 +86,9 @@ const acquireDialogResourcesResult = (id, focusSelector) => __foldkitBrandViewRe
+  *  so modal resources and the scroll lock cannot split. A concurrent
+  *  lifecycle acquisition reuses the resources already held by the id. */
+ export const ShowDialog = Command.define('ShowDialog', {
+-    args: { id: Schema.String, focusSelector: Schema.String },
++    args: { id: Schema.String, focusSelector: Schema.String, allowedOutsideSelectors: Schema.optional(Schema.Array(Schema.String)) },
+     messages: [Message.SucceededShowDialog, Message.FailedShowDialog],
+-    execute: ({ id, focusSelector }) => __foldkitBrandViewResult((acquireDialogResourcesResult(id, focusSelector)), "@foldkit/ui/dialog/index.js#execute"),
++    execute: ({ id, focusSelector, allowedOutsideSelectors }) => __foldkitBrandViewResult((acquireDialogResourcesResult(id, focusSelector, allowedOutsideSelectors)), "@foldkit/ui/dialog/index.js#execute"),
+ });
+ /** Reacquires an initially visible Dialog's framework resources when its
+  *  element mounts, including after development Model preservation restores an
+@@ -94,13 +96,13 @@ export const ShowDialog = Command.define('ShowDialog', {
+  *  acquisition also resumes a preserved animation transition from its current
+  *  phase. */
+ export const AcquireResources = Mount.define('AcquireResources', {
+-    args: { id: Schema.String, focusSelector: Schema.String },
++    args: { id: Schema.String, focusSelector: Schema.String, allowedOutsideSelectors: Schema.optional(Schema.Array(Schema.String)) },
+     messages: [Message.SucceededAcquireResources, Message.FailedAcquireResources],
+-    execute: ({ element, id, focusSelector }) => {
++    execute: ({ element, id, focusSelector, allowedOutsideSelectors }) => {
+         if (!(element instanceof HTMLDialogElement) || element.id !== id) {
+             return __foldkitBrandViewResult((Effect.succeed(Message.FailedAcquireResources())), "@foldkit/ui/dialog/index.js#execute~2");
+         }
+-        const acquisition = acquireDialogResources(id, focusSelector).pipe(Effect.map(isAcquired => (__foldkitBrandViewResult(({
++        const acquisition = acquireDialogResources(id, focusSelector, allowedOutsideSelectors).pipe(Effect.map(isAcquired => (__foldkitBrandViewResult(({
+             isAcquired,
+             message: Message.SucceededAcquireResources(),
+         }), "@foldkit/ui/dialog/index.js#anonymous~4"))), Effect.catch(() => __foldkitBrandViewResult((Effect.succeed({
+@@ -214,6 +216,7 @@ export const update = (model, message) => __foldkitBrandViewResult((Message.matc
+         const wasClosed = !model.isOpen;
+         const maybeShow = Option.liftPredicate(ShowDialog({
+             id: model.id,
++            allowedOutsideSelectors: model.allowedOutsideSelectors,
+             focusSelector: Option.getOrElse(model.maybeFocusSelector, () => __foldkitBrandViewResult((initialFocusMarkerSelector), "@foldkit/ui/dialog/index.js#anonymous~17")),
+         }), () => __foldkitBrandViewResult((wasClosed), "@foldkit/ui/dialog/index.js#anonymous~18"));
+         const commands = Option.toArray(maybeShow);
+@@ -386,6 +389,7 @@ export const view = defineView((model, viewInputs, h) => {
+                 h.DataAttribute('open', ''),
+                 h.OnMount(AcquireResources({
+                     id,
++                    allowedOutsideSelectors: model.allowedOutsideSelectors,
+                     focusSelector: Option.getOrElse(model.maybeFocusSelector, () => __foldkitBrandViewResult((initialFocusMarkerSelector), "@foldkit/ui/dialog/index.js#anonymous~29")),
+                 })),
+                 h.OnUnmount(Message.Unmounted()),

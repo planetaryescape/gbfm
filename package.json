@@ -77,6 +77,7 @@
   "patchedDependencies": {
     "@spotify-effect/core@0.6.7": "patches/@spotify-effect%2Fcore@0.6.7.patch",
     "@spotify-effect/browser@0.6.7": "patches/@spotify-effect%2Fbrowser@0.6.7.patch",
-    "harfbuzzjs@0.10.0": "patches/harfbuzzjs@0.10.0.patch"
+    "harfbuzzjs@0.10.0": "patches/harfbuzzjs@0.10.0.patch",
+    "@foldkit/ui@0.169.0": "patches/@foldkit%2Fui@0.169.0.patch"
   }
 }

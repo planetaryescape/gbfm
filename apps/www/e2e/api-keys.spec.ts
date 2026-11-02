@@ -181,3 +181,63 @@ test('Escape from an external autofill popup does not dismiss password confirmat
   await page.keyboard.press('Escape')
   await expect(dialog).not.toBeVisible()
 })
+
+for (const tag of ['com-1password-button', 'com-1password-menu'])
+  test(`a body-mounted ${tag} receives clicks instead of the button underneath`, async ({
+    page,
+  }) => {
+    await signIn(page, 'creator')
+
+    if (tag === 'com-1password-button')
+      await page.evaluate((tag) => {
+        const host = document.createElement(tag)
+        host.id = 'e2e-body-autofill'
+        document.body.append(host)
+      }, tag)
+    await page
+      .getByRole('textbox', { name: 'Name', exact: true })
+      .fill('Password manager hit testing')
+    await page.getByRole('checkbox', { name: 'Read your posts' }).check()
+    await page.getByRole('button', { name: 'Create key', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Confirm your password', exact: true })
+    await expect(dialog).toBeVisible()
+
+    const point = await page.evaluate((tag) => {
+      const cancel = document.querySelector('[data-key-password-form] button[type="button"]')
+
+      if (!(cancel instanceof HTMLButtonElement)) throw new Error('Cancel button is missing')
+      const bounds = cancel.getBoundingClientRect()
+      const host = document.getElementById('e2e-body-autofill') ?? document.createElement(tag)
+      host.id = 'e2e-body-autofill'
+      host.style.cssText = `display:block;position:fixed;left:${bounds.left}px;top:${bounds.top}px;width:${bounds.width}px;height:${bounds.height}px;z-index:2147483647`
+      const shadow = host.attachShadow({ mode: 'closed' })
+      const button = document.createElement('button')
+      button.textContent = 'Use saved password'
+      button.style.cssText = 'width:100%;height:100%'
+      button.addEventListener('click', () => {
+        host.dataset.selected = 'true'
+        const password = document.querySelector('[data-key-password-form] input[name="password"]')
+
+        if (password instanceof HTMLInputElement) {
+          password.value = 'autofilled-disposable-password'
+          password.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      })
+      shadow.append(button)
+
+      if (!host.isConnected) document.body.append(host)
+
+      return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }
+    }, tag)
+
+    await page.mouse.click(point.x, point.y)
+    await expect(page.locator('#e2e-body-autofill')).toHaveAttribute('data-selected', 'true')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole('textbox', { name: 'Password', exact: true })).toHaveValue(
+      'autofilled-disposable-password',
+    )
+    await expect(page.locator('[data-key-create-form]')).toHaveAttribute('inert', '')
+    await page.evaluate(() => document.getElementById('e2e-body-autofill')?.remove())
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(dialog).not.toBeVisible()
+  })

@@ -10,6 +10,8 @@ The Model owns state, Messages describe events, `update` returns a Model and Com
 
 Use the pinned `@foldkit/ui` 0.169.0 primitives for dialogs and popovers. Mobile navigation, search, playback, publish review, and account actions fold their primitive Models and Messages into the owning submodel. Keep the dialog mounted while closed so its Commands can manage native modal focus and scroll locking. Preserve native selects, sliders, and disclosures when they already provide the required behavior.
 
+`patches/@foldkit%2Fui@0.169.0.patch` exposes the modal engine's existing `allowedOutsideSelectors` option through `Dialog.init`, opening Commands and resource-acquisition Mounts. The API-key password dialog allows only `com-1password-button` and `com-1password-menu`; all other dialogs retain their existing defaults. Without this allowance, modal isolation makes body-mounted 1Password overlays inert, so clicks pass through to the controls underneath. Keep the allowance narrow and retain background isolation. Browser regressions exercise a body-mounted closed-shadow popup overlapping a dialog button, not only an overlay outside `body`. Revisit the patch when upgrading Foldkit.
+
 ## Server document
 
 `src/server/document.ts`, re-exported by `src/entry.server.ts`, owns the whole HTML document. The Vite plugin supplies browser asset URLs from `ssr.clientEntry`; styles are imported by `src/entry.client.ts`. There is no `index.html` template or production `transformIndexHtml` hook. Page responses stay `Server.Rendered` until the host renders the document; data, actions, and redirects use `Server.Responded`. Request-specific escaped head markup follows its application object through a WeakMap, so concurrent pages cannot overwrite each other's metadata.

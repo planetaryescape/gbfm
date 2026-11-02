@@ -16,6 +16,7 @@ export class SessionUnavailable extends Data.TaggedError('SessionUnavailable')<{
 export class SessionExpired extends Data.TaggedError('SessionExpired') {}
 
 const BetterAuthUser = Schema.Struct({
+  role: Schema.optional(Schema.NullOr(Schema.String)),
   id: Schema.String,
   name: Schema.String,
   username: Schema.optional(Schema.NullOr(Schema.String)),
@@ -33,7 +34,10 @@ const BetterAuthLoginResponse = Schema.Struct({
 
 const BetterAuthSessionResponse = Schema.Struct({ user: BetterAuthUser })
 
-const toFullUser = (user: typeof BetterAuthUser.Type): FullUser => ({
+export type SessionUser = FullUser & { readonly role?: string | null }
+
+const toFullUser = (user: typeof BetterAuthUser.Type): SessionUser => ({
+  role: user.role ?? 'user',
   id: user.id,
   name: user.name,
   username: user.username ?? user.name,

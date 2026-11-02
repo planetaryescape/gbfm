@@ -1,14 +1,13 @@
 import { useAtomMount, useAtomSet, useAtomValue } from '@effect/atom-react'
-import type { FullUser } from '@gbfm/core/api'
 import { Effect, Schema } from 'effect'
 import * as Atom from 'effect/reactivity/Atom'
 import * as SecureStore from 'expo-secure-store'
 import { type PropsWithChildren, useMemo } from 'react'
 
-import { getSession, SessionExpired } from '@/api/auth'
+import { getSession, SessionExpired, type SessionUser } from '@/api/auth'
 
 export type AuthSession = {
-  readonly user: FullUser | null
+  readonly user: SessionUser | null
   readonly sessionToken: string | null
 }
 
@@ -16,6 +15,7 @@ const emptyAuthState: AuthSession = { user: null, sessionToken: null }
 
 const PersistedAuthSession = Schema.Struct({
   user: Schema.Struct({
+    role: Schema.optionalKey(Schema.NullOr(Schema.String)),
     id: Schema.String,
     name: Schema.String,
     username: Schema.NullOr(Schema.String),
@@ -31,6 +31,10 @@ const PersistedAuthSession = Schema.Struct({
 const storageKey = 'gbfm.auth-session'
 
 export const authState = Atom.make<AuthSession>(emptyAuthState).pipe(Atom.keepAlive)
+
+const authReady = Atom.make(false).pipe(Atom.keepAlive)
+
+export const useAuthReady = () => useAtomValue(authReady)
 
 const persistAuth = (session: AuthSession) =>
   session.user && session.sessionToken
@@ -77,15 +81,18 @@ const makeRestoreAuth = (setState: (session: AuthSession) => void) =>
     )
   })
 
-const makeRestoreAuthAtom = (setState: (session: AuthSession) => void) =>
-  Atom.make(makeRestoreAuth(setState))
+const makeRestoreAuthAtom = (
+  setState: (session: AuthSession) => void,
+  setReady: (ready: boolean) => void,
+) => Atom.make(makeRestoreAuth(setState).pipe(Effect.ensuring(Effect.sync(() => setReady(true)))))
 
 export const useAuthStore = <T>(selector: (state: AuthSession) => T) =>
   useAtomValue(authState, selector)
 
 export const AuthProvider = ({ children }: PropsWithChildren) => {
   const setState = useAtomSet(authState)
-  const restoreAtom = useMemo(() => makeRestoreAuthAtom(setState), [setState])
+  const setReady = useAtomSet(authReady)
+  const restoreAtom = useMemo(() => makeRestoreAuthAtom(setState, setReady), [setState, setReady])
   useAtomMount(restoreAtom)
 
   return children
@@ -105,8 +112,8 @@ export const useClearAuth = () => {
   const setState = useAtomSet(authState)
 
   return () => {
-    setState(emptyAuthState)
-
-    return persistAuth(emptyAuthState)
+    return persistAuth(emptyAuthState).pipe(
+      Effect.tap(() => Effect.sync(() => setState(emptyAuthState))),
+    )
   }
 }

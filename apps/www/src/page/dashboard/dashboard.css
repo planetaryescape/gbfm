@@ -268,7 +268,8 @@
   background: var(--dash-panel);
 }
 .dashboard-error {
-  border-color: #a43b3b;
+  border-color: color-mix(in srgb, var(--error) 55%, transparent);
+  background: color-mix(in srgb, var(--error) 10%, var(--dash-panel));
   color: var(--dash-fg);
 }
 .dashboard-empty {
@@ -395,7 +396,7 @@
 }
 .admin-stats dd {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: 1.5rem;
   font-weight: 700;
   line-height: 1.2;
 }
@@ -853,11 +854,15 @@
   background: color-mix(in srgb, var(--dash-fg) 10%, transparent);
 }
 .admin-badge {
+  --badge-tone: var(--dash-muted);
   display: inline-block;
-  padding: 0 0.375rem;
-  border: 1px solid color-mix(in srgb, var(--dash-muted) 40%, transparent);
+  padding: 0.0625rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--badge-tone) 35%, transparent);
+  border-radius: var(--dash-control-radius);
+  background: color-mix(in srgb, var(--badge-tone) 16%, transparent);
   color: var(--dash-fg);
   font-size: 0.75rem;
+  font-weight: 600;
   line-height: 1.5;
   white-space: nowrap;
 }
@@ -865,13 +870,13 @@
   margin-left: 0.25rem;
 }
 .admin-badge[data-tone='ok'] {
-  border-color: color-mix(in srgb, #2f8f5b 55%, transparent);
+  --badge-tone: var(--success);
 }
 .admin-badge[data-tone='warn'] {
-  border-color: color-mix(in srgb, #b7791f 60%, transparent);
+  --badge-tone: var(--warning);
 }
 .admin-badge[data-tone='error'] {
-  border-color: color-mix(in srgb, #c24141 60%, transparent);
+  --badge-tone: var(--error);
 }
 .admin-pager {
   display: flex;

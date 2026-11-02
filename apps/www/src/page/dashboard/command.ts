@@ -6,11 +6,16 @@ import { Command } from 'foldkit'
 import { disconnected, SpotifyConnection } from '../../spotify/connection'
 import { readTheme, saveTheme, Theme } from '../../theme'
 import { CatalogOperation, Message } from './message'
+import type * as ApiKeys from './page/api-keys'
 import { catalogPayload, Kind } from './page/catalog'
 import type * as Sessions from './page/sessions'
 import { DashboardService } from './service'
 
-export type Services = DashboardService | SpotifyConnection | Sessions.SessionService
+export type Services =
+  | DashboardService
+  | SpotifyConnection
+  | Sessions.SessionService
+  | ApiKeys.KeyService
 
 export const SpotifyRequest = Command.define('Spotify.Connection', {
   args: { action: Schema.Literals(['status', 'connect', 'disconnect', 'completeCallback']) },

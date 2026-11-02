@@ -22,6 +22,7 @@ describe('dashboard navigation', () => {
     expect(located('email')).toBe('You / Settings / Email')
     expect(located('player')).toBe('You / Settings / Player')
     expect(located('integrations')).toBe('You / Settings / Integrations')
+    expect(located('api-keys', 'user')).toBe('You / Settings / API keys')
   })
 
   it('places every admin section in the Admin workspace', () => {

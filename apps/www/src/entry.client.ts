@@ -23,6 +23,7 @@ const clientResources = Layer.mergeAll(
   Creator.CreatorUploadLive,
   Dashboard.DashboardServiceLive,
   Dashboard.SessionServiceLive,
+  Dashboard.KeyServiceLive,
   SpotifyConnectionLive,
 )
 

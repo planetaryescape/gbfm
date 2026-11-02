@@ -5,6 +5,7 @@ import { defineMessageUnion } from 'foldkit/message'
 import { SpotifyStatus } from '../../spotify/connection'
 import { Theme } from '../../theme'
 import { Row, DashboardDocument } from './document'
+import * as ApiKeys from './page/api-keys'
 import * as Emails from './page/emails'
 import * as Playlists from './page/playlists'
 import * as Sessions from './page/sessions'
@@ -19,6 +20,7 @@ export const CatalogOperation = Schema.Literals([
 ])
 
 export const Message = defineMessageUnion({
+  GotApiKeyMessage: { message: ApiKeys.Message },
   GotEmailMessage: { message: Emails.Message },
   SaveCatalogEntity: {},
   DeleteCatalogEntity: {},

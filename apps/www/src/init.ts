@@ -24,6 +24,7 @@ export type Services =
   | Creator.CreatorUpload
   | Dashboard.DashboardService
   | Dashboard.SessionService
+  | Dashboard.KeyService
   | SpotifyConnection
 
 export const init: Runtime.ApplicationInit<Model, Message, Flags, Services> = (flags) => {

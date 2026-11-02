@@ -8,6 +8,8 @@ export { DashboardService, DashboardServiceLive, makeDashboardServiceLayer } fro
 
 export { SessionService, SessionServiceLive } from './page/sessions'
 
+export { KeyService, KeyServiceLive } from './page/api-keys'
+
 export { update } from './update'
 
 export { view, type ViewInputs } from './view'

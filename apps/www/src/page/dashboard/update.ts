@@ -13,6 +13,7 @@ import {
 } from './command'
 import { type CatalogOperation, Message } from './message'
 import type { Model } from './model'
+import * as ApiKeys from './page/api-keys'
 import { entityRoute } from './page/catalog'
 import * as Emails from './page/emails'
 import * as Playlists from './page/playlists'
@@ -57,6 +58,17 @@ const writeCatalog = (
 
 export const update = (model: Model, message: Message): Update.Return<Model, Message, Services> =>
   Message.match<Update.Return<Model, Message, Services>>(message, {
+    GotApiKeyMessage: ({ message }) => {
+      if (model.section !== 'api-keys') return { model }
+      const child = ApiKeys.update(model.apiKeys, message)
+
+      return {
+        model: { ...model, apiKeys: child.model },
+        commands: Command.mapMessages(child.commands ?? [], (message) =>
+          Message.GotApiKeyMessage({ message }),
+        ),
+      }
+    },
     GotEmailMessage: ({ message }) => {
       if (model.principal.role !== 'admin' || model.section !== 'emails') return { model }
       const child = Emails.update(model.emails, message)

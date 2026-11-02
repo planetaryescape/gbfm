@@ -200,6 +200,15 @@
 .dashboard-toggle input {
   width: auto;
 }
+.dashboard-form .api-key-permissions label {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  gap: 0.75rem;
+}
+.api-key-permissions input[type='checkbox'] {
+  width: auto;
+}
 .dashboard-list {
   margin: 0;
   padding: 0;

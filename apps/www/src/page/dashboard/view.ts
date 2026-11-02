@@ -8,6 +8,7 @@ import { Message } from './message'
 import type { Model } from './model'
 import { dashboardHeader, sectionHref, sectionLabel, subTabs } from './navigation'
 import { adminHub } from './page/admin'
+import * as ApiKeys from './page/api-keys'
 import { catalogView, entityRoute } from './page/catalog'
 import { historyView, subscribersView } from './page/comms'
 import { contentListView, isContentList } from './page/content'
@@ -293,6 +294,18 @@ export const view = defineView<Model, typeof Message.Type, ViewInputs>((model, i
           h.a([h.Href('/dashboard')], ['Go to your dashboard']),
         ],
       ),
+    )
+
+  if (model.section === 'api-keys')
+    return shell(
+      'API keys',
+      h.submodel({
+        slotId: 'api-keys',
+        view: ApiKeys.view,
+        model: model.apiKeys,
+        viewInputs: { role },
+        toParentMessage: (message) => Message.GotApiKeyMessage({ message }),
+      }),
     )
 
   const content =

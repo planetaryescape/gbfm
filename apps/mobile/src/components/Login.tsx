@@ -1,5 +1,5 @@
 import { typography } from '@gbfm/theme'
-import { Effect, Match } from 'effect'
+import { Effect } from 'effect'
 import { useRouter } from 'expo-router'
 import { useHeaderHeight } from 'expo-router/react-navigation'
 import { type ComponentRef, useRef, useState } from 'react'
@@ -17,14 +17,22 @@ import {
 import { login } from '@/api/auth'
 import { Screen } from '@/components/Screen'
 import { useSetAuth } from '@/store/auth'
+import { idleLoginSubmission, LoginSubmission, submitLogin } from '@/store/loginSubmission'
 import { useThemeColors } from '@/theme/colors'
 
 export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string>()
+  const [submission, setSubmission] = useState<LoginSubmission>(idleLoginSubmission)
+  const isSubmitting = LoginSubmission.$is('Submitting')(submission)
+
+  const errorMessage = LoginSubmission.$match(submission, {
+    Idle: () => undefined,
+    Submitting: () => undefined,
+    Failed: ({ message }) => message,
+  })
+
   const router = useRouter()
   const setAuth = useSetAuth()
   const colors = useThemeColors()
@@ -35,24 +43,10 @@ export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void
   const handleLogin = () => {
     if (!canSubmit) return
 
-    setIsSubmitting(true)
-    setErrorMessage(undefined)
-
-    const runLogin = login({ email: email.trim(), password }).pipe(
-      Effect.tap(setAuth),
-      Effect.tap(() => Effect.sync(() => (onSignedIn ? onSignedIn() : router.replace('/profile')))),
-      Effect.catch((error) =>
-        Effect.sync(() => {
-          setErrorMessage(
-            Match.value(error).pipe(
-              Match.tag('LoginFailed', ({ message }) => message),
-              Match.orElse(() => 'Unable to sign in right now.'),
-            ),
-          )
-        }),
-      ),
-      Effect.ensuring(Effect.sync(() => setIsSubmitting(false))),
-      Effect.asVoid,
+    const runLogin = submitLogin(
+      login({ email: email.trim(), password }).pipe(Effect.tap(setAuth)),
+      setSubmission,
+      () => (onSignedIn ? onSignedIn() : router.replace('/profile')),
     )
 
     void Effect.runPromise(runLogin)

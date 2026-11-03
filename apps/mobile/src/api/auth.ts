@@ -48,26 +48,33 @@ const toFullUser = (user: typeof BetterAuthUser.Type): SessionUser => ({
   updatedAt: user.updatedAt,
 })
 
+export const loginWithClient = Effect.fn('loginWithClient')(function* (
+  connection: { readonly httpClient: HttpClient.HttpClient; readonly baseUrl: string },
+  credentials: LoginRequest,
+) {
+  const request = yield* HttpClientRequest.bodyJson(
+    HttpClientRequest.post(`${connection.baseUrl}/auth/sign-in/email`),
+    credentials,
+  )
+
+  const response = yield* connection.httpClient.execute(request)
+
+  if (response.status < 200 || response.status >= 300) {
+    return yield* new LoginFailed({ message: `Login failed with status ${response.status}` })
+  }
+
+  const data = yield* response.json.pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(BetterAuthLoginResponse)),
+  )
+
+  return { user: toFullUser(data.user), sessionToken: data.token }
+})
+
 export const login = (credentials: LoginRequest) =>
   Effect.gen(function* () {
-    const client = yield* getHttpClient
+    const httpClient = yield* getHttpClient
 
-    const request = yield* HttpClientRequest.bodyJson(
-      HttpClientRequest.post(`${env.EXPO_PUBLIC_API_URL}/auth/sign-in/email`),
-      credentials,
-    )
-
-    const response = yield* client.execute(request)
-
-    if (response.status < 200 || response.status >= 300) {
-      return yield* new LoginFailed({ message: `Login failed with status ${response.status}` })
-    }
-
-    const data = yield* response.json.pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(BetterAuthLoginResponse)),
-    )
-
-    return { user: toFullUser(data.user), sessionToken: data.token }
+    return yield* loginWithClient({ httpClient, baseUrl: env.EXPO_PUBLIC_API_URL }, credentials)
   })
 
 export const getSessionWithClient = Effect.fn('getSessionWithClient')(function* (connection: {

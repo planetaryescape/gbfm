@@ -1,7 +1,7 @@
 import type { D1Database } from '@cloudflare/workers-types'
 import { REMINDER_STATUS } from '@gbfm/core/status'
 import { eq, sql } from 'drizzle-orm'
-import { Effect, Layer } from 'effect'
+import { Deferred, Effect, Fiber, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
@@ -9,7 +9,7 @@ import { emailDeliveryLogsTable } from '@/db/email.schema'
 import { Database, DatabaseLayer } from '@/db/layer'
 import { musicReminder } from '@/db/music-reminder.schema'
 import { ConfigService, createConfig, type WorkerConfigBindings } from '@/services/config.service'
-import { EmailDeliveryLive } from '@/services/email-delivery.service'
+import { EmailDelivery, EmailDeliveryLive } from '@/services/email-delivery.service'
 import {
   EmailTransport,
   EmailUnavailable,
@@ -24,6 +24,7 @@ import {
   sendClaimedReminder,
 } from '@/services/reminder-processor'
 import { withTestLayer } from '@/test/effect'
+import { gatedPostDatabase } from '@/test/gated-post-database'
 import { createMigratedD1Database } from '@/test/migrate-d1'
 
 const workerBindings = (): WorkerConfigBindings => ({
@@ -77,6 +78,94 @@ const reminderLayer = (d1: D1Database, messages: Array<OutboundEmailMessage>) =>
 }
 
 describe('reminder queue delivery', () => {
+  test('a reminder removed after its claim finishes successfully without sending stale work', async () => {
+    await using resource = await createMigratedD1Database()
+    const database = Effect.runSync(withTestLayer(Database, DatabaseLayer(resource.database)))
+    await database
+      .insert(user)
+      .values({ id: 'listener', name: 'Listener', email: 'listener@example.test' })
+    await database.insert(musicReminder).values({
+      id: 'pending',
+      userId: 'listener',
+      musicTitle: 'Mix',
+      artistName: 'Artist',
+      musicUrl: 'https://example.test/mix',
+      reminderDate: new Date(0),
+    })
+    const gate = gatedPostDatabase(resource.database, 'before', /^select .*from "music_reminder"/i)
+    const messages: Array<OutboundEmailMessage> = []
+
+    const pending = Effect.runPromise(
+      withTestLayer(processReminderJob('pending'), reminderLayer(gate.database, messages)),
+    )
+
+    try {
+      await Promise.race([
+        gate.reached,
+        pending.then(() => {
+          throw new Error('Expected reminder read gate')
+        }),
+      ])
+      expect((await database.select().from(musicReminder))[0]?.status).toBe(
+        REMINDER_STATUS.PROCESSING,
+      )
+      await database.delete(musicReminder).where(eq(musicReminder.id, 'pending'))
+      gate.release()
+      expect(await pending).toBeUndefined()
+      expect(messages).toHaveLength(0)
+    } finally {
+      gate.release()
+      await pending
+    }
+  })
+
+  test('interruption leaves a processing claim that queue redelivery skips rather than reclaiming', async () => {
+    await using resource = await createMigratedD1Database()
+    const database = Effect.runSync(withTestLayer(Database, DatabaseLayer(resource.database)))
+    await database
+      .insert(user)
+      .values({ id: 'listener', name: 'Listener', email: 'listener@example.test' })
+    await database.insert(musicReminder).values({
+      id: 'pending',
+      userId: 'listener',
+      musicTitle: 'Mix',
+      artistName: 'Artist',
+      musicUrl: 'https://example.test/mix',
+      reminderDate: new Date(0),
+    })
+    let attempts = 0
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const entered = yield* Deferred.make<void>()
+
+        const delivery = Layer.succeed(EmailDelivery, {
+          deliver: () =>
+            Effect.sync(() => {
+              attempts += 1
+            }).pipe(
+              Effect.andThen(Deferred.succeed(entered, undefined)),
+              Effect.andThen(Effect.never),
+            ),
+        })
+
+        const layer = Layer.mergeAll(DatabaseLayer(resource.database), delivery)
+
+        const fiber = yield* withTestLayer(processReminderJob('pending'), layer).pipe(
+          Effect.forkChild,
+        )
+
+        yield* Deferred.await(entered)
+        yield* Fiber.interrupt(fiber)
+        yield* withTestLayer(processReminderJob('pending'), layer)
+      }),
+    )
+    expect(attempts).toBe(1)
+    expect((await database.select().from(musicReminder))[0]).toMatchObject({
+      status: REMINDER_STATUS.PROCESSING,
+      isSent: false,
+    })
+  })
+
   test('duplicate queue claims skip delivery, while the batch alone reclaims stalled processing', async () => {
     await using resource = await createMigratedD1Database()
     const database = Effect.runSync(withTestLayer(Database, DatabaseLayer(resource.database)))

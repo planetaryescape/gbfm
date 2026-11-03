@@ -344,19 +344,21 @@ describe('makeAudioPlayback', () => {
         Effect.gen(function* () {
           queueWrites += 1
 
-          if (queueWrites !== 1) return
+          if (queueWrites !== 1) return yield* Effect.void
           yield* Deferred.succeed(queueStarted, undefined)
           yield* Deferred.await(releaseQueue)
-          yield* Effect.fail(new AudioStorageError('write'))
+
+          return yield* Effect.fail(new AudioStorageError('write'))
         }),
       saveVolume: () =>
         Effect.gen(function* () {
           volumeWrites += 1
 
-          if (volumeWrites !== 1) return
+          if (volumeWrites !== 1) return yield* Effect.void
           yield* Deferred.succeed(volumeStarted, undefined)
           yield* Deferred.await(releaseVolume)
-          yield* Effect.fail(new AudioStorageError('write'))
+
+          return yield* Effect.fail(new AudioStorageError('write'))
         }),
     })
 

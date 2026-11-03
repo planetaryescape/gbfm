@@ -49,6 +49,8 @@ describe('player drag click suppression', () => {
     expect(drag.click(1)).toBe(true)
     drag.move(1, 10)
     expect(drag.click(1)).toBe(true)
+    drag.down(1, 0)
+    drag.move(1, 10)
     drag.release()
     drag.down(2, 100)
     expect(drag.click(1)).toBe(false)

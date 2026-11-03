@@ -91,7 +91,8 @@ export const startSignupChallenge = (input: {
       }
     },
     retry() {
-      if (!Challenge.$is('Disposed')(challenge)) challenge = Challenge.Waiting()
+      if (Challenge.$is('Disposed')(challenge)) return
+      challenge = Challenge.Waiting()
       status('verifying')
       const api = input.widget()
 
@@ -104,10 +105,10 @@ export const startSignupChallenge = (input: {
       submitting = true
       status('submitting')
       const token = challenge.token
-      const request = input.prepare(token, controller.signal)
-      challenge = Challenge.Waiting()
 
       try {
+        const request = input.prepare(token, controller.signal)
+        challenge = Challenge.Waiting()
         const response = await request()
 
         if (Challenge.$is('Disposed')(challenge)) return

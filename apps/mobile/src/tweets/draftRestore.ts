@@ -22,7 +22,15 @@ export const restoreDraft = Effect.fn('restoreDraft')(function* (identity: strin
 
   if (!guest) return own
 
-  const draft = own ? appendSharedText(own, guest.text) : guest
+  const guestText = guest.text.trimEnd()
+
+  const adopted =
+    own &&
+    (!guestText ||
+      own.text.trimEnd() === guestText ||
+      own.text.trimEnd().endsWith(`\n\n${guestText}`))
+
+  const draft = own ? (adopted ? own : appendSharedText(own, guest.text)) : guest
 
   yield* storage.save(identity, draft)
   yield* storage.remove('guest')

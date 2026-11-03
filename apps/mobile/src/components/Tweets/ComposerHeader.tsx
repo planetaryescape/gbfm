@@ -6,6 +6,7 @@ export function ComposerHeader({
   signedIn,
   busy,
   label,
+  busyLabel = 'Saving',
   disabled,
   onCancel,
   onSubmit,
@@ -14,6 +15,7 @@ export function ComposerHeader({
   readonly signedIn: boolean
   readonly busy: boolean
   readonly label: string
+  readonly busyLabel?: string
   readonly disabled: boolean
   readonly onCancel: () => void
   readonly onSubmit: () => void
@@ -39,7 +41,7 @@ export function ComposerHeader({
             tintColor={colors.accent}
             disabled={busy || disabled}
             onPress={onSubmit}>
-            {busy ? 'Saving' : label}
+            {busy ? busyLabel : label}
           </Stack.Toolbar.Button>
         ) : (
           <Stack.Toolbar.Button variant='prominent' tintColor={colors.accent} onPress={onSignIn}>

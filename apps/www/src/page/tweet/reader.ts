@@ -73,8 +73,13 @@ export type Model = typeof Model.Type
 export const visitState = (model: Model, slug: string) =>
   Option.getOrElse(HashMap.get(model.visits, slug), () => VisitState.cases.Unrecorded.make({}))
 
-const hasPendingVisit = (model: Model) =>
-  Array.from(HashMap.values(model.visits)).some(VisitState.guards.Pending)
+const hasPendingVisit = (model: Model) => {
+  for (const state of HashMap.values(model.visits)) {
+    if (VisitState.guards.Pending(state)) return true
+  }
+
+  return false
+}
 
 export const Message = defineMessageUnion({
   EntryResolved: {

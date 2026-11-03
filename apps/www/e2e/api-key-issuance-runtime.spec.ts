@@ -139,8 +139,9 @@ test('validates locally, cancels settings, and retries password failure without 
   expect(creations).toBe(1)
 })
 
-test('retains a secret on clipboard failure, then erases it on dismissal and pagehide', async ({
+test('retains a secret after the browser clipboard outcome, then erases it on dismissal and pagehide', async ({
   page,
+  browserName,
 }) => {
   await page.route('**/auth/sign-in/email', (route) => route.fulfill({ json: {} }))
   await page.route('**/api/user/api-keys', (route) => route.fulfill({ json: issued }))
@@ -149,7 +150,9 @@ test('retains a secret on clipboard failure, then erases it on dismissal and pag
   const secret = page.getByRole('textbox', { name: 'New API key secret', exact: true })
   await expect(secret).toBeVisible()
   await page.getByRole('button', { name: 'Copy key', exact: true }).click()
-  await expect(page.locator('[data-key-status]')).toContainText('Could not copy')
+  await expect(page.locator('[data-key-status]')).toContainText(
+    browserName === 'webkit' ? 'Key copied' : 'Could not copy',
+  )
   await expect(secret).toBeVisible()
   await page.getByRole('button', { name: 'I saved my key', exact: true }).click()
   await expect(secret).toHaveCount(0)

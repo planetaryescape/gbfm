@@ -67,6 +67,7 @@ export function useTweetComposer({
   const [submission, setSubmission] = useState<SubmissionState>(idleSubmission)
   const submissionRef = useRef(submission)
   const controller = useRef<AbortController | null>(null)
+  const published = useRef<{ readonly storageKey: string; readonly slug: string } | null>(null)
 
   const accept = (restored: TweetDraft) => {
     latest.current = restored
@@ -167,7 +168,17 @@ export function useTweetComposer({
       ),
     )
 
-    const work = submitComposerDraft(storageKey, draft, publish, Boolean(replyTo), request).pipe(
+    const publishedSlug =
+      published.current?.storageKey === storageKey ? published.current.slug : null
+
+    const work = submitComposerDraft(
+      storageKey,
+      draft,
+      publish,
+      Boolean(replyTo),
+      request,
+      publishedSlug,
+    ).pipe(
       Effect.provideService(TweetDraftStorage, {
         read: readTweetDraft,
         save: saveTweetDraft,
@@ -177,11 +188,12 @@ export function useTweetComposer({
         Effect.sync(() =>
           ComposerSubmission.$match(outcome, {
             Published: ({ slug }) => onPublished(slug),
-            PublishedNotCleared: ({ draft: remote }) => {
+            PublishedNotCleared: ({ draft: remote, slug }) => {
+              published.current = { storageKey, slug }
               latest.current = remote
               setDraft(remote)
               setError(
-                'Your tweet was published, but the local draft could not be cleared. Close this screen and check your tweet before trying again.',
+                'Published, but the local draft could not be cleared. Try again to clear it without publishing again.',
               )
             },
             RemoteDraftSaved: ({ draft: remote, localSaved }) => {

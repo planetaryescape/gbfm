@@ -12,6 +12,7 @@ import {
 import { env } from '@/env'
 import { haptics } from '@/feedback/haptics'
 
+import { createComposerLoadOwner, type ComposerLoadAttempt } from './composerLoad'
 import { createComposerOwner } from './composerOwner'
 import { ComposerSubmission } from './composerSubmission'
 import { emptyTweetDraft, musicCandidate, type TweetDraft, withText } from './draft'
@@ -69,6 +70,7 @@ export function useTweetComposer({
   const submissionRef = useRef(submission)
   const controller = useRef<AbortController | null>(null)
   const [owner] = useState(createComposerOwner)
+  const [loads] = useState(createComposerLoadOwner)
   const publication = owner.state(storageKey)
   const editable = Predicate.isTagged(publication, 'Writable')
   const cleanupPending = Predicate.isTagged(publication, 'CleanupPending')
@@ -83,37 +85,39 @@ export function useTweetComposer({
     })
   }
 
-  const loadRemote = (slug: string) => {
-    const abort = new AbortController()
-    controller.current = abort
-
-    const work = Effect.suspend(() => connection(sessionToken)).pipe(
+  const loadRemote = (slug: string, attempt: ComposerLoadAttempt) => {
+    const request = Effect.suspend(() => connection(sessionToken)).pipe(
       Effect.flatMap((connected) => loadTweetForEdit(connected, slug)),
       Effect.timeout('20 seconds'),
-      Effect.match({
-        onSuccess: ({ draft: loaded }) => accept(loaded),
-        onFailure: (cause) =>
-          setError(
-            cause instanceof TweetAuthoringFailed ? cause.message : 'Could not load this tweet.',
-          ),
-      }),
     )
 
-    void Effect.runPromiseExit(work, { signal: abort.signal })
+    const work = attempt.run(
+      request,
+      ({ draft: loaded }) => accept(loaded),
+      (cause) =>
+        setError(
+          cause instanceof TweetAuthoringFailed ? cause.message : 'Could not load this tweet.',
+        ),
+    )
+
+    void Effect.runPromiseExit(work, { signal: attempt.signal })
   }
 
   const load = () => {
-    if (!editable) return
+    if (!Predicate.isTagged(owner.state(storageKey), 'Writable')) return
+    const attempt = loads.start()
 
     return Effect.runSync(
       (editSlug || replyTo ? readTweetDraft(storageKey) : restoreTweetDraft(identity)).pipe(
         Effect.match({
           onSuccess: (stored) => {
-            if (stored) accept(stored)
-            else if (editSlug) loadRemote(editSlug)
-            else accept(emptyTweetDraft(randomUUID()))
+            attempt.commit(() => {
+              if (stored) accept(stored)
+              else if (editSlug) loadRemote(editSlug, attempt)
+              else accept(emptyTweetDraft(randomUUID()))
+            })
           },
-          onFailure: (cause) => setError(cause.message),
+          onFailure: (cause) => attempt.commit(() => setError(cause.message)),
         }),
       ),
     )
@@ -124,8 +128,11 @@ export function useTweetComposer({
   useEffect(() => {
     restore()
 
-    return () => controller.current?.abort()
-  }, [])
+    return () => {
+      loads.cancel()
+      controller.current?.abort()
+    }
+  }, [loads])
 
   const change = (next: TweetDraft) =>
     owner.change(storageKey, () => {
@@ -171,6 +178,7 @@ export function useTweetComposer({
     if (!publish && !editable) return
 
     if (!cleanupPending && !change(draft)) return
+    loads.cancel()
     submissionRef.current = SubmissionState.Submitting()
     setSubmission(submissionRef.current)
     const abort = new AbortController()
@@ -213,6 +221,10 @@ export function useTweetComposer({
               )
             },
             RequestFailed: ({ message }) => {
+              void haptics.failure()
+              setError(message)
+            },
+            ReplyOutcomeUncertain: ({ message }) => {
               void haptics.failure()
               setError(message)
             },

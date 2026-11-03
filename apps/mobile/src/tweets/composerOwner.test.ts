@@ -1,4 +1,5 @@
-import { Effect, Schema } from 'effect'
+import { Effect, Fiber, ManagedRuntime, Schema } from 'effect'
+import { TestClock } from 'effect/testing'
 import { expect, test } from 'vitest'
 
 import { composerControls, createComposerOwner } from './composerOwner'
@@ -58,7 +59,7 @@ const fixture = () => {
   const change = (next: TweetDraft) =>
     owner.change(key, () => Effect.runSync(storage.save(key, next).pipe(Effect.as(true))))
 
-  return { owner, drafts, failures, requests, writes, submit, change }
+  return { owner, drafts, failures, requests, writes, submit, change, storage }
 }
 
 test('published cleanup blocks edits without changing memory or device storage', async () => {
@@ -90,6 +91,7 @@ test.each(['Post', 'Reply', 'Save'])(
     ).toEqual({
       editable: false,
       cleanupPending: true,
+      requiresThreadCheck: false,
       canSubmit: true,
       canSave: false,
       label: 'Retry cleanup',
@@ -139,9 +141,61 @@ test('fresh drafts remain editable and keep their normal submission controls', (
   ).toEqual({
     editable: true,
     cleanupPending: false,
+    requiresThreadCheck: false,
     canSubmit: false,
     canSave: true,
     label: 'Reply',
     busyLabel: 'Saving',
   })
+})
+
+test('an accepted reply with a lost response cannot be published again before checking the thread', async () => {
+  const composer = fixture()
+  const runtime = ManagedRuntime.make(TestClock.layer())
+
+  const request = Effect.sync(() => composer.requests.push('accepted reply')).pipe(
+    Effect.andThen(Effect.never),
+  )
+
+  try {
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const first = yield* composer.owner
+          .submit(key, draft, true, true, request)
+          .pipe(Effect.forkScoped)
+
+        yield* TestClock.adjust('30 seconds')
+        const outcome = yield* Fiber.join(first)
+
+        const retry = yield* composer.owner
+          .submit(key, draft, true, true, request)
+          .pipe(Effect.forkScoped)
+
+        yield* TestClock.adjust('30 seconds')
+        const retried = yield* Fiber.join(retry)
+        expect(composer.requests).toEqual(['accepted reply'])
+        expect(retried).toBeNull()
+        expect(outcome && ComposerSubmission.$is('ReplyOutcomeUncertain')(outcome)).toBe(true)
+        expect(composer.change({ ...draft, text: 'Another reply' })).toBe(false)
+        expect(yield* composer.owner.submit(key, draft, false, true, request)).toBeNull()
+        expect(composer.drafts.get(key)).toEqual(draft)
+        expect(composer.writes).toEqual([])
+        expect(
+          composerControls(composer.owner.state(key), {
+            canSubmit: false,
+            canSave: true,
+            label: 'Reply',
+          }),
+        ).toMatchObject({
+          editable: false,
+          canSubmit: true,
+          canSave: false,
+          requiresThreadCheck: true,
+          label: 'Check thread',
+        })
+      }).pipe(Effect.provideService(TweetDraftStorage, composer.storage), Effect.scoped),
+    )
+  } finally {
+    await runtime.dispose()
+  }
 })

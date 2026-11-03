@@ -1,4 +1,4 @@
-import { Effect, Redacted } from 'effect'
+import { Data, Effect, Redacted } from 'effect'
 import { randomUUID } from 'expo-crypto'
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 
@@ -12,9 +12,17 @@ import {
 import { env } from '@/env'
 import { haptics } from '@/feedback/haptics'
 
+import { ComposerSubmission, submitComposerDraft } from './composerSubmission'
 import { emptyTweetDraft, musicCandidate, type TweetDraft, withText } from './draft'
+import { TweetDraftStorage } from './draftRestore'
 import { readTweetDraft, removeTweetDraft, restoreTweetDraft, saveTweetDraft } from './draftStorage'
 import { useMusicLookup } from './useMusicLookup'
+
+type SubmissionState = { readonly _tag: 'Idle' } | { readonly _tag: 'Submitting' }
+
+const SubmissionState = Data.taggedEnum<SubmissionState>()
+
+const idleSubmission = SubmissionState.Idle()
 
 const connection = (sessionToken: string | null) =>
   Effect.gen(function* () {
@@ -56,8 +64,8 @@ export function useTweetComposer({
   const latest = useRef<TweetDraft | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const locked = useRef(false)
+  const [submission, setSubmission] = useState<SubmissionState>(idleSubmission)
+  const submissionRef = useRef(submission)
   const controller = useRef<AbortController | null>(null)
 
   const accept = (restored: TweetDraft) => {
@@ -133,7 +141,7 @@ export function useTweetComposer({
   }
 
   const discard = (onDone: () => void) => {
-    if (locked.current) return
+    if (SubmissionState.$is('Submitting')(submissionRef.current)) return
     Effect.runSync(
       removeTweetDraft(storageKey).pipe(
         Effect.match({
@@ -145,66 +153,58 @@ export function useTweetComposer({
   }
 
   const save = (publish: boolean, onPublished: (slug: string) => void) => {
-    if (!draft || locked.current || !change(draft)) return
-    locked.current = true
-    setBusy(true)
+    if (!draft || SubmissionState.$is('Submitting')(submissionRef.current) || !change(draft)) return
+    submissionRef.current = SubmissionState.Submitting()
+    setSubmission(submissionRef.current)
     const abort = new AbortController()
     controller.current = abort
 
-    const work = connection(sessionToken).pipe(
+    const request = connection(sessionToken).pipe(
       Effect.flatMap((connected) =>
         replyTo
           ? publishReply(connected, replyTo, draft)
           : saveTweet(connected, draft, publish, knownTags),
       ),
-      Effect.timeoutOrElse({
-        duration: '30 seconds',
-        orElse: () =>
-          Effect.fail(
-            new TweetAuthoringFailed({
-              message: replyTo
-                ? 'The request timed out. Check the thread before retrying, so you do not reply twice.'
-                : 'The request timed out. Retry to check and save the same tweet, without creating a second one.',
-            }),
-          ),
+    )
+
+    const work = submitComposerDraft(storageKey, draft, publish, Boolean(replyTo), request).pipe(
+      Effect.provideService(TweetDraftStorage, {
+        read: readTweetDraft,
+        save: saveTweetDraft,
+        remove: removeTweetDraft,
       }),
-      Effect.tap((saved) =>
-        Effect.sync(() => {
-          if (publish) {
-            Effect.runSync(
-              removeTweetDraft(storageKey).pipe(
-                Effect.match({
-                  onSuccess: () => onPublished(saved.slug),
-                  onFailure: () => {
-                    latest.current = { ...draft, remote: true }
-                    setDraft(latest.current)
-                    setError(
-                      'Your tweet was published, but the local draft could not be cleared. Close this screen and check your tweet before trying again.',
-                    )
-                  },
-                }),
-              ),
-            )
-          } else {
-            change({ ...draft, remote: true })
-            setNotice('Draft saved to your account. It is not public.')
-          }
-        }),
-      ),
-      Effect.catch((cause) =>
-        Effect.sync(() => {
-          void haptics.failure()
-          setError(
-            cause instanceof TweetAuthoringFailed
-              ? cause.message
-              : 'Could not connect. Your local draft is safe.',
-          )
-        }),
+      Effect.tap((outcome) =>
+        Effect.sync(() =>
+          ComposerSubmission.$match(outcome, {
+            Published: ({ slug }) => onPublished(slug),
+            PublishedNotCleared: ({ draft: remote }) => {
+              latest.current = remote
+              setDraft(remote)
+              setError(
+                'Your tweet was published, but the local draft could not be cleared. Close this screen and check your tweet before trying again.',
+              )
+            },
+            RemoteDraftSaved: ({ draft: remote, localSaved }) => {
+              latest.current = remote
+              setDraft(remote)
+              setNotice('Draft saved to your account. It is not public.')
+              setError(
+                localSaved
+                  ? null
+                  : 'Could not save your draft on this device. Keep this screen open and try again.',
+              )
+            },
+            RequestFailed: ({ message }) => {
+              void haptics.failure()
+              setError(message)
+            },
+          }),
+        ),
       ),
       Effect.ensuring(
         Effect.sync(() => {
-          locked.current = false
-          setBusy(false)
+          submissionRef.current = SubmissionState.Idle()
+          setSubmission(submissionRef.current)
         }),
       ),
     )
@@ -235,7 +235,7 @@ export function useTweetComposer({
     draft,
     error,
     notice,
-    busy,
+    busy: SubmissionState.$is('Submitting')(submission),
     musicLoading,
     change,
     setText,

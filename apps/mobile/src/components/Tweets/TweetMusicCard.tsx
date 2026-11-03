@@ -29,7 +29,7 @@ const platformLabel = (platform: string) => platformLabels.get(platform) ?? plat
 function StreamLink({ platform, url }: { platform: string; url: string }) {
   const label = platformLabel(platform)
 
-  return <TweetLink href={url} label={`Open in ${label}`} />
+  return <TweetLink href={url} label={label} accessibilityLabel={`Open in ${label}`} />
 }
 
 export function TweetMusicCard({ music }: { music: TweetMusic }) {

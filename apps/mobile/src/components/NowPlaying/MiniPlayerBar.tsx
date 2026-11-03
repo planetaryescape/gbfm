@@ -16,6 +16,8 @@ import { Glyph } from '@/icons/Glyph'
 import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 
+const artworkRadius = (size: number) => Math.round(size * 0.22)
+
 const textColor =
   Platform.OS === 'ios'
     ? dynamicColorIOS({ dark: brandDark.overlayText, light: brandDark.bg })
@@ -36,7 +38,7 @@ function Artwork({
         style={{
           width: size,
           height: size,
-          borderRadius: radii.artwork,
+          borderRadius: artworkRadius(size),
           backgroundColor: colors.accentSurface,
         }}
       />
@@ -46,7 +48,7 @@ function Artwork({
   return (
     <Image
       source={{ uri: url }}
-      style={{ width: size, height: size, borderRadius: radii.artwork }}
+      style={{ width: size, height: size, borderRadius: artworkRadius(size) }}
       resizeMode='cover'
     />
   )

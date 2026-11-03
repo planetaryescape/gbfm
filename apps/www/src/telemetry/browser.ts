@@ -1,3 +1,4 @@
+import { Data } from 'effect'
 import { onCLS, onINP, onLCP, type Metric } from 'web-vitals'
 
 import {
@@ -39,6 +40,12 @@ type Transport = {
   readonly fetch: (body: string) => Promise<void>
 }
 
+type BatchQueue =
+  | { readonly _tag: 'Empty' }
+  | { readonly _tag: 'Scheduled'; readonly events: Array<BrowserTelemetryEvent> }
+
+const BatchQueue = Data.taggedEnum<BatchQueue>()
+
 /** A browser telemetry queue with explicit lifecycle flush control. */
 export type TelemetryBatcher = {
   readonly add: (event: BrowserTelemetryEvent) => void
@@ -63,13 +70,17 @@ export function createTelemetryBatcher(input: {
   readonly now?: () => number
   readonly schedule?: (flush: () => void, delay: number) => void
 }): TelemetryBatcher {
-  let events: Array<BrowserTelemetryEvent> = []
-  let scheduled = false
+  let state: BatchQueue = BatchQueue.Empty()
   const now = input.now ?? Date.now
   const schedule = input.schedule ?? ((flush, delay) => globalThis.setTimeout(flush, delay))
 
   const flush = () => {
-    scheduled = false
+    const events = BatchQueue.$match(state, {
+      Empty: () => [],
+      Scheduled: ({ events }) => events,
+    })
+
+    state = BatchQueue.Empty()
 
     if (events.length === 0) return
 
@@ -82,7 +93,6 @@ export function createTelemetryBatcher(input: {
       events,
     }
 
-    events = []
     const body = JSON.stringify(batch)
 
     if (!input.transport.beacon(body)) void input.transport.fetch(body).catch(() => undefined)
@@ -90,11 +100,12 @@ export function createTelemetryBatcher(input: {
 
   return {
     add(event) {
-      events.push(event)
+      if (BatchQueue.$is('Scheduled')(state)) {
+        state.events.push(event)
 
-      if (events.length >= MAX_BATCH_EVENTS) flush()
-      else if (!scheduled) {
-        scheduled = true
+        if (state.events.length >= MAX_BATCH_EVENTS) flush()
+      } else {
+        state = BatchQueue.Scheduled({ events: [event] })
         schedule(flush, FLUSH_DELAY_MS)
       }
     },

@@ -62,7 +62,7 @@ const storageFixture = (initial: ReadonlyArray<readonly [string, TweetDraft]> = 
 test('restores existing drafts and adopts guest text without replacing the account slug', async () => {
   const storage = storageFixture([
     ['account', draft],
-    ['guest', { ...draft, text: 'Shared link' }],
+    ['guest', { ...draft, slug: 'guest-slug', text: 'Shared link' }],
   ])
 
   const restored = await Effect.runPromise(
@@ -108,27 +108,42 @@ test('failed guest adoption write retains both drafts', async () => {
   expect([...storage.drafts.values()]).toEqual([draft, draft])
 })
 
-test('characterizes guest cleanup failure: retry appends the guest text a second time', async () => {
-  const guest = { ...draft, text: 'Guest text' }
+test.each(
+  [true, false].flatMap((hasAccount) =>
+    ['Guest text', '  Guest text', 'Guest text  ', '  Guest text  '].map((text) => ({
+      hasAccount,
+      text,
+    })),
+  ),
+)(
+  'guest cleanup retries preserve adopted bytes (account=$hasAccount, text="$text")',
+  async ({ hasAccount, text }) => {
+    const guest = { ...draft, slug: 'guest-slug', text }
 
-  const storage = storageFixture([
-    ['account', draft],
-    ['guest', guest],
-  ])
+    const storage = storageFixture([
+      ...(hasAccount ? [['account', draft] as const] : []),
+      ['guest', guest],
+    ])
 
-  storage.failures.add('remove')
+    storage.failures.add('remove')
 
-  const restore = restoreDraft('account').pipe(
-    Effect.provideService(TweetDraftStorage, storage.store),
-    Effect.isFailure,
-  )
+    const restore = restoreDraft('account').pipe(
+      Effect.provideService(TweetDraftStorage, storage.store),
+      Effect.isFailure,
+    )
 
-  expect(await Effect.runPromise(restore)).toBe(true)
-  expect(storage.drafts.get('account')?.text).toBe('A record\n\nGuest text')
-  expect(await Effect.runPromise(restore)).toBe(true)
-  expect(storage.drafts.get('account')?.text).toBe('A record\n\nGuest text\n\nGuest text')
-  expect(storage.drafts.get('guest')).toEqual(guest)
-})
+    expect(await Effect.runPromise(restore)).toBe(true)
+    const adopted = storage.drafts.get('account')
+    expect(adopted?.text).toBe(hasAccount ? `A record\n\n${text}` : text)
+    expect(await Effect.runPromise(restore)).toBe(true)
+    expect(storage.drafts.get('account')).toEqual(adopted)
+    expect(storage.drafts.get('guest')).toEqual(guest)
+    storage.failures.clear()
+    expect(await Effect.runPromise(restore)).toBe(false)
+    expect(storage.drafts.get('account')).toEqual(adopted)
+    expect(storage.drafts.has('guest')).toBe(false)
+  },
+)
 
 test('read failure never overwrites existing draft storage', async () => {
   const storage = storageFixture([['account', draft]])
@@ -186,7 +201,7 @@ test('publication success is not a request failure when local cleanup fails', as
   )
 
   expect(outcome).toEqual(
-    ComposerSubmission.PublishedNotCleared({ draft: { ...draft, remote: true } }),
+    ComposerSubmission.PublishedNotCleared({ draft: { ...draft, remote: true }, slug: draft.slug }),
   )
   expect(storage.drafts.get('account')).toEqual(draft)
 })
@@ -202,6 +217,34 @@ test('successful publication clears the local draft and returns the server slug'
 
   expect(outcome).toEqual(ComposerSubmission.Published({ slug: 'saved-slug' }))
   expect(storage.drafts.has('account')).toBe(false)
+})
+
+test('reply cleanup retries preserve the draft and never publish another reply', async () => {
+  const storage = storageFixture([['account/reply/thread', draft]])
+  storage.failures.add('remove')
+  let requests = 0
+  const request = Effect.sync(() => ({ slug: `reply-${++requests}` }))
+
+  const submit = (publishedSlug: string | null) =>
+    Effect.runPromise(
+      submitComposerDraft('account/reply/thread', draft, true, true, request, publishedSlug).pipe(
+        Effect.provideService(TweetDraftStorage, storage.store),
+      ),
+    )
+
+  const first = await submit(null)
+  expect(ComposerSubmission.$is('PublishedNotCleared')(first)).toBe(true)
+  expect(storage.drafts.get('account/reply/thread')).toEqual(draft)
+  const retry = await submit('reply-1')
+  expect(requests).toBe(1)
+  expect(retry).toEqual(first)
+  expect(first).toEqual(
+    ComposerSubmission.PublishedNotCleared({ draft: { ...draft, remote: true }, slug: 'reply-1' }),
+  )
+  storage.failures.clear()
+  expect(await submit('reply-1')).toEqual(ComposerSubmission.Published({ slug: 'reply-1' }))
+  expect(requests).toBe(1)
+  expect(storage.drafts.has('account/reply/thread')).toBe(false)
 })
 
 test('failed requests preserve device storage and their user-facing failure', async () => {

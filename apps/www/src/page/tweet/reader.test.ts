@@ -2,7 +2,17 @@ import { MicroPostNeighboursResponse } from '@gbfm/api/navigation'
 import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 
-import { init, Message, nextUnread, parseCheckpoint, UnreadTarget, update, visit } from './reader'
+import {
+  init,
+  Message,
+  nextUnread,
+  parseCheckpoint,
+  UnreadTarget,
+  update,
+  visit,
+  visitState,
+  VisitState,
+} from './reader'
 
 const neighbours = Schema.decodeUnknownSync(MicroPostNeighboursResponse)({
   newer: 'c',
@@ -15,6 +25,61 @@ const neighbours = Schema.decodeUnknownSync(MicroPostNeighboursResponse)({
 })
 
 describe('Tweet reader', () => {
+  it('waits for every pending visit before refreshing metadata for the visible destination', () => {
+    const first = visit(init('anonymous'), 'b', 1, neighbours, null).model
+    expect(visitState(first, 'unknown')).toEqual(VisitState.cases.Unrecorded.make({}))
+    const next = visit(first, 'a', 2, null, null).model
+    const settledFirst = update(next, Message.Seen({ slug: 'b', identity: 'anonymous' }))
+    expect(settledFirst.commands ?? []).toHaveLength(0)
+    expect(visitState(settledFirst.model, 'a')).toEqual(VisitState.cases.Pending.make({}))
+
+    const settledLast = update(
+      settledFirst.model,
+      Message.SeenFailed({ slug: 'a', identity: 'anonymous' }),
+    )
+
+    expect(settledLast.commands).toHaveLength(1)
+    expect(settledLast.model.requestId).toBe(1)
+    const retry = update(settledLast.model, Message.RetrySeen())
+    expect(retry.commands).toHaveLength(1)
+    expect(update(retry.model, Message.RetrySeen())).toEqual({ model: retry.model })
+    expect(
+      update(init('another-account'), Message.Seen({ slug: 'b', identity: 'anonymous' })),
+    ).toEqual({ model: init('another-account') })
+  })
+
+  it('rejects superseded metadata successes and failures and retains recorded visits on revisit', () => {
+    const first = visit(init('anonymous'), 'b', 1, neighbours, null).model
+    const saved = update(first, Message.Seen({ slug: 'b', identity: 'anonymous' })).model
+
+    const token = {
+      identity: 'anonymous',
+      navigationId: saved.navigationId,
+      revision: saved.revision,
+      requestId: saved.requestId,
+    }
+
+    const retry = update(saved, Message.RetryNavigation()).model
+    expect(update(retry, Message.LoadedNavigation({ ...token, neighbours }))).toEqual({
+      model: retry,
+    })
+    expect(update(retry, Message.FailedNavigation(token))).toEqual({ model: retry })
+    expect(
+      update(
+        retry,
+        Message.LoadedNavigation({
+          ...token,
+          requestId: retry.requestId,
+          identity: 'another-account',
+          neighbours,
+        }),
+      ),
+    ).toEqual({ model: retry })
+    const revisited = visit(retry, 'b', 2, null, null)
+    expect(visitState(revisited.model, 'b')).toEqual(VisitState.cases.Recorded.make({}))
+    expect(revisited.model.revision).toBe(saved.revision)
+  })
+
   it('keeps a return point through newer tweets and clears it only after returning', () => {
     const latest = visit(
       { ...init('anonymous'), returnSlug: 'archive' },
@@ -90,10 +155,9 @@ describe('Tweet reader', () => {
     expect(first.model.neighbours?.timeline[0]?.unread).toBe(2)
     expect(first.model.neighbours?.unreadCount).toBe(2)
     const again = visit(first.model, 'b', 1, null, '2024-04')
-    expect(again.model.pending).toEqual(['b'])
+    expect(visitState(again.model, 'b')).toEqual(VisitState.cases.Pending.make({}))
     const saved = update(again.model, Message.Seen({ slug: 'b', identity: 'anonymous' }))
-    expect(saved.model.pending).toEqual([])
-    expect(saved.model.recorded).toEqual(['b'])
+    expect(visitState(saved.model, 'b')).toEqual(VisitState.cases.Recorded.make({}))
     expect(update(saved.model, Message.Seen({ slug: 'b', identity: 'anonymous' }))).toEqual({
       model: saved.model,
     })
@@ -130,7 +194,7 @@ describe('Tweet reader', () => {
   it('makes seen and metadata failures retryable without false exhaustion', () => {
     const visited = visit(init('anonymous'), 'b', 1, neighbours, '2024-04').model
     const failed = update(visited, Message.SeenFailed({ slug: 'b', identity: 'anonymous' })).model
-    expect(failed.failed).toEqual(['b'])
+    expect(visitState(failed, 'b')).toEqual(VisitState.cases.Failed.make({}))
     expect(failed.checkpoint).toBe('b')
 
     const unavailable = update(
@@ -144,7 +208,9 @@ describe('Tweet reader', () => {
     ).model
 
     expect(nextUnread(unavailable.neighbours)._tag).toBe('Unavailable')
-    expect(update(unavailable, Message.RetrySeen()).model.pending).toEqual(['b'])
+    expect(visitState(update(unavailable, Message.RetrySeen()).model, 'b')).toEqual(
+      VisitState.cases.Pending.make({}),
+    )
     expect(update(failed, Message.Seen({ slug: 'b', identity: 'other' }))).toEqual({
       model: failed,
     })

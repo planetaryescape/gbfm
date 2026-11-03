@@ -1,5 +1,5 @@
 import { MicroPostNeighboursResponse, MicroPostSeenResponse } from '@gbfm/api/navigation'
-import { Data, Effect, Schema } from 'effect'
+import { Data, Effect, HashMap, Option, Schema } from 'effect'
 import { Command, type Update } from 'foldkit'
 import { defineMessageUnion } from 'foldkit/message'
 
@@ -46,6 +46,13 @@ export const nextUnread = (neighbours: MicroPostNeighboursResponse | null): Unre
     : UnreadTarget.Unavailable()
 }
 
+export const VisitState = Schema.TaggedUnion({
+  Unrecorded: {},
+  Pending: {},
+  Recorded: {},
+  Failed: {},
+})
+
 export const Model = Schema.Struct({
   identity: Schema.String,
   checkpoint: Schema.NullOr(Checkpoint),
@@ -55,15 +62,19 @@ export const Model = Schema.Struct({
   navigationId: Schema.Number,
   revision: Schema.Number,
   requestId: Schema.Number,
-  pending: Schema.Array(Schema.String),
-  recorded: Schema.Array(Schema.String),
-  failed: Schema.Array(Schema.String),
+  visits: Schema.HashMap(Schema.String, VisitState),
   neighbours: Schema.NullOr(MicroPostNeighboursResponse),
   lastKnown: Schema.NullOr(MicroPostNeighboursResponse),
   metadataStatus: Schema.Literals(['loading', 'ready', 'error']),
 })
 
 export type Model = typeof Model.Type
+
+export const visitState = (model: Model, slug: string) =>
+  Option.getOrElse(HashMap.get(model.visits, slug), () => VisitState.cases.Unrecorded.make({}))
+
+const hasPendingVisit = (model: Model) =>
+  Array.from(HashMap.values(model.visits)).some(VisitState.guards.Pending)
 
 export const Message = defineMessageUnion({
   EntryResolved: {
@@ -178,16 +189,14 @@ export const init = (identity: string): Model => ({
   navigationId: 0,
   revision: 0,
   requestId: 0,
-  pending: [],
-  recorded: [],
-  failed: [],
+  visits: HashMap.empty(),
   neighbours: null,
   lastKnown: null,
   metadataStatus: 'loading',
 })
 
 const refresh = (model: Model): Update.Return<Model, Message> => {
-  if (!model.current || model.pending.length) return { model }
+  if (!model.current || hasPendingVisit(model)) return { model }
   const requestId = model.requestId + 1
 
   return {
@@ -207,8 +216,7 @@ const refresh = (model: Model): Update.Return<Model, Message> => {
 const beginSeen = (model: Model, slug: string): Update.Return<Model, Message> => ({
   model: {
     ...model,
-    pending: [...model.pending, slug],
-    failed: model.failed.filter((candidate) => candidate !== slug),
+    visits: HashMap.set(model.visits, slug, VisitState.cases.Pending.make({})),
     revision: model.revision + 1,
   },
   commands: [MarkSeen({ slug, identity: model.identity })],
@@ -255,8 +263,10 @@ export const visit = (
     metadataStatus: 'loading' as const,
   }
 
+  const state = visitState(model, slug)
+
   const seen =
-    model.pending.includes(slug) || model.recorded.includes(slug)
+    VisitState.guards.Pending(state) || VisitState.guards.Recorded(state)
       ? refresh(next)
       : beginSeen(next, slug)
 
@@ -271,30 +281,28 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
     EntryResolved: () => ({ model }),
     Stored: () => ({ model }),
     RetrySeen: () =>
-      model.current &&
-      model.failed.includes(model.current) &&
-      !model.pending.includes(model.current)
+      model.current && VisitState.guards.Failed(visitState(model, model.current))
         ? beginSeen(model, model.current)
         : { model },
     RetryNavigation: () => refresh(model),
     Seen: ({ slug, identity }) => {
-      if (identity !== model.identity || !model.pending.includes(slug)) return { model }
+      if (identity !== model.identity || !VisitState.guards.Pending(visitState(model, slug)))
+        return { model }
 
       return refresh({
         ...model,
         revision: model.revision + 1,
-        pending: model.pending.filter((candidate) => candidate !== slug),
-        recorded: [...model.recorded, slug],
+        visits: HashMap.set(model.visits, slug, VisitState.cases.Recorded.make({})),
       })
     },
     SeenFailed: ({ slug, identity }) => {
-      if (identity !== model.identity || !model.pending.includes(slug)) return { model }
+      if (identity !== model.identity || !VisitState.guards.Pending(visitState(model, slug)))
+        return { model }
 
       return refresh({
         ...model,
         revision: model.revision + 1,
-        pending: model.pending.filter((candidate) => candidate !== slug),
-        failed: [...model.failed, slug],
+        visits: HashMap.set(model.visits, slug, VisitState.cases.Failed.make({})),
       })
     },
     LoadedNavigation: ({ neighbours, navigationId, revision, requestId, identity }) =>
@@ -302,7 +310,7 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
       navigationId === model.navigationId &&
       revision === model.revision &&
       requestId === model.requestId &&
-      !model.pending.length
+      !hasPendingVisit(model)
         ? { model: { ...model, neighbours, lastKnown: neighbours, metadataStatus: 'ready' } }
         : { model },
     FailedNavigation: ({ navigationId, revision, requestId, identity }) =>
@@ -310,7 +318,7 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
       navigationId === model.navigationId &&
       revision === model.revision &&
       requestId === model.requestId &&
-      !model.pending.length
+      !hasPendingVisit(model)
         ? { model: { ...model, neighbours: null, metadataStatus: 'error' } }
         : { model },
   })

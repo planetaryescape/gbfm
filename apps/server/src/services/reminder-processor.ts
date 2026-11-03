@@ -358,9 +358,11 @@ export const sendClaimedReminder = (reminder: typeof musicReminder.$inferSelect)
   Effect.gen(function* () {
     const db = yield* Database
 
-    if (!(yield* findReminderById(reminder.id))) return
+    const currentReminder = yield* findReminderById(reminder.id)
 
-    yield* deliverReminderEmail(reminder)
+    if (!currentReminder) return
+
+    yield* deliverReminderEmail(currentReminder)
 
     yield* Effect.tryPromise({
       try: () =>

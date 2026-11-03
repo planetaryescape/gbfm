@@ -135,15 +135,13 @@ test('rejects vertical and cancelled touches, coalesces rapid swipes, and retrie
     const dispose = startTweetSwipes()
 
     const touch = (type: string, x: number, y: number) => {
-      const value = new Touch({ identifier: 1, target: surface, clientX: x, clientY: y })
-      surface.dispatchEvent(
-        new TouchEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          touches: type === 'touchend' || type === 'touchcancel' ? [] : [value],
-          changedTouches: [value],
-        }),
-      )
+      const value = { identifier: 1, target: surface, clientX: x, clientY: y }
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperties(event, {
+        touches: { value: type === 'touchend' || type === 'touchcancel' ? [] : [value] },
+        changedTouches: { value: [value] },
+      })
+      surface.dispatchEvent(event)
     }
 
     touch('touchstart', 300, 100)

@@ -10,13 +10,19 @@ const unusedAssets = {
 describe('render runtime initialization', () => {
   it('shares concurrent and completed initialization, including the first asset provider', async () => {
     const loaded: Array<string> = []
+    const laterLoaded: Array<string> = []
     const initialized: Array<string> = []
+    const yoga = new ArrayBuffer(1)
+    const resvg = new ArrayBuffer(2)
+    const initializedWasm: Array<WebAssembly.Module | ArrayBuffer> = []
 
     const initialize = createRenderRuntime({
-      yoga: () => {
+      yoga: (wasm) => {
+        initializedWasm.push(wasm)
         initialized.push('yoga')
       },
-      resvg: () => {
+      resvg: (wasm) => {
+        initializedWasm.push(wasm)
         initialized.push('resvg')
       },
     })
@@ -26,16 +32,28 @@ describe('render runtime initialization', () => {
       loadWasm: async (name) => {
         loaded.push(name)
 
+        return name === 'yoga.wasm' ? yoga : resvg
+      },
+    }
+
+    const laterAssets: SocialCardRenderAssets = {
+      ...unusedAssets,
+      loadWasm: async (name) => {
+        laterLoaded.push(name)
+
         return new ArrayBuffer(0)
       },
     }
 
     const first = initialize(assets)
-    expect(initialize(assets)).toBe(first)
+    expect(initialize(laterAssets)).toBe(first)
     await first
-    expect(initialize(assets)).toBe(first)
+    expect(initialize(laterAssets)).toBe(first)
     expect(loaded).toEqual(['yoga.wasm', 'resvg.wasm'])
+    expect(laterLoaded).toEqual([])
     expect(initialized).toEqual(['yoga', 'resvg'])
+    expect(initializedWasm[0]).toBe(yoga)
+    expect(initializedWasm[1]).toBe(resvg)
   })
 
   it('retries both initializers after partial success and preserves the rejection', async () => {

@@ -142,14 +142,26 @@ describe('page navigation and cached revalidation', () => {
   it('does not display cached content from another principal and clears it on identity change', () => {
     const principal = { id: 'account-a', name: null, username: null, role: null }
 
+    const otherMixes: Flags = {
+      ...mixes,
+      principal: { ...principal, id: 'account-b' },
+      title: 'Account B mixes',
+    }
+
     const initial = update(
       init({ ...about, principal }).model,
-      Message.PrefetchedPage({ flags: mixes, key: '/mixes' }),
+      Message.PrefetchedPage({ flags: otherMixes, key: '/mixes' }),
     ).model
 
+    expect(
+      Option.getOrThrow(
+        AsyncData.getData(Option.getOrThrow(HashMap.get(initial.pageCache, '/mixes'))),
+      ),
+    ).toEqual(otherMixes)
     const navigation = update(initial, changed(mixes.url)).model
     expect(navigation.loading).toBe(true)
-    expect(navigation.flags.principal?.id).toBe('account-a')
+    expect(navigation.flags).toBe(initial.flags)
+    expect(navigation.pendingPath).toBe('/mixes')
 
     const loaded = update(
       navigation,
@@ -162,6 +174,11 @@ describe('page navigation and cached revalidation', () => {
 
     expect(loaded.tweetReader.identity).toBe('anonymous')
     expect(HashMap.has(loaded.pageCache, '/about')).toBe(false)
+    expect(
+      Option.getOrThrow(
+        AsyncData.getData(Option.getOrThrow(HashMap.get(loaded.pageCache, '/mixes'))),
+      ).principal,
+    ).toBeNull()
     expect(loaded.player.favorite.principalId).toBeNull()
     expect(loaded.player.favorite.principalKnown).toBe(true)
   })

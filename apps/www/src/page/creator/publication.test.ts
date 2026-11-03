@@ -75,6 +75,22 @@ describe('creator publication and durability characterization', () => {
     expect(
       update(published, Message.Saved({ id: 'post', slug: 'draft', published: false })).model.phase,
     ).toBe('writing')
+
+    const drafted = update(
+      publishing.model,
+      Message.Saved({ id: 'post', slug: 'draft', published: false }),
+    ).model
+
+    expect(drafted.phase).toBe('writing')
+    expect(drafted.draft).toMatchObject({ postId: 'post', editSlug: 'draft' })
+
+    const publishedLast = update(
+      drafted,
+      Message.Saved({ id: 'post', slug: 'published', published: true }),
+    ).model
+
+    expect(publishedLast.phase).toBe('published')
+    expect(publishedLast.draft).toMatchObject({ postId: 'post', editSlug: 'published' })
   })
 
   it('currently treats remote success followed by local cleanup failure as save failure', async () => {

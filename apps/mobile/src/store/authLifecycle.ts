@@ -96,7 +96,21 @@ export const restoreAuthSession = Effect.fn('restoreAuthSession')(function* (
     return
   }
 
-  setState(AuthLifecycle.ValidatingSession({ session: cached }))
+  const validating = AuthLifecycle.ValidatingSession({ session: cached })
+  setState(validating)
+
+  const transition = (next: AuthLifecycle) => {
+    let owned = false
+    setState((current) => {
+      if (current !== validating) return current
+      owned = true
+
+      return next
+    })
+
+    return owned
+  }
+
   const validation = yield* AuthSessionValidation
 
   yield* validation.validate(cached.sessionToken).pipe(
@@ -104,22 +118,16 @@ export const restoreAuthSession = Effect.fn('restoreAuthSession')(function* (
       onSuccess: (user) =>
         Effect.gen(function* () {
           const refreshed = { user, sessionToken: cached.sessionToken }
-          setState(AuthLifecycle.Authenticated({ session: refreshed }))
-          yield* persistAuthSession(refreshed).pipe(Effect.ignore)
+
+          if (transition(AuthLifecycle.Authenticated({ session: refreshed })))
+            yield* persistAuthSession(refreshed).pipe(Effect.ignore)
         }),
       onFailure: (error) =>
         error instanceof SessionExpired
           ? Effect.gen(function* () {
-              setState(AuthLifecycle.SignedOut())
-              yield* persistAuthSession(emptyAuthSession)
+              if (transition(AuthLifecycle.SignedOut())) yield* persistAuthSession(emptyAuthSession)
             })
-          : Effect.sync(() =>
-              setState((current) =>
-                AuthLifecycle.$is('ValidatingSession')(current) && current.session === cached
-                  ? AuthLifecycle.CachedSession({ session: cached })
-                  : current,
-              ),
-            ),
+          : Effect.sync(() => transition(AuthLifecycle.CachedSession({ session: cached }))),
     }),
   )
 })

@@ -86,47 +86,53 @@ describe('playlist editing', () => {
     }
 
     const cases = [
-      { action: 'save', message: Message.Save(), method: 'PATCH', suffix: '', reset: true },
+      {
+        action: 'save',
+        message: Message.Save(),
+        method: 'PATCH',
+        path: '/api/music/playlists/second',
+        reset: true,
+      },
       {
         action: 'import',
         message: Message.Import(),
         method: 'POST',
-        suffix: '/import/spotify',
+        path: '/api/music/playlists/import/spotify',
         reset: true,
       },
       {
         action: 'add',
         message: Message.AddTrack(),
         method: 'POST',
-        suffix: '/second/tracks/spotify',
+        path: '/api/music/playlists/second/tracks/spotify',
         reset: false,
       },
       {
         action: 'remove',
         message: Message.RemoveTrack({ id: 'one' }),
         method: 'DELETE',
-        suffix: '/second/tracks/one',
+        path: '/api/music/playlists/second/tracks/one',
         reset: false,
       },
       {
         action: 'reorder',
         message: Message.MoveTrack({ id: 'two', direction: 'up' }),
         method: 'PUT',
-        suffix: '/second/tracks/order',
+        path: '/api/music/playlists/second/tracks/order',
         reset: false,
       },
       {
         action: 'sync',
         message: Message.Sync(),
         method: 'POST',
-        suffix: '/second/sync-links',
+        path: '/api/music/playlists/second/sync-links',
         reset: false,
       },
       {
         action: 'delete',
         message: Message.ConfirmDelete(),
         method: 'DELETE',
-        suffix: '/second',
+        path: '/api/music/playlists/second',
         reset: true,
       },
     ]
@@ -139,7 +145,29 @@ describe('playlist editing', () => {
           Effect.sync(() => {
             requests.push(request)
 
-            return { ...emptyDocument, playlists: [playlist], playlistTracks: tracks }
+            if (request.method)
+              return {
+                ...emptyDocument,
+                playlistImport:
+                  item.action === 'import'
+                    ? {
+                        status: 'Imported',
+                        playlistId: playlist.id,
+                        trackCount: 2,
+                        createdTrackCount: 2,
+                        reusedTrackCount: 0,
+                        enrichmentStatus: 'Unavailable',
+                      }
+                    : undefined,
+              }
+
+            if (request.path === '/api/music/playlists')
+              return { ...emptyDocument, playlists: item.action === 'delete' ? [] : [playlist] }
+
+            if (request.path === '/api/music/playlists/second/tracks')
+              return { ...emptyDocument, playlistTracks: tracks }
+
+            throw new Error(`Unexpected reload path: ${request.path}`)
           }),
         readPlayerPreferences: Effect.succeed({ continueQueue: true, restorePosition: true }),
         writePlayerPreferences: () => Effect.void,
@@ -158,7 +186,7 @@ describe('playlist editing', () => {
       )
 
       expect(requests[0]?.method).toBe(item.method)
-      expect(requests[0]?.path.endsWith(item.suffix)).toBe(true)
+      expect(requests[0]?.path).toBe(item.path)
 
       expect(
         item.action !== 'reorder' ||
@@ -175,7 +203,14 @@ describe('playlist editing', () => {
         await Effect.runPromise(load.effect.pipe(Effect.provideService(DashboardService, service))),
       ).model
 
+      expect(requests.slice(1)).toEqual(
+        item.action === 'delete'
+          ? [{ path: '/api/music/playlists' }]
+          : [{ path: '/api/music/playlists' }, { path: '/api/music/playlists/second/tracks' }],
+      )
       expect(loaded.operation).toBe('idle')
+      expect(loaded.listing).toEqual(item.action === 'delete' ? [] : [playlist])
+      expect(loaded.tracks).toEqual(item.action === 'delete' ? [] : tracks)
       expect(loaded.form.title).toBe(
         item.reset ? (item.action === 'delete' ? '' : playlist.title) : 'Unsaved',
       )

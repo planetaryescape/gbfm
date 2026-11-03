@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, Fiber, Layer, Option, Scope } from 'effect'
+import { Cause, Effect, Exit, Fiber, Layer, Option, Schema, Scope } from 'effect'
 import { describe, expect, it } from 'vitest'
 
 import { StorageQuotaError } from './errors'
@@ -15,6 +15,21 @@ import { UploadTransport } from './transport'
 const file = (name = 'mix.mp3') =>
   new File(['abcdef'], name, { type: 'audio/mpeg', lastModified: 1 })
 
+const Identity = Schema.Struct({ uploadId: Schema.String, key: Schema.String })
+
+const PartRequest = Schema.Struct({ ...Identity.fields, partNumber: Schema.Number })
+
+const CompleteRequest = Schema.Struct({
+  ...Identity.fields,
+  parts: Schema.Array(Schema.Struct({ partNumber: Schema.Number, etag: Schema.String })),
+})
+
+const readIdentity = Schema.decodeUnknownSync(Schema.fromJsonString(Identity))
+
+const readPart = Schema.decodeUnknownSync(Schema.fromJsonString(PartRequest))
+
+const readComplete = Schema.decodeUnknownSync(Schema.fromJsonString(CompleteRequest))
+
 const fixture = () => {
   const checkpoints = new Map<string, PersistedResumableUpload>()
   const requests: Array<{ url: string; init: RequestInit }> = []
@@ -27,7 +42,25 @@ const fixture = () => {
   let clearFails = false
   let completeFails = false
   let holdAbort = false
-  let remoteParts: PersistedResumableUpload['completedParts'] = []
+
+  const sessions = new Map<
+    string,
+    { key: string; parts: PersistedResumableUpload['completedParts']; aborted: boolean }
+  >()
+
+  let nextUpload = 0
+  const presigned = new Set<string>()
+
+  const sessionFor = (identity: typeof Identity.Type) => {
+    const session = sessions.get(identity.uploadId)
+    expect(session?.key).toBe(identity.key)
+
+    if (!session) throw new Error('Unknown multipart upload')
+
+    expect(session.aborted).toBe(false)
+
+    return session
+  }
 
   const storage = Layer.succeed(ResumableUploadStorage, {
     read: (key) => Effect.sync(() => checkpoints.get(key) ?? null),
@@ -47,40 +80,100 @@ const fixture = () => {
     fetch: async (url, init) => {
       requests.push({ url, init })
 
-      if (url.endsWith('/abort') && holdAbort) {
-        abortEntered.resolve()
-        await abortRelease.promise
+      if (url.endsWith('/abort')) {
+        const session = sessionFor(readIdentity(init.body))
+
+        if (holdAbort) {
+          abortEntered.resolve()
+          await abortRelease.promise
+        }
+
+        session.aborted = true
+
+        return Response.json({ ok: true })
       }
 
-      if (url === 'https://upload.test/part') {
+      if (url.startsWith('https://upload.test/')) {
+        expect(presigned.has(url)).toBe(true)
+        const target = new URL(url)
+        const [, uploadId, part] = target.pathname.split('/')
+        const partNumber = Number(part)
+        const session = sessions.get(uploadId ?? '')
+        expect(session).toBeDefined()
+        expect(session?.aborted).toBe(false)
+        expect(init.method).toBe('PUT')
+        expect(init.body).toBeInstanceOf(Blob)
+
+        if (!(init.body instanceof Blob) || !session) throw new Error('Invalid part upload')
+
+        expect(await init.body.text()).toBe(partNumber === 1 ? 'abc' : 'def')
+        expect([1, 2]).toContain(partNumber)
+
         if (hold) {
           entered.resolve()
           await release.promise
         }
 
-        return fail
-          ? new Response(null, { status: 400 })
-          : new Response(null, { headers: { ETag: 'etag' } })
+        if (fail) return new Response(null, { status: 400 })
+
+        const etag = `etag-${partNumber}`
+        session.parts = [
+          ...session.parts.filter((part) => part.partNumber !== partNumber),
+          { partNumber, etag, size: init.body.size },
+        ]
+
+        return new Response(null, { headers: { ETag: etag } })
       }
 
-      if (url.endsWith('/init'))
-        return Response.json({ uploadId: 'upload', key: 'audio/mix.mp3', chunkSize: 3 })
+      if (url.endsWith('/init')) {
+        const uploadId = `upload-${++nextUpload}`
+        const key = `audio/${uploadId}.mp3`
+        sessions.set(uploadId, { key, parts: [], aborted: false })
 
-      if (url.includes('/status?')) return Response.json({ parts: remoteParts })
+        return Response.json({ uploadId, key, chunkSize: 3 })
+      }
 
-      if (url.endsWith('/presign-part'))
-        return Response.json({
-          url: 'https://upload.test/part',
-          partNumber: 1,
-          expiresInSeconds: 300,
+      if (url.includes('/status?')) {
+        const query = new URL(url, 'https://api.test').searchParams
+
+        const identity = Schema.decodeUnknownSync(Identity)({
+          uploadId: query.get('uploadId'),
+          key: query.get('key'),
         })
 
-      if (url.endsWith('/complete') && completeFails) return new Response(null, { status: 400 })
+        return Response.json({ parts: sessionFor(identity).parts })
+      }
 
-      if (url.endsWith('/complete'))
-        return Response.json({ url: 'https://cdn.test/mix.mp3', key: 'audio/mix.mp3' })
+      if (url.endsWith('/presign-part')) {
+        const part = readPart(init.body)
+        sessionFor(part)
+        expect([1, 2]).toContain(part.partNumber)
+        const signedUrl = `https://upload.test/${part.uploadId}/${part.partNumber}`
+        presigned.add(signedUrl)
 
-      return Response.json({ ok: true })
+        return Response.json({
+          url: signedUrl,
+          partNumber: part.partNumber,
+          expiresInSeconds: 300,
+        })
+      }
+
+      if (url.endsWith('/complete')) {
+        const complete = readComplete(init.body)
+        const session = sessionFor(complete)
+        expect(complete.parts).toEqual(
+          session.parts
+            .toSorted((a, b) => a.partNumber - b.partNumber)
+            .map(({ partNumber, etag }) => ({ partNumber, etag })),
+        )
+        expect(complete.parts.map(({ partNumber }) => partNumber)).toEqual([1, 2])
+
+        if (completeFails) return new Response(null, { status: 400 })
+
+        return Response.json({ url: 'https://cdn.test/mix.mp3', key: complete.key })
+      }
+
+      throw new Error(`Unexpected upload request: ${url}`)
     },
   })
 
@@ -107,7 +200,19 @@ const fixture = () => {
       completeFails = value
     },
     remote: (parts: PersistedResumableUpload['completedParts']) => {
-      remoteParts = parts
+      const session = sessions.get(`upload-${nextUpload}`)
+
+      if (!session) throw new Error('Expected an initialized upload')
+
+      session.parts = parts
+    },
+    seed: (checkpoint: PersistedResumableUpload) => {
+      sessions.set(checkpoint.uploadId, {
+        key: checkpoint.key,
+        parts: [],
+        aborted: false,
+      })
+      checkpoints.set(checkpoint.fileFingerprint, checkpoint)
     },
     layer: CreatorUploadLayer.pipe(Layer.provide(storage), Layer.provide(transport)),
     storage,
@@ -140,6 +245,21 @@ describe('creator upload ownership through the multipart program', () => {
         yield* Effect.promise(() => test.entered.promise)
         test.abortRelease.resolve()
         yield* Fiber.join(cancelling)
+        expect(
+          test.requests
+            .filter(({ url }) => url.endsWith('/abort'))
+            .map(({ init }) => readIdentity(init.body)),
+        ).toEqual([{ uploadId: 'upload-1', key: 'audio/upload-1.mp3' }])
+        expect(test.checkpoints.get(computeFileFingerprint(file('replacement.mp3')))).toMatchObject(
+          {
+            uploadId: 'upload-2',
+            key: 'audio/upload-2.mp3',
+          },
+        )
+        expect(
+          test.requests.find(({ url }) => url === 'https://upload.test/upload-2/1')?.init.signal
+            ?.aborted,
+        ).toBe(false)
         expect(failureTag(yield* Effect.exit(upload.resume))).toHaveProperty(
           '_tag',
           'InvalidResponseError',
@@ -225,7 +345,7 @@ describe('creator upload ownership through the multipart program', () => {
         test.release.resolve()
         expect(failureTag(yield* Fiber.join(running))).toHaveProperty('_tag', 'UploadPaused')
         const checkpoint = test.checkpoints.get(computeFileFingerprint(storageFile))
-        expect(checkpoint?.completedParts).toEqual([{ partNumber: 1, etag: 'etag', size: 3 }])
+        expect(checkpoint?.completedParts).toEqual([{ partNumber: 1, etag: 'etag-1', size: 3 }])
         test.remote([{ partNumber: 1, etag: 'remote-etag', size: 3 }])
         expect(yield* upload.resume).toBe('https://cdn.test/mix.mp3')
         expect(test.requests.filter(({ init }) => init.method === 'PUT')).toHaveLength(2)
@@ -274,11 +394,11 @@ describe('creator upload ownership through the multipart program', () => {
     const checkpoint = createPersistedUpload({
       file: selected,
       fileFingerprint: computeFileFingerprint(selected),
-      init: { uploadId: 'upload', key: 'audio/mix.mp3', chunkSize: 3 },
+      init: { uploadId: 'upload-0', key: 'audio/mix.mp3', chunkSize: 3 },
       now: 1,
     })
 
-    test.checkpoints.set(checkpoint.fileFingerprint, {
+    test.seed({
       ...checkpoint,
       completedParts: [{ partNumber: 1, etag: 'local', size: 3 }],
     })

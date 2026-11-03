@@ -2,11 +2,13 @@ import { radii } from '@gbfm/theme'
 import { Text, View } from 'react-native'
 
 import type { TweetScreenPost } from '@/api/tweets'
+import { Button } from '@/components/Button'
 import { withAlpha, useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
+import { tagLabel } from '@/tweets/tagText'
 import { replyCountLabel } from '@/tweets/tweetText'
 
-import { ReaderScrollView } from './SwipeExclusion'
+import { ReaderScrollView, SwipeExclusion } from './SwipeExclusion'
 import { TweetAuthor } from './TweetAuthor'
 import { TweetBody } from './TweetBody'
 import { TweetRow } from './TweetRow'
@@ -16,6 +18,7 @@ type Props = {
   readonly parent: TweetScreenPost | null
   readonly quote: TweetScreenPost | null
   readonly replies: ReadonlyArray<TweetScreenPost>
+  readonly onMore: () => void
 }
 
 function SectionLabel({ children }: { children: string }) {
@@ -28,7 +31,7 @@ function SectionLabel({ children }: { children: string }) {
   )
 }
 
-export function TweetDetail({ post, parent, quote, replies }: Props) {
+export function TweetDetail({ post, parent, quote, replies, onMore }: Props) {
   const colors = useThemeColors()
 
   return (
@@ -42,7 +45,15 @@ export function TweetDetail({ post, parent, quote, replies }: Props) {
         </View>
       ) : null}
 
-      <TweetAuthor creator={post.creators?.[0]} createdAt={post.createdAt} />
+      <TweetAuthor
+        creator={post.creators?.[0]}
+        createdAt={post.createdAt}
+        trailing={
+          <SwipeExclusion>
+            <Button iconOnly glyph='more' variant='quiet' label='More actions' onPress={onMore} />
+          </SwipeExclusion>
+        }
+      />
       <TweetBody tweet={post} />
 
       {quote ? (
@@ -59,7 +70,7 @@ export function TweetDetail({ post, parent, quote, replies }: Props) {
 
       {post.tags && post.tags.length > 0 ? (
         <Text style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 12 }}>
-          {post.tags.map((tag) => `#${tag}`).join('  ')}
+          {post.tags.map((tag) => `#${tagLabel(tag)}`).join('  ')}
         </Text>
       ) : null}
 

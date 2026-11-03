@@ -23,10 +23,17 @@ import Animated, {
 } from 'react-native-reanimated'
 import { scheduleOnRN } from 'react-native-worklets'
 
+import { haptics } from '@/feedback/haptics'
+
 import { SwipeGestureContext } from './SwipeExclusion'
 import { useReaderReducedMotion } from './useReaderMotion'
+import { useSwipeNudge } from './useSwipeNudge'
 
 const spring = { damping: 28, stiffness: 280, mass: 0.8, overshootClamping: true }
+
+const bump = () => {
+  void haptics.edge()
+}
 
 export function TweetSwipeSurface({
   children,
@@ -50,6 +57,13 @@ export function TweetSwipeSurface({
   const offset = useSharedValue(!reduced && entering ? (entering === 'older' ? 48 : -48) : 0)
   const settling = useSharedValue(false)
   const enabled = useSharedValue(!disabled)
+
+  const markActive = useSwipeNudge({
+    offset,
+    direction: older ? -1 : newer ? 1 : null,
+    entry: entering === null,
+    enabled: !disabled && !reduced,
+  })
 
   const cancel = useCallback(() => {
     enabled.set(false)
@@ -175,6 +189,8 @@ export function TweetSwipeSurface({
       if (!enabled.get() || !direction || !(direction === 'older' ? older : newer)) {
         offset.set(reduced ? 0 : withSpring(0, spring))
 
+        if (direction) scheduleOnRN(bump)
+
         return
       }
 
@@ -197,7 +213,7 @@ export function TweetSwipeSurface({
     <GestureHandlerRootView style={{ flex: 1, overflow: 'hidden' }}>
       <SwipeGestureContext value={{ pan, scroll }}>
         <GestureDetector gesture={pan}>
-          <View collapsable={false} style={{ flex: 1 }}>
+          <View collapsable={false} style={{ flex: 1 }} onTouchStart={markActive}>
             <Animated.View style={[{ flex: 1 }, style]}>{children}</Animated.View>
           </View>
         </GestureDetector>

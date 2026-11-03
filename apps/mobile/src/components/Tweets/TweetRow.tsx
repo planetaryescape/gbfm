@@ -4,6 +4,7 @@ import { Pressable, Text, View } from 'react-native'
 import type { Tweet } from '@/api/tweets'
 import { withAlpha, useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
+import { tagLabel } from '@/tweets/tagText'
 import { replyCountLabel } from '@/tweets/tweetText'
 
 import { SwipeExclusion } from './SwipeExclusion'
@@ -19,7 +20,7 @@ export function TweetRow({ tweet }: { tweet: Tweet }) {
   const meta = [
     tweet.music ? null : tweet.musicEntityType,
     replyCount > 0 ? replyCountLabel(replyCount) : null,
-    ...(tweet.tags ?? []).slice(0, 2).map((tag) => `#${tag}`),
+    ...(tweet.tags ?? []).slice(0, 2).map((tag) => `#${tagLabel(tag)}`),
   ].filter(Boolean)
 
   return (

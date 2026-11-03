@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Image, Text, View } from 'react-native'
 
 import type { Tweet } from '@/api/tweets'
@@ -12,9 +13,11 @@ const AVATAR_SIZE = 36
 export function TweetAuthor({
   creator,
   createdAt,
+  trailing = null,
 }: {
   creator: Creator | undefined
   createdAt: string
+  trailing?: ReactNode
 }) {
   const colors = useThemeColors()
 
@@ -52,6 +55,7 @@ export function TweetAuthor({
           {meta}
         </Text>
       </View>
+      {trailing}
     </View>
   )
 }

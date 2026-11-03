@@ -45,5 +45,5 @@ export function useTweetPages(firstPage: Page | null) {
     )
   }, [firstPage, hasMore, more])
 
-  return { tweets, status: more?.status ?? 'idle', loadMore }
+  return { tweets, hasMore, status: more?.status ?? 'idle', loadMore }
 }

@@ -16,9 +16,11 @@ import {
 } from '@/api/tweetReader'
 import { env } from '@/env'
 
+import { readerCache, type ReaderCache } from './readerCache'
+import { readReaderPosition, saveReaderPosition } from './readerPosition'
 import { initialReaderState, readerAcceptsAction, ReaderEvent, reduceReader } from './readerState'
 
-const checkpoints = Atom.make<Readonly<Record<string, string>>>({}).pipe(Atom.keepAlive)
+export const checkpoints = Atom.make<Readonly<Record<string, string>>>({}).pipe(Atom.keepAlive)
 
 const bounded = <A, E>(work: Effect.Effect<A, E>) =>
   work.pipe(
@@ -28,7 +30,7 @@ const bounded = <A, E>(work: Effect.Effect<A, E>) =>
     }),
   )
 
-const connect = (sessionToken: string | null) =>
+export const readerConnection = (sessionToken: string | null) =>
   getHttpClient.pipe(
     Effect.map((httpClient): ReaderConnection => ({
       httpClient,
@@ -38,39 +40,88 @@ const connect = (sessionToken: string | null) =>
     Effect.mapError(() => new TweetReaderUnavailable()),
   )
 
+const prefetch = (connection: ReaderConnection, cache: ReaderCache, slugs: ReadonlyArray<string>) =>
+  Effect.forEach(
+    slugs,
+    (slug) =>
+      Effect.all(
+        [
+          cache.hasScreen(slug)
+            ? Effect.void
+            : loadReaderPost(connection, slug).pipe(
+                Effect.tap((screen) => Effect.sync(() => screen && cache.warmScreen(screen))),
+              ),
+          cache.neighbours(slug)
+            ? Effect.void
+            : loadReaderNavigation(connection, slug).pipe(
+                Effect.tap((value) => Effect.sync(() => cache.storeNeighbours(slug, value))),
+              ),
+        ],
+        { concurrency: 'unbounded', discard: true },
+      ).pipe(bounded, Effect.ignore),
+    { concurrency: 'unbounded', discard: true },
+  )
+
 const loadVisit = (input: {
   readonly sessionToken: string | null
   readonly slug: string | null
   readonly request: number
+  readonly cache: ReaderCache
   readonly dispatch: Dispatch<ReaderEvent>
   readonly remember: (slug: string) => void
 }) =>
-  bounded(connect(input.sessionToken)).pipe(
+  bounded(readerConnection(input.sessionToken)).pipe(
     Effect.flatMap((connection) =>
       Effect.gen(function* () {
-        const screen = yield* bounded(loadReaderPost(connection, input.slug))
-        input.dispatch(ReaderEvent.Loaded({ request: input.request, screen }))
+        const { cache, request, dispatch } = input
+        const cached = input.slug ? cache.screen(input.slug) : undefined
+        const cachedNavigation = input.slug ? cache.neighbours(input.slug) : undefined
+
+        if (cached) dispatch(ReaderEvent.Loaded({ request, screen: cached }))
+
+        if (cachedNavigation)
+          dispatch(ReaderEvent.Navigation({ request, navigation: cachedNavigation }))
+
+        const load = bounded(loadReaderPost(connection, input.slug))
+
+        const screen = yield* cached ? load.pipe(Effect.catch(() => Effect.succeed(cached))) : load
+
+        dispatch(ReaderEvent.Loaded({ request, screen }))
 
         if (!screen) return
 
+        cache.storeScreen(screen)
         const current = screen.post.slug
         input.remember(current)
         yield* bounded(recordReaderVisit(connection, current)).pipe(
           Effect.match({
-            onSuccess: () =>
-              input.dispatch(ReaderEvent.Progress({ request: input.request, failed: false })),
-            onFailure: () =>
-              input.dispatch(ReaderEvent.Progress({ request: input.request, failed: true })),
+            onSuccess: () => dispatch(ReaderEvent.Progress({ request, failed: false })),
+            onFailure: () => dispatch(ReaderEvent.Progress({ request, failed: true })),
           }),
         )
-        yield* bounded(loadReaderNavigation(connection, current)).pipe(
+
+        const navigation = yield* bounded(loadReaderNavigation(connection, current)).pipe(
           Effect.match({
-            onSuccess: (navigation) =>
-              input.dispatch(ReaderEvent.Navigation({ request: input.request, navigation })),
-            onFailure: () =>
-              input.dispatch(ReaderEvent.NavigationFailed({ request: input.request })),
+            onSuccess: (value) => {
+              cache.storeNeighbours(current, value)
+              dispatch(ReaderEvent.Navigation({ request, navigation: value }))
+
+              return value
+            },
+            onFailure: () => {
+              if (!cachedNavigation) dispatch(ReaderEvent.NavigationFailed({ request }))
+
+              return cachedNavigation ?? null
+            },
           }),
         )
+
+        if (navigation)
+          yield* prefetch(
+            connection,
+            cache,
+            [navigation.older, navigation.newer].flatMap((slug) => (slug ? [slug] : [])),
+          )
       }),
     ),
     Effect.catch(() =>
@@ -87,7 +138,7 @@ export function useTweetReader(
   const remember = useAtomSet(checkpoints)
 
   const [target, setTarget] = useState({
-    slug: initialSlug ?? saved[identity] ?? null,
+    slug: initialSlug ?? saved[identity] ?? readReaderPosition(identity),
     revision: 0,
   })
 
@@ -127,8 +178,12 @@ export function useTweetReader(
         sessionToken,
         slug: target.slug,
         request,
+        cache: readerCache(identity),
         dispatch,
-        remember: (current) => remember((positions) => ({ ...positions, [identity]: current })),
+        remember: (current) => {
+          saveReaderPosition(identity, current)
+          remember((positions) => ({ ...positions, [identity]: current }))
+        },
       })
 
       const pending = Effect.runPromise(load, { signal: controller.signal })
@@ -165,7 +220,7 @@ export function useTweetReader(
     const current = state.screen.post.slug
     dispatch(ReaderEvent.Action({ request, busy: true }))
 
-    const work = connect(sessionToken).pipe(
+    const work = readerConnection(sessionToken).pipe(
       Effect.flatMap((connection) =>
         kind === 'reset'
           ? resetReaderHistory(connection).pipe(Effect.as(null))

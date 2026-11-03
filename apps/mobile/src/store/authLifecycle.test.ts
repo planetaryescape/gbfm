@@ -1,4 +1,4 @@
-import { Deferred, Effect, Fiber, Redacted } from 'effect'
+import { Deferred, Effect, Fiber, Predicate, Redacted } from 'effect'
 import { HttpClient, HttpClientResponse } from 'effect/http'
 import { expect, test } from 'vitest'
 
@@ -15,6 +15,7 @@ import {
   emptyAuthSession,
   restoreAuthSession,
   type AuthSession,
+  type SetAuthLifecycle,
 } from './authLifecycle'
 
 const wireUser = {
@@ -52,7 +53,8 @@ const fixture = (stored: string | null, response = Response.json({ user: wireUse
   const phases: Array<AuthLifecycle['_tag']> = []
   let state: AuthLifecycle = AuthLifecycle.Bootstrapping()
 
-  const setState = (next: AuthLifecycle) => {
+  const setState: SetAuthLifecycle = (update) => {
+    const next = Predicate.isFunction(update) ? update(state) : update
     state = next
     phases.push(next._tag)
   }
@@ -256,6 +258,49 @@ test.each(['sign-out', 'sign-in'])(
         yield* Fiber.join(fiber)
         expect(auth.session().user?.id).toBe(wireUser.id)
         expect(auth.persisted.get('session')).toBe(JSON.stringify(auth.session()))
+      }).pipe(Effect.scoped),
+    )
+  },
+)
+
+test.each(['sign-out', 'sign-in'])(
+  'unavailable restore leaves a newer %s unchanged',
+  async (operation) => {
+    const auth = fixture(JSON.stringify(cached), new Response(null, { status: 503 }))
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>()
+        const finish = yield* Deferred.make<void>()
+
+        const restore = restoreAuthSession(auth.setState).pipe(
+          Effect.provideService(AuthSessionStorage, auth.storage),
+          Effect.provideService(AuthSessionValidation, {
+            validate: (token) =>
+              Deferred.succeed(started, undefined).pipe(
+                Effect.andThen(Deferred.await(finish)),
+                Effect.andThen(auth.validation.validate(token)),
+              ),
+          }),
+        )
+
+        const fiber = yield* restore.pipe(Effect.forkScoped)
+        yield* Deferred.await(started)
+
+        if (operation === 'sign-out')
+          yield* clearAuthSession(auth.setState).pipe(
+            Effect.provideService(AuthSessionStorage, auth.storage),
+          )
+        else
+          yield* acceptAuthSession(
+            { ...cached, user: cached.user ? { ...cached.user, id: 'new-login' } : null },
+            auth.setState,
+          ).pipe(Effect.provideService(AuthSessionStorage, auth.storage))
+        const newer = auth.session()
+        const persisted = auth.persisted.get('session')
+        yield* Deferred.succeed(finish, undefined)
+        yield* Fiber.join(fiber)
+        expect(auth.session()).toEqual(newer)
+        expect(auth.persisted.get('session')).toBe(persisted)
       }).pipe(Effect.scoped),
     )
   },

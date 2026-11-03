@@ -20,6 +20,10 @@ export type AuthLifecycle =
 
 export const AuthLifecycle = Data.taggedEnum<AuthLifecycle>()
 
+export type SetAuthLifecycle = (
+  update: AuthLifecycle | ((current: AuthLifecycle) => AuthLifecycle),
+) => void
+
 export const currentAuthSession = (state: AuthLifecycle): AuthSession =>
   AuthLifecycle.$match(state, {
     Bootstrapping: () => emptyAuthSession,
@@ -75,7 +79,7 @@ export const persistAuthSession = Effect.fn('persistAuthSession')(function* (ses
 })
 
 export const restoreAuthSession = Effect.fn('restoreAuthSession')(function* (
-  setState: (state: AuthLifecycle) => void,
+  setState: SetAuthLifecycle,
 ) {
   const storage = yield* AuthSessionStorage
   const stored = yield* storage.read.pipe(Effect.orElseSucceed(() => null))
@@ -109,15 +113,18 @@ export const restoreAuthSession = Effect.fn('restoreAuthSession')(function* (
               setState(AuthLifecycle.SignedOut())
               yield* persistAuthSession(emptyAuthSession)
             })
-          : Effect.sync(() => setState(AuthLifecycle.CachedSession({ session: cached }))),
+          : Effect.sync(() =>
+              setState((current) =>
+                AuthLifecycle.$is('ValidatingSession')(current) && current.session === cached
+                  ? AuthLifecycle.CachedSession({ session: cached })
+                  : current,
+              ),
+            ),
     }),
   )
 })
 
-export const acceptAuthSession = (
-  session: AuthSession,
-  setState: (state: AuthLifecycle) => void,
-) => {
+export const acceptAuthSession = (session: AuthSession, setState: SetAuthLifecycle) => {
   setState(
     session.user !== null || session.sessionToken !== null
       ? AuthLifecycle.Authenticated({ session })
@@ -127,7 +134,7 @@ export const acceptAuthSession = (
   return persistAuthSession(session)
 }
 
-export const clearAuthSession = (setState: (state: AuthLifecycle) => void) =>
+export const clearAuthSession = (setState: SetAuthLifecycle) =>
   persistAuthSession(emptyAuthSession).pipe(
     Effect.tap(() => Effect.sync(() => setState(AuthLifecycle.SignedOut()))),
   )

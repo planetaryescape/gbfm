@@ -24,6 +24,7 @@ describe('player submodel', () => {
     const dropped = update(dragging, Message.DroppedAt({ index: 0 }))
     expect(dropped.model.draggedIndex).toBeNull()
     expect(dropped.commands?.[0]?.args).toEqual({ from: 2, to: 0 })
+    expect(update(dropped.model, Message.DroppedAt({ index: 1 })).commands).toBeUndefined()
   })
 })
 
@@ -31,6 +32,25 @@ describe('player pull gesture', () => {
   const openPlayer = () => ({
     ...initialModel,
     playerDialog: { ...initialModel.playerDialog, isOpen: true },
+  })
+
+  it('guards closed, animating and already-owned sheets without issuing commands', () => {
+    const start = Message.PlayerDragStarted({ pointerId: 1, clientY: 100 })
+    expect(update(initialModel, start).model).toBe(initialModel)
+    const opening = update(initialModel, Message.ToggleFullscreen()).model
+    expect(opening.playerDialog.animation.transitionState).not.toBe('Idle')
+    expect(update(opening, start).model).toBe(opening)
+    const started = update(openPlayer(), start).model
+    expect(update(started, Message.PlayerDragStarted({ pointerId: 2, clientY: 200 })).model).toBe(
+      started,
+    )
+    expect(
+      update(
+        started,
+        Message.PlayerDragReleased({ pointerId: 2, clientY: 500, viewportHeight: 800 }),
+      ).model,
+    ).toBe(started)
+    expect(update(initialModel, Message.PlayerDragCancelled()).model).toBe(initialModel)
   })
 
   it('follows the active pointer downward and snaps short pulls back', () => {

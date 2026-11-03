@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Cause, Effect, Exit } from 'effect'
 import { HttpClient, HttpClientResponse } from 'effect/http'
 import { HttpApiError } from 'effect/http-api'
 import { expect, test } from 'vitest'
@@ -23,19 +23,27 @@ const fixture = () => {
   const events: Array<ReaderEvent> = []
   const targets: Array<string | null> = []
   const paths: Array<string> = []
+  const started = Promise.withResolvers<AbortSignal>()
 
-  const run = (kind: 'random' | 'reset', response: Response) => {
+  const run = (
+    kind: 'random' | 'reset',
+    response: Response | Promise<Response>,
+    cancelOnBlur = true,
+  ) => {
     const connection: ReaderConnection = {
       baseUrl: 'https://fixture.test',
       sessionToken: null,
-      httpClient: HttpClient.make((request, url) => {
+      httpClient: HttpClient.make((request, url, signal) => {
         paths.push(`${request.method} ${url.pathname}`)
+        started.resolve(signal)
 
-        return Effect.succeed(HttpClientResponse.fromWeb(request, response))
+        return Effect.promise(() => Promise.resolve(response)).pipe(
+          Effect.map((response) => HttpClientResponse.fromWeb(request, response)),
+        )
       }),
     }
 
-    return Effect.runPromise(
+    return Effect.runPromiseExit(
       readerAction(Effect.succeed(connection), {
         ...action,
         kind,
@@ -44,10 +52,11 @@ const fixture = () => {
         dispatch: (event) => events.push(event),
         go: (target) => targets.push(target),
       }),
+      { signal: cancelOnBlur ? action.controller.signal : undefined },
     )
   }
 
-  return { owner, visit, action, events, targets, paths, run }
+  return { owner, visit, action, events, targets, paths, started: started.promise, run }
 }
 
 test.each(['random', 'reset'] as const)(
@@ -78,10 +87,38 @@ test('random exhaustion is distinct from resetting to latest', async () => {
 
 test('stale successful random results cannot navigate after blur and refocus', async () => {
   const f = fixture()
+  const response = Promise.withResolvers<Response>()
+  const running = f.run('random', response.promise, false)
+  await f.started
   f.owner.blur(f.visit.controller)
   f.owner.focus()
-  await f.run('random', Response.json({ slug: 'another' }))
+  response.resolve(Response.json({ slug: 'another' }))
+  expect(Exit.isSuccess(await running)).toBe(true)
   expect(f.targets).toEqual([])
+  expect(f.events).toEqual([])
+  expect(f.paths).toEqual(['GET /api/content/posts/micro/current/random'])
+})
+
+test.each(['random', 'reset'] as const)('blur cancels pending %s HTTP work', async (kind) => {
+  const f = fixture()
+  const response = Promise.withResolvers<Response>()
+  const running = f.run(kind, response.promise)
+  const signal = await f.started
+  expect(signal.aborted).toBe(false)
+  f.owner.blur(f.visit.controller)
+  f.owner.focus()
+  response.resolve(Response.json(kind === 'random' ? { slug: 'another' } : { reset: true }))
+  const exit = await running
+  expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+  expect(signal.aborted).toBe(true)
+  expect(f.targets).toEqual([])
+  expect(f.events).toEqual([])
+})
+
+test('an active successful random action navigates to the unread slug', async () => {
+  const f = fixture()
+  await f.run('random', Response.json({ slug: 'another' }))
+  expect(f.targets).toEqual(['another'])
   expect(f.events).toEqual([])
   expect(f.paths).toEqual(['GET /api/content/posts/micro/current/random'])
 })

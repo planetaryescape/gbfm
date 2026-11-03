@@ -14,7 +14,7 @@ import { makeHtmlAudioEngineLayer, type AudioPort } from './runtime'
 class PlatformAudio extends EventTarget implements AudioPort {
   src = ''
   currentTime = 0
-  duration = 0
+  duration = Number.NaN
   paused = true
   ended = false
   readyState = 0
@@ -25,6 +25,9 @@ class PlatformAudio extends EventTarget implements AudioPort {
 
   load() {
     this.currentTime = 0
+    this.readyState = 0
+    this.duration = Number.NaN
+    this.paused = true
     this.ended = false
     this.calls.push(`replace:${this.src}`)
   }
@@ -140,7 +143,6 @@ const fixture = () => {
 describe('browser adapter with shared playback orchestration', () => {
   it('ignores completion already queued by the adapter before source replacement', async () => {
     const f = fixture()
-    f.audio.ready()
 
     try {
       await f.runtime.runPromise(
@@ -148,7 +150,10 @@ describe('browser adapter with shared playback orchestration', () => {
           const core = yield* f.core()
           yield* core.requestPlayOnReady('one')
           yield* core.setSource(track('one'))
-          yield* Effect.yieldNow
+          f.audio.ready(90)
+          yield* Effect.promise(async () => {
+            await expect.poll(() => f.reported).toEqual(['one'])
+          })
           f.audio.finish()
           yield* core.requestPlayOnReady('two')
           yield* core.setSource(track('two'))
@@ -156,6 +161,13 @@ describe('browser adapter with shared playback orchestration', () => {
           expect(f.cleared).toEqual([])
           expect(f.completions).toBe(0)
           expect(yield* core.currentTrackId).toBe('two')
+          expect(f.audio.readyState).toBe(0)
+          expect(f.audio.duration).toBeNaN()
+          expect(f.reported).toEqual(['one'])
+          f.audio.ready(150)
+          yield* Effect.promise(async () => {
+            await expect.poll(() => f.reported).toEqual(['one', 'two'])
+          })
           f.audio.finish()
           yield* Effect.promise(async () => {
             await expect
@@ -174,7 +186,6 @@ describe('browser adapter with shared playback orchestration', () => {
     const gate = Promise.withResolvers<string | null>()
     f.hold('one', gate.promise)
     f.save('two', 24)
-    f.audio.ready()
 
     try {
       await f.runtime.runPromise(
@@ -185,11 +196,20 @@ describe('browser adapter with shared playback orchestration', () => {
           yield* Effect.promise(async () => {
             await expect.poll(() => f.reads).toContain(f.checkpointKey('one'))
           })
+          f.audio.ready(90)
           yield* core.requestPlayOnReady('two')
           yield* core.setSource(track('two'))
           gate.resolve(f.checkpoint(67))
           yield* Fiber.join(old)
           expect(f.audio.src).toBe(track('two').url)
+          expect(f.audio.readyState).toBe(0)
+          expect(f.audio.duration).toBeNaN()
+          expect(f.audio.calls.filter((call) => call.startsWith('play:'))).toEqual([])
+          expect(f.audio.currentTime).toBe(0)
+          f.audio.ready(150)
+          yield* Effect.promise(async () => {
+            await expect.poll(() => f.reported).toEqual(['two'])
+          })
           expect(f.audio.calls.filter((call) => call.startsWith('play:'))).toEqual(['play:24'])
           expect(f.audio.currentTime).toBe(24)
           yield* core.setSource(null)
@@ -276,7 +296,6 @@ describe('browser adapter with shared playback orchestration', () => {
 
   it('does not report or arm completion after platform play rejection', async () => {
     const f = fixture()
-    f.audio.ready()
     f.audio.rejectPlay = true
 
     try {
@@ -285,6 +304,10 @@ describe('browser adapter with shared playback orchestration', () => {
           const core = yield* f.core()
           yield* core.requestPlayOnReady('one')
           yield* core.setSource(track('one'))
+          f.audio.ready()
+          yield* Effect.promise(async () => {
+            await expect.poll(() => f.errors).toEqual(['Playback was refused by the platform'])
+          })
           f.audio.finish()
           yield* Effect.yieldNow
           expect(yield* core.isDesiredPlaying).toBe(false)
@@ -301,7 +324,6 @@ describe('browser adapter with shared playback orchestration', () => {
 
   it('deduplicates completion and rearms it after explicit replay from zero', async () => {
     const f = fixture()
-    f.audio.ready()
 
     try {
       await f.runtime.runPromise(
@@ -309,6 +331,10 @@ describe('browser adapter with shared playback orchestration', () => {
           const core = yield* f.core()
           yield* core.requestPlayOnReady('one')
           yield* core.setSource(track('one'))
+          f.audio.ready()
+          yield* Effect.promise(async () => {
+            await expect.poll(() => f.reported).toEqual(['one'])
+          })
           f.audio.finish()
           f.audio.finish()
           yield* Effect.promise(async () => {
@@ -338,7 +364,6 @@ describe('browser adapter with shared playback orchestration', () => {
 
   it.each([true, false])('uses live queue continuation preference %s', async (continueQueue) => {
     const f = fixture()
-    f.audio.ready()
     const completed: Array<string | null> = []
     let preferences = { continueQueue: !continueQueue, restorePosition: true }
 
@@ -358,6 +383,10 @@ describe('browser adapter with shared playback orchestration', () => {
 
           yield* Effect.yieldNow
           yield* playback.playAll([track('one'), track('two')])
+          f.audio.ready(90)
+          yield* Effect.promise(async () => {
+            await expect.poll(() => f.reported).toEqual(['one'])
+          })
           preferences = { ...preferences, continueQueue }
           f.audio.finish()
           yield* Effect.promise(async () => {
@@ -371,6 +400,13 @@ describe('browser adapter with shared playback orchestration', () => {
 
           if (continueQueue) {
             yield* Effect.promise(async () => {
+              await expect.poll(() => f.audio.src).toBe(track('two').url)
+            })
+            expect(f.audio.readyState).toBe(0)
+            expect(f.audio.duration).toBeNaN()
+            expect(f.reported).toEqual(['one'])
+            f.audio.ready(150)
+            yield* Effect.promise(async () => {
               await expect.poll(() => f.reported).toEqual(['one', 'two'])
             })
             expect(f.audio.src).toBe(track('two').url)
@@ -378,6 +414,13 @@ describe('browser adapter with shared playback orchestration', () => {
             expect(f.reported).toEqual(['one'])
             yield* playback.playNext
             expect(f.audio.src).toBe(track('two').url)
+            expect(f.audio.readyState).toBe(0)
+            expect(f.audio.duration).toBeNaN()
+            expect(f.reported).toEqual(['one'])
+            f.audio.ready(150)
+            yield* Effect.promise(async () => {
+              await expect.poll(() => f.reported).toEqual(['one', 'two'])
+            })
           }
         }).pipe(Effect.scoped),
       )

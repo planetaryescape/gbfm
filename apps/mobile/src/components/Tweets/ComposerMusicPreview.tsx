@@ -15,7 +15,7 @@ export function ComposerMusicPreview({
 }: {
   readonly music: MusicAttachment | null
   readonly loading: boolean
-  readonly onDismiss: () => void
+  readonly onDismiss: (() => void) | undefined
 }) {
   const colors = useThemeColors()
 
@@ -64,7 +64,7 @@ export function ComposerMusicPreview({
           </Text>
         ) : null}
       </View>
-      {music ? (
+      {music && onDismiss ? (
         <Pressable
           accessibilityRole='button'
           accessibilityLabel='Remove music card'

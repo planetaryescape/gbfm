@@ -29,7 +29,7 @@ const user = {
 
 const credentials = { email: 'fixture@example.test', password: 'fixture-password' }
 
-const fixture = (response: Response) => {
+const fixture = (response: Response, writeGate: Effect.Effect<void> = Effect.void) => {
   const requests: Array<{ readonly method: string; readonly path: string }> = []
 
   const httpClient = HttpClient.make((request, url) => {
@@ -43,15 +43,20 @@ const fixture = (response: Response) => {
   const persisted: Array<AuthSession> = []
   const failures = new Set<string>()
   const navigation: Array<string> = []
+  const events: Array<string> = []
 
   const storage = AuthSessionStorage.of({
     read: Effect.succeed(null),
     write: (session) =>
-      failures.has('write')
-        ? Effect.fail(new AuthStorageFailed({ message: 'Could not save the session.' }))
-        : Effect.sync(() => {
-            persisted.push(session)
-          }),
+      Effect.gen(function* () {
+        events.push('write-start')
+        yield* writeGate
+
+        if (failures.has('write'))
+          yield* new AuthStorageFailed({ message: 'Could not save the session.' })
+        persisted.push(session)
+        events.push('persisted')
+      }),
     remove: Effect.void,
   })
 
@@ -71,6 +76,7 @@ const fixture = (response: Response) => {
   ).pipe(Effect.tap(setAuth))
 
   const navigate = () => {
+    events.push('navigate')
     navigation.push('profile')
   }
 
@@ -82,6 +88,7 @@ const fixture = (response: Response) => {
     requests,
     failures,
     navigation,
+    events,
     persisted,
     storage,
     request,
@@ -101,6 +108,33 @@ test('login success persists the parsed session before navigating and returns to
   expect(login.session().user?.role).toBe('creator')
   expect(login.persisted).toEqual([login.session()])
   expect(login.navigation).toEqual(['profile'])
+  expect(login.events).toEqual(['write-start', 'persisted', 'navigate'])
+})
+
+test('login cannot navigate while session persistence is pending', async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+
+      const login = fixture(
+        Response.json({ user, token: 'fixture-token' }),
+        Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(finish))),
+      )
+
+      const fiber = yield* login.work.pipe(Effect.forkScoped)
+      yield* Deferred.await(started)
+      expect(login.events).toEqual(['write-start'])
+      expect(login.persisted).toEqual([])
+      expect(login.navigation).toEqual([])
+      expect(login.state()).toEqual(LoginSubmission.Submitting())
+      yield* Deferred.succeed(finish, undefined)
+      yield* Fiber.join(fiber)
+      expect(login.events).toEqual(['write-start', 'persisted', 'navigate'])
+      expect(login.persisted).toEqual([login.session()])
+      expect(login.state()).toEqual(LoginSubmission.Idle())
+    }).pipe(Effect.scoped),
+  )
 })
 
 test.each([401, 403, 500])(

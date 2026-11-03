@@ -8,7 +8,7 @@ import { TweetDraftStorage } from './draftRestore'
 export type ComposerSubmission = Data.TaggedEnum<{
   RemoteDraftSaved: { readonly draft: TweetDraft; readonly localSaved: boolean }
   Published: { readonly slug: string }
-  PublishedNotCleared: { readonly draft: TweetDraft }
+  PublishedNotCleared: { readonly draft: TweetDraft; readonly slug: string }
   RequestFailed: { readonly message: string }
 }>
 
@@ -20,10 +20,11 @@ export const submitComposerDraft = Effect.fn('submitComposerDraft')(function* <E
   publish: boolean,
   replying: boolean,
   request: Effect.Effect<{ readonly slug: string }, E, R>,
+  publishedSlug: string | null = null,
 ) {
   const storage = yield* TweetDraftStorage
 
-  const response = yield* request.pipe(
+  const response = yield* (publishedSlug ? Effect.succeed({ slug: publishedSlug }) : request).pipe(
     Effect.timeoutOrElse({
       duration: '30 seconds',
       orElse: () =>
@@ -53,7 +54,7 @@ export const submitComposerDraft = Effect.fn('submitComposerDraft')(function* <E
 
     return cleared
       ? ComposerSubmission.Published({ slug: response.success.slug })
-      : ComposerSubmission.PublishedNotCleared({ draft: remote })
+      : ComposerSubmission.PublishedNotCleared({ draft: remote, slug: response.success.slug })
   }
 
   const localSaved = yield* storage.save(storageKey, remote).pipe(Effect.isSuccess)

@@ -30,6 +30,7 @@ import {
   withUpdatedPart,
 } from './protocol'
 import { type ResumableUploadStorage, clearCheckpoint, writeCheckpoint } from './storage'
+import { UploadTransport } from './transport'
 
 const MAX_PART_ATTEMPTS = 5
 
@@ -84,24 +85,26 @@ const decodeOrFail = <A>(decode: (raw: JsonInput) => A, raw: JsonInput, label: s
 const httpRequest = (
   url: string,
   init: Omit<RequestInit, 'signal'> & { signal: AbortSignal },
-): Effect.Effect<Response, NetworkError | HttpError | UploadAborted> =>
-  Effect.tryPromise({
-    try: () =>
-      fetch(url, {
-        ...init,
-        credentials: init.credentials ?? 'include',
-      }),
-    catch: (cause) => {
-      if (init.signal.aborted) return new UploadAborted()
+): Effect.Effect<Response, NetworkError | HttpError | UploadAborted, UploadTransport> =>
+  Effect.flatMap(UploadTransport, (transport) =>
+    Effect.tryPromise({
+      try: () =>
+        transport.fetch(url, {
+          ...init,
+          credentials: init.credentials ?? 'include',
+        }),
+      catch: (cause) => {
+        if (init.signal.aborted) return new UploadAborted()
 
-      if (cause instanceof Error && cause.name === 'AbortError') return new UploadAborted()
+        if (cause instanceof Error && cause.name === 'AbortError') return new UploadAborted()
 
-      return new NetworkError({
-        message: cause instanceof Error ? cause.message : String(cause),
-        cause,
-      })
-    },
-  }).pipe(
+        return new NetworkError({
+          message: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        })
+      },
+    }),
+  ).pipe(
     Effect.flatMap((response) =>
       response.ok
         ? Effect.succeed(response)
@@ -120,7 +123,7 @@ const retryableJsonRequest = <A>(
   decode: (raw: JsonInput) => A,
   label: string,
   times: number,
-): Effect.Effect<A, ResumableUploadError> =>
+): Effect.Effect<A, ResumableUploadError, UploadTransport> =>
   httpRequest(url, init).pipe(
     Effect.flatMap((response) =>
       Effect.tryPromise({
@@ -138,7 +141,11 @@ const retryableJsonRequest = <A>(
 const initUpload = (
   input: UploadInput,
   signal: AbortSignal,
-): Effect.Effect<{ uploadId: string; key: string; chunkSize: number }, ResumableUploadError> =>
+): Effect.Effect<
+  { uploadId: string; key: string; chunkSize: number },
+  ResumableUploadError,
+  UploadTransport
+> =>
   retryableJsonRequest(
     '/api/upload/multipart/init',
     {
@@ -160,7 +167,7 @@ const initUpload = (
 const fetchStatus = (
   persisted: PersistedResumableUpload,
   signal: AbortSignal,
-): Effect.Effect<{ parts: Array<ResumablePart> }, ResumableUploadError> => {
+): Effect.Effect<{ parts: Array<ResumablePart> }, ResumableUploadError, UploadTransport> => {
   const url = `/api/upload/multipart/status?key=${encodeURIComponent(persisted.key)}&uploadId=${encodeURIComponent(persisted.uploadId)}`
 
   return retryableJsonRequest(
@@ -176,7 +183,7 @@ const presignPart = (
   working: PersistedResumableUpload,
   partNumber: number,
   signal: AbortSignal,
-): Effect.Effect<{ url: string }, ResumableUploadError> =>
+): Effect.Effect<{ url: string }, ResumableUploadError, UploadTransport> =>
   retryableJsonRequest(
     '/api/upload/multipart/presign-part',
     {
@@ -200,20 +207,26 @@ const putPartToS3 = (
   url: string,
   blob: Blob,
   signal: AbortSignal,
-): Effect.Effect<string, NetworkError | HttpError | InvalidResponseError | UploadAborted> =>
-  Effect.tryPromise({
-    try: () => fetch(url, { method: 'PUT', body: blob, signal }),
-    catch: (cause): NetworkError | UploadAborted => {
-      if (signal.aborted) return new UploadAborted()
+): Effect.Effect<
+  string,
+  NetworkError | HttpError | InvalidResponseError | UploadAborted,
+  UploadTransport
+> =>
+  Effect.flatMap(UploadTransport, (transport) =>
+    Effect.tryPromise({
+      try: () => transport.fetch(url, { method: 'PUT', body: blob, signal }),
+      catch: (cause): NetworkError | UploadAborted => {
+        if (signal.aborted) return new UploadAborted()
 
-      if (cause instanceof Error && cause.name === 'AbortError') return new UploadAborted()
+        if (cause instanceof Error && cause.name === 'AbortError') return new UploadAborted()
 
-      return new NetworkError({
-        message: cause instanceof Error ? cause.message : String(cause),
-        cause,
-      })
-    },
-  }).pipe(
+        return new NetworkError({
+          message: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        })
+      },
+    }),
+  ).pipe(
     Effect.flatMap((response): Effect.Effect<string, HttpError | InvalidResponseError> => {
       if (!response.ok) {
         return Effect.fail(
@@ -253,7 +266,7 @@ const uploadPart = (
   working: PersistedResumableUpload,
   part: { partNumber: number; blob: Blob },
   signal: AbortSignal,
-): Effect.Effect<ResumablePart, ResumableUploadError> =>
+): Effect.Effect<ResumablePart, ResumableUploadError, UploadTransport> =>
   Effect.gen(function* () {
     if (signal.aborted) return yield* new UploadAborted()
 
@@ -274,7 +287,7 @@ const uploadPart = (
 const completeUpload = (
   working: PersistedResumableUpload,
   signal: AbortSignal,
-): Effect.Effect<ResumableUploadResult, ResumableUploadError> =>
+): Effect.Effect<ResumableUploadResult, ResumableUploadError, UploadTransport> =>
   retryableJsonRequest(
     '/api/upload/multipart/complete',
     {
@@ -295,7 +308,7 @@ const completeUpload = (
 const abortUpload = (
   persisted: PersistedResumableUpload,
   signal: AbortSignal,
-): Effect.Effect<void, ResumableUploadError> =>
+): Effect.Effect<void, ResumableUploadError, UploadTransport> =>
   Effect.gen(function* () {
     if (signal.aborted) return yield* new UploadAborted()
 
@@ -328,7 +341,11 @@ const sumCompleted = (parts: ReadonlyArray<ResumablePart>): number =>
 export const uploadProgram = (
   input: UploadInput,
   options: UploadOptions,
-): Effect.Effect<ResumableUploadResult, ResumableUploadError, ResumableUploadStorage> =>
+): Effect.Effect<
+  ResumableUploadResult,
+  ResumableUploadError,
+  ResumableUploadStorage | UploadTransport
+> =>
   Effect.gen(function* () {
     const max = input.maxBytes ?? DEFAULT_MAX_BYTES
 
@@ -456,5 +473,5 @@ export const uploadProgram = (
 export const cancelProgram = (
   persisted: PersistedResumableUpload,
   signal: AbortSignal,
-): Effect.Effect<void, ResumableUploadError, ResumableUploadStorage> =>
+): Effect.Effect<void, ResumableUploadError, ResumableUploadStorage | UploadTransport> =>
   abortUpload(persisted, signal).pipe(Effect.andThen(clearCheckpoint(persisted.fileFingerprint)))

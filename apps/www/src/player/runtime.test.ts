@@ -251,4 +251,104 @@ describe('HTML audio engine', () => {
       }).pipe(Effect.scoped),
     )
   })
+
+  it.each(['replace', 'clear'])(
+    'does not install a private source after a newer %s while its first grant is pending',
+    async (command) => {
+      const audio = new TestAudio()
+      const grant = Promise.withResolvers<Response>()
+      const requested = Promise.withResolvers<void>()
+      let requests = 0
+
+      const layer = makeHtmlAudioEngineLayer(audio, (source, onDenied) =>
+        createPreviewSession(source, {
+          now: Date.now,
+          onDenied,
+          fetch: async () => {
+            requests++
+            requested.resolve()
+
+            return requests === 1 ? grant.promise : new Response(null, { status: 204 })
+          },
+        }),
+      )
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const engine = Context.get(yield* Layer.build(layer), AudioEngine)
+
+          const pending = yield* Effect.forkScoped(
+            engine.replace('https://cdn.goosebumps.fm/user-content/private/owner/id/song.mp3', 1),
+          )
+
+          yield* Effect.promise(() => requested.promise)
+
+          if (command === 'replace') yield* engine.replace('/public.mp3', 2)
+          else yield* engine.clearSource
+
+          grant.resolve(
+            Response.json({
+              sessionUrl: 'https://cdn.goosebumps.fm/preview-session',
+              grant: 'disposable',
+              expiresAt: Date.now() + 300_000,
+            }),
+          )
+          yield* Fiber.join(pending)
+
+          const expected = command === 'replace' ? '/public.mp3' : ''
+          expect(audio.src).toBe(expected)
+          expect(audio.sourceWrites).toEqual([{ url: expected, crossOrigin: null }])
+          expect(requests).toBe(1)
+          expect(yield* engine.currentStatus).toMatchObject({
+            sourceGeneration: command === 'replace' ? 2 : null,
+            playing: false,
+          })
+        }).pipe(Effect.scoped),
+      )
+    },
+  )
+
+  it('installs a previously denied private source once when a later play is authorized', async () => {
+    const audio = new TestAudio()
+    const url = 'https://cdn.goosebumps.fm/user-content/private/owner/id/song.mp3'
+    let now = 0
+    let requests = 0
+
+    const layer = makeHtmlAudioEngineLayer(audio, (source, onDenied) =>
+      createPreviewSession(source, {
+        now: () => now,
+        onDenied,
+        fetch: async () => {
+          requests++
+
+          if (requests === 1) return new Response(null, { status: 403 })
+
+          return requests === 2
+            ? Response.json({
+                sessionUrl: 'https://cdn.goosebumps.fm/preview-session',
+                grant: 'disposable',
+                expiresAt: now + 300_000,
+              })
+            : new Response(null, { status: 204 })
+        },
+      }),
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const engine = Context.get(yield* Layer.build(layer), AudioEngine)
+        yield* engine.replace(url, 1)
+        expect(audio.sourceWrites).toEqual([])
+        now = 5_000
+        yield* engine.play
+        yield* engine.pause
+        audio.currentTime = 42
+        yield* engine.play
+
+        expect(audio.sourceWrites).toEqual([{ url, crossOrigin: 'use-credentials' }])
+        expect(audio.currentTime).toBe(42)
+        expect(requests).toBe(3)
+      }).pipe(Effect.scoped),
+    )
+  })
 })

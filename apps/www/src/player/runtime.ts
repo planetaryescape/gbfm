@@ -60,6 +60,23 @@ const status = (audio: AudioPort, finished: boolean, generation: number | null):
 
 const hasMediaSession = () => 'navigator' in globalThis && 'mediaSession' in navigator
 
+type BrowserSource =
+  | { readonly _tag: 'Empty'; readonly generation: null }
+  | { readonly _tag: 'Public'; readonly generation: number }
+  | {
+      readonly _tag: 'PrivatePending'
+      readonly generation: number
+      readonly url: string
+      readonly preview: PreviewSession
+    }
+  | {
+      readonly _tag: 'PrivateReady'
+      readonly generation: number
+      readonly preview: PreviewSession
+    }
+
+const BrowserSource = Data.taggedEnum<BrowserSource>()
+
 export const makeHtmlAudioEngineLayer = (
   audio: AudioPort,
   createPreview: (url: string, onDenied: () => void) => PreviewSession = browserPreviewSession,
@@ -68,23 +85,33 @@ export const makeHtmlAudioEngineLayer = (
     AudioEngine,
     Effect.gen(function* () {
       let finished = false
-      let generation: number | null = null
-      let privateSource: string | null = null
-      let preview: PreviewSession | undefined
+      let source: BrowserSource = BrowserSource.Empty({ generation: null })
       let playVersion = 0
 
-      const resetPreview = () => {
+      const resetSource = () => {
         playVersion++
-        preview?.dispose()
-        preview = undefined
-        privateSource = null
+
+        if ('preview' in source) source.preview.dispose()
+        source = BrowserSource.Empty({ generation: null })
       }
 
-      yield* Effect.addFinalizer(() => Effect.sync(resetPreview))
+      const installPrivateSource = (
+        pending: Extract<BrowserSource, { readonly _tag: 'PrivatePending' }>,
+      ) => {
+        audio.crossOrigin = 'use-credentials'
+        audio.src = pending.url
+        source = BrowserSource.PrivateReady({
+          generation: pending.generation,
+          preview: pending.preview,
+        })
+        audio.load()
+      }
+
+      yield* Effect.addFinalizer(() => Effect.sync(resetSource))
 
       const changes = Stream.callback<EngineStatus>((queue) =>
         Effect.gen(function* () {
-          const emit = () => Queue.offerUnsafe(queue, status(audio, finished, generation))
+          const emit = () => Queue.offerUnsafe(queue, status(audio, finished, source.generation))
 
           const ended = () => {
             finished = true
@@ -157,55 +184,51 @@ export const makeHtmlAudioEngineLayer = (
       return {
         replace: (url: string, nextGeneration: number) =>
           Effect.promise(async () => {
-            resetPreview()
-            generation = nextGeneration
+            resetSource()
             finished = false
 
             if (isPrivateMedia(url)) {
-              audio.pause()
-              privateSource = url
-              preview = createPreview(url, () => audio.pause())
-              const active = preview
-              const result = await active.ensure()
+              const active = BrowserSource.PrivatePending({
+                generation: nextGeneration,
+                url,
+                preview: createPreview(url, () => audio.pause()),
+              })
 
-              if (preview !== active || !result.ok) return
-              audio.crossOrigin = 'use-credentials'
-              audio.src = url
-              privateSource = null
-              audio.load()
+              source = active
+              audio.pause()
+              const result = await active.preview.ensure()
+
+              if (source !== active || !result.ok) return
+              installPrivateSource(active)
 
               return
             }
+
+            source = BrowserSource.Public({ generation: nextGeneration })
 
             if (audio.crossOrigin === 'use-credentials') audio.crossOrigin = null
             audio.src = url
             audio.load()
           }),
         clearSource: Effect.sync(() => {
-          resetPreview()
-          generation = null
+          resetSource()
           finished = false
           audio.src = ''
           audio.load()
         }),
         play: Effect.gen(function* () {
           const version = playVersion
-          const active = preview
+          const active = 'preview' in source ? source.preview : undefined
 
           if (active) {
             const result = yield* Effect.promise(() => active.ensure())
 
-            if (version !== playVersion || preview !== active)
+            if (version !== playVersion || !('preview' in source) || source.preview !== active)
               return yield* new PlaybackRejected({ reason: 'superseded' })
 
             if (!result.ok) return yield* new PlaybackRejected({})
 
-            if (privateSource !== null) {
-              audio.crossOrigin = 'use-credentials'
-              audio.src = privateSource
-              privateSource = null
-              audio.load()
-            }
+            if (BrowserSource.$is('PrivatePending')(source)) installPrivateSource(source)
           }
 
           yield* Effect.tryPromise({
@@ -234,7 +257,7 @@ export const makeHtmlAudioEngineLayer = (
           Effect.sync(() => {
             audio.muted = muted
           }),
-        currentStatus: Effect.sync(() => status(audio, finished, generation)),
+        currentStatus: Effect.sync(() => status(audio, finished, source.generation)),
         changes,
         setNowPlaying: (metadata: NowPlayingMetadata | null) =>
           Effect.sync(() => {

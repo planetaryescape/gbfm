@@ -36,21 +36,21 @@ describe('player pull gesture', () => {
 
   it('guards closed, animating and already-owned sheets without issuing commands', () => {
     const start = Message.PlayerDragStarted({ pointerId: 1, clientY: 100 })
-    expect(update(initialModel, start).model).toBe(initialModel)
+    expect(update(initialModel, start)).toEqual({ model: initialModel })
     const opening = update(initialModel, Message.ToggleFullscreen()).model
     expect(opening.playerDialog.animation.transitionState).not.toBe('Idle')
-    expect(update(opening, start).model).toBe(opening)
+    expect(update(opening, start)).toEqual({ model: opening })
     const started = update(openPlayer(), start).model
-    expect(update(started, Message.PlayerDragStarted({ pointerId: 2, clientY: 200 })).model).toBe(
-      started,
-    )
+    expect(update(started, Message.PlayerDragStarted({ pointerId: 2, clientY: 200 }))).toEqual({
+      model: started,
+    })
     expect(
       update(
         started,
         Message.PlayerDragReleased({ pointerId: 2, clientY: 500, viewportHeight: 800 }),
-      ).model,
-    ).toBe(started)
-    expect(update(initialModel, Message.PlayerDragCancelled()).model).toBe(initialModel)
+      ),
+    ).toEqual({ model: started })
+    expect(update(initialModel, Message.PlayerDragCancelled())).toEqual({ model: initialModel })
   })
 
   it('follows the active pointer downward and snaps short pulls back', () => {
@@ -61,7 +61,9 @@ describe('player pull gesture', () => {
 
     const moved = update(started, Message.PlayerDragMoved({ pointerId: 1, clientY: 180 })).model
     expect(moved.playerOffset).toBe(80)
-    expect(update(moved, Message.PlayerDragMoved({ pointerId: 2, clientY: 400 })).model).toBe(moved)
+    expect(update(moved, Message.PlayerDragMoved({ pointerId: 2, clientY: 400 }))).toEqual({
+      model: moved,
+    })
 
     const released = update(
       moved,

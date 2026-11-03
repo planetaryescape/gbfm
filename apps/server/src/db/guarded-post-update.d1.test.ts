@@ -110,7 +110,7 @@ test.each(['edited', 'draft-changed', 'revoked', 'slug-collision'] as const)(
   },
 )
 
-test('guarded updates attach only owned uploaded assets and preserve first attachment on repeat', async () => {
+test('guarded updates attach only owned uploaded assets and reject stale repeats', async () => {
   await using h = await harness()
   const future = new Date(Date.now() + 60_000)
   await h.db.update(postsTable).set({ updatedAt: future }).where(eq(postsTable.id, h.post.id))
@@ -148,6 +148,31 @@ test('guarded updates attach only owned uploaded assets and preserve first attac
   expect(await h.snapshot()).toEqual(before)
 })
 
+test('guarded updates cannot reassign an attached asset to another authorized post', async () => {
+  await using h = await harness()
+  expect(
+    await guardedPostUpdate(h.db, h.post, 'owner', { title: 'First attachment' }, undefined, [
+      'owned',
+    ]),
+  ).toHaveLength(1)
+
+  const [otherPost] = await h.db
+    .insert(postsTable)
+    .values({ id: 'other-post', title: 'Other', slug: 'other-post', type: 'micro', content: '' })
+    .returning()
+
+  if (!otherPost) throw new Error('Missing other post fixture')
+  await h.db.insert(postCreators).values({ postId: otherPost.id, creatorId: 'owner' })
+  const assetsBefore = await h.db.select().from(uploadAssetsTable)
+
+  expect(
+    await guardedPostUpdate(h.db, otherPost, 'owner', { title: 'Valid update' }, undefined, [
+      'owned',
+    ]),
+  ).toMatchObject([{ id: otherPost.id, title: 'Valid update' }])
+  expect(await h.db.select().from(uploadAssetsTable)).toEqual(assetsBefore)
+})
+
 test('tracking write failure currently aborts the guarded post batch rather than remaining best-effort', async () => {
   await using h = await harness()
   await h.db.$client
@@ -157,6 +182,19 @@ test('tracking write failure currently aborts the guarded post batch rather than
   const before = await h.snapshot()
   await expect(
     guardedPostUpdate(h.db, h.post, 'owner', { title: 'New' }, ['new'], ['owned']),
-  ).rejects.toThrow()
+  ).rejects.toThrow('fixture tracking failure')
+  expect(await h.snapshot()).toEqual(before)
+})
+
+test('a final post write failure rolls back earlier tracking and label writes', async () => {
+  await using h = await harness()
+  await h.db.$client
+    .prepare(`CREATE TRIGGER reject_post BEFORE UPDATE ON posts
+    BEGIN SELECT RAISE(ABORT, 'fixture post failure'); END`)
+    .run()
+  const before = await h.snapshot()
+  await expect(
+    guardedPostUpdate(h.db, h.post, 'owner', { title: 'New' }, ['new'], ['owned']),
+  ).rejects.toThrow('fixture post failure')
   expect(await h.snapshot()).toEqual(before)
 })

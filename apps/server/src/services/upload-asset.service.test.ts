@@ -77,6 +77,29 @@ describe('keyFromAssetUrl', () => {
 })
 
 describe('UploadAssetService state machine', () => {
+  test('missing tracking rows and schema-only expired rows cannot become uploaded or attached', async () => {
+    const actorId = await createActor()
+    const service = await getService()
+    const missing = `${actorId}/missing.png`
+    await Effect.runPromise(service.markUploaded(missing))
+    await Effect.runPromise(service.markAttached(missing, 'posts', 'missing-post'))
+    expect(await selectByKey(missing)).toBeUndefined()
+
+    const expired = `${actorId}/expired.png`
+    await Effect.runPromise(service.createPending(makePendingInput(actorId, expired)))
+    await db
+      .update(uploadAssetsTable)
+      .set({ status: 'expired' })
+      .where(eq(uploadAssetsTable.key, expired))
+    await Effect.runPromise(service.markUploaded(expired))
+    await Effect.runPromise(service.markAttached(expired, 'posts', 'expired-post'))
+    expect(await selectByKey(expired)).toMatchObject({
+      status: 'expired',
+      attachedToTable: null,
+      attachedToId: null,
+    })
+  })
+
   test('uploads and attaches an asset without premature attachment, downgrades, or reassignment', async () => {
     const actorId = await createActor()
     const service = await getService()

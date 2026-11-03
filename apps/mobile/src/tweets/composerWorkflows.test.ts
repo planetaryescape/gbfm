@@ -280,9 +280,16 @@ test.each([false, true])(
 
         yield* TestClock.adjust('30 seconds')
         const outcome = yield* Fiber.join(fiber)
-        expect(ComposerSubmission.$is('RequestFailed')(outcome)).toBe(true)
+        expect(
+          replying
+            ? ComposerSubmission.$is('ReplyOutcomeUncertain')(outcome)
+            : ComposerSubmission.$is('RequestFailed')(outcome),
+        ).toBe(true)
 
-        if (ComposerSubmission.$is('RequestFailed')(outcome))
+        if (
+          ComposerSubmission.$is('RequestFailed')(outcome) ||
+          ComposerSubmission.$is('ReplyOutcomeUncertain')(outcome)
+        )
           expect(outcome.message).toContain(
             replying ? 'do not reply twice' : 'without creating a second one',
           )

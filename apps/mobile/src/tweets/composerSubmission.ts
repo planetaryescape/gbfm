@@ -1,4 +1,4 @@
-import { Data, Effect, Result } from 'effect'
+import { Cause, Data, Effect, Result } from 'effect'
 
 import { TweetAuthoringFailed } from '@/api/tweetAuthoring'
 
@@ -9,6 +9,7 @@ export type ComposerSubmission = Data.TaggedEnum<{
   RemoteDraftSaved: { readonly draft: TweetDraft; readonly localSaved: boolean }
   Published: { readonly slug: string }
   PublishedNotCleared: { readonly draft: TweetDraft; readonly slug: string }
+  ReplyOutcomeUncertain: { readonly message: string }
   RequestFailed: { readonly message: string }
 }>
 
@@ -25,27 +26,29 @@ export const submitComposerDraft = Effect.fn('submitComposerDraft')(function* <E
   const storage = yield* TweetDraftStorage
 
   const response = yield* (publishedSlug ? Effect.succeed({ slug: publishedSlug }) : request).pipe(
-    Effect.timeoutOrElse({
-      duration: '30 seconds',
-      orElse: () =>
-        Effect.fail(
-          new TweetAuthoringFailed({
-            message: replying
-              ? 'The request timed out. Check the thread before retrying, so you do not reply twice.'
-              : 'The request timed out. Retry to check and save the same tweet, without creating a second one.',
-          }),
-        ),
-    }),
+    Effect.timeout('30 seconds'),
     Effect.result,
   )
 
-  if (Result.isFailure(response))
+  if (Result.isFailure(response)) {
+    if (Cause.isTimeoutError(response.failure))
+      return replying
+        ? ComposerSubmission.ReplyOutcomeUncertain({
+            message:
+              'The reply may have been published. Your local draft is safe. Check the thread before trying again, so you do not reply twice.',
+          })
+        : ComposerSubmission.RequestFailed({
+            message:
+              'The request timed out. Retry to check and save the same tweet, without creating a second one.',
+          })
+
     return ComposerSubmission.RequestFailed({
       message:
         response.failure instanceof TweetAuthoringFailed
           ? response.failure.message
           : 'Could not connect. Your local draft is safe.',
     })
+  }
 
   const remote = { ...draft, remote: true }
 

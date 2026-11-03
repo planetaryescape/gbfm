@@ -30,6 +30,7 @@ const fixture = (
 
   const redirects: Array<string> = []
   let available = !options.script
+  let preparationFails = options.preparationFails
 
   const api: ChallengeWidget = {
     render: (widget) => {
@@ -61,7 +62,10 @@ const fixture = (
       }
     },
     prepare: (token, signal) => {
-      if (options.preparationFails) throw new Error('fixture form preparation failure')
+      if (preparationFails) {
+        preparationFails = false
+        throw new Error('fixture form preparation failure')
+      }
 
       return () =>
         new Promise<Response>((resolve, reject) => {
@@ -91,15 +95,57 @@ const fixture = (
 }
 
 describe('signup challenge runtime', () => {
-  it('preserves the stuck submission after synchronous form preparation failure', async () => {
+  it('reports synchronous preparation failure and allows a fresh submission', async () => {
     const f = fixture({ preparationFails: true })
     f.widgets[0]?.callback('token')
-    await expect(f.runtime.submit()).rejects.toThrow('fixture form preparation failure')
-    f.runtime.retry()
-    f.widgets[0]?.callback('new-token')
+    await f.runtime.submit()
+    expect(f.statuses.at(-1)).toBe('failed')
+    expect(f.requests).toEqual([])
     await f.runtime.submit()
     expect(f.requests).toEqual([])
-    expect(f.statuses.at(-1)).toBe('ready')
+    f.runtime.retry()
+    f.widgets[0]?.callback('new-token')
+    const pending = f.runtime.submit()
+    expect(f.requests.map(({ token }) => token)).toEqual(['new-token'])
+    f.requests[0]?.resolve(new Response('', { status: 400 }))
+    await pending
+    expect(f.statuses.at(-1)).toBe('failed')
+    f.runtime.dispose()
+  })
+
+  it.each([false, true])('keeps retry inert after disposal with script loading %s', (script) => {
+    const f = fixture({ script })
+    f.runtime.dispose()
+    const statuses = [...f.statuses]
+    const scripts = f.scripts.length
+    f.runtime.retry()
+    expect(f.scripts).toHaveLength(scripts)
+    expect(f.scripts.every(({ disposed }) => disposed)).toBe(true)
+    expect(f.resets).toEqual([])
+    expect(f.widgets).toHaveLength(script ? 0 : 1)
+    expect(f.statuses).toEqual(statuses)
+  })
+
+  it.each([
+    { status: 400, redirected: true },
+    { status: 200, redirected: false },
+  ])('rejects a response with status $status and redirected $redirected', async (result) => {
+    class Result extends Response {
+      override get redirected() {
+        return result.redirected
+      }
+      override get url() {
+        return 'https://fixture.invalid/complete'
+      }
+    }
+
+    const f = fixture()
+    f.widgets[0]?.callback('token')
+    const pending = f.runtime.submit()
+    f.requests[0]?.resolve(new Result('', { status: result.status }))
+    await pending
+    expect(f.redirects).toEqual([])
+    expect(f.statuses.at(-1)).toBe('failed')
     f.runtime.dispose()
   })
   it('redirects only a successful redirected response', async () => {

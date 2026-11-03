@@ -261,7 +261,7 @@ describe('media publication at the content/storage seam', () => {
     ).toMatchObject([{ status: 'attached', attachedToId: audio.id, attachedToTable: 'audio' }])
   })
 
-  test('post creator-save failure retains the earlier content write but creates no public copy', async () => {
+  test('post creator-save failure currently deletes existing creators, retains the content write, and creates no public copy', async () => {
     await using h = await harness()
 
     const post = await Effect.runPromise(
@@ -278,6 +278,10 @@ describe('media publication at the content/storage seam', () => {
         actor,
       ),
     )
+
+    expect(
+      await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
+    ).toMatchObject([{ creatorId: actor.userId }])
 
     const result = await Effect.runPromise(
       h.post

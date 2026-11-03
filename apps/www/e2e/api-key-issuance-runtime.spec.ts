@@ -185,6 +185,40 @@ test('reports issuance during suspension without exposing the one-time secret', 
   )
 })
 
+for (const event of ['pagehide', 'fixture:pause']) {
+  test(`does not issue after ${event} clears an in-flight password confirmation`, async ({
+    page,
+  }) => {
+    const requested = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    let creations = 0
+    await page.route('**/auth/sign-in/email', async (route) => {
+      requested.resolve()
+      await release.promise
+      await route.fulfill({ json: {} })
+    })
+    await page.route('**/api/user/api-keys', (route) => {
+      creations += 1
+
+      return route.fulfill({ json: issued })
+    })
+    await start(page)
+    await confirm(page)
+    await requested.promise
+    await page.evaluate((event) => window.dispatchEvent(new Event(event)), event)
+    await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeDisabled()
+    release.resolve()
+    await expect(page.locator('#fixture')).toHaveAttribute(
+      'data-failure',
+      'Confirmation was cancelled. Close this dialog and try again.',
+    )
+    expect(creations).toBe(0)
+    await expect(
+      page.getByRole('textbox', { name: 'New API key secret', exact: true }),
+    ).toHaveCount(0)
+  })
+}
+
 test('characterizes late issuance after pagehide without silently changing its policy', async ({
   page,
 }) => {

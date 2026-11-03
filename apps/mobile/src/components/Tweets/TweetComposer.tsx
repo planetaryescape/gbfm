@@ -19,6 +19,7 @@ import { useThemeColors } from '@/theme/colors'
 import { composerControls } from '@/tweets/composerOwner'
 import { draftError, replyError, tweetLength } from '@/tweets/draft'
 import { completions } from '@/tweets/tagSuggestions'
+import { useComposerRemoval } from '@/tweets/useComposerRemoval'
 import { useKnownTags } from '@/tweets/useKnownTags'
 import { useTweetComposer } from '@/tweets/useTweetComposer'
 
@@ -55,6 +56,7 @@ export function TweetComposer({
   const { draft, busy, editing, replying } = composer
   const colors = useThemeColors()
   const router = useRouter()
+  const { leave, requestRemoval } = useComposerRemoval(composer.publication)
   const headerHeight = useHeaderHeight()
   const input = useRef<ComponentRef<typeof TextInput>>(null)
   const [cursor, setCursor] = useState(0)
@@ -75,8 +77,10 @@ export function TweetComposer({
   const published = (slug: string) => {
     void haptics.success()
 
-    if (editing || replying) close()
-    else router.replace({ pathname: '/(tabs)/(tweets)/tweet/[slug]', params: { slug } })
+    leave(() => {
+      if (editing || replying) close()
+      else router.replace({ pathname: '/(tabs)/(tweets)/tweet/[slug]', params: { slug } })
+    })
   }
 
   const validation = draft ? (replying ? replyError(draft) : draftError(draft)) : null
@@ -89,15 +93,8 @@ export function TweetComposer({
   })
 
   const cancel = () => {
-    if (controls.cleanupPending) {
-      Alert.alert(
-        'Already published',
-        'Retry cleanup before closing. If you close now, check your published post before posting again.',
-        [
-          { text: 'Keep open', style: 'cancel' },
-          { text: 'Close anyway', onPress: close },
-        ],
-      )
+    if (controls.cleanupPending || controls.requiresThreadCheck) {
+      requestRemoval(close)
 
       return
     }
@@ -142,13 +139,26 @@ export function TweetComposer({
       edges={{ bottom: true, top: false, left: true, right: true }}
       style={{ flex: 1, backgroundColor: colors.background }}>
       <ComposerHeader
-        signedIn={Boolean(user) || controls.cleanupPending}
+        signedIn={Boolean(user) || controls.cleanupPending || controls.requiresThreadCheck}
         busy={busy}
         label={controls.label}
         busyLabel={controls.busyLabel}
         disabled={!controls.canSubmit}
         onCancel={cancel}
-        onSubmit={() => composer.save(true, published)}
+        onSubmit={() => {
+          if (controls.requiresThreadCheck && replyTo) {
+            leave(() =>
+              router.replace({
+                pathname: '/(tabs)/(tweets)/tweet/[slug]',
+                params: { slug: replyTo },
+              }),
+            )
+
+            return
+          }
+
+          composer.save(true, published)
+        }}
         onSignIn={() => router.push('/sign-in')}
       />
       <KeyboardAvoidingView

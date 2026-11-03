@@ -315,7 +315,7 @@ export type ReminderClaimResult = { readonly claimed: true } | { readonly claime
 // Guarded UPDATE ... WHERE status is PENDING or FAILED. A queue redelivery
 // reclaims the FAILED state written after a delivery failure, while zero rows
 // still means another invocation already owns this reminder and can be acked.
-export const claimReminder = (reminderId: string) =>
+const claimReminderRow = (reminderId: string) =>
   Effect.gen(function* () {
     const db = yield* Database
 
@@ -333,7 +333,7 @@ export const claimReminder = (reminderId: string) =>
               ),
             ),
           )
-          .returning({ id: musicReminder.id }),
+          .returning(),
       catch: (error) =>
         new ReminderProcessingError({
           message: `Failed to claim reminder: ${getErrorMessage(error)}`,
@@ -342,10 +342,13 @@ export const claimReminder = (reminderId: string) =>
         }),
     })
 
-    const result: ReminderClaimResult = { claimed: claimed.length > 0 }
-
-    return result
+    return claimed[0] ?? null
   })
+
+export const claimReminder = (reminderId: string) =>
+  claimReminderRow(reminderId).pipe(
+    Effect.map((reminder): ReminderClaimResult => ({ claimed: reminder !== null })),
+  )
 
 // Sends one already-claimed reminder and marks it sent/failed. Each invocation
 // makes one provider call. If the provider accepts just before the terminal D1
@@ -354,6 +357,8 @@ export const claimReminder = (reminderId: string) =>
 export const sendClaimedReminder = (reminder: typeof musicReminder.$inferSelect) =>
   Effect.gen(function* () {
     const db = yield* Database
+
+    if (!(yield* findReminderById(reminder.id))) return
 
     yield* deliverReminderEmail(reminder)
 
@@ -394,8 +399,6 @@ export const sendClaimedReminder = (reminder: typeof musicReminder.$inferSelect)
     ),
   )
 
-// Loads one reminder row by id, for the queue consumer to hand to
-// sendClaimedReminder after a successful claim.
 export const findReminderById = (reminderId: string) =>
   Effect.gen(function* () {
     const db = yield* Database
@@ -415,11 +418,7 @@ export const findReminderById = (reminderId: string) =>
 
 export const processReminderJob = (reminderId: string) =>
   Effect.gen(function* () {
-    const claim = yield* claimReminder(reminderId)
-
-    if (!claim.claimed) return
-
-    const reminder = yield* findReminderById(reminderId)
+    const reminder = yield* claimReminderRow(reminderId)
 
     if (!reminder) return
 

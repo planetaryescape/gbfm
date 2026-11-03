@@ -1,5 +1,5 @@
 import { isPrivateMediaPath } from '@gbfm/core/media-preview'
-import { Option, Schema } from 'effect'
+import { Data, Option, Schema } from 'effect'
 
 const PreviewResponse = Schema.Struct({
   sessionUrl: Schema.String,
@@ -25,6 +25,23 @@ export type PreviewSession = {
   dispose(): void
 }
 
+type PreviewState =
+  | { readonly _tag: 'Unavailable'; readonly lastAttempt: number }
+  | { readonly _tag: 'RequestingGrant'; readonly pending: Promise<PreviewResult> }
+  | { readonly _tag: 'InstallingCredentials'; readonly pending: Promise<PreviewResult> }
+  | {
+      readonly _tag: 'Granted'
+      readonly expiresAt: number
+      readonly lastAttempt: number
+      readonly timer: ReturnType<typeof setTimeout>
+    }
+  | { readonly _tag: 'Denied'; readonly lastAttempt: number }
+  | { readonly _tag: 'Disposed' }
+
+const PreviewState = Data.taggedEnum<PreviewState>()
+
+type SettledPreview = Extract<PreviewState, { readonly lastAttempt: number }>
+
 /** Owns one active path, never the media element or its src. No token is retained. */
 export const createPreviewSession = (
   url: string,
@@ -39,12 +56,11 @@ export const createPreviewSession = (
   },
 ): PreviewSession => {
   const controller = new AbortController()
-  let pending: Promise<PreviewResult> | undefined
-  let timer: ReturnType<typeof setTimeout> | undefined
-  let expiresAt = 0
-  let lastAttempt = -Infinity
+  let state: PreviewState = PreviewState.Unavailable({ lastAttempt: -Infinity })
 
-  const request = async (): Promise<PreviewResult> => {
+  const request = async (lastAttempt: number): Promise<PreviewResult> => {
+    if (controller.signal.aborted) return { ok: false }
+
     try {
       const response = await dependencies.fetch('/api/upload/preview', {
         method: 'POST',
@@ -56,6 +72,8 @@ export const createPreviewSession = (
 
       if (!response.ok) throw new Error('Preview denied')
       const parsed = Schema.decodeUnknownOption(PreviewResponse)(await response.json())
+
+      if (controller.signal.aborted) return { ok: false }
 
       if (Option.isNone(parsed)) throw new Error('Invalid preview response')
       const grant = parsed.value
@@ -72,6 +90,9 @@ export const createPreviewSession = (
       )
         throw new Error('Invalid preview response')
 
+      if (!PreviewState.$is('RequestingGrant')(state)) return { ok: false }
+      state = PreviewState.InstallingCredentials({ pending: state.pending })
+
       const installed = await dependencies.fetch(endpoint.href, {
         method: 'POST',
         credentials: 'include',
@@ -83,40 +104,51 @@ export const createPreviewSession = (
       if (!installed.ok) throw new Error('Preview denied')
 
       if (controller.signal.aborted) return { ok: false }
-      expiresAt = grant.expiresAt
-      timer = setTimeout(
-        () => {
-          void refresh()
-        },
-        Math.max(5_000, expiresAt - dependencies.now() - 180_000),
-      )
+      state = PreviewState.Granted({
+        expiresAt: grant.expiresAt,
+        lastAttempt,
+        timer: setTimeout(
+          () => {
+            void refresh()
+          },
+          Math.max(5_000, grant.expiresAt - dependencies.now() - 180_000),
+        ),
+      })
 
       return { ok: true }
     } catch {
-      expiresAt = 0
-
-      if (!controller.signal.aborted) dependencies.onDenied()
+      if (!controller.signal.aborted) {
+        state = PreviewState.Denied({ lastAttempt })
+        dependencies.onDenied()
+      }
 
       return { ok: false }
     }
   }
 
-  const refresh = (): Promise<PreviewResult> => {
-    if (controller.signal.aborted) return Promise.resolve({ ok: false })
+  const startRequest = (previous: SettledPreview): Promise<PreviewResult> => {
+    const expiresAt = PreviewState.$is('Granted')(previous) ? previous.expiresAt : 0
+    const lastAttempt = dependencies.now()
 
-    if (pending) return pending
-
-    // Resume events often arrive together. Denials never create an automatic retry loop.
-    if (dependencies.now() - lastAttempt < 5_000)
+    if (lastAttempt - previous.lastAttempt < 5_000)
       return Promise.resolve({ ok: expiresAt > dependencies.now() })
-    lastAttempt = dependencies.now()
-    clearTimeout(timer)
-    pending = request().finally(() => {
-      pending = undefined
-    })
+
+    if (PreviewState.$is('Granted')(previous)) clearTimeout(previous.timer)
+    const pending = Promise.resolve().then(() => request(lastAttempt))
+    state = PreviewState.RequestingGrant({ pending })
 
     return pending
   }
+
+  const refresh = (): Promise<PreviewResult> =>
+    PreviewState.$match(state, {
+      Unavailable: startRequest,
+      Denied: startRequest,
+      Granted: startRequest,
+      RequestingGrant: ({ pending }) => pending,
+      InstallingCredentials: ({ pending }) => pending,
+      Disposed: () => Promise.resolve<PreviewResult>({ ok: false }),
+    })
 
   const resume = () => {
     if (dependencies.document?.visibilityState !== 'hidden') void refresh()
@@ -127,10 +159,13 @@ export const createPreviewSession = (
 
   return {
     ensure: () =>
-      pending ?? (expiresAt > dependencies.now() ? Promise.resolve({ ok: true }) : refresh()),
+      PreviewState.$is('Granted')(state) && state.expiresAt > dependencies.now()
+        ? Promise.resolve({ ok: true })
+        : refresh(),
     dispose: () => {
+      if (PreviewState.$is('Granted')(state)) clearTimeout(state.timer)
+      state = PreviewState.Disposed()
       controller.abort()
-      clearTimeout(timer)
       dependencies.document?.removeEventListener('visibilitychange', resume)
       dependencies.window?.removeEventListener('online', resume)
     },

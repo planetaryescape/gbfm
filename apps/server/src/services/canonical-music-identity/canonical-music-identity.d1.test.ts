@@ -143,6 +143,49 @@ const snapshot = (
 })
 
 describe('CanonicalMusicIdentity', () => {
+  test('interruption leaves its unresolved lease for expiry rather than releasing it', async () => {
+    const sourceUrl = `https://open.spotify.com/track/${externalId()}`
+    const source = await Effect.runPromise(parseMusicSource(sourceUrl, 'track'))
+    const started = Promise.withResolvers<void>()
+    const controller = new AbortController()
+
+    const recorder = recordingScraper(() =>
+      Effect.sync(() => started.resolve()).pipe(Effect.andThen(Effect.never)),
+    )
+
+    const resolution = Effect.runPromiseExit(
+      serviceEffect(recorder.service, (service) =>
+        service.resolveSource({
+          url: sourceUrl,
+          origin: 'manual',
+          artworkDelivery: 'preserve',
+        }),
+      ),
+      { signal: controller.signal },
+    )
+
+    await started.promise
+    controller.abort()
+    expect(Exit.hasInterrupts(await resolution)).toBe(true)
+
+    const [identity] = await db
+      .select()
+      .from(musicSourceIdentitiesTable)
+      .where(eq(musicSourceIdentitiesTable.sourceKey, source.sourceKey))
+
+    expect(identity).toMatchObject({ state: 'resolving', entityId: null })
+    expect(identity?.ownerToken).toBeTypeOf('string')
+    const expiresAt = identity?.leaseExpiresAt
+
+    if (!expiresAt) throw new Error('Missing interrupted lease')
+    const repository = new CanonicalMusicIdentityRepository(db)
+    expect(
+      await Effect.runPromise(
+        repository.claim(source, 'replacement', new Date(expiresAt.getTime() + 1), 30_000),
+      ),
+    ).toMatchObject({ result: 'reclaimed' })
+  })
+
   test('persists and returns required artwork after upload', async () => {
     const sourceUrl = `https://open.spotify.com/track/${externalId()}`
     const artworkUrl = 'https://i.scdn.co/image/strict-success'

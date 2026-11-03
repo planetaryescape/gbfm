@@ -32,7 +32,7 @@ const receiveSharedDraft = (identity: string) =>
     const stored = yield* restoreTweetDraft(identity)
     const draft = appendSharedText(stored ?? emptyTweetDraft(randomUUID()), text)
 
-    if (draft.content.length > CONTENT_MAX_LENGTH)
+    if (draft.text.length > CONTENT_MAX_LENGTH)
       return yield* new SharedContentInvalid({
         message:
           'Your existing draft and this share are too long together. Finish your draft first, then share again.',

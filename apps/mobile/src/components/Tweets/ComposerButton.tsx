@@ -9,12 +9,14 @@ export function ComposerButton({
   disabled = false,
   primary = false,
   destructive = false,
+  compact = false,
 }: {
   readonly label: string
   readonly onPress: () => void
   readonly disabled?: boolean
   readonly primary?: boolean
   readonly destructive?: boolean
+  readonly compact?: boolean
 }) {
   const colors = useThemeColors()
 
@@ -25,10 +27,10 @@ export function ComposerButton({
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => ({
-        minHeight: 48,
+        minHeight: compact ? 32 : 48,
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 16,
+        paddingHorizontal: compact ? 12 : 16,
         borderRadius: 4,
         borderWidth: 1,
         borderColor: withAlpha(destructive ? colors.error : colors.accent, 0.4),

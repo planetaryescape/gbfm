@@ -2,7 +2,7 @@ import { Effect, Schema } from 'effect'
 
 import { LocalStorageFailed, readLocal, removeLocal, writeLocal } from '@/store/localStorage'
 
-import { TweetDraft, appendSharedText } from './draft'
+import { StoredTweetDraft, type TweetDraft, appendSharedText, normalizeStoredDraft } from './draft'
 
 const draftKey = (identity: string) => `gbfm-tweet-draft-${encodeURIComponent(identity)}.json`
 
@@ -11,7 +11,9 @@ export const readTweetDraft = (identity: string) =>
     Effect.flatMap((value) =>
       value === null
         ? Effect.succeed(null)
-        : Schema.decodeUnknownEffect(Schema.fromJsonString(TweetDraft))(value),
+        : Schema.decodeUnknownEffect(Schema.fromJsonString(StoredTweetDraft))(value).pipe(
+            Effect.map(normalizeStoredDraft),
+          ),
     ),
     Effect.mapError(
       () =>
@@ -35,9 +37,7 @@ export const restoreTweetDraft = (identity: string) =>
 
     if (!guest) return own
 
-    const draft = own
-      ? appendSharedText(own, [guest.title, guest.content].filter(Boolean).join('\n\n'))
-      : guest
+    const draft = own ? appendSharedText(own, guest.text) : guest
 
     yield* saveTweetDraft(identity, draft)
     yield* removeTweetDraft('guest')

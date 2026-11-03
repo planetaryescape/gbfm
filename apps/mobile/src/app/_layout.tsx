@@ -69,7 +69,7 @@ function AppLayout() {
                   <Stack.Screen
                     name='compose'
                     options={{
-                      title: 'Write a tweet',
+                      title: '',
                       presentation: 'modal',
                       gestureEnabled: false,
                     }}

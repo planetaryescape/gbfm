@@ -1,10 +1,34 @@
 import { Effect, Schema } from 'effect'
 
-export const TWEET_MAX_LENGTH = 255
+import { extractTags, stripTags, tidyText } from './tagText'
+
+export const TWEET_MAX_LENGTH = 280
 
 export const CONTENT_MAX_LENGTH = 64 * 1024
 
+const LINK_WEIGHT = 23
+
+const MusicAttachment = Schema.Struct({
+  entityType: Schema.Literals(['album', 'track', 'playlist']),
+  entityId: Schema.String,
+  title: Schema.String,
+  url: Schema.NullOr(Schema.String),
+  coverImageUrl: Schema.NullOr(Schema.String),
+})
+
+export type MusicAttachment = typeof MusicAttachment.Type
+
 export const TweetDraft = Schema.Struct({
+  slug: Schema.NonEmptyString,
+  text: Schema.String,
+  remote: Schema.Boolean,
+  music: Schema.NullOr(MusicAttachment),
+  dismissedMusicUrl: Schema.NullOr(Schema.String),
+})
+
+export type TweetDraft = typeof TweetDraft.Type
+
+const LegacyTweetDraft = Schema.Struct({
   slug: Schema.NonEmptyString,
   title: Schema.String,
   content: Schema.String,
@@ -19,24 +43,81 @@ export const TweetDraft = Schema.Struct({
   ),
 })
 
-export type TweetDraft = typeof TweetDraft.Type
+type LegacyTweetDraft = typeof LegacyTweetDraft.Type
+
+export const StoredTweetDraft = Schema.Union([TweetDraft, LegacyTweetDraft])
+
+const fromLegacy = (legacy: LegacyTweetDraft): TweetDraft => {
+  const hashtags = legacy.tags
+    .split(',')
+    .map((tag) => tag.trim().replaceAll(/\s+/g, ''))
+    .filter((tag) => tag.length > 0)
+    .map((tag) => `#${tag}`)
+    .join(' ')
+
+  return {
+    slug: legacy.slug,
+    text: [legacy.title, legacy.content, hashtags].filter((part) => part.trim()).join('\n\n'),
+    remote: legacy.remote,
+    music: legacy.music ? { ...legacy.music, url: null, coverImageUrl: null } : null,
+    dismissedMusicUrl: null,
+  }
+}
+
+export const normalizeStoredDraft = (stored: typeof StoredTweetDraft.Type): TweetDraft =>
+  'text' in stored ? stored : fromLegacy(stored)
 
 export const emptyTweetDraft = (id: string): TweetDraft => ({
   slug: `mobile-${id}`,
-  title: '',
-  content: '',
-  tags: '',
+  text: '',
   remote: false,
   music: null,
+  dismissedMusicUrl: null,
 })
 
+const linkPattern = /https?:\/\/[^\s<>"'`)\]}]+/g
+
+const trimLink = (link: string) => link.replace(/[.,;!?]+$/, '')
+
+export const extractLinks = (text: string) =>
+  [...text.matchAll(linkPattern)].map(([link]) => trimLink(link))
+
+export const tweetLength = (text: string) =>
+  text.trim().replaceAll(linkPattern, 'x'.repeat(LINK_WEIGHT)).length
+
+export const musicCandidate = (draft: TweetDraft) => {
+  const link = extractLinks(draft.text)[0] ?? null
+
+  return link && link !== draft.dismissedMusicUrl && link !== draft.music?.url ? link : null
+}
+
+export const withText = (draft: TweetDraft, text: string): TweetDraft => {
+  const links = extractLinks(text)
+  const music = draft.music?.url && !links.includes(draft.music.url) ? null : draft.music
+
+  const dismissedMusicUrl =
+    draft.dismissedMusicUrl && links.includes(draft.dismissedMusicUrl)
+      ? draft.dismissedMusicUrl
+      : null
+
+  return { ...draft, text, music, dismissedMusicUrl }
+}
+
+export const tweetContent = (draft: TweetDraft) => {
+  const body = stripTags(draft.text)
+  const link = draft.music?.url
+
+  if (!link) return body
+  const withoutLink = tidyText(body.split(link).join(''))
+
+  return withoutLink || body
+}
+
 export const draftError = (draft: TweetDraft): string | null => {
-  if (!draft.title.trim() && !draft.content.trim()) return 'Write a tweet or add some content.'
+  if (!tweetContent(draft)) return 'Write something besides tags.'
 
-  if (draft.title.length > TWEET_MAX_LENGTH)
-    return 'Keep the tweet to 255 characters. Use the body for more.'
-
-  if (draft.content.length > CONTENT_MAX_LENGTH) return 'The body is too long. Keep it under 64 KB.'
+  if (tweetLength(draft.text) > TWEET_MAX_LENGTH)
+    return `Keep it to ${TWEET_MAX_LENGTH} characters.`
 
   return null
 }
@@ -82,30 +163,44 @@ export const parseSharedText = (input: unknown) =>
     }),
   )
 
-export const appendSharedText = (draft: TweetDraft, text: string): TweetDraft => {
-  if (!draft.title && !draft.content && text.length <= TWEET_MAX_LENGTH)
-    return { ...draft, title: text }
+export const appendSharedText = (draft: TweetDraft, text: string): TweetDraft =>
+  withText(draft, [draft.text.trim(), text].filter((value) => value.length > 0).join('\n\n'))
 
-  return {
-    ...draft,
-    content: [draft.content, text].filter((value) => value.length > 0).join('\n\n'),
-  }
-}
-
-export const postPayload = (draft: TweetDraft, publish: boolean) => ({
+export const postPayload = (
+  draft: TweetDraft,
+  publish: boolean,
+  known: ReadonlyArray<string> = [],
+) => ({
   type: 'micro' as const,
   slug: draft.slug,
-  title: draft.title.trim() || null,
-  content: draft.content.trim() || null,
-  tags: [
-    ...new Set(
-      draft.tags
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter((tag) => tag.length > 0),
-    ),
-  ],
+  title: null,
+  content: tweetContent(draft) || null,
+  tags: extractTags(draft.text, known),
   draft: !publish,
+  musicEntityType: draft.music?.entityType ?? null,
+  musicEntityId: draft.music?.entityId ?? null,
+})
+
+export const replyContent = (draft: TweetDraft) => {
+  const body = tidyText(draft.text)
+  const link = draft.music?.url
+
+  if (!link) return body
+
+  return tidyText(body.split(link).join('')) || body
+}
+
+export const replyError = (draft: TweetDraft): string | null => {
+  if (!replyContent(draft)) return 'Write a reply.'
+
+  if (tweetLength(draft.text) > TWEET_MAX_LENGTH)
+    return `Keep it to ${TWEET_MAX_LENGTH} characters.`
+
+  return null
+}
+
+export const replyPayload = (draft: TweetDraft) => ({
+  content: replyContent(draft),
   musicEntityType: draft.music?.entityType ?? null,
   musicEntityId: draft.music?.entityId ?? null,
 })

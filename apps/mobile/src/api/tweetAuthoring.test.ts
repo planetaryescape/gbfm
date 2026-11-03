@@ -56,7 +56,7 @@ const fixture = (respond: (method: string, path: string) => Response) => {
   return { connection, requests }
 }
 
-const draft = { ...emptyTweetDraft('fixed-id'), title: 'A record' }
+const draft = { ...emptyTweetDraft('fixed-id'), text: 'A record' }
 
 const compiled = { ...post, compiledContent: '' }
 

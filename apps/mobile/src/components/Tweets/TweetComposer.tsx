@@ -1,218 +1,178 @@
 import { canCreatePosts } from '@gbfm/core/roles'
-import { Stack, useRouter } from 'expo-router'
+import { useRouter } from 'expo-router'
 import { useHeaderHeight } from 'expo-router/react-navigation'
-import { useState } from 'react'
+import { type ComponentRef, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Text,
+  type TextInput,
   View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-screens/experimental'
 
+import { haptics } from '@/feedback/haptics'
 import { useAuthStore } from '@/store/auth'
 import { useThemeColors } from '@/theme/colors'
-import { fonts } from '@/theme/fonts'
-import { draftError, TWEET_MAX_LENGTH } from '@/tweets/draft'
+import { draftError, replyError, tweetLength } from '@/tweets/draft'
+import { completions } from '@/tweets/tagSuggestions'
+import { useKnownTags } from '@/tweets/useKnownTags'
 import { useTweetComposer } from '@/tweets/useTweetComposer'
 
 import { ComposerButton } from './ComposerButton'
-import { ComposerField } from './ComposerField'
+import { ComposerFooter } from './ComposerFooter'
+import { ComposerHeader } from './ComposerHeader'
+import { ComposerInput } from './ComposerInput'
+import { ComposerMusicPreview } from './ComposerMusicPreview'
+import { ComposerTagSuggestions } from './ComposerTagSuggestions'
 
-export function TweetComposer({ identity }: { readonly identity: string }) {
+export function TweetComposer({
+  identity,
+  editSlug,
+  replyTo,
+}: {
+  readonly identity: string
+  readonly editSlug: string | null
+  readonly replyTo: string | null
+}) {
   const { user, sessionToken } = useAuthStore((state) => state)
-  const composer = useTweetComposer(identity, sessionToken)
-  const { draft, busy } = composer
-  const [musicUrl, setMusicUrl] = useState('')
+  const creator = canCreatePosts(user?.role)
+  const allowed = replyTo ? Boolean(user) : creator
+  const knownTags = useKnownTags()
+
+  const composer = useTweetComposer({
+    identity,
+    sessionToken,
+    resolvesMusic: creator,
+    editSlug,
+    replyTo,
+    knownTags,
+  })
+
+  const { draft, busy, editing, replying } = composer
   const colors = useThemeColors()
   const router = useRouter()
   const headerHeight = useHeaderHeight()
+  const input = useRef<ComponentRef<typeof TextInput>>(null)
+  const [cursor, setCursor] = useState(0)
+  const tags = completions(replying ? '' : (draft?.text ?? ''), cursor, knownTags)
+
+  const pickTag = (tag: string) => {
+    const next = tags.complete(tag)
+
+    if (!next) return
+    void haptics.select()
+    composer.setText(next.text)
+    setCursor(next.cursor)
+    requestAnimationFrame(() => input.current?.setSelection(next.cursor, next.cursor))
+  }
+
   const close = () => (router.canGoBack() ? router.back() : router.replace('/(tabs)/(tweets)'))
-  const allowed = canCreatePosts(user?.role)
 
-  const published = (slug: string) =>
-    router.replace({ pathname: '/(tabs)/(tweets)/tweet/[slug]', params: { slug } })
+  const published = (slug: string) => {
+    void haptics.success()
 
-  const validation = draft ? draftError(draft) : null
+    if (editing || replying) close()
+    else router.replace({ pathname: '/(tabs)/(tweets)/tweet/[slug]', params: { slug } })
+  }
+
+  const validation = draft ? (replying ? replyError(draft) : draftError(draft)) : null
+  const canSave = Boolean(!editing && !replying && user && allowed && draft?.text.trim())
+
+  const cancel = () => {
+    if (!draft || !draft.text.trim()) {
+      composer.discard(close)
+
+      return
+    }
+
+    if (editing) {
+      Alert.alert('Discard your changes?', 'The published tweet stays as it was.', [
+        { text: 'Keep editing', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: () => composer.discard(close) },
+      ])
+
+      return
+    }
+
+    Alert.alert('Keep this draft?', 'It stays on this phone until you post or delete it.', [
+      { text: 'Keep writing', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => composer.discard(close) },
+      {
+        text: 'Keep draft',
+        onPress: () => {
+          if (composer.change(draft)) close()
+        },
+      },
+    ])
+  }
+
+  const status = composer.error
+    ? { tone: 'error' as const, text: composer.error }
+    : composer.notice
+      ? { tone: 'success' as const, text: composer.notice }
+      : user && !allowed
+        ? { tone: 'muted' as const, text: 'Posting needs a creator account. Your draft is saved.' }
+        : null
 
   return (
     <SafeAreaView
       edges={{ bottom: true, top: false, left: true, right: true }}
       style={{ flex: 1, backgroundColor: colors.background }}>
-      <Stack.Screen
-        options={{
-          headerBackVisible: false,
-          headerLeft: () => (
-            <ComposerButton
-              label='Close'
-              disabled={busy}
-              onPress={() => {
-                if (!draft || composer.change(draft)) close()
-              }}
-            />
-          ),
-        }}
+      <ComposerHeader
+        signedIn={Boolean(user)}
+        busy={busy}
+        label={editing ? 'Save' : replying ? 'Reply' : 'Post'}
+        disabled={!allowed || !draft || validation !== null || composer.musicLoading}
+        onCancel={cancel}
+        onSubmit={() => composer.save(true, published)}
+        onSignIn={() => router.push('/sign-in')}
       />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={headerHeight}
         style={{ flex: 1 }}>
-        <ScrollView
-          keyboardShouldPersistTaps='handled'
-          keyboardDismissMode='on-drag'
-          contentContainerStyle={{ padding: 20, gap: 22 }}>
-          <View style={{ gap: 8 }}>
-            <Text style={{ color: colors.accent, fontFamily: fonts.serif, fontSize: 32 }}>
-              Put it into words.
-            </Text>
-            <Text
-              style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 12, lineHeight: 19 }}>
-              Saved on this phone as you write. Nothing goes public until you choose Publish.
-            </Text>
+        {draft ? (
+          <>
+            <ScrollView
+              keyboardShouldPersistTaps='handled'
+              contentContainerStyle={{ padding: 16, gap: 16 }}>
+              <ComposerInput
+                ref={input}
+                text={draft.text}
+                editable={!busy}
+                placeholder={replying ? 'Post your reply' : 'What are you listening to?'}
+                onChangeText={composer.setText}
+                onCursorChange={setCursor}
+              />
+              <ComposerTagSuggestions suggestions={tags.suggestions} onPick={pickTag} />
+              <ComposerMusicPreview
+                music={draft.music}
+                loading={composer.musicLoading}
+                onDismiss={composer.dismissMusic}
+              />
+            </ScrollView>
+            <ComposerFooter
+              length={tweetLength(draft.text)}
+              status={status}
+              saveLabel={canSave ? 'Save to drafts' : null}
+              onSave={() => composer.save(false, published)}
+            />
+          </>
+        ) : (
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+            {composer.error ? (
+              <>
+                <ComposerFooter length={0} status={status} saveLabel={null} onSave={close} />
+                <ComposerButton label='Retry' onPress={composer.retry} />
+              </>
+            ) : (
+              <ActivityIndicator color={colors.accent} />
+            )}
           </View>
-          {composer.error ? (
-            <View style={{ gap: 8 }}>
-              <Text accessibilityRole='alert' style={{ color: colors.error }}>
-                {composer.error}
-              </Text>
-              {!draft ? (
-                <ComposerButton label='Retry restoring draft' onPress={composer.restore} />
-              ) : null}
-            </View>
-          ) : null}
-          {draft ? (
-            <>
-              <ComposerField
-                label='Tweet'
-                value={draft.title}
-                onChangeText={(title) => composer.change({ ...draft, title })}
-                multiline
-                editable={!busy}
-                placeholder='What are you listening to?'
-                hint={`${draft.title.length}/${TWEET_MAX_LENGTH} characters`}
-              />
-              <ComposerField
-                label='Body (optional)'
-                value={draft.content}
-                onChangeText={(content) => composer.change({ ...draft, content })}
-                multiline
-                editable={!busy}
-                placeholder='More to say? Add text, links or Markdown here.'
-                hint='Shared links and longer selections appear here.'
-              />
-              <ComposerField
-                label='Tags (optional)'
-                value={draft.tags}
-                onChangeText={(tags) => composer.change({ ...draft, tags })}
-                editable={!busy}
-                placeholder='jazz, new music'
-                hint='Separate tags with commas.'
-              />
-              {sessionToken && allowed ? (
-                <View style={{ gap: 10 }}>
-                  {draft.music ? (
-                    <View style={{ gap: 8 }}>
-                      <Text style={{ color: colors.text }}>
-                        {draft.music.entityType}: {draft.music.title}
-                      </Text>
-                      <ComposerButton
-                        label='Remove music attachment'
-                        disabled={busy}
-                        onPress={() => composer.change({ ...draft, music: null })}
-                      />
-                    </View>
-                  ) : (
-                    <>
-                      <ComposerField
-                        label='Music link (optional)'
-                        value={musicUrl}
-                        onChangeText={setMusicUrl}
-                        editable={!busy}
-                        autoCapitalize='none'
-                        autoCorrect={false}
-                        keyboardType='url'
-                        placeholder='Paste an album, track or playlist link'
-                      />
-                      <ComposerButton
-                        label='Attach music'
-                        disabled={busy || !musicUrl.trim()}
-                        onPress={() => composer.attachMusic(musicUrl)}
-                      />
-                    </>
-                  )}
-                </View>
-              ) : null}
-              {validation ? (
-                <Text style={{ color: colors.muted, fontSize: 13 }}>{validation}</Text>
-              ) : null}
-              {composer.notice ? (
-                <Text accessibilityLiveRegion='polite' style={{ color: colors.success }}>
-                  {composer.notice}
-                </Text>
-              ) : null}
-              {busy ? <ActivityIndicator color={colors.accent} /> : null}
-              {!user ? (
-                <ComposerButton
-                  label='Sign in to publish'
-                  onPress={() => router.push('/sign-in')}
-                />
-              ) : !allowed ? (
-                <Text style={{ color: colors.muted, lineHeight: 22 }}>
-                  Your draft is saved on this phone. Publishing requires a creator account.
-                </Text>
-              ) : (
-                <View style={{ gap: 12 }}>
-                  <ComposerButton
-                    label='Publish'
-                    primary
-                    disabled={busy || validation !== null}
-                    onPress={() =>
-                      Alert.alert(
-                        'Publish this tweet?',
-                        'It will be visible to everyone on Goosebumps FM.',
-                        [
-                          { text: 'Keep writing', style: 'cancel' },
-                          { text: 'Publish', onPress: () => composer.save(true, published) },
-                        ],
-                      )
-                    }
-                  />
-                  <ComposerButton
-                    label='Save private draft to account'
-                    disabled={busy || validation !== null}
-                    onPress={() => composer.save(false, published)}
-                  />
-                </View>
-              )}
-              <ComposerButton
-                label='Discard local draft'
-                destructive
-                disabled={busy}
-                onPress={() =>
-                  Alert.alert(
-                    'Discard this local draft?',
-                    draft.remote
-                      ? 'The private draft saved to your account will remain there.'
-                      : 'This cannot be undone.',
-                    [
-                      { text: 'Keep writing', style: 'cancel' },
-                      {
-                        text: 'Discard',
-                        style: 'destructive',
-                        onPress: () => composer.discard(close),
-                      },
-                    ],
-                  )
-                }
-              />
-            </>
-          ) : !composer.error ? (
-            <ActivityIndicator color={colors.accent} />
-          ) : null}
-        </ScrollView>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   )

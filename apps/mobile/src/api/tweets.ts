@@ -32,3 +32,9 @@ export const getTweetScreen = (slug: string) =>
 
     return yield* client.post.getMicroPostScreen({ params: { slug }, query: {} })
   })
+
+export const getTweetTags = Effect.gen(function* () {
+  const client = yield* getApiClient
+
+  return yield* client.post.getMicroTags()
+})

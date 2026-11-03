@@ -6,19 +6,27 @@ import { defineMessageUnion } from 'foldkit/message'
 
 import { disconnected, SpotifyConnection, SpotifyStatus } from './connection'
 
+const Action = Schema.Literals(['connect', 'play', 'queue'])
+
+const Operation = Schema.TaggedUnion({
+  Idle: { target: Schema.NullOr(Schema.String), notice: Schema.String },
+  Running: { action: Action, url: Schema.String },
+})
+
 export const Model = Schema.Struct({
   status: Schema.NullOr(SpotifyStatus),
-  busy: Schema.Boolean,
-  target: Schema.NullOr(Schema.String),
-  notice: Schema.String,
+  operation: Operation,
 })
 
 export type Model = typeof Model.Type
 
-export const initialModel: Model = { status: null, busy: false, target: null, notice: '' }
+export const initialModel: Model = {
+  status: null,
+  operation: Operation.cases.Idle.make({ target: null, notice: '' }),
+}
 
 export const Message = defineMessageUnion({
-  Requested: { action: Schema.Literals(['connect', 'play', 'queue']), url: Schema.String },
+  Requested: { action: Action, url: Schema.String },
   Loaded: { status: SpotifyStatus },
   Completed: { notice: Schema.String },
 })
@@ -35,7 +43,7 @@ export const Load = Command.define('Spotify.PlaybackStatus', {
 })
 
 const Request = Command.define('Spotify.Playback', {
-  args: { action: Schema.Literals(['connect', 'play', 'queue']), url: Schema.String },
+  args: { action: Action, url: Schema.String },
   messages: [Message.Completed],
   execute: ({ action, url }) =>
     SpotifyConnection.pipe(
@@ -55,14 +63,25 @@ export const update = (
 ): Update.Return<Model, Message, SpotifyConnection> =>
   Message.match<Update.Return<Model, Message, SpotifyConnection>>(message, {
     Requested: ({ action, url }) =>
-      model.busy
+      Operation.guards.Running(model.operation)
         ? { model }
         : {
-            model: { ...model, busy: true, target: url, notice: '' },
+            model: { ...model, operation: Operation.cases.Running.make({ action, url }) },
             commands: [Request({ action, url })],
           },
     Loaded: ({ status }) => ({ model: { ...model, status } }),
-    Completed: ({ notice }) => ({ model: { ...model, busy: false, notice } }),
+    Completed: ({ notice }) => ({
+      model: {
+        ...model,
+        operation: Operation.cases.Idle.make({
+          target: Operation.match(model.operation, {
+            Idle: ({ target }) => target,
+            Running: ({ url }) => url,
+          }),
+          notice,
+        }),
+      },
+    }),
   })
 
 export const view = <M>(
@@ -74,14 +93,25 @@ export const view = <M>(
 ) => {
   if (!spotifyEntityFromUrl(url)) return h.empty
   const connected = model.status?.connected
+  const busy = Operation.guards.Running(model.operation)
+
+  const target = Operation.match(model.operation, {
+    Idle: ({ target }) => target,
+    Running: ({ url }) => url,
+  })
+
+  const notice = Operation.match(model.operation, {
+    Idle: ({ notice }) => notice,
+    Running: () => 'Working…',
+  })
 
   const button = (action: 'connect' | 'play' | 'queue', label: string) =>
     h.button(
       [
         h.Type('button'),
-        h.Disabled(!interactive || model.status === null || model.busy),
+        h.Disabled(!interactive || model.status === null || busy),
         h.OnClick(toMessage(Message.Requested({ action, url }))),
-        h.AriaBusy(model.busy && model.target === url),
+        h.AriaBusy(busy && target === url),
         h.Class(action === 'play' ? 'btn btn-primary' : 'btn'),
       ],
       [label],
@@ -104,7 +134,7 @@ export const view = <M>(
       ),
       h.p(
         [h.Role('status'), h.Class('text-xs text-muted-foreground')],
-        [model.target === url ? (model.busy ? 'Working…' : model.notice) : ''],
+        [target === url ? notice : ''],
       ),
     ],
   )

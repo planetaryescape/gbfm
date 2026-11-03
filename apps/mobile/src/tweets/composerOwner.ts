@@ -3,11 +3,12 @@ import { Data, Effect } from 'effect'
 import { ComposerSubmission, submitComposerDraft } from './composerSubmission'
 import type { TweetDraft } from './draft'
 
-type ComposerPublication =
+export type ComposerPublication =
   | { readonly _tag: 'Writable' }
   | Data.TaggedEnum<{
       CleanupPending: { readonly draft: TweetDraft; readonly slug: string }
       Published: { readonly slug: string }
+      ReplyUncertain: { readonly draft: TweetDraft; readonly message: string }
     }>
 
 const ComposerPublication = Data.taggedEnum<ComposerPublication>()
@@ -20,13 +21,20 @@ export const composerControls = (
 ) => {
   const editable = ComposerPublication.$is('Writable')(publication)
   const cleanupPending = ComposerPublication.$is('CleanupPending')(publication)
+  const requiresThreadCheck = ComposerPublication.$is('ReplyUncertain')(publication)
 
   return {
     editable,
     cleanupPending,
-    canSubmit: cleanupPending || (editable && fresh.canSubmit),
+    requiresThreadCheck,
+    canSubmit: cleanupPending || requiresThreadCheck || (editable && fresh.canSubmit),
     canSave: editable && fresh.canSave,
-    label: cleanupPending ? 'Retry cleanup' : fresh.label,
+    label: ComposerPublication.$match(publication, {
+      Writable: () => fresh.label,
+      CleanupPending: () => 'Retry cleanup',
+      Published: () => fresh.label,
+      ReplyUncertain: () => 'Check thread',
+    }),
     busyLabel: cleanupPending ? 'Clearing' : 'Saving',
   }
 }
@@ -50,7 +58,11 @@ export const createComposerOwner = () => {
   ) {
     const publication = state(storageKey)
 
-    if (ComposerPublication.$is('Published')(publication)) return null
+    if (
+      ComposerPublication.$is('Published')(publication) ||
+      ComposerPublication.$is('ReplyUncertain')(publication)
+    )
+      return null
     const pending = ComposerPublication.$is('CleanupPending')(publication) ? publication : null
 
     if (pending && !publish) return null
@@ -69,6 +81,12 @@ export const createComposerOwner = () => {
 
     if (ComposerSubmission.$is('Published')(outcome))
       current = { storageKey, publication: ComposerPublication.Published(outcome) }
+
+    if (ComposerSubmission.$is('ReplyOutcomeUncertain')(outcome))
+      current = {
+        storageKey,
+        publication: ComposerPublication.ReplyUncertain({ draft, message: outcome.message }),
+      }
 
     return outcome
   })

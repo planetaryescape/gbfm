@@ -202,6 +202,7 @@ export function useTweetReader(
   )
 
   const go = (target: string | null) => {
+    if (target === null) dispatch(ReaderEvent.Latest({ request: sequence.current }))
     action.current?.abort()
     setTarget((previous) => ({ slug: target, revision: previous.revision + 1 }))
   }

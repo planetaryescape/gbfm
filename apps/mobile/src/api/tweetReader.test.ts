@@ -6,6 +6,8 @@ import { expect, test } from 'vitest'
 
 import {
   loadReaderNavigation,
+  loadReaderEntry,
+  loadOlderReaderPost,
   loadReaderPost,
   randomReaderPost,
   recordReaderVisit,
@@ -105,6 +107,95 @@ test('direct links preserve the requested tweet instead of returning latest', as
   expect(server.requests.map((request) => request.path)).toEqual([
     '/api/content/posts/micro/reader-one/screen',
   ])
+})
+
+test('automatic resume loads an old saved tweet directly without scanning the archive', async () => {
+  const screen = MicroPostScreenResponse.make({ post, root: post, replies: [], quote: null })
+  const server = fixture(() => json(screen))
+  expect(await Effect.runPromise(loadReaderEntry(server.connection, post.slug))).toEqual(screen)
+  expect(server.requests.map((request) => request.path)).toEqual([
+    '/api/content/posts/micro/reader-one/screen',
+  ])
+})
+
+test('only a missing automatic resume target falls back to latest', async () => {
+  const screen = MicroPostScreenResponse.make({ post, root: post, replies: [], quote: null })
+
+  const server = fixture((_method, path) =>
+    path.includes('/deleted/')
+      ? json(new HttpApiError.NotFound(), 404)
+      : path.endsWith('/latest')
+        ? json({ slug: post.slug })
+        : json(screen),
+  )
+
+  expect(await Effect.runPromise(loadReaderEntry(server.connection, 'deleted'))).toEqual(screen)
+  expect(server.requests.map((request) => request.path)).toEqual([
+    '/api/content/posts/micro/deleted/screen',
+    '/api/content/posts/micro/latest',
+    '/api/content/posts/micro/reader-one/screen',
+  ])
+  const direct = fixture(() => json(new HttpApiError.NotFound(), 404))
+  expect(await outcome(loadReaderPost(direct.connection, 'deleted'))).toEqual({
+    error: 'TweetReaderMissing',
+  })
+  expect(direct.requests).toHaveLength(1)
+})
+
+test('failed automatic resume preserves the target instead of trying latest', async () => {
+  const server = fixture(() => json(new HttpApiError.InternalServerError(), 500))
+  expect(await outcome(loadReaderEntry(server.connection, 'saved'))).toEqual({
+    error: 'TweetReaderUnavailable',
+  })
+  expect(server.requests.map((request) => request.path)).toEqual([
+    '/api/content/posts/micro/saved/screen',
+  ])
+})
+
+test('the pager follows chronological neighbours from its saved anchor without marking prefetched posts seen', async () => {
+  const screen = MicroPostScreenResponse.make({ post, root: post, replies: [], quote: null })
+
+  const server = fixture((_method, path) =>
+    path.endsWith('/neighbours')
+      ? json({
+          newer: 'newer',
+          older: post.slug,
+          olderUnread: null,
+          newerUnread: 'newer',
+          seen: true,
+          unreadCount: 4,
+          timeline: [],
+        })
+      : json(screen),
+  )
+
+  expect(await Effect.runPromise(loadOlderReaderPost(server.connection, 'saved'))).toEqual(screen)
+  expect(server.requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
+    'GET /api/content/posts/micro/saved/neighbours',
+    'GET /api/content/posts/micro/reader-one/screen',
+  ])
+})
+
+test('only confirmed chronological exhaustion ends the pager; a discovery failure stays retryable', async () => {
+  const end = fixture(() =>
+    json({
+      newer: 'newer',
+      older: null,
+      olderUnread: null,
+      newerUnread: 'newer',
+      seen: true,
+      unreadCount: 4,
+      timeline: [],
+    }),
+  )
+
+  expect(await Effect.runPromise(loadOlderReaderPost(end.connection, 'oldest'))).toBeNull()
+  expect(end.requests).toHaveLength(1)
+  const failed = fixture(() => json(new HttpApiError.InternalServerError(), 500))
+  expect(await outcome(loadOlderReaderPost(failed.connection, 'saved'))).toEqual({
+    error: 'TweetReaderUnavailable',
+  })
+  expect(failed.requests).toHaveLength(1)
 })
 
 test('an empty corpus produces the empty reader without requesting a made-up slug', async () => {

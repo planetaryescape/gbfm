@@ -1,17 +1,19 @@
 import { useAtomValue } from '@effect/atom-react'
-import { useRouter } from 'expo-router'
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useFocusEffect, useRouter } from 'expo-router'
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { FlatList, View } from 'react-native'
 
 import type { Tweet } from '@/api/tweets'
 import { haptics } from '@/feedback/haptics'
 import { useAuthStore } from '@/store/auth'
 import { readReaderPosition } from '@/tweets/readerPosition'
+import { useAnchoredFeed } from '@/tweets/useAnchoredFeed'
+import { useReaderDiscovery } from '@/tweets/useReaderDiscovery'
 import { useReadingProgress } from '@/tweets/useReadingProgress'
-import { useTweetFeed } from '@/tweets/useTweetFeed'
 import { checkpoints } from '@/tweets/useTweetReader'
 
 import { CaughtUp } from './CaughtUp'
+import { ReadingProgress } from './ReadingProgress'
 import { TweetPage } from './TweetPage'
 import { TweetsStatus } from './TweetsStatus'
 import { useTweetActions } from './useTweetActions'
@@ -23,6 +25,7 @@ function Pages({
   footer,
   onSettle,
   onEndReached,
+  onLatest,
 }: {
   readonly tweets: ReadonlyArray<Tweet>
   readonly height: number
@@ -30,11 +33,11 @@ function Pages({
   readonly footer: 'end' | 'loading' | 'failed'
   readonly onSettle: (tweet: Tweet) => void
   readonly onEndReached: () => void
+  readonly onLatest: () => void
 }) {
   const router = useRouter()
   const user = useAuthStore((auth) => auth.user)
   const tweetActions = useTweetActions()
-  const list = useRef<FlatList<Tweet>>(null)
 
   const [start] = useState(() =>
     Math.max(
@@ -64,7 +67,6 @@ function Pages({
 
   return (
     <FlatList
-      ref={list}
       data={tweets}
       keyExtractor={(tweet) => tweet.id}
       pagingEnabled
@@ -102,42 +104,95 @@ function Pages({
         />
       )}
       ListFooterComponent={
-        <CaughtUp
-          height={height}
-          state={footer}
-          onRetry={onEndReached}
-          onTop={() => list.current?.scrollToOffset({ offset: 0, animated: true })}
-        />
+        <CaughtUp height={height} state={footer} onRetry={onEndReached} onTop={onLatest} />
       }
     />
   )
 }
 
 export function TweetPager() {
-  const [attempt, setAttempt] = useState(0)
+  const identity = useAuthStore((auth) => auth.user?.id ?? 'anonymous')
 
-  return <Feed key={attempt} onRetry={() => setAttempt((value) => value + 1)} />
+  return <ReadingSession key={identity} identity={identity} />
 }
 
-const RESUME_LIMIT = 300
-
-function Feed({ onRetry }: { readonly onRetry: () => void }) {
-  const identity = useAuthStore((auth) => auth.user?.id ?? 'anonymous')
+function ReadingSession({ identity }: { readonly identity: string }) {
   const sessionToken = useAuthStore((auth) => auth.sessionToken)
   const saved = useAtomValue(checkpoints)
-  const [startSlug] = useState(() => saved[identity] ?? readReaderPosition(identity))
-  const feed = useTweetFeed()
+
+  const [target, setTarget] = useState(() => ({
+    slug: saved[identity] ?? readReaderPosition(identity),
+    revision: 0,
+  }))
+
+  const [current, setCurrent] = useState<string | null>(null)
+  const [returnSlug, setReturnSlug] = useState<string | null>(null)
+  const currentSlug = useRef<string | null>(null)
+  useFocusEffect(
+    useCallback(() => {
+      const stored = readReaderPosition(identity)
+
+      if (stored && currentSlug.current && stored !== currentSlug.current) {
+        setTarget((previous) => ({ slug: stored, revision: previous.revision + 1 }))
+      }
+    }, [identity]),
+  )
+  const newerUnread = useReaderDiscovery(sessionToken, current)
   const visit = useReadingProgress(identity, sessionToken)
+
+  const go = (slug: string | null) =>
+    setTarget((previous) => ({ slug, revision: previous.revision + 1 }))
+
+  const latest = () => {
+    setReturnSlug((previous) => previous ?? current)
+    go(null)
+  }
+
+  return (
+    <View style={{ flex: 1 }}>
+      <ReadingProgress
+        newerUnread={newerUnread}
+        canReturn={Boolean(returnSlug)}
+        onLatest={latest}
+        onReturn={() => {
+          if (returnSlug) go(returnSlug)
+        }}
+      />
+      <Feed
+        key={target.revision}
+        sessionToken={sessionToken}
+        startSlug={target.slug}
+        onRetry={() => go(target.slug)}
+        onLatest={latest}
+        onSettle={(tweet) => {
+          setCurrent(tweet.slug)
+          currentSlug.current = tweet.slug
+          setReturnSlug((previous) => (previous === tweet.slug ? null : previous))
+          visit(tweet.slug)
+        }}
+      />
+    </View>
+  )
+}
+
+function Feed({
+  sessionToken,
+  startSlug,
+  onRetry,
+  onSettle,
+  onLatest,
+}: {
+  readonly sessionToken: string | null
+  readonly startSlug: string | null
+  readonly onRetry: () => void
+  readonly onSettle: (tweet: Tweet) => void
+  readonly onLatest: () => void
+}) {
+  const feed = useAnchoredFeed(sessionToken, startSlug)
   const [height, setHeight] = useState(0)
-  const found = !startSlug || feed.tweets.some((tweet) => tweet.slug === startSlug)
-  const searching = !found && feed.hasMore && !feed.loadMoreFailed
+  const [displayed, setDisplayed] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (searching && feed.tweets.length < RESUME_LIMIT) feed.loadMore()
-  }, [searching, feed])
-
-  if (feed.status === 'loading' || (searching && feed.tweets.length < RESUME_LIMIT))
-    return <TweetsStatus kind='loading' />
+  if (feed.status === 'loading') return <TweetsStatus kind='loading' />
 
   if (feed.status === 'error')
     return <TweetsStatus kind='error' message="couldn't load tweets" onRetry={onRetry} />
@@ -150,13 +205,17 @@ function Feed({ onRetry }: { readonly onRetry: () => void }) {
       onLayout={({ nativeEvent }) => setHeight(Math.round(nativeEvent.layout.height))}>
       {height > 0 ? (
         <Pages
-          key={`${identity}:${height}`}
+          key={height}
           tweets={feed.tweets}
           height={height}
-          startSlug={startSlug}
+          startSlug={displayed ?? startSlug}
           footer={feed.loadMoreFailed ? 'failed' : feed.hasMore ? 'loading' : 'end'}
-          onSettle={(tweet) => visit(tweet.slug)}
+          onSettle={(tweet) => {
+            setDisplayed(tweet.slug)
+            onSettle(tweet)
+          }}
           onEndReached={feed.loadMore}
+          onLatest={onLatest}
         />
       ) : null}
     </View>

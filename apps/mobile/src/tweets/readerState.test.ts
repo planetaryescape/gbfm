@@ -86,30 +86,31 @@ test('month labels use UTC like the web timeline', () => {
   expect(readerMonth('2026-10-01T00:00:00Z')).toBe('Oct 2026')
 })
 
-test('delayed reset confirmations cannot act after blur, account unmount, or a newer request', () => {
-  const post = MicroPostScreenResponse.fields.post.make({
-    id: 'one',
-    slug: 'one',
-    title: null,
-    description: null,
-    thumbnailUrl: null,
-    content: null,
-    draft: false,
-    tags: [],
-    type: 'micro',
-    musicEntityType: null,
-    musicEntityId: null,
-    parentPostId: null,
-    rootPostId: null,
-    depth: 0,
-    quotedPostId: null,
-    createdAt: '2026-10-01T00:00:00Z',
-    updatedAt: '2026-10-01T00:00:00Z',
-    compiledContent: '',
-    music: null,
-  })
+const post = MicroPostScreenResponse.fields.post.make({
+  id: 'one',
+  slug: 'one',
+  title: null,
+  description: null,
+  thumbnailUrl: null,
+  content: null,
+  draft: false,
+  tags: [],
+  type: 'micro',
+  musicEntityType: null,
+  musicEntityId: null,
+  parentPostId: null,
+  rootPostId: null,
+  depth: 0,
+  quotedPostId: null,
+  createdAt: '2026-10-01T00:00:00Z',
+  updatedAt: '2026-10-01T00:00:00Z',
+  compiledContent: '',
+  music: null,
+})
 
-  const screen = MicroPostScreenResponse.make({ post, root: post, replies: [], quote: null })
+const screen = MicroPostScreenResponse.make({ post, root: post, replies: [], quote: null })
+
+test('delayed reset confirmations cannot act after blur, account unmount, or a newer request', () => {
   const ready = reduceReader(initialReaderState, ReaderEvent.Loaded({ request: 0, screen }))
 
   const opening = reduceReader(ready, ReaderEvent.Started({ request: 1 }))
@@ -129,4 +130,29 @@ test('delayed reset confirmations cannot act after blur, account unmount, or a n
   expect(readerAcceptsAction(ready, 0, false)).toBe(false)
   expect(readerAcceptsAction(ready, 1, true)).toBe(false)
   expect(readerAcceptsAction(initialReaderState, 0, true)).toBe(false)
+})
+
+test('Latest retains a return point through failures and repeated jumps until a successful return', () => {
+  const ready = reduceReader(initialReaderState, ReaderEvent.Loaded({ request: 0, screen }))
+  const jumping = reduceReader(ready, ReaderEvent.Latest({ request: 0 }))
+  expect(jumping.returnSlug).toBe('one')
+  const opening = reduceReader(jumping, ReaderEvent.Started({ request: 1 }))
+  const failed = reduceReader(opening, ReaderEvent.Failed({ request: 1 }))
+  expect(failed.returnSlug).toBe('one')
+  const latestPost = MicroPostScreenResponse.fields.post.make({ ...post, slug: 'latest-one' })
+
+  const latestScreen = MicroPostScreenResponse.make({
+    post: latestPost,
+    root: latestPost,
+    replies: [],
+    quote: null,
+  })
+
+  const latest = reduceReader(failed, ReaderEvent.Loaded({ request: 1, screen: latestScreen }))
+  expect(latest.returnSlug).toBe('one')
+  expect(reduceReader(latest, ReaderEvent.Latest({ request: 1 })).returnSlug).toBe('one')
+  const returning = reduceReader(latest, ReaderEvent.Started({ request: 2 }))
+  expect(reduceReader(returning, ReaderEvent.Loaded({ request: 1, screen }))).toBe(returning)
+  expect(reduceReader(returning, ReaderEvent.Loaded({ request: 2, screen })).returnSlug).toBeNull()
+  expect(initialReaderState.returnSlug).toBeNull()
 })

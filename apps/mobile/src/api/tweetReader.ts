@@ -11,6 +11,8 @@ export type ReaderConnection = {
 
 export class TweetReaderUnavailable extends Data.TaggedError('TweetReaderUnavailable') {}
 
+export class TweetReaderMissing extends Data.TaggedError('TweetReaderMissing') {}
+
 const requestFailed = () => new TweetReaderUnavailable()
 
 const clientFor = (connection: ReaderConnection) =>
@@ -41,7 +43,16 @@ export const loadReaderPost = (connection: ReaderConnection, slug: string | null
     if (!target) return null
 
     return yield* posts.getMicroPostScreen({ params: { slug: target }, query: {} })
-  }).pipe(Effect.mapError(requestFailed))
+  }).pipe(
+    Effect.mapError((error) =>
+      Predicate.isTagged(error, 'NotFound') ? new TweetReaderMissing() : requestFailed(),
+    ),
+  )
+
+export const loadReaderEntry = (connection: ReaderConnection, slug: string | null) =>
+  loadReaderPost(connection, slug).pipe(
+    Effect.catchTag('TweetReaderMissing', () => loadReaderPost(connection, null)),
+  )
 
 export const loadReaderNavigation = (connection: ReaderConnection, slug: string) =>
   Effect.gen(function* () {
@@ -49,6 +60,13 @@ export const loadReaderNavigation = (connection: ReaderConnection, slug: string)
 
     return yield* client.getMicroPostNeighbours({ params: { slug } })
   }).pipe(Effect.mapError(requestFailed))
+
+export const loadOlderReaderPost = (connection: ReaderConnection, slug: string) =>
+  loadReaderNavigation(connection, slug).pipe(
+    Effect.flatMap((navigation) =>
+      navigation.older ? loadReaderPost(connection, navigation.older) : Effect.succeed(null),
+    ),
+  )
 
 export const recordReaderVisit = (connection: ReaderConnection, slug: string) =>
   Effect.gen(function* () {

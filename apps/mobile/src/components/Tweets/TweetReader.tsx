@@ -6,10 +6,12 @@ import { haptics } from '@/feedback/haptics'
 import { useAuthStore } from '@/store/auth'
 import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
+import { useReaderDiscovery } from '@/tweets/useReaderDiscovery'
 import { useTweetReader } from '@/tweets/useTweetReader'
 
 import { ReaderButton } from './ReaderButton'
 import { ReaderOptions } from './ReaderOptions'
+import { ReadingProgress } from './ReadingProgress'
 import { ReplyBar } from './ReplyBar'
 import { TweetDetail } from './TweetDetail'
 import { TweetsStatus } from './TweetsStatus'
@@ -30,6 +32,9 @@ function Reader({
   const [options, setOptions] = useState(false)
   const [entering, setEntering] = useState<'older' | 'newer' | null>(null)
   const { screen, navigation } = reader
+  const returnSlug = reader.returnSlug
+  const newerUnread = useReaderDiscovery(sessionToken, screen?.post.slug ?? null)
+
   const router = useRouter()
   const user = useAuthStore((auth) => auth.user)
 
@@ -95,6 +100,14 @@ function Reader({
         <TweetsStatus kind='empty' message='no tweets yet' />
       ) : (
         <>
+          <ReadingProgress
+            newerUnread={newerUnread}
+            canReturn={Boolean(returnSlug)}
+            onLatest={() => go(null)}
+            onReturn={() => {
+              if (returnSlug) go(returnSlug)
+            }}
+          />
           <TweetSwipeSurface
             key={screen.post.slug}
             disabled={options || reader.actionBusy || reader.status !== 'ready' || !navigation}

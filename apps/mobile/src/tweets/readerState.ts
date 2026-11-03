@@ -28,6 +28,7 @@ export type ReaderState = {
   readonly progressFailed: boolean
   readonly notice: string | null
   readonly actionBusy: boolean
+  readonly returnSlug: string | null
 }
 
 export const initialReaderState: ReaderState = {
@@ -39,9 +40,11 @@ export const initialReaderState: ReaderState = {
   progressFailed: false,
   notice: null,
   actionBusy: false,
+  returnSlug: null,
 }
 
 export type ReaderEvent =
+  | { readonly _tag: 'Latest'; readonly request: number }
   | { readonly _tag: 'Action'; readonly request: number; readonly busy: boolean }
   | { readonly _tag: 'Started'; readonly request: number }
   | {
@@ -63,16 +66,27 @@ export const ReaderEvent = Data.taggedEnum<ReaderEvent>()
 
 export const reduceReader = (state: ReaderState, event: ReaderEvent): ReaderState => {
   if (ReaderEvent.$is('Started')(event))
-    return { ...initialReaderState, request: event.request, screen: state.screen }
+    return {
+      ...initialReaderState,
+      request: event.request,
+      screen: state.screen,
+      returnSlug: state.returnSlug,
+    }
 
   if (state.request !== event.request) return state
 
   return ReaderEvent.$match(event, {
+    Latest: () => ({ ...state, returnSlug: state.returnSlug ?? state.screen?.post.slug ?? null }),
     Action: ({ busy }) => ({ ...state, actionBusy: busy }),
     Loaded: ({ screen }): ReaderState =>
       !screen && state.screen
         ? { ...state, status: 'error' }
-        : { ...state, screen, status: screen ? 'ready' : 'empty' },
+        : {
+            ...state,
+            screen,
+            status: screen ? 'ready' : 'empty',
+            returnSlug: screen?.post.slug === state.returnSlug ? null : state.returnSlug,
+          },
     Failed: (): ReaderState => ({ ...state, status: 'error' }),
     Progress: ({ failed }) => ({ ...state, progressFailed: failed }),
     Navigation: ({ navigation }): ReaderState => ({

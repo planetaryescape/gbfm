@@ -231,7 +231,7 @@ export const update = (
         ...initialModel,
         listing: model.listing,
         operation: 'loading',
-        notice: 'Show changes saved.',
+        notice: model.operation === 'deleting' ? 'Show deleted.' : 'Show changes saved.',
       },
       commands: [Load({ offset: 0 })],
     }),
@@ -295,7 +295,13 @@ const showForm = (model: Model, h: HtmlBuilder<Message>) => {
         [
           h.button(
             [h.Type('submit'), h.Class('dashboard-button-primary'), h.Disabled(busy(model))],
-            [busy(model) ? 'Saving' : editingSlug(model) ? 'Save changes' : 'Create show'],
+            [
+              model.operation === 'saving'
+                ? 'Saving'
+                : editingSlug(model)
+                  ? 'Save changes'
+                  : 'Create show',
+            ],
           ),
           h.button(
             [h.Type('button'), h.Disabled(busy(model)), h.OnClick(Message.Clear())],

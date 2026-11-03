@@ -1,9 +1,10 @@
-import { Effect, Predicate, Schema } from 'effect'
+import { Effect, Match, Predicate, Schema } from 'effect'
+import { Scene } from 'foldkit/test'
 import { expect, test } from 'vitest'
 
 import { emptyDocument } from '../document'
 import { DashboardService, type DashboardRequest } from '../service'
-import { initialModel, Message, Model, update } from './shows'
+import { initialModel, Message, Model, update, view } from './shows'
 
 test('show deletion requires selecting an existing show and explicit confirmation', () => {
   expect(update(initialModel, Message.ConfirmDelete()).commands).toBeUndefined()
@@ -121,6 +122,14 @@ test('show operations keep independent edit and deletion selections while serial
 
     const completed = update(pending.model, result)
 
+    expect(completed.model.notice).toBe(
+      Match.value(pending.model.operation).pipe(
+        Match.when('deleting', () => 'Show deleted.'),
+        Match.when('saving', () => 'Show changes saved.'),
+        Match.orElse(() => ''),
+      ),
+    )
+
     expect(completed.model.operation).toBe(
       Predicate.isTagged(result, 'Loaded') ? 'idle' : 'loading',
     )
@@ -130,4 +139,30 @@ test('show operations keep independent edit and deletion selections while serial
   }
 
   expect(requests.map(({ method = 'GET' }) => method)).toEqual(['PATCH', 'DELETE', 'GET'])
+})
+
+test('show submit labels describe saving only while a save is pending', () => {
+  for (const editor of [
+    Model.fields.editor.cases.Creating.make({}),
+    Model.fields.editor.cases.Editing.make({ slug: 'show' }),
+  ]) {
+    for (const operation of Model.fields.operation.literals) {
+      Scene.scene(
+        { update, view },
+        Scene.given({ ...initialModel, editor, operation }),
+        Scene.tap(({ html }) => {
+          const button = Scene.getByRole('button', {
+            name:
+              operation === 'saving'
+                ? 'Saving'
+                : Model.fields.editor.guards.Editing(editor)
+                  ? 'Save changes'
+                  : 'Create show',
+          })(html)
+
+          expect(button._tag).toBe('Some')
+        }),
+      )
+    }
+  }
 })

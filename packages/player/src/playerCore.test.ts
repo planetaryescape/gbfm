@@ -1,5 +1,5 @@
 /* oxlint-disable effecttsgo/strict-effect-provide -- Each test invokes Effect.runPromise, making it an Effect application entry point. */
-import { Effect, Layer, PubSub, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Layer, PubSub, Stream } from 'effect'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -100,7 +100,10 @@ const makeRecordingEngine = (options: { readonly rejectPlay?: boolean } = {}) =>
     return { engine, calls, emit, setStatus }
   })
 
-const makeRecordingStorage = (stored: PositionRecord | null = null) => {
+const makeRecordingStorage = (
+  stored: PositionRecord | null = null,
+  loadPosition = (_id: string): Effect.Effect<PositionRecord | null> => Effect.succeed(stored),
+) => {
   const saved: Array<{ readonly id: string; readonly position: number }> = []
   const cleared: Array<string> = []
 
@@ -109,7 +112,7 @@ const makeRecordingStorage = (stored: PositionRecord | null = null) => {
     saveQueue: () => Effect.void,
     loadVolume: Effect.succeed(null),
     saveVolume: () => Effect.void,
-    loadPosition: () => Effect.succeed(stored),
+    loadPosition,
     savePosition: (id: string, position: number) =>
       Effect.sync(() => {
         saved.push({ id, position })
@@ -139,6 +142,124 @@ const makeRecordingReporter = () => {
 }
 
 describe('makePlayerCore', () => {
+  it('keeps pause intent when a source becomes ready after the pause', async () => {
+    await Effect.gen(function* () {
+      const recording = yield* makeRecordingEngine()
+      const storage = makeRecordingStorage({ position: 42, updatedAt: 0 })
+      const reporter = makeRecordingReporter()
+
+      const core = yield* makePlayerCore({ onStatus: () => {}, onTrackFinished: () => {} }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(AudioEngine, recording.engine),
+            storage.layer,
+            reporter.layer,
+          ),
+        ),
+      )
+
+      yield* core.requestPlayOnReady(track.id)
+      yield* core.setSource(track)
+      yield* core.pause
+      yield* Effect.yieldNow
+      yield* recording.emit({ isLoaded: true, duration: 300 })
+      yield* Effect.yieldNow
+      expect(recording.calls).toContain('seek:42')
+      expect(recording.calls).not.toContain('play')
+      expect(yield* core.isDesiredPlaying).toBe(false)
+      expect(reporter.reported).toEqual([])
+    }).pipe(Effect.scoped, Effect.runPromise)
+  })
+
+  it('ignores a replaced session checkpoint even when its read finishes last', async () => {
+    await Effect.gen(function* () {
+      const checkpoint = yield* Deferred.make<PositionRecord | null>()
+      const reading = yield* Deferred.make<void>()
+      const recording = yield* makeRecordingEngine()
+
+      const storage = makeRecordingStorage(null, (id) =>
+        id === track.id
+          ? Deferred.succeed(reading, undefined).pipe(Effect.andThen(Deferred.await(checkpoint)))
+          : Effect.succeed({ position: 17, updatedAt: 0 }),
+      )
+
+      const reporter = makeRecordingReporter()
+
+      const core = yield* makePlayerCore({ onStatus: () => {}, onTrackFinished: () => {} }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(AudioEngine, recording.engine),
+            storage.layer,
+            reporter.layer,
+          ),
+        ),
+      )
+
+      yield* recording.setStatus({ isLoaded: true, duration: 300 })
+      yield* core.requestPlayOnReady(track.id)
+      const first = yield* core.setSource(track).pipe(Effect.forkScoped)
+      yield* Deferred.await(reading)
+
+      const replacement = {
+        ...track,
+        id: 'replacement',
+        url: 'https://cdn.example/replacement.mp3',
+      }
+
+      yield* core.requestPlayOnReady(replacement.id)
+      yield* core.setSource(replacement)
+      yield* Deferred.succeed(checkpoint, { position: 42, updatedAt: 0 })
+      yield* Fiber.join(first)
+      yield* Effect.yieldNow
+      expect(yield* core.currentTrackId).toBe(replacement.id)
+      expect(recording.calls).toContain('seek:17')
+      expect(recording.calls).not.toContain('seek:42')
+      expect(recording.calls.filter((call) => call === 'play')).toHaveLength(1)
+      expect(reporter.reported).toEqual([replacement.id])
+    }).pipe(Effect.scoped, Effect.runPromise)
+  })
+
+  it('seeks to the beginning on explicit replay and accepts the next completion once', async () => {
+    await Effect.gen(function* () {
+      const recording = yield* makeRecordingEngine()
+      const storage = makeRecordingStorage()
+      const reporter = makeRecordingReporter()
+      let finished = 0
+
+      const core = yield* makePlayerCore({
+        onStatus: () => {},
+        onTrackFinished: () => {
+          finished += 1
+        },
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(AudioEngine, recording.engine),
+            storage.layer,
+            reporter.layer,
+          ),
+        ),
+      )
+
+      yield* recording.setStatus({ isLoaded: true, duration: 300 })
+      yield* core.requestPlayOnReady(track.id)
+      yield* core.setSource(track)
+      yield* Effect.yieldNow
+      yield* recording.emit({ didJustFinish: true, playing: false })
+      yield* Effect.yieldNow
+      yield* core.play(track.id)
+      yield* recording.emit({ didJustFinish: false, playing: true })
+      yield* Effect.yieldNow
+      yield* recording.emit({ didJustFinish: true, playing: false })
+      yield* recording.emit({ didJustFinish: true, playing: false })
+      yield* Effect.yieldNow
+      expect(recording.calls).toContain('seek:0')
+      expect(recording.calls.filter((call) => call === 'play')).toHaveLength(2)
+      expect(finished).toBe(2)
+      expect(storage.cleared).toEqual([track.id, track.id])
+    }).pipe(Effect.scoped, Effect.runPromise)
+  })
+
   it('restores the position when a cached source reports loaded before its duration', async () => {
     const program = Effect.gen(function* () {
       const { engine, calls, emit, setStatus } = yield* makeRecordingEngine()

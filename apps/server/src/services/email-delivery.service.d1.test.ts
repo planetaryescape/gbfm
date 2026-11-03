@@ -1,6 +1,7 @@
 import type { D1Database } from '@cloudflare/workers-types'
 import { buildWelcomeEmail } from '@gbfm/email/index'
-import { Clock, Effect, Layer } from 'effect'
+import { sql } from 'drizzle-orm'
+import { Clock, Deferred, Effect, Fiber, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
 
 import { emailDeliveryLogsTable } from '@/db/email.schema'
@@ -85,6 +86,100 @@ const deliveryLayer = (d1: D1Database, transport: Layer.Layer<EmailTransportServ
   )
 
 describe('EmailDelivery', () => {
+  test('rejects an empty provider receipt without persisting acceptance', async () => {
+    await using resource = await createMigratedD1Database()
+    const database = Effect.runSync(withTestLayer(Database, DatabaseLayer(resource.database)))
+
+    const transport = Layer.succeed(EmailTransport, {
+      send: () => Effect.succeed({ provider: 'cloudflare' as const, messageId: '   ' }),
+    })
+
+    const result = await Effect.runPromise(
+      withTestLayer(
+        Effect.gen(function* () {
+          const delivery = yield* EmailDelivery
+
+          return yield* delivery
+            .deliver({ message: yield* message(), emailType: 'TRANSACTIONAL' })
+            .pipe(Effect.result)
+        }),
+        deliveryLayer(resource.database, transport),
+      ),
+    )
+
+    expect(result).toHaveProperty('failure._tag', 'EmailDeliveryUnavailable')
+    expect((await database.select().from(emailDeliveryLogsTable))[0]).toMatchObject({
+      status: 'FAILED',
+      failureCategory: 'unavailable',
+      providerMessageId: null,
+      sentAt: null,
+    })
+  })
+
+  test('provider acceptance followed by persistence failure leaves an ambiguous pending attempt', async () => {
+    await using resource = await createMigratedD1Database()
+    const database = Effect.runSync(withTestLayer(Database, DatabaseLayer(resource.database)))
+    await database.run(
+      sql`CREATE TRIGGER reject_receipt BEFORE UPDATE ON email_delivery_logs WHEN NEW.status = 'SENT' BEGIN SELECT RAISE(ABORT, 'fixture receipt failure'); END`,
+    )
+    const recording = makeRecordingEmailTransport()
+
+    const result = await Effect.runPromise(
+      withTestLayer(
+        Effect.gen(function* () {
+          const delivery = yield* EmailDelivery
+
+          return yield* delivery
+            .deliver({ message: yield* message(), emailType: 'TRANSACTIONAL' })
+            .pipe(Effect.result)
+        }),
+        deliveryLayer(resource.database, recording.layer),
+      ),
+    )
+
+    expect(result).toHaveProperty('failure.operation', 'mark-sent')
+    expect(recording.messages).toHaveLength(1)
+    expect((await database.select().from(emailDeliveryLogsTable))[0]).toMatchObject({
+      status: 'PENDING',
+      providerMessageId: null,
+      sentAt: null,
+    })
+  })
+
+  test('interruption during transport leaves PENDING without manufacturing a failure receipt', async () => {
+    await using resource = await createMigratedD1Database()
+    const database = Effect.runSync(withTestLayer(Database, DatabaseLayer(resource.database)))
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const entered = yield* Deferred.make<void>()
+
+        const transport = Layer.succeed(EmailTransport, {
+          send: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
+        })
+
+        const fiber = yield* withTestLayer(
+          Effect.gen(function* () {
+            const delivery = yield* EmailDelivery
+
+            return yield* delivery.deliver({
+              message: yield* message(),
+              emailType: 'TRANSACTIONAL',
+            })
+          }),
+          deliveryLayer(resource.database, transport),
+        ).pipe(Effect.forkChild)
+
+        yield* Deferred.await(entered)
+        yield* Fiber.interrupt(fiber)
+      }),
+    )
+    expect((await database.select().from(emailDeliveryLogsTable))[0]).toMatchObject({
+      status: 'PENDING',
+      failureCategory: null,
+      sentAt: null,
+    })
+  })
+
   test('rejects an invalid sender while composing delivery before inserting PENDING', async () => {
     await using d1Resource = await createMigratedD1Database()
     const d1 = d1Resource.database

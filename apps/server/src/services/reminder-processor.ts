@@ -412,3 +412,16 @@ export const findReminderById = (reminderId: string) =>
 
     return rows[0] ?? null
   })
+
+export const processReminderJob = (reminderId: string) =>
+  Effect.gen(function* () {
+    const claim = yield* claimReminder(reminderId)
+
+    if (!claim.claimed) return
+
+    const reminder = yield* findReminderById(reminderId)
+
+    if (!reminder) return
+
+    yield* sendClaimedReminder(reminder)
+  })

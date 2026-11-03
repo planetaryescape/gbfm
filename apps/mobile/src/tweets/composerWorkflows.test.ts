@@ -108,10 +108,17 @@ test('failed guest adoption write retains both drafts', async () => {
   expect([...storage.drafts.values()]).toEqual([draft, draft])
 })
 
-test.each([true, false])(
-  'guest cleanup retries do not duplicate adopted text (account=%s)',
-  async (hasAccount) => {
-    const guest = { ...draft, slug: 'guest-slug', text: 'Guest text' }
+test.each(
+  [true, false].flatMap((hasAccount) =>
+    ['Guest text', '  Guest text', 'Guest text  ', '  Guest text  '].map((text) => ({
+      hasAccount,
+      text,
+    })),
+  ),
+)(
+  'guest cleanup retries preserve adopted bytes (account=$hasAccount, text="$text")',
+  async ({ hasAccount, text }) => {
+    const guest = { ...draft, slug: 'guest-slug', text }
 
     const storage = storageFixture([
       ...(hasAccount ? [['account', draft] as const] : []),
@@ -127,7 +134,7 @@ test.each([true, false])(
 
     expect(await Effect.runPromise(restore)).toBe(true)
     const adopted = storage.drafts.get('account')
-    expect(adopted?.text).toBe(hasAccount ? 'A record\n\nGuest text' : 'Guest text')
+    expect(adopted?.text).toBe(hasAccount ? `A record\n\n${text}` : text)
     expect(await Effect.runPromise(restore)).toBe(true)
     expect(storage.drafts.get('account')).toEqual(adopted)
     expect(storage.drafts.get('guest')).toEqual(guest)

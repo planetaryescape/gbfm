@@ -5,7 +5,7 @@ import { presentToastNotice } from './toastPresentation'
 const fixture = () => {
   let hide: (() => void) | null = null
   const frames: Array<{ target: number; duration: number }> = []
-  let complete: ((finished: boolean) => void) | undefined
+  const completions = new Map<number, (finished: boolean) => void>()
   const announced: Array<string> = []
   const dismissed: Array<{ message: string }> = []
   let stopped = 0
@@ -23,7 +23,8 @@ const fixture = () => {
         },
         animate: (target, duration, callback) => {
           frames.push({ target, duration })
-          complete = callback
+
+          if (callback) completions.set(frames.length - 1, callback)
         },
       },
       (message) => announced.push(message),
@@ -44,7 +45,13 @@ const fixture = () => {
     dismissed,
     frames,
     expire: () => hide?.(),
-    finish: (finished: boolean) => complete?.(finished),
+    finish: (frame: number, finished: boolean) => {
+      const complete = completions.get(frame)
+
+      if (!complete) throw new Error('expected a pending animation completion')
+      completions.delete(frame)
+      complete(finished)
+    },
     stopped: () => stopped,
     reset: () => reset,
   }
@@ -63,10 +70,16 @@ test('expiry dismisses the exact notice only after a finished fade-out', () => {
     { target: 1, duration: 180 },
     { target: 0, duration: 220 },
   ])
-  f.finish(false)
-  expect(f.dismissed).toEqual([])
-  f.finish(true)
+  f.finish(1, true)
   expect(f.dismissed[0]).toBe(notice)
+})
+
+test('an interrupted fade-out does not dismiss the notice', () => {
+  const f = fixture()
+  f.start({ message: 'Added to queue' })
+  f.expire()
+  f.finish(1, false)
+  expect(f.dismissed).toEqual([])
 })
 
 test('replacement cancels the old timer and resets animation even for equal messages', () => {
@@ -79,12 +92,40 @@ test('replacement cancels the old timer and resets animation even for equal mess
   expect(f.frames).toHaveLength(1)
   f.start(second)
   f.expire()
-  f.finish(true)
+  f.finish(2, true)
   expect(f.dismissed).toEqual([second])
   expect(f.dismissed[0]).toBe(second)
   expect(f.stopped()).toBe(2)
   expect(f.reset()).toBe(2)
 })
+
+test.each([false, true])(
+  'a late old completion with finished=%s retains its original notice after replacement',
+  (finished) => {
+    const f = fixture()
+    const first = { message: 'Playing track' }
+    const second = { message: 'Playing track' }
+    const release = f.start(first)
+    f.expire()
+    release()
+    f.start(second)
+    f.expire()
+    expect(f.frames).toEqual([
+      { target: 1, duration: 180 },
+      { target: 0, duration: 220 },
+      { target: 1, duration: 180 },
+      { target: 0, duration: 220 },
+    ])
+    f.finish(1, finished)
+    expect(f.dismissed).toEqual(finished ? [first] : [])
+
+    expect(f.dismissed[0]).toBe(finished ? first : undefined)
+    expect(f.dismissed).not.toContain(second)
+    f.finish(3, true)
+    expect(f.dismissed).toEqual(finished ? [first, second] : [second])
+    expect(f.dismissed.at(-1)).toBe(second)
+  },
+)
 
 test('unmount cancels a waiting timer', () => {
   const f = fixture()
@@ -101,6 +142,6 @@ test('characterizes cleanup during fade-out: the native completion remains owned
   const release = f.start(notice)
   f.expire()
   release()
-  f.finish(true)
+  f.finish(1, true)
   expect(f.dismissed[0]).toBe(notice)
 })

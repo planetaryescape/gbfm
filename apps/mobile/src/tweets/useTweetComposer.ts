@@ -1,4 +1,4 @@
-import { Data, Effect, Redacted } from 'effect'
+import { Data, Effect, Predicate, Redacted } from 'effect'
 import { randomUUID } from 'expo-crypto'
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 
@@ -12,7 +12,8 @@ import {
 import { env } from '@/env'
 import { haptics } from '@/feedback/haptics'
 
-import { ComposerSubmission, submitComposerDraft } from './composerSubmission'
+import { createComposerOwner } from './composerOwner'
+import { ComposerSubmission } from './composerSubmission'
 import { emptyTweetDraft, musicCandidate, type TweetDraft, withText } from './draft'
 import { TweetDraftStorage } from './draftRestore'
 import { readTweetDraft, removeTweetDraft, restoreTweetDraft, saveTweetDraft } from './draftStorage'
@@ -67,11 +68,19 @@ export function useTweetComposer({
   const [submission, setSubmission] = useState<SubmissionState>(idleSubmission)
   const submissionRef = useRef(submission)
   const controller = useRef<AbortController | null>(null)
+  const [owner] = useState(createComposerOwner)
+  const publication = owner.state(storageKey)
+  const editable = Predicate.isTagged(publication, 'Writable')
+  const cleanupPending = Predicate.isTagged(publication, 'CleanupPending')
 
   const accept = (restored: TweetDraft) => {
-    latest.current = restored
-    setDraft(restored)
-    setError(null)
+    owner.change(storageKey, () => {
+      latest.current = restored
+      setDraft(restored)
+      setError(null)
+
+      return true
+    })
   }
 
   const loadRemote = (slug: string) => {
@@ -93,8 +102,10 @@ export function useTweetComposer({
     void Effect.runPromiseExit(work, { signal: abort.signal })
   }
 
-  const load = () =>
-    Effect.runSync(
+  const load = () => {
+    if (!editable) return
+
+    return Effect.runSync(
       (editSlug || replyTo ? readTweetDraft(storageKey) : restoreTweetDraft(identity)).pipe(
         Effect.match({
           onSuccess: (stored) => {
@@ -106,6 +117,7 @@ export function useTweetComposer({
         }),
       ),
     )
+  }
 
   const restore = useEffectEvent(load)
 
@@ -115,30 +127,31 @@ export function useTweetComposer({
     return () => controller.current?.abort()
   }, [])
 
-  const change = (next: TweetDraft) => {
-    latest.current = next
-    setDraft(next)
-    setNotice(null)
+  const change = (next: TweetDraft) =>
+    owner.change(storageKey, () => {
+      latest.current = next
+      setDraft(next)
+      setNotice(null)
 
-    return Effect.runSync(
-      saveTweetDraft(storageKey, next).pipe(
-        Effect.match({
-          onSuccess: () => {
-            setError(null)
+      return Effect.runSync(
+        saveTweetDraft(storageKey, next).pipe(
+          Effect.match({
+            onSuccess: () => {
+              setError(null)
 
-            return true
-          },
-          onFailure: () => {
-            setError(
-              'Could not save your draft on this device. Keep this screen open and try again.',
-            )
+              return true
+            },
+            onFailure: () => {
+              setError(
+                'Could not save your draft on this device. Keep this screen open and try again.',
+              )
 
-            return false
-          },
-        }),
-      ),
-    )
-  }
+              return false
+            },
+          }),
+        ),
+      )
+    })
 
   const discard = (onDone: () => void) => {
     if (SubmissionState.$is('Submitting')(submissionRef.current)) return
@@ -153,7 +166,11 @@ export function useTweetComposer({
   }
 
   const save = (publish: boolean, onPublished: (slug: string) => void) => {
-    if (!draft || SubmissionState.$is('Submitting')(submissionRef.current) || !change(draft)) return
+    if (!draft || SubmissionState.$is('Submitting')(submissionRef.current)) return
+
+    if (!publish && !editable) return
+
+    if (!cleanupPending && !change(draft)) return
     submissionRef.current = SubmissionState.Submitting()
     setSubmission(submissionRef.current)
     const abort = new AbortController()
@@ -167,21 +184,22 @@ export function useTweetComposer({
       ),
     )
 
-    const work = submitComposerDraft(storageKey, draft, publish, Boolean(replyTo), request).pipe(
+    const work = owner.submit(storageKey, draft, publish, Boolean(replyTo), request).pipe(
       Effect.provideService(TweetDraftStorage, {
         read: readTweetDraft,
         save: saveTweetDraft,
         remove: removeTweetDraft,
       }),
       Effect.tap((outcome) =>
-        Effect.sync(() =>
+        Effect.sync(() => {
+          if (!outcome) return
           ComposerSubmission.$match(outcome, {
             Published: ({ slug }) => onPublished(slug),
             PublishedNotCleared: ({ draft: remote }) => {
               latest.current = remote
               setDraft(remote)
               setError(
-                'Your tweet was published, but the local draft could not be cleared. Close this screen and check your tweet before trying again.',
+                'Published, but the local draft could not be cleared. Retry cleanup without publishing again. Keep this screen open until cleanup succeeds.',
               )
             },
             RemoteDraftSaved: ({ draft: remote, localSaved }) => {
@@ -198,8 +216,8 @@ export function useTweetComposer({
               void haptics.failure()
               setError(message)
             },
-          }),
-        ),
+          })
+        }),
       ),
       Effect.ensuring(
         Effect.sync(() => {
@@ -212,7 +230,8 @@ export function useTweetComposer({
     void Effect.runPromiseExit(work, { signal: abort.signal })
   }
 
-  const candidate = draft && resolvesMusic && sessionToken ? musicCandidate(draft) : null
+  const candidate =
+    editable && draft && resolvesMusic && sessionToken ? musicCandidate(draft) : null
 
   const musicLoading = useMusicLookup(candidate, sessionToken, (music) => {
     const current = latest.current
@@ -236,6 +255,7 @@ export function useTweetComposer({
     error,
     notice,
     busy: SubmissionState.$is('Submitting')(submission),
+    publication,
     musicLoading,
     change,
     setText,

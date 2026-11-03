@@ -21,11 +21,13 @@ test('refocus and account replacement reject old requests without resetting the 
   const first = owner.focus()
   const ready = { ...initialReaderState, request: first.request, status: 'ready' as const }
   const action = owner.beginAction(ready)
-  owner.blur(first.controller)
+
+  if (!action) throw new Error('expected an action')
   const second = owner.focus()
+  expect(action.controller.signal.aborted).toBe(true)
   expect(second.request).toBe(first.request + 1)
   expect(owner.beginAction(ready)).toBeNull()
-  expect(owner.acceptsResult(first.request, action?.controller ?? first.controller)).toBe(false)
+  expect(owner.acceptsResult(first.request, action.controller)).toBe(false)
   expect(owner.acceptsResult(second.request, second.controller)).toBe(true)
 })
 

@@ -27,10 +27,14 @@ const neighbours = Schema.decodeUnknownSync(MicroPostNeighboursResponse)({
 describe('Tweet reader', () => {
   it('waits for every pending visit before refreshing metadata for the visible destination', () => {
     const first = visit(init('anonymous'), 'b', 1, neighbours, null).model
+    expect(visitState(first, 'b')).toEqual(VisitState.cases.Pending.make({}))
     expect(visitState(first, 'unknown')).toEqual(VisitState.cases.Unrecorded.make({}))
     const next = visit(first, 'a', 2, null, null).model
+    expect(visitState(next, 'b')).toEqual(VisitState.cases.Pending.make({}))
+    expect(visitState(next, 'a')).toEqual(VisitState.cases.Pending.make({}))
     const settledFirst = update(next, Message.Seen({ slug: 'b', identity: 'anonymous' }))
     expect(settledFirst.commands ?? []).toHaveLength(0)
+    expect(visitState(settledFirst.model, 'b')).toEqual(VisitState.cases.Recorded.make({}))
     expect(visitState(settledFirst.model, 'a')).toEqual(VisitState.cases.Pending.make({}))
 
     const settledLast = update(
@@ -43,9 +47,39 @@ describe('Tweet reader', () => {
     const retry = update(settledLast.model, Message.RetrySeen())
     expect(retry.commands).toHaveLength(1)
     expect(update(retry.model, Message.RetrySeen())).toEqual({ model: retry.model })
-    expect(
-      update(init('another-account'), Message.Seen({ slug: 'b', identity: 'anonymous' })),
-    ).toEqual({ model: init('another-account') })
+  })
+
+  it.each([
+    { name: 'Seen', settle: Message.Seen },
+    { name: 'SeenFailed', settle: Message.SeenFailed },
+  ])('rejects another identity settling a pending visit with $name', ({ settle }) => {
+    const pending = visit(init('another-account'), 'b', 1, neighbours, null).model
+    expect(visitState(pending, 'b')).toEqual(VisitState.cases.Pending.make({}))
+    expect(update(pending, settle({ slug: 'b', identity: 'anonymous' }))).toEqual({
+      model: pending,
+    })
+    const accepted = update(pending, settle({ slug: 'b', identity: pending.identity }))
+    expect(VisitState.guards.Pending(visitState(accepted.model, 'b'))).toBe(false)
+    expect(accepted.commands).toHaveLength(1)
+  })
+
+  it('waits for an earlier pending visit after the visible visit settles first', () => {
+    const first = visit(init('anonymous'), 'b', 1, neighbours, null).model
+    const next = visit(first, 'a', 2, null, null).model
+    const settledVisible = update(next, Message.Seen({ slug: 'a', identity: 'anonymous' }))
+    expect(settledVisible.commands ?? []).toHaveLength(0)
+    expect(update(settledVisible.model, Message.RetryNavigation())).toEqual({
+      model: settledVisible.model,
+    })
+
+    const settledLast = update(
+      settledVisible.model,
+      Message.Seen({ slug: 'b', identity: 'anonymous' }),
+    )
+
+    expect(settledLast.model.current).toBe('a')
+    expect(settledLast.commands).toHaveLength(1)
+    expect(settledLast.model.requestId).toBe(1)
   })
 
   it('rejects superseded metadata successes and failures and retains recorded visits on revisit', () => {

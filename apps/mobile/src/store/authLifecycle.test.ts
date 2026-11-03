@@ -1,4 +1,4 @@
-import { Deferred, Effect, Fiber, Predicate, Redacted } from 'effect'
+import { Deferred, Effect, Fiber, Match, Predicate, Redacted } from 'effect'
 import { HttpClient, HttpClientResponse } from 'effect/http'
 import { expect, test } from 'vitest'
 
@@ -218,50 +218,69 @@ test('failed sign-out persistence does not clear the memory session', async () =
   expect(auth.session()).toEqual(cached)
 })
 
-test.each(['sign-out', 'sign-in'])(
-  'characterizes late restore overwriting a concurrent %s',
-  async (operation) => {
-    const auth = fixture(JSON.stringify(cached))
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const started = yield* Deferred.make<void>()
-        const finish = yield* Deferred.make<void>()
+test.each([
+  ['sign-out', 'success'],
+  ['sign-in', 'success'],
+  ['sign-out', 'expired'],
+  ['sign-in', 'expired'],
+  ['restore', 'success'],
+  ['restore', 'expired'],
+  ['restore', 'unavailable'],
+])('late restore preserves a newer %s after validation %s', async (operation, result) => {
+  const auth = fixture(
+    JSON.stringify(cached),
+    Match.value(result).pipe(
+      Match.when('expired', () => new Response(null, { status: 401 })),
+      Match.when('unavailable', () => new Response(null, { status: 503 })),
+      Match.orElse(() => Response.json({ user: wireUser })),
+    ),
+  )
 
-        const restore = restoreAuthSession(auth.setState).pipe(
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+
+      const restore = restoreAuthSession(auth.setState).pipe(
+        Effect.provideService(AuthSessionStorage, auth.storage),
+        Effect.provideService(AuthSessionValidation, {
+          validate: (token) =>
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(finish)),
+              Effect.andThen(auth.validation.validate(token)),
+            ),
+        }),
+      )
+
+      const fiber = yield* restore.pipe(Effect.forkScoped)
+      yield* Deferred.await(started)
+
+      if (operation === 'sign-out') {
+        yield* clearAuthSession(auth.setState).pipe(
           Effect.provideService(AuthSessionStorage, auth.storage),
-          Effect.provideService(AuthSessionValidation, {
-            validate: (token) =>
-              Deferred.succeed(started, undefined).pipe(
-                Effect.andThen(Deferred.await(finish)),
-                Effect.andThen(auth.validation.validate(token)),
-              ),
-          }),
         )
+        expect(auth.session().user).toBeNull()
+      } else if (operation === 'restore') {
+        auth.setState(AuthLifecycle.ValidatingSession({ session: auth.session() }))
+      } else {
+        yield* acceptAuthSession(
+          { ...cached, user: cached.user ? { ...cached.user, id: 'new-login' } : null },
+          auth.setState,
+        ).pipe(Effect.provideService(AuthSessionStorage, auth.storage))
+        expect(auth.session().user?.id).toBe('new-login')
+      }
 
-        const fiber = yield* restore.pipe(Effect.forkScoped)
-        yield* Deferred.await(started)
-
-        if (operation === 'sign-out') {
-          yield* clearAuthSession(auth.setState).pipe(
-            Effect.provideService(AuthSessionStorage, auth.storage),
-          )
-          expect(auth.session().user).toBeNull()
-        } else {
-          yield* acceptAuthSession(
-            { ...cached, user: cached.user ? { ...cached.user, id: 'new-login' } : null },
-            auth.setState,
-          ).pipe(Effect.provideService(AuthSessionStorage, auth.storage))
-          expect(auth.session().user?.id).toBe('new-login')
-        }
-
-        yield* Deferred.succeed(finish, undefined)
-        yield* Fiber.join(fiber)
-        expect(auth.session().user?.id).toBe(wireUser.id)
-        expect(auth.persisted.get('session')).toBe(JSON.stringify(auth.session()))
-      }).pipe(Effect.scoped),
-    )
-  },
-)
+      const newer = auth.session()
+      const lifecycle = auth.state()
+      const persisted = auth.persisted.get('session')
+      yield* Deferred.succeed(finish, undefined)
+      yield* Fiber.join(fiber)
+      expect(auth.session()).toEqual(newer)
+      expect(auth.state()).toBe(lifecycle)
+      expect(auth.persisted.get('session')).toBe(persisted)
+    }).pipe(Effect.scoped),
+  )
+})
 
 test.each(['sign-out', 'sign-in'])(
   'unavailable restore leaves a newer %s unchanged',

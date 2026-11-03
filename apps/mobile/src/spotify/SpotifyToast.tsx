@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react'
-import { AccessibilityInfo, Animated, Text, View } from 'react-native'
+import { useState } from 'react'
+import { Animated, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
+import { useAnimatedToast } from '@/components/NowPlaying/useAnimatedToast'
 import { useThemeColors, withAlpha } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
-
-const VISIBLE_MS = 2400
 
 export type SpotifyToastNotice = {
   readonly id: number
@@ -22,27 +21,7 @@ export const useSpotifyToast = () => {
 export function SpotifyToast({ notice }: { notice: SpotifyToastNotice | null }) {
   const colors = useThemeColors()
   const insets = useSafeAreaInsets()
-  const [progress] = useState(() => new Animated.Value(0))
-  const [dismissedNotice, setDismissedNotice] = useState<SpotifyToastNotice | null>(null)
-  const message = notice !== dismissedNotice ? notice?.message : null
-
-  useEffect(() => {
-    if (!notice) return undefined
-    AccessibilityInfo.announceForAccessibility(notice.message)
-    progress.stopAnimation()
-    progress.setValue(0)
-    Animated.timing(progress, { toValue: 1, duration: 180, useNativeDriver: true }).start()
-
-    const hide = setTimeout(() => {
-      Animated.timing(progress, { toValue: 0, duration: 220, useNativeDriver: true }).start(
-        ({ finished }) => {
-          if (finished) setDismissedNotice(notice)
-        },
-      )
-    }, VISIBLE_MS)
-
-    return () => clearTimeout(hide)
-  }, [notice, progress])
+  const { progress, message } = useAnimatedToast(notice)
 
   if (!message) return null
 

@@ -1,6 +1,5 @@
 import { radii } from '@gbfm/theme'
-import { useEffect, useState } from 'react'
-import { AccessibilityInfo, Animated, Text, View } from 'react-native'
+import { Animated, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useNowPlaying } from '@/audio/NowPlayingProvider'
@@ -8,33 +7,13 @@ import { Glyph } from '@/icons/Glyph'
 import { useThemeColors, withAlpha } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 
-const VISIBLE_MS = 2400
+import { useAnimatedToast } from './useAnimatedToast'
 
 export function QueueToast() {
   const { queueNotice } = useNowPlaying()
   const colors = useThemeColors()
   const insets = useSafeAreaInsets()
-  const [progress] = useState(() => new Animated.Value(0))
-  const [dismissedNotice, setDismissedNotice] = useState<typeof queueNotice>(null)
-  const message = queueNotice !== dismissedNotice ? queueNotice?.message : null
-
-  useEffect(() => {
-    if (!queueNotice) return undefined
-    AccessibilityInfo.announceForAccessibility(queueNotice.message)
-    progress.stopAnimation()
-    progress.setValue(0)
-    Animated.timing(progress, { toValue: 1, duration: 180, useNativeDriver: true }).start()
-
-    const hide = setTimeout(() => {
-      Animated.timing(progress, { toValue: 0, duration: 220, useNativeDriver: true }).start(
-        ({ finished }) => {
-          if (finished) setDismissedNotice(queueNotice)
-        },
-      )
-    }, VISIBLE_MS)
-
-    return () => clearTimeout(hide)
-  }, [queueNotice, progress])
+  const { progress, message } = useAnimatedToast(queueNotice)
 
   if (!message) return null
 

@@ -1,7 +1,15 @@
 import { Deferred, Effect, Fiber } from 'effect'
 import { describe, expect, it } from 'vitest'
 
-import { Hydrate, PersistDraft, ReconcileLocalDraft, Save } from './command'
+import {
+  Hydrate,
+  PersistDraft,
+  ReconcileLocalDraft,
+  ResolveMusic,
+  ResolveQuote,
+  Save,
+  UploadArtwork,
+} from './command'
 import { initialModel } from './init'
 import { Message } from './message'
 import type { Model } from './model'
@@ -9,6 +17,7 @@ import {
   CreatorRequestError,
   CreatorService,
   CreatorStorageError,
+  CreatorUploadError,
   reconcileStoredDraft,
   type CreatorOperations,
 } from './services'
@@ -51,6 +60,50 @@ const saved = (published = true, requestId = 1) =>
   Message.Saved({ owner: { ...owner, requestId }, id: 'post', slug: 'saved', published })
 
 describe('creator publication ownership', () => {
+  it.each([false, true])(
+    'clears autosave errors superseded by remote success, late=%s',
+    async (late) => {
+      const edited = update(
+        ready(),
+        Message.Changed({ field: 'content', value: 'Saved content' }),
+      ).model
+
+      const pending = update(edited, Message.DraftSaveRequested()).model
+
+      const failure = await Effect.runPromise(
+        PersistDraft({
+          key: pending.localDraftKey,
+          draft: pending.draft,
+          editorId: pending.editorId,
+          revision: pending.revision,
+        }).effect.pipe(
+          Effect.provideService(
+            CreatorService,
+            service({
+              writeLocalDraft: () =>
+                Effect.fail(new CreatorStorageError({ operation: 'write', message: 'Full' })),
+            }),
+          ),
+        ),
+      )
+
+      const remoteResult = await Effect.runPromise(
+        Save({
+          draft: pending.draft,
+          creatorId: input.creatorId,
+          publish: false,
+          owner,
+        }).effect.pipe(Effect.provideService(CreatorService, service())),
+      )
+
+      const completed = late
+        ? update(update(pending, remoteResult).model, failure).model
+        : update(update(pending, failure).model, remoteResult).model
+
+      expect(completed).toMatchObject({ saveState: 'saved', localError: null, error: null })
+    },
+  )
+
   it.each([false, true])(
     'admits one remote operation and rejects duplicate completions, publish=%s',
     (publish) => {
@@ -192,6 +245,7 @@ describe('creator publication ownership', () => {
     expect(update(failed, saved()).model).toMatchObject({
       phase: 'published',
       saveState: 'unsaved',
+      localError: 'autosave: Full',
       draft: { title: 'New title', postId: 'post' },
     })
   })
@@ -252,6 +306,89 @@ describe('creator publication ownership', () => {
       }).pipe(Effect.scoped),
     )
   })
+
+  it.each(['hydrate', 'music', 'quote', 'artwork'] as const)(
+    'ignores delayed %s failures after editor discard',
+    async (operation) => {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const entered = yield* Deferred.make<void>()
+          const release = yield* Deferred.make<void>()
+
+          const failure = Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.andThen(
+              Effect.fail(
+                new CreatorRequestError({ operation, status: 503, message: 'Unavailable' }),
+              ),
+            ),
+          )
+
+          const commands = {
+            hydrate: Hydrate({
+              key: 'micro:new',
+              kind: 'micro',
+              editSlug: null,
+              editorId: input.editorId,
+            }),
+            music: ResolveMusic({
+              url: 'https://music.test',
+              kind: 'micro',
+              editorId: input.editorId,
+            }),
+            quote: ResolveQuote({ slug: 'quote', editorId: input.editorId }),
+            artwork: UploadArtwork({
+              file: new File(['image'], 'cover.png'),
+              editorId: input.editorId,
+            }),
+          }
+
+          const command: Effect.Effect<Message, never, CreatorService> = commands[operation].effect
+
+          const fiber = yield* command.pipe(
+            Effect.provideService(
+              CreatorService,
+              service({
+                readLocalDraft: () =>
+                  failure.pipe(
+                    Effect.mapError(
+                      () => new CreatorStorageError({ operation: 'read', message: 'Unavailable' }),
+                    ),
+                  ),
+                resolveMusic: () => failure,
+                resolveQuote: () => failure,
+                uploadImage: () =>
+                  failure.pipe(
+                    Effect.mapError(
+                      () =>
+                        new CreatorUploadError({
+                          stage: 'image',
+                          status: 503,
+                          message: 'Unavailable',
+                        }),
+                    ),
+                  ),
+              }),
+            ),
+            Effect.forkChild,
+          )
+
+          yield* Deferred.await(entered)
+          const discarded = update(ready(), Message.DiscardRequested()).model
+
+          const replacement = update(
+            update(discarded, Message.Changed({ field: 'title', value: 'Replacement' })).model,
+            Message.PublishRequested(),
+          ).model
+
+          yield* Deferred.succeed(release, undefined)
+          const result = yield* Fiber.join(fiber)
+          expect(update(replacement, result)).toEqual({ model: replacement })
+          expect(update(ready(), result).model.error).toContain('Unavailable')
+        }).pipe(Effect.scoped),
+      )
+    },
+  )
 
   it('rejects outdated autosave success and failure without dismissing review', () => {
     const first = update(ready(), Message.Changed({ field: 'title', value: 'First' })).model
@@ -401,7 +538,7 @@ describe('creator local storage reconciliation', () => {
     expect(local.getItem('draft')).toBe('invalid')
   })
 
-  it.each([false, true])(
+  it.each(['absent', 'saved', 'intermediate'])(
     'persists newer in-memory edits when autosave did not retain them, existing=%s',
     async (existing) => {
       const local = storage()
@@ -412,7 +549,14 @@ describe('creator local storage reconciliation', () => {
         Message.Changed({ field: 'content', value: 'Not yet locally saved' }),
       ).model
 
-      if (existing) local.setItem('micro:new', JSON.stringify(pending.draft))
+      if (existing !== 'absent')
+        local.setItem(
+          'micro:new',
+          JSON.stringify({
+            ...pending.draft,
+            content: existing === 'intermediate' ? 'Older autosave' : pending.draft.content,
+          }),
+        )
       const result = update(edited, saved())
 
       const command = ReconcileLocalDraft({
@@ -457,10 +601,72 @@ describe('creator local storage reconciliation', () => {
 
     local.setItem('draft', JSON.stringify(replacement))
     await Effect.runPromise(
-      reconcileStoredDraft(local, 'draft', ready().draft, { id: 'post', slug: 'saved' }),
+      reconcileStoredDraft(
+        local,
+        'draft',
+        ready().draft,
+        { id: 'post', slug: 'saved' },
+        { ...ready().draft, content: 'Retained edit' },
+      ),
     )
     expect(JSON.parse(local.getItem('draft') ?? '{}')).toEqual(replacement)
   })
+
+  it('does not overwrite a draft changed by another tab during reconciliation', async () => {
+    const local = storage()
+    const draft = ready().draft
+    const replacement = JSON.stringify({ ...draft, content: 'Other tab latest' })
+    local.setItem('draft', JSON.stringify(draft))
+    let reads = 0
+    await Effect.runPromise(
+      reconcileStoredDraft(
+        {
+          ...local,
+          getItem: (key) => {
+            if (++reads === 2) local.setItem(key, replacement)
+
+            return local.getItem(key)
+          },
+        },
+        'draft',
+        draft,
+        { id: 'post', slug: 'saved' },
+        { ...draft, content: 'This tab retained' },
+      ),
+    )
+    expect(local.getItem('draft')).toBe(replacement)
+  })
+
+  it.each(['read', 'decode', 'write', 'clear'])(
+    'reports a neutral reconciliation operation for %s failures',
+    async (stage) => {
+      const local = storage()
+      const draft = ready().draft
+      local.setItem('draft', stage === 'decode' ? 'invalid' : JSON.stringify(draft))
+
+      const fail = () => {
+        throw new Error('Storage unavailable')
+      }
+
+      const adapter = {
+        getItem: stage === 'read' ? fail : local.getItem,
+        setItem: stage === 'write' ? fail : local.setItem,
+        removeItem: stage === 'clear' ? fail : local.removeItem,
+      }
+
+      const error = await Effect.runPromise(
+        reconcileStoredDraft(
+          adapter,
+          'draft',
+          draft,
+          { id: 'post', slug: 'saved' },
+          stage === 'write' ? { ...draft, content: 'Retained' } : null,
+        ).pipe(Effect.flip),
+      )
+
+      expect(error.operation).toBe('reconcile')
+    },
+  )
 })
 
 describe('creator hydration provenance', () => {
@@ -472,6 +678,7 @@ describe('creator hydration provenance', () => {
 
       const result = await Effect.runPromise(
         Hydrate({
+          editorId: input.editorId,
           key: 'micro:new',
           kind: 'micro',
           editSlug: source === 'remote' ? 'saved' : null,

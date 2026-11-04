@@ -1,5 +1,6 @@
 import { RegistryProvider, useAtomMount } from '@effect/atom-react'
 import { brandDark, brandLight } from '@gbfm/theme'
+import * as Sentry from '@sentry/react-native'
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
@@ -29,7 +30,7 @@ const lightTheme = {
   colors: { ...DefaultTheme.colors, background: brandLight.bg },
 }
 
-export default function Layout() {
+function Layout() {
   return (
     <RegistryProvider>
       <PreferencesProvider>
@@ -38,6 +39,8 @@ export default function Layout() {
     </RegistryProvider>
   )
 }
+
+export default Sentry.wrap(Layout, { touchEventBoundaryProps: { extractTextFromChildren: false } })
 
 function AppLayout() {
   const systemColorScheme = useColorScheme()

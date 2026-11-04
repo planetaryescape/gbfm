@@ -2,7 +2,7 @@
   "name": "@gbfm/mobile",
   "version": "1.0.0",
   "private": true,
-  "main": "expo-router/entry",
+  "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
@@ -22,6 +22,7 @@
     "@gbfm/player": "workspace:*",
     "@gbfm/spotify": "workspace:*",
     "@gbfm/theme": "workspace:*",
+    "@sentry/react-native": "8.33.0",
     "@spotify-effect/browser": "0.6.7",
     "@spotify-effect/core": "0.6.7",
     "babel-preset-expo": "~58.0.0",

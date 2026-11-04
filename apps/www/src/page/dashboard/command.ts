@@ -65,12 +65,18 @@ export const ApplyTheme = Command.define('Appearance.Apply', {
 
 export const Load = Command.define('DashboardLoad', {
   args: { path: Schema.String },
-  messages: [Message.Loaded, Message.Failed],
+  messages: [Message.Loaded, Message.Failed, Message.ConnectionsUnavailable],
   execute: ({ path }) =>
     DashboardService.pipe(
       Effect.flatMap((service) => service.request({ path })),
       Effect.map((document) => Message.Loaded({ document })),
-      Effect.catch((error) => Effect.succeed(Message.Failed({ message: error.message }))),
+      Effect.catch((error) =>
+        Effect.succeed(
+          path === '/api/user/mcp-connections' && [403, 503].includes(error.status ?? 0)
+            ? Message.ConnectionsUnavailable()
+            : Message.Failed({ message: error.message }),
+        ),
+      ),
     ),
 })
 

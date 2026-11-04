@@ -1,11 +1,13 @@
-import { Effect, Option } from 'effect'
+import { Context, Effect, Layer, Option } from 'effect'
 import type { HtmlBuilder } from 'foldkit/html'
 import { Scene } from 'foldkit/test'
 import { expect, it } from 'vitest'
 
+import { Load } from '../command'
 import { parseDashboardDocument } from '../document'
 import { initialModel } from '../init'
 import { Message } from '../message'
+import { DashboardService, makeDashboardServiceLayer } from '../service'
 import { update } from '../update'
 import { connectionsView, Model } from './connections'
 
@@ -44,7 +46,7 @@ it('renders a parsed connection and its disconnect form through the dashboard lo
   )
 
   show(loaded.model.connections, 'heading', 'Disposable editor')
-  show(loaded.model.connections, 'button', 'Disconnect')
+  show(loaded.model.connections, 'button', 'Disconnect Disposable editor')
 })
 
 it('distinguishes loading and a failed load with retry', () => {
@@ -61,4 +63,38 @@ it('distinguishes loading and a failed load with retry', () => {
 
   show(retrying.model.connections, 'status')
   expect(retrying.commands).toHaveLength(1)
+})
+
+it('shows an explicit unavailable state instead of an error and retry loop', () => {
+  const result = update(
+    initialModel('connections', { id: 'member', role: 'user' }),
+    Message.ConnectionsUnavailable(),
+  )
+
+  show(result.model.connections, 'status')
+  expect(result.model.error).toBeNull()
+  expect(result.commands).toEqual([])
+})
+
+it('maps forbidden and disabled connection responses to the explicit unavailable view', async () => {
+  for (const status of [403, 503]) {
+    const message = await Effect.runPromise(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(
+          makeDashboardServiceLayer(async () => new Response(null, { status })),
+        )
+
+        return yield* Load({ path: '/api/user/mcp-connections' }).effect.pipe(
+          Effect.provideService(DashboardService, Context.get(context, DashboardService)),
+        )
+      }).pipe(Effect.scoped),
+    )
+
+    expect(message).toEqual(Message.ConnectionsUnavailable())
+    show(
+      update(initialModel('connections', { id: 'member', role: 'user' }), message).model
+        .connections,
+      'status',
+    )
+  }
 })

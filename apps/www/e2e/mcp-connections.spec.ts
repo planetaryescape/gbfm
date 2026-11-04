@@ -26,6 +26,12 @@ test('owner signs in, denies, allows and disconnects a disposable read-only app'
 
   if (!resource) return
 
+  const ownerEmail = process.env.GBFM_MCP_E2E_OWNER_EMAIL
+  const ownerPassword = process.env.GBFM_MCP_E2E_OWNER_PASSWORD
+
+  if (!ownerEmail || !ownerPassword)
+    throw new Error('Explicit disposable MCP owner credentials are required')
+
   const name = `Disposable MCP app ${crypto.randomUUID()}`
 
   const callbackServer = createServer((_request, response) => {
@@ -84,12 +90,8 @@ test('owner signs in, denies, allows and disconnects a disposable read-only app'
       const loginPage = await page.goto(authorize())
       expect(loginPage?.headers()['referrer-policy']).toBe('strict-origin')
       await expect(page).toHaveURL(/\/auth\/sign-in\?/)
-      await page
-        .getByRole('textbox', { name: 'Email', exact: true })
-        .fill(process.env.GBFM_MCP_E2E_OWNER_EMAIL ?? 'admin@gbfm.local')
-      await page
-        .getByRole('textbox', { name: 'Password', exact: true })
-        .fill(process.env.GBFM_MCP_E2E_OWNER_PASSWORD ?? 'LocalTest123!')
+      await page.getByRole('textbox', { name: 'Email', exact: true }).fill(ownerEmail)
+      await page.getByRole('textbox', { name: 'Password', exact: true }).fill(ownerPassword)
       await page.getByRole('button', { name: 'Sign in', exact: true }).click()
       await expect(
         page.getByRole('heading', { name: `Connect ${name} to gbfm`, exact: true }),
@@ -117,13 +119,16 @@ test('owner signs in, denies, allows and disconnects a disposable read-only app'
         .filter({ has: page.getByRole('heading', { name, exact: true }) })
 
       await expect(connection).toContainText('posts:read')
-      await connection.getByRole('button', { name: 'Disconnect', exact: true }).click()
+      await connection.getByRole('button', { name: `Disconnect ${name}`, exact: true }).click()
       await expect(page.getByRole('status').filter({ hasText: 'App disconnected.' })).toBeVisible()
       await expect(connection).toHaveCount(0)
     } finally {
-      await page.request.post(
+      const cleanup = await page.request.post(
         `/api/user/mcp-connections/${encodeURIComponent(client.client_id)}/revoke`,
+        { headers: { origin: new URL(resource).origin } },
       )
+
+      expect(cleanup.ok(), `Disposable grant cleanup returned ${cleanup.status()}`).toBe(true)
     }
   } finally {
     await closeCallback()

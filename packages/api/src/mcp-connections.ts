@@ -1,4 +1,4 @@
-import { OAuthClientId } from '@gbfm/core/editorial-mcp'
+import { EditorialReadScope, OAuthClientId } from '@gbfm/core/editorial-mcp'
 import { Schema } from 'effect'
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup } from 'effect/http-api'
 
@@ -9,7 +9,7 @@ export const McpClientId = OAuthClientId
 export const McpConnection = Schema.Struct({
   clientId: McpClientId,
   name: Schema.String,
-  scopes: Schema.Array(Schema.String),
+  scopes: Schema.Array(EditorialReadScope),
   createdAt: Schema.String,
 })
 
@@ -28,7 +28,7 @@ export const McpConnectionsGroup = HttpApiGroup.make('mcpConnections')
     HttpApiEndpoint.post('revokeConnection', '/api/user/mcp-connections/:clientId/revoke', {
       params: { clientId: McpClientId },
       success: Schema.Struct({ success: Schema.Literal(true) }),
-      error: [HttpApiError.Forbidden, HttpApiError.NotFound, HttpApiError.ServiceUnavailable],
+      error: [HttpApiError.Forbidden, HttpApiError.ServiceUnavailable],
     }),
   )
   .middleware(AuthMiddleware)

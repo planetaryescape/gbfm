@@ -64,7 +64,7 @@ it('keeps consent server-only, preserves provider state, and forwards login and 
       response.end(
         JSON.stringify({
           redirect: true,
-          url: `https://api.goosebumps.fm/connect/gbfm/consent?${query}`,
+          url: `/connect/gbfm/consent?${query}`,
         }),
       )
     } else

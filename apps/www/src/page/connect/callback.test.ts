@@ -49,6 +49,7 @@ it('rejects callback CSP injection, wildcards, credentials and executable browse
   for (const callback of [
     'https://client.example.test/callback;form-action *',
     'https://client.example.test/callback;script-src',
+    'https://client.example.test/callback,script-src',
     'https://client.example.test/callback\r\nX-Injected: yes',
     'https://*.example.test/callback',
     'https://client.example.test/*',

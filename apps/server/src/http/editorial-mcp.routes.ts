@@ -40,7 +40,17 @@ export const EditorialMcpRoutesLive = Layer.unwrap(
     const config = yield* ConfigService
     const settings = config.mcp
 
-    if (!settings) return Layer.empty
+    if (!settings)
+      return config.mcpConfigurationError
+        ? HttpRouter.add(
+            '*',
+            '/mcp',
+            HttpServerResponse.empty({
+              status: 503,
+              headers: { 'cache-control': 'private, no-store' },
+            }),
+          )
+        : Layer.empty
 
     const oauth = yield* EditorialOAuth
     const auth = yield* Auth

@@ -1,7 +1,7 @@
 import { EditorialPrincipal, PostId } from '@gbfm/core/editorial-mcp'
 import { UserId } from '@gbfm/core/identity'
 import { Role } from '@gbfm/core/roles'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { Effect, Exit, Layer, Option, Schema } from 'effect'
 import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
@@ -312,6 +312,39 @@ describe('request-scoped editorial MCP', () => {
 
     expect(empty.posts).toEqual([])
     expect(empty.pagination.total).toBe(2)
+  })
+
+  test('drafts with identical creation times have deterministic page boundaries', async () => {
+    const ids = ['mcp-tied-b', 'mcp-tied-a', 'mcp-tied-c']
+    await db.insert(postsTable).values(
+      ids.map((id): typeof postsTable.$inferInsert => ({
+        id,
+        slug: id,
+        title: id,
+        content: 'Disposable pagination fixture',
+        type: 'post',
+        draft: true,
+        createdAt: new Date('2030-01-01T00:00:00Z'),
+      })),
+    )
+    await db.insert(postCreators).values(ids.map((postId) => ({ postId, creatorId: ownerId })))
+
+    try {
+      const pages: Array<string> = []
+
+      for (let offset = 0; offset < 3; offset++) {
+        const page = Schema.decodeUnknownSync(ListDraftsResult)(
+          (await call('list_drafts', { limit: 1, offset })).structuredContent,
+        )
+
+        pages.push(...page.posts.map((post) => post.postId))
+      }
+
+      expect(pages).toEqual(['mcp-tied-c', 'mcp-tied-b', 'mcp-tied-a'])
+    } finally {
+      await db.delete(postCreators).where(inArray(postCreators.postId, ids))
+      await db.delete(postsTable).where(inArray(postsTable.id, ids))
+    }
   })
 
   test('reads stable IDs, projects source only, and keeps the same version across reads and listing', async () => {

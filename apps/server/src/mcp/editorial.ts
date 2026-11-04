@@ -75,7 +75,14 @@ export const EditorialReadServiceLayer = Layer.effect(
             .where(eq(user.id, principal.userId))
             .limit(1),
         catch: unavailable,
-      })
+      }).pipe(
+        Effect.tapError(() =>
+          Effect.logError('editorial.authorization.unavailable', {
+            operation: 'owner.lookup',
+            dependency: 'database',
+          }),
+        ),
+      )
 
       const owner = yield* Schema.decodeUnknownEffect(OwnerAccount)(rows[0]).pipe(
         Effect.mapError(accessDenied),

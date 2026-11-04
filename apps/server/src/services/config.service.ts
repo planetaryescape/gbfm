@@ -1,10 +1,25 @@
 import { EditorialOAuthSettings } from '@gbfm/core/editorial-mcp'
 import { Context, Effect, Layer, Redacted, Schema } from 'effect'
 
-import { parseEditorialOAuthConfig } from '@/lib/editorial-oauth-config'
+import {
+  EditorialOAuthConfigInvalid,
+  parseEditorialOAuthConfig,
+} from '@/lib/editorial-oauth-config'
 
-const parseMcpConfig = (bindings: WorkerConfigBindings | undefined) =>
-  parseEditorialOAuthConfig(bindings?.MCP_OWNER_USER_ID, bindings?.MCP_RESOURCE_URL)
+const parseMcpConfig = (bindings: WorkerConfigBindings | undefined) => {
+  try {
+    return {
+      mcp: parseEditorialOAuthConfig(bindings?.MCP_OWNER_USER_ID, bindings?.MCP_RESOURCE_URL),
+    }
+  } catch (error) {
+    if (!(error instanceof EditorialOAuthConfigInvalid)) throw error
+    Effect.runSync(
+      Effect.logError('editorial.oauth.configuration.invalid', { fields: error.fields }),
+    )
+
+    return { mcp: undefined, mcpConfigurationError: error }
+  }
+}
 
 const secretNames = [
   'SpotifyClientId',
@@ -126,6 +141,7 @@ export const StorageConfigSchema = Schema.Struct({
 
 const ConfigSchema = Schema.Struct({
   mcp: Schema.optional(EditorialOAuthSettings),
+  mcpConfigurationError: Schema.optional(EditorialOAuthConfigInvalid),
   urls: Schema.Struct({
     frontend: Schema.String,
     share: Schema.String,
@@ -195,7 +211,7 @@ function requiredInProduction(isProd: boolean, bindings: WorkerConfigBindings | 
 export function createConfig(bindings?: WorkerConfigBindings): ConfigService {
   const appStage = bindings?.APP_STAGE ?? 'dev'
   const isProd = appStage === 'prod' && bindings?.LOCAL_DEV !== 'true'
-  const mcp = parseMcpConfig(bindings)
+  const mcpConfig = parseMcpConfig(bindings)
 
   const secrets = {
     SpotifyClientId: secretString('SpotifyClientId', '', bindings),
@@ -265,7 +281,7 @@ export function createConfig(bindings?: WorkerConfigBindings): ConfigService {
     (['dev', 'local'].includes(appStage) ? 'http://localhost:4318' : '')
 
   return {
-    mcp,
+    ...mcpConfig,
     urls: {
       frontend: frontendUrl,
       share: shareUrl,

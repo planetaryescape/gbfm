@@ -85,6 +85,7 @@ it('uses only successful provider redirects and matches native callbacks against
       response('https://api.goosebumps.fm/connect/gbfm/consent?sig=disposable'),
       'https://goosebumps.fm',
       native,
+      'https://api.goosebumps.fm',
     ),
   ).toEqual(redirected('/connect/gbfm/consent?sig=disposable'))
   expect(
@@ -94,4 +95,31 @@ it('uses only successful provider redirects and matches native callbacks against
       native,
     ),
   ).toEqual(redirected('https://other.app/connect/gbfm?code=disposable'))
+})
+
+it('normalizes the supplied API origin without trusting the production host in other environments', async () => {
+  const redirect = (url: string) => Response.json({ redirect: true, url })
+  expect(
+    await providerRedirect(
+      redirect('https://api.staging.test/connect/gbfm?sig=fixture'),
+      'https://www.staging.test',
+      '',
+      'https://api.staging.test',
+    ),
+  ).toEqual(
+    ProviderOutcome.cases.Redirect.make({ location: '/connect/gbfm?sig=fixture', cookies: [] }),
+  )
+  expect(
+    await providerRedirect(
+      redirect('https://api.goosebumps.fm/connect/gbfm?sig=fixture'),
+      'https://www.staging.test',
+      '',
+      'https://api.staging.test',
+    ),
+  ).toEqual(
+    ProviderOutcome.cases.Redirect.make({
+      location: 'https://api.goosebumps.fm/connect/gbfm?sig=fixture',
+      cookies: [],
+    }),
+  )
 })

@@ -10,7 +10,7 @@ import { ConfigService, createConfig } from '@/services/config.service'
 import { createTestWebHandler } from '@/test/http-handler'
 import { createMigratedD1Database } from '@/test/migrate-d1'
 
-const frontend = process.env.FRONTEND_URL ?? 'https://mcp-479.localhost'
+const frontend = new URL(process.env.FRONTEND_URL ?? 'https://mcp-479.localhost').origin
 
 const resource = await createMigratedD1Database()
 
@@ -171,6 +171,12 @@ const server = Bun.serve({
           }),
         }),
       )
+
+      if (!discovered.ok || !discovered.headers.get('content-type')?.includes('application/json'))
+        return new Response(`Tool discovery failed: HTTP ${discovered.status}`, {
+          status: 502,
+          headers: { 'cache-control': 'no-store' },
+        })
 
       const tools = Schema.decodeUnknownSync(
         Schema.Struct({

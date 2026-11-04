@@ -1,6 +1,10 @@
 import { Redacted, Schema, Effect } from 'effect'
 import { describe, expect, test } from 'vitest'
 
+import {
+  EditorialOAuthConfigInvalid,
+  parseEditorialOAuthConfig,
+} from '@/lib/editorial-oauth-config'
 import { withTestLayer } from '@/test/effect'
 
 import {
@@ -36,6 +40,22 @@ const workerBindings = (): WorkerConfigBindings => ({
 })
 
 describe('editorial OAuth configuration', () => {
+  test('invalid configuration diagnostics name only the failing fields', () => {
+    for (const [owner, resource, fields] of [
+      ['', 'https://valid.test/mcp', ['MCP_OWNER_USER_ID']],
+      ['owner', 'https://user:synthetic-secret@invalid.test/mcp', ['MCP_RESOURCE_URL']],
+    ] satisfies Array<[string, string, Array<string>]>) {
+      const error = createConfig({
+        ...workerBindings(),
+        MCP_OWNER_USER_ID: owner,
+        MCP_RESOURCE_URL: resource,
+      }).mcpConfigurationError
+
+      expect(error).toBeInstanceOf(EditorialOAuthConfigInvalid)
+      expect(error?.fields).toEqual(fields)
+      expect(JSON.stringify(error)).not.toContain('synthetic-secret')
+    }
+  })
   test('stays disabled without explicit bindings and preserves the existing auth URL', () => {
     const config = createConfig(workerBindings())
     expect(config.mcp).toBeUndefined()
@@ -71,7 +91,16 @@ describe('editorial OAuth configuration', () => {
         'https://editorial.example.com/auth',
       ].map((MCP_RESOURCE_URL) => ({ MCP_OWNER_USER_ID: 'owner', MCP_RESOURCE_URL })),
     ]) {
-      expect(() => createConfig({ ...workerBindings(), ...bindings })).toThrow()
+      expect(() =>
+        parseEditorialOAuthConfig(bindings.MCP_OWNER_USER_ID, bindings.MCP_RESOURCE_URL),
+      ).toThrow(EditorialOAuthConfigInvalid)
+      const config = createConfig({ ...workerBindings(), ...bindings })
+      expect(config.mcp).toBeUndefined()
+      expect(config.mcpConfigurationError).toBeInstanceOf(EditorialOAuthConfigInvalid)
+      expect(config.auth.betterAuthUrl).toBe('configured')
+      expect(JSON.stringify(config.mcpConfigurationError)).not.toMatch(
+        /password|token=secret|fragment/,
+      )
     }
   })
 

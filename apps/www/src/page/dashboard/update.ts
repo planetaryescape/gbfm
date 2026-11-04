@@ -255,6 +255,15 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
           : [],
       }
     },
+    ConnectionsUnavailable: () => ({
+      model: {
+        ...model,
+        phase: 'ready',
+        error: null,
+        connections: Connections.Model.cases.Unavailable.make({}),
+      },
+      commands: [],
+    }),
     Failed: ({ message: error }) => ({
       model: {
         ...model,

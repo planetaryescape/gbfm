@@ -24,7 +24,7 @@ export const NativeCallbackScheme = Schema.String.check(
 ).pipe(Schema.brand('NativeCallbackScheme'))
 
 const FormActionSource = Schema.NonEmptyString.check(
-  Schema.isPattern(/^[^\s;'"\\*\p{Cc}]+$/u),
+  Schema.isPattern(/^[^\s;,'"\\*\p{Cc}]+$/u),
 ).pipe(Schema.brand('CallbackFormActionSource'))
 
 export const consentFormActionSource = (state: typeof ConsentState.cases.Verified.Type) => {

@@ -679,7 +679,7 @@ const getPostRowsEffect = (
               .limit(limit)
               .offset(offset)
               .where(whereCondition)
-              .orderBy(desc(postsTable.createdAt)),
+              .orderBy(desc(postsTable.createdAt), desc(postsTable.id)),
           'get-posts-data',
         ),
       catch: (error) =>

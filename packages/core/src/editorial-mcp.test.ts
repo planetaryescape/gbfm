@@ -24,6 +24,8 @@ describe('editorial MCP domain boundaries', () => {
     'https://example.test/mcp?token=secret',
     'https://owner:password@example.test/mcp',
     'https://example.test/mcp#fragment',
+    'https://example.test/mcp?',
+    'https://example.test/mcp#',
     'https://example.test/not-mcp',
     'https://EXAMPLE.test/mcp',
   ])('rejects unsafe or noncanonical resource identities: %s', (value) => {

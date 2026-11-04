@@ -7,6 +7,7 @@ import { Effect, Layer, Schema } from 'effect'
 import * as schema from '@/db/exports'
 import { Database, makeDatabaseClient } from '@/db/layer'
 import { editorialOAuthPlugins } from '@/lib/editorial-oauth'
+import { editorialOAuthAdapter } from '@/lib/editorial-oauth-adapter'
 import { ConfigService, createConfig } from '@/services/config.service'
 import { EditorialOAuth, EditorialOAuthLive } from '@/services/editorial-oauth.service'
 import { withTestLayer } from '@/test/effect'
@@ -32,7 +33,7 @@ export const createEditorialOAuthFixture = async () => {
   }
 
   let beforeRefreshInsert: (() => Promise<void>) | undefined
-  const adapterFactory = drizzleAdapter(db, { provider: 'sqlite', schema })
+  const adapterFactory = editorialOAuthAdapter(drizzleAdapter(db, { provider: 'sqlite', schema }))
 
   const makeAuth = () =>
     betterAuth({

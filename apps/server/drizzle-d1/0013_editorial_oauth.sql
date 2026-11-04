@@ -32,6 +32,16 @@ CREATE INDEX oauth_refresh_token_code ON oauth_refresh_token(authorization_code_
 --> statement-breakpoint
 CREATE INDEX oauth_access_token_code ON oauth_access_token(authorization_code_id);
 --> statement-breakpoint
+CREATE INDEX oauth_refresh_token_client_id_idx ON oauth_refresh_token(client_id);
+--> statement-breakpoint
+CREATE INDEX oauth_refresh_token_session_id_idx ON oauth_refresh_token(session_id);
+--> statement-breakpoint
+CREATE INDEX oauth_access_token_client_id_idx ON oauth_access_token(client_id);
+--> statement-breakpoint
+CREATE INDEX oauth_access_token_session_id_idx ON oauth_access_token(session_id);
+--> statement-breakpoint
+CREATE INDEX oauth_access_token_refresh_id_idx ON oauth_access_token(refresh_id);
+--> statement-breakpoint
 CREATE TRIGGER editorial_oauth_refresh_live BEFORE INSERT ON oauth_refresh_token
 WHEN NEW.reference_id IS NULL OR EXISTS (SELECT 1 FROM editorial_oauth_revoked_grant WHERE reference_id = NEW.reference_id AND client_id = NEW.client_id)
 BEGIN SELECT RAISE(ABORT, 'Editorial grant revoked'); END;

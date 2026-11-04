@@ -3,10 +3,12 @@ import { Match, Schema } from 'effect'
 import type { HtmlBuilder } from 'foldkit/html'
 
 import { Message } from '../message'
+import { relativeTime } from '../ui'
 
 export const Model = Schema.TaggedUnion({
   Loading: {},
   Ready: { connections: Schema.Array(McpConnection) },
+  Unavailable: {},
   Failed: { message: Schema.String },
 })
 
@@ -33,6 +35,11 @@ export const connectionsView = (model: Model, url: string, h: HtmlBuilder<Messag
       ),
       Model.match(model, {
         Loading: () => h.p([h.Role('status')], ['Loading connections…']),
+        Unavailable: () =>
+          h.p(
+            [h.Role('status')],
+            ['App connections are not available for this account or environment.'],
+          ),
         Failed: ({ message }) =>
           h.div(
             [],
@@ -52,7 +59,7 @@ export const connectionsView = (model: Model, url: string, h: HtmlBuilder<Messag
                     [
                       h.h2([], [connection.name]),
                       h.p([], [connection.scopes.join(', ')]),
-                      h.p([], [`Connected ${connection.createdAt}`]),
+                      h.p([], ['Connected ', relativeTime(h, connection.createdAt)]),
                       h.form(
                         [h.Method('post'), h.Action('/actions/connections/revoke')],
                         [
@@ -61,7 +68,10 @@ export const connectionsView = (model: Model, url: string, h: HtmlBuilder<Messag
                             h.Name('clientId'),
                             h.Value(connection.clientId),
                           ]),
-                          h.button([h.Type('submit')], ['Disconnect']),
+                          h.button(
+                            [h.Type('submit'), h.AriaLabel(`Disconnect ${connection.name}`)],
+                            ['Disconnect'],
+                          ),
                         ],
                       ),
                     ],

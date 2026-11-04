@@ -81,7 +81,7 @@ Required checks include relevant server and WWW tests, the WWW production build,
 
 ## Configuration and connection
 
-MCP is disabled unless both `MCP_OWNER_USER_ID` and `MCP_RESOURCE_URL` are supplied. Partial or malformed configuration fails validation. These are configuration values, not credentials. The resource must be a canonical HTTPS URL ending in `/mcp`; its origin determines the issuer at `/auth`.
+MCP is disabled unless both `MCP_OWNER_USER_ID` and `MCP_RESOURCE_URL` are supplied. Partial or malformed configuration disables MCP, logs only the failing field names, and makes `/mcp` return 503 without preventing unrelated API routes, queue consumers, or scheduled jobs from starting. These are configuration values, not credentials. The resource must be a canonical HTTPS URL ending in `/mcp`; its origin determines the issuer at `/auth`.
 
 | Environment | Resource |
 | --- | --- |

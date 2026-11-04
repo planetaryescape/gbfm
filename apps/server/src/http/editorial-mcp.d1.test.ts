@@ -4,7 +4,7 @@ import { expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
 import { postCreators, postsTable } from '@/db/post.schema'
-import { ConfigService } from '@/services/config.service'
+import { ConfigService, createConfig } from '@/services/config.service'
 import { createEditorialOAuthFixture, OAuthTokens } from '@/test/editorial-oauth'
 import { createTestWebHandler } from '@/test/http-handler'
 
@@ -19,6 +19,49 @@ const ReadResult = Schema.Struct({
       posts: Schema.Array(Schema.Struct({ postId: Schema.String })),
     }),
   }),
+})
+
+test('invalid optional MCP settings isolate failure from health and existing authentication', async () => {
+  await using fixture = await createEditorialOAuthFixture()
+
+  const config = createConfig({
+    APP_STAGE: 'test',
+    MCP_OWNER_USER_ID: 'owner',
+    MCP_RESOURCE_URL: 'https://invalid.test/mcp?secret=fixture',
+    USER_CONTENT_BUCKET_NAME: 'disposable',
+    MIXES_BUCKET_NAME: 'disposable',
+    StorageRegion: 'auto',
+    BETTER_AUTH_SECRET: 'disposable-test-secret-with-at-least-32-chars',
+    BETTER_AUTH_URL: 'https://editorial-test.localhost',
+    SpotifyClientId: '',
+    SpotifyClientSecret: '',
+    SENTRY_BACKEND_DSN: '',
+    VITE_PUBLIC_SENTRY_DSN: '',
+    CloudflareAnalyticsApiToken: '',
+  })
+
+  const handler = createTestWebHandler(
+    fixture.db.$client,
+    undefined,
+    undefined,
+    undefined,
+    Layer.succeed(ConfigService, config),
+  )
+
+  try {
+    expect(
+      (await handler.handler(new Request('https://editorial-test.localhost/health/live'))).status,
+    ).toBe(200)
+    expect(
+      (await handler.handler(new Request('https://editorial-test.localhost/auth/get-session')))
+        .status,
+    ).toBe(200)
+    expect(
+      (await handler.handler(new Request('https://editorial-test.localhost/mcp'))).status,
+    ).toBe(503)
+  } finally {
+    await handler.dispose()
+  }
 })
 
 test('composed HTTP MCP requires OAuth on discovery and calls and disconnects immediately', async () => {
@@ -91,6 +134,35 @@ test('composed HTTP MCP requires OAuth on discovery and calls and disconnects im
     expect(unauthorized.headers.get('cache-control')).toBe('private, no-store')
     expect((await rpc('server/discover')).status).toBe(401)
     expect((await rpc('tools/list', Redacted.make('owner-session-token'))).status).toBe(401)
+
+    const browserUnauthorized = await rpc(
+      'tools/list',
+      undefined,
+      undefined,
+      fixture.config.urls.frontend,
+    )
+
+    expect(browserUnauthorized.status).toBe(401)
+    expect(browserUnauthorized.headers.get('access-control-allow-origin')).toBe(
+      fixture.config.urls.frontend,
+    )
+    expect(
+      browserUnauthorized.headers.get('access-control-expose-headers')?.toLowerCase(),
+    ).toContain('www-authenticate')
+
+    const preflight = await handler.handler(
+      new Request(fixture.config.mcp.resourceUrl, {
+        method: 'OPTIONS',
+        headers: {
+          origin: fixture.config.urls.frontend,
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'authorization,mcp-protocol-version',
+        },
+      }),
+    )
+
+    expect(preflight.status).toBe(204)
+    expect(preflight.headers.get('access-control-allow-origin')).toBe(fixture.config.urls.frontend)
 
     const listed = await rpc('tools/list', tokens.access_token)
     expect(listed.status).toBe(200)

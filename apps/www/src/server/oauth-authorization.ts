@@ -57,7 +57,11 @@ export const forwardOAuthAuthorization = async (
   return ProviderOutcome.match(
     await providerRedirect(response.clone(), url.origin, url.searchParams.toString()),
     {
-      Rejected: () => response,
+      Rejected: ({ status }) =>
+        new Response('The authorization continuation could not be completed.', {
+          status,
+          headers: { 'cache-control': 'private, no-store', 'referrer-policy': 'no-referrer' },
+        }),
       Redirect: ({ location, cookies }) => {
         if (!validDestination(location, url))
           return new Response('The authorization continuation could not be completed.', {

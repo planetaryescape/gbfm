@@ -156,12 +156,12 @@ export const createWebHandler = (options: {
     // this.
     Layer.mergeAll(
       ApiLive,
-      EditorialMcpRoutesLive,
       betterAuthRoute,
       SearchCacheHeaderLive,
       SiteRoutesLive,
       DocsLive,
       CorsLive.pipe(Layer.provide(appServices)),
+      EditorialMcpRoutesLive,
       RequestLoggerLive,
       SentryDefectLive,
     ).pipe(

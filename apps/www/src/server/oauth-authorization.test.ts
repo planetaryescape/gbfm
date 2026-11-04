@@ -130,3 +130,13 @@ it('supports a provider-approved native callback and HTML navigation without fet
   expect(result.status).toBe(303)
   expect(result.headers.get('location')).toBe('com.example.editor:/callback?code=disposable')
 })
+
+it('rejects unexpected successful JSON with a private upstream-failure response', async () => {
+  for (const payload of [{ ok: true }, { redirect: false }, null]) {
+    const result = await forwardOAuthAuthorization(navigation(), async () => Response.json(payload))
+    expect(result.status).toBe(502)
+    expect(result.headers.get('cache-control')).toBe('private, no-store')
+    expect(result.headers.get('referrer-policy')).toBe('no-referrer')
+    expect(await result.text()).toBe('The authorization continuation could not be completed.')
+  }
+})

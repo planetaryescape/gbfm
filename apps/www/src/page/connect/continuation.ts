@@ -20,7 +20,12 @@ export const loginOAuthQuery = (returnTo: string, origin: string) => {
 
 const ProviderRedirect = Schema.Struct({ redirect: Schema.Literal(true), url: Schema.String })
 
-const providerLocation = async (response: Response, origin: string, query: string) => {
+const providerLocation = async (
+  response: Response,
+  origin: string,
+  query: string,
+  apiOrigin: string,
+) => {
   if (!response.ok) return null
 
   const result = Option.getOrNull(
@@ -49,7 +54,7 @@ const providerLocation = async (response: Response, origin: string, query: strin
   }
 
   if (
-    (target.origin === origin || target.origin === 'https://api.goosebumps.fm') &&
+    (target.origin === origin || target.origin === apiOrigin) &&
     ['/connect/gbfm', '/connect/gbfm/consent'].includes(target.pathname)
   )
     return `${target.pathname}${target.search}`
@@ -61,8 +66,9 @@ export const providerRedirect = async (
   response: Response,
   origin: string,
   query: string,
+  apiOrigin: string = URL.parse(response.url)?.origin ?? origin,
 ): Promise<typeof ProviderOutcome.Type> => {
-  const location = await providerLocation(response, origin, query)
+  const location = await providerLocation(response, origin, query, apiOrigin)
 
   return location
     ? ProviderOutcome.cases.Redirect.make({ location, cookies: response.headers.getSetCookie() })

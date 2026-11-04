@@ -52,6 +52,8 @@ export const apiWorker = ({
 }: ApiWorkerInput) =>
   Effect.gen(function* () {
     const sentryDsn = secrets.SENTRY_BACKEND_DSN
+    const mcpResource = mcpResourceUrl ? URL.parse(mcpResourceUrl) : null
+    const mcpFrontendOrigin = mcpResource?.protocol === 'https:' ? mcpResource.origin : undefined
 
     const requestTelemetry = yield* Cloudflare.AnalyticsEngine.Dataset('ApiRequestTelemetry', {
       dataset: `gbfm_api_${config.stage}`,
@@ -109,8 +111,8 @@ export const apiWorker = ({
         ADMIN_EMAIL: adminEmail,
         ...(mcpOwnerUserId ? { MCP_OWNER_USER_ID: mcpOwnerUserId } : undefined),
         ...(mcpResourceUrl ? { MCP_RESOURCE_URL: mcpResourceUrl } : undefined),
-        ...(config.isLocalDev && mcpResourceUrl
-          ? { FRONTEND_URL: new URL(mcpResourceUrl).origin }
+        ...(config.isLocalDev && mcpFrontendOrigin
+          ? { FRONTEND_URL: mcpFrontendOrigin }
           : undefined),
         ...secrets,
         SENTRY_DSN: sentryDsn,

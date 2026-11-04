@@ -16,6 +16,7 @@ import { Database, type DatabaseClient } from '@/db/layer'
 import * as oauthSchema from '@/db/oauth.schema'
 import { browserOrigins } from '@/lib/browser-origins'
 import { editorialOAuthPlugins } from '@/lib/editorial-oauth'
+import { editorialOAuthAdapter } from '@/lib/editorial-oauth-adapter'
 import {
   getOrCreateEmailPreferencesByUserId,
   updateEmailPreferences,
@@ -50,10 +51,12 @@ const makeAuth = (
   nowIso: () => Promise<string>,
 ) =>
   betterAuth({
-    database: drizzleAdapter(database, {
-      provider: 'sqlite',
-      schema: { ...authSchema, ...oauthSchema },
-    }),
+    database: editorialOAuthAdapter(
+      drizzleAdapter(database, {
+        provider: 'sqlite',
+        schema: { ...authSchema, ...oauthSchema },
+      }),
+    ),
     advanced: {
       database: { joins: true },
       ipAddress: config.mcp ? { ipAddressHeaders: ['cf-connecting-ip'] } : undefined,

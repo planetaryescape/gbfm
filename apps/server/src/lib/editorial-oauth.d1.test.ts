@@ -9,6 +9,47 @@ import { hashEditorialOAuthToken } from '@/lib/editorial-oauth-token'
 import { createEditorialOAuthFixture, OAuthTokens } from '@/test/editorial-oauth'
 
 describe('editorial OAuth provider on migrated D1', () => {
+  test('malformed persisted authorization grants produce OAuth invalid_grant without leaking data', async () => {
+    await using fixture = await createEditorialOAuthFixture()
+    const clientId = await fixture.register()
+    const code = await fixture.authorize(clientId)
+    await fixture.db
+      .update(authVerification)
+      .set({ value: '{"private":"synthetic-private-grant"}' })
+      .where(eq(authVerification.identifier, await hashEditorialOAuthToken(code)))
+    const response = await fixture.exchange(clientId, code)
+    expect(response.status).toBe(400)
+    const body = await response.text()
+    expect(JSON.parse(body)).toMatchObject({
+      error: 'invalid_grant',
+      error_description: 'Invalid editorial grant',
+    })
+    expect(body).not.toContain('synthetic-private-grant')
+  })
+
+  test('migrated token foreign keys have usable lookup indexes', async () => {
+    await using fixture = await createEditorialOAuthFixture()
+
+    for (const { table, column } of [
+      { table: 'oauth_refresh_token', column: 'client_id' },
+      { table: 'oauth_refresh_token', column: 'session_id' },
+      { table: 'oauth_access_token', column: 'client_id' },
+      { table: 'oauth_access_token', column: 'session_id' },
+      { table: 'oauth_access_token', column: 'refresh_id' },
+    ]) {
+      const plan = await fixture.db.$client
+        .prepare(`EXPLAIN QUERY PLAN SELECT id FROM ${table} WHERE ${column} = ?`)
+        .bind('disposable')
+        .all()
+
+      const rows = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ detail: Schema.String })))(
+        plan.results,
+      )
+
+      expect(rows.some(({ detail }) => detail.includes(`${table}_${column}_idx`))).toBe(true)
+    }
+  })
+
   test('the next verification rejects role demotion and accepts restored editorial permission', async () => {
     await using fixture = await createEditorialOAuthFixture()
     const clientId = await fixture.register()
@@ -258,7 +299,9 @@ describe('editorial OAuth provider on migrated D1', () => {
     const reconnected = await fixture.exchange(clientId, await fixture.authorize(clientId))
     expect(reconnected.status).toBe(200)
     release.resolve()
-    expect((await refreshing).status).toBeGreaterThanOrEqual(400)
+    const rejected = await refreshing
+    expect(rejected.status).toBe(400)
+    expect(await rejected.json()).toMatchObject({ error: 'invalid_grant' })
     expect(
       await Effect.runPromise(fixture.service.verify(tokens.access_token).pipe(Effect.result)),
     ).toHaveProperty('_tag', 'Failure')

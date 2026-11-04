@@ -11,7 +11,7 @@ const sensitivePath = (pathname: string) =>
 
 const editorialUrl = (value: string | undefined) => {
   if (!value) return undefined
-  const url = URL.parse(value)
+  const url = URL.parse(value, 'https://telemetry.invalid')
 
   return url && sensitivePath(url.pathname) ? url : undefined
 }
@@ -20,17 +20,22 @@ const capturedString = Schema.decodeUnknownOption(Schema.String)
 
 const capturedNumber = Schema.decodeUnknownOption(Schema.Number)
 
+const safeUrl = (url: URL) =>
+  url.origin === 'https://telemetry.invalid' ? url.pathname : `${url.origin}${url.pathname}`
+
 const safeUrlText = (value: string | undefined) =>
-  value?.replace(/https?:\/\/[^\s"'<>]+/g, (candidate) => {
+  value?.replace(/(?:https?:\/\/|\/)[^\s"'<>]+/g, (candidate) => {
     const url = editorialUrl(candidate)
 
-    return url ? `${url.origin}${url.pathname}` : candidate
+    return url ? safeUrl(url) : candidate
   })
 
 export function sanitizeOAuthBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
   const data = breadcrumb.data
-  const target = data?.url ?? data?.['url.full'] ?? data?.to
-  const url = editorialUrl(Option.getOrUndefined(capturedString(target)))
+
+  const url = [data?.url, data?.['url.full'], data?.to, data?.from]
+    .map((target) => editorialUrl(Option.getOrUndefined(capturedString(target))))
+    .find((target) => target !== undefined)
 
   if (!url) return { ...breadcrumb, ...omitUndefined({ message: safeUrlText(breadcrumb.message) }) }
 
@@ -41,7 +46,7 @@ export function sanitizeOAuthBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
     timestamp: breadcrumb.timestamp,
     message: url.pathname,
     data: omitUndefined({
-      url: `${url.origin}${url.pathname}`,
+      url: safeUrl(url),
       method: Option.getOrUndefined(capturedString(data?.method)),
       status_code: Option.getOrUndefined(capturedNumber(data?.status_code)),
     }),
@@ -101,15 +106,16 @@ export function sanitizeOAuthEvent<T extends ErrorEvent | TransactionEvent>(even
       : undefined,
     breadcrumbs,
     request: {
-      url: `${url.origin}${url.pathname}`,
+      url: safeUrl(url),
       method: event.request?.method,
     },
   }
 }
 
 export function sanitizeOAuthSpan(span: SpanJSON): SpanJSON {
-  const target = span.data['url.full'] ?? span.data['http.url']
-  const url = editorialUrl(Option.getOrUndefined(capturedString(target)))
+  const url = [span.data['url.full'], span.data['http.url'], span.data['http.target']]
+    .map((target) => editorialUrl(Option.getOrUndefined(capturedString(target))))
+    .find((target) => target !== undefined)
 
   if (!url) return span
 
@@ -132,6 +138,6 @@ export function sanitizeOAuthSpan(span: SpanJSON): SpanJSON {
   return {
     ...span,
     description: url.pathname,
-    data: { ...data, 'url.full': `${url.origin}${url.pathname}` },
+    data: { ...data, 'url.full': safeUrl(url) },
   }
 }

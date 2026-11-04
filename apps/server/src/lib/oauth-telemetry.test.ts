@@ -1,7 +1,7 @@
 import type { ErrorEvent, SpanJSON } from '@sentry/core'
 import { expect, test } from 'vitest'
 
-import { sanitizeOAuthEvent, sanitizeOAuthSpan } from './oauth-telemetry'
+import { sanitizeOAuthBreadcrumb, sanitizeOAuthEvent, sanitizeOAuthSpan } from './oauth-telemetry'
 
 test('OAuth request capture excludes authorization queries, headers, cookies and bodies', () => {
   const marker = 'synthetic-private-value'
@@ -100,4 +100,35 @@ test('unrelated request telemetry retains its existing behavior', () => {
   }
 
   expect(sanitizeOAuthEvent(event).request).toBe(event.request)
+})
+
+test('relative HTTP targets and both navigation endpoints cannot leak OAuth queries', () => {
+  const marker = 'synthetic-relative-secret'
+
+  const span: SpanJSON = {
+    span_id: '1234567890abcdef',
+    trace_id: '1234567890abcdef1234567890abcdef',
+    start_timestamp: 1,
+    timestamp: 2,
+    description: `GET /auth/oauth2/authorize?code=${marker}`,
+    data: { 'http.target': `/auth/oauth2/authorize?code=${marker}`, 'http.request.body': marker },
+  }
+
+  expect(JSON.stringify(sanitizeOAuthSpan(span))).not.toContain(marker)
+  expect(sanitizeOAuthSpan(span).data['url.full']).toBe('/auth/oauth2/authorize')
+  expect(
+    JSON.stringify(
+      sanitizeOAuthBreadcrumb({ message: `GET /auth/oauth2/authorize?code=${marker}` }),
+    ),
+  ).not.toContain(marker)
+
+  for (const data of [
+    { to: `/connect/gbfm?sig=${marker}`, from: '/dashboard' },
+    { to: '/dashboard', from: `/connect/gbfm?sig=${marker}` },
+    { url: '/health', to: `/auth/oauth2/token?code=${marker}` },
+  ]) {
+    const result = sanitizeOAuthBreadcrumb({ category: 'navigation', data, message: marker })
+    expect(JSON.stringify(result)).not.toContain(marker)
+    expect(result.data).not.toHaveProperty('from')
+  }
 })

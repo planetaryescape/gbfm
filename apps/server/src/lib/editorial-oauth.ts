@@ -86,7 +86,10 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
                         )(code.value).pipe(
                           Option.getOrThrowWith(
                             () =>
-                              new APIError('BAD_REQUEST', { message: 'Invalid editorial grant' }),
+                              new APIError('BAD_REQUEST', {
+                                error: 'invalid_grant',
+                                error_description: 'Invalid editorial grant',
+                              }),
                           ),
                         )
 

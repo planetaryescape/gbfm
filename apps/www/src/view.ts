@@ -6,6 +6,7 @@ import type { Document, HtmlBuilder } from 'foldkit/html'
 import { ObservePrivateMedia } from './media-preview/mount'
 import { Message } from './message'
 import type { Model } from './model'
+import { readerViewState } from './observability/reader-state'
 import * as Page from './page'
 import { isEntry } from './page/tweet/reader'
 import * as Player from './player'
@@ -187,6 +188,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
       : null
 
   const content = pendingShow ?? (target ? pageSkeleton(target, model.route) : null) ?? page
+  const reader = readerViewState(model)
 
   return {
     title: model.flags.metadata
@@ -205,6 +207,9 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
       [
         h.Class('site'),
         h.DataAttribute('interactive', String(model.interactive)),
+        h.DataAttribute('reader-active', String(reader.active)),
+        h.DataAttribute('reader-request', String(reader.request)),
+        h.DataAttribute('reader-status', reader.status),
         h.OnMount(ObservePrivateMedia()),
       ],
       [

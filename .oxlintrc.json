@@ -145,6 +145,12 @@
   },
   "overrides": [
     {
+      "files": ["apps/mobile/index.js"],
+      "rules": {
+        "import/no-unassigned-import": "off"
+      }
+    },
+    {
       "files": ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/test/**"],
       "rules": {
         "eslint/no-console": "off",

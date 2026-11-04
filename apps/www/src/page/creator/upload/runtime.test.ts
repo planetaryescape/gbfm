@@ -228,7 +228,7 @@ const failureTag = <A, E>(exit: Exit.Exit<A, E>) => {
 }
 
 describe('creator upload ownership through the multipart program', () => {
-  it('preserves the existing cancellation and replacement overlap without losing the active controller', async () => {
+  it('keeps the replacement file resumable when an older cancellation finishes during upload', async () => {
     const test = fixture()
     test.fail(true)
     await Effect.runPromise(
@@ -262,14 +262,40 @@ describe('creator upload ownership through the multipart program', () => {
         ).toBe(false)
         expect(failureTag(yield* Effect.exit(upload.resume))).toHaveProperty(
           '_tag',
-          'InvalidResponseError',
+          'AlreadyInProgressError',
         )
         expect(failureTag(yield* Effect.exit(upload.start(file('third.mp3'))))).toHaveProperty(
           '_tag',
           'AlreadyInProgressError',
         )
+        yield* upload.pause
         test.release.resolve()
-        expect(yield* Fiber.join(replacement)).toBe('https://cdn.test/mix.mp3')
+        expect(failureTag(yield* Fiber.await(replacement))).toHaveProperty('_tag', 'UploadPaused')
+        expect(yield* upload.resume).toBe('https://cdn.test/mix.mp3')
+      }).pipe(Effect.scoped),
+    )
+  })
+
+  it('keeps a failed replacement resumable when an older cancellation finishes afterward', async () => {
+    const test = fixture()
+    test.fail(true)
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(test.layer)
+        const upload = yield* CreatorUpload.pipe(Effect.provideContext(context))
+        yield* Effect.exit(upload.start(file()))
+        test.holdAbort()
+        const cancelling = yield* upload.cancel.pipe(Effect.forkChild)
+        yield* Effect.promise(() => test.abortEntered.promise)
+        expect(
+          failureTag(yield* Effect.exit(upload.start(file('replacement.mp3')))),
+        ).toHaveProperty('status', 400)
+        test.abortRelease.resolve()
+        yield* Fiber.join(cancelling)
+        test.fail(false)
+        expect(yield* upload.resume).toBe('https://cdn.test/mix.mp3')
+        expect(test.requests.filter(({ url }) => url.endsWith('/init'))).toHaveLength(2)
+        expect(test.checkpoints.size).toBe(0)
       }).pipe(Effect.scoped),
     )
   })
@@ -297,31 +323,70 @@ describe('creator upload ownership through the multipart program', () => {
     expect(test.requests).toEqual([])
   })
 
-  it('retains the file and completed checkpoint when finalization or local cleanup fails', async () => {
-    for (const failure of ['complete', 'clear']) {
-      const test = fixture()
+  it('retains the file and completed checkpoint when remote finalization fails', async () => {
+    const test = fixture()
+    test.failComplete(true)
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(test.layer)
+        const upload = yield* CreatorUpload.pipe(Effect.provideContext(context))
+        expect(Exit.isFailure(yield* Effect.exit(upload.start(file())))).toBe(true)
+        expect(test.checkpoints.get(computeFileFingerprint(file()))?.completedParts).toHaveLength(2)
+        test.failClear(false)
+        test.failComplete(false)
+        test.remote([
+          { partNumber: 1, etag: 'one', size: 3 },
+          { partNumber: 2, etag: 'two', size: 3 },
+        ])
+        expect(yield* upload.resume).toBe('https://cdn.test/mix.mp3')
+        expect(test.requests.filter(({ init }) => init.method === 'PUT')).toHaveLength(2)
+      }).pipe(Effect.scoped),
+    )
+  })
 
-      if (failure === 'complete') test.failComplete(true)
-      else test.failClear(true)
-      await Effect.runPromise(
-        Effect.gen(function* () {
-          const context = yield* Layer.build(test.layer)
-          const upload = yield* CreatorUpload.pipe(Effect.provideContext(context))
-          expect(Exit.isFailure(yield* Effect.exit(upload.start(file())))).toBe(true)
-          expect(test.checkpoints.get(computeFileFingerprint(file()))?.completedParts).toHaveLength(
-            2,
-          )
-          test.failClear(false)
-          test.failComplete(false)
-          test.remote([
-            { partNumber: 1, etag: 'one', size: 3 },
-            { partNumber: 2, etag: 'two', size: 3 },
-          ])
-          expect(yield* upload.resume).toBe('https://cdn.test/mix.mp3')
-          expect(test.requests.filter(({ init }) => init.method === 'PUT')).toHaveLength(2)
-        }).pipe(Effect.scoped),
-      )
-    }
+  it('returns confirmed success without retaining a resumable file when checkpoint cleanup fails', async () => {
+    const test = fixture()
+    test.failClear(true)
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(test.layer)
+        const upload = yield* CreatorUpload.pipe(Effect.provideContext(context))
+        expect(yield* upload.start(file())).toBe('https://cdn.test/mix.mp3')
+        expect(test.checkpoints.get(computeFileFingerprint(file()))?.completedParts).toHaveLength(2)
+        expect(failureTag(yield* Effect.exit(upload.resume))).toHaveProperty(
+          '_tag',
+          'InvalidResponseError',
+        )
+        yield* upload.cancel
+        expect(test.requests.filter(({ url }) => url.endsWith('/complete'))).toHaveLength(1)
+        expect(test.requests.filter(({ url }) => url.endsWith('/abort'))).toHaveLength(0)
+      }).pipe(Effect.scoped),
+    )
+  })
+
+  it('emits completed progress after confirmed remote completion even if cleanup fails', async () => {
+    const test = fixture()
+    test.failClear(true)
+    const phases: Array<string> = []
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(Layer.merge(test.storage, test.transport))
+
+        return yield* uploadProgram(
+          { file: file(), fileType: 'audio' },
+          {
+            signal: new AbortController().signal,
+            isPaused: () => false,
+            onProgress: ({ phase }) => phases.push(phase),
+            onCheckpoint: () => {},
+          },
+        ).pipe(Effect.provideContext(context))
+      }).pipe(Effect.scoped),
+    )
+
+    expect(result.url).toBe('https://cdn.test/mix.mp3')
+    expect(phases.at(-1)).toBe('completed')
   })
 
   it('rejects duplicate starts and cancellation until a part finishes, then resumes remote parts', async () => {

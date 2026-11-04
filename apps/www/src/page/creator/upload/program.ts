@@ -458,7 +458,9 @@ export const uploadProgram = (
 
     const result = yield* completeUpload(working, options.signal)
 
-    yield* clearCheckpoint(fingerprint)
+    yield* clearCheckpoint(fingerprint).pipe(
+      Effect.catchTag('StorageQuotaError', () => Effect.void),
+    )
     yield* emitProgress(options, {
       phase: 'completed',
       bytesUploaded: working.totalBytes,

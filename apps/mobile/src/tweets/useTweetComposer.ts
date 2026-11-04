@@ -203,6 +203,31 @@ export function useTweetComposer({
     )
   }
 
+  const recover = () => {
+    if (!session.available()) return
+    Effect.runSync(
+      owner.recover(storageKey).pipe(
+        Effect.provideService(ComposerReceiptStorage, composerReceiptStorage),
+        Effect.provideService(TweetDraftStorage, {
+          read: readTweetDraft,
+          save: saveTweetDraft,
+          remove: removeTweetDraft,
+        }),
+        Effect.match({
+          onFailure: ({ message }) => setError(message),
+          onSuccess: (cleared) => {
+            if (cleared) {
+              load()
+              setNotice(
+                'Recovery record cleared. Your draft was kept. Nothing was sent. Check publication before choosing to send again.',
+              )
+            }
+          },
+        }),
+      ),
+    )
+  }
+
   const save = (publish: boolean, onPublished: (slug: string) => void) => {
     if (!draft || !session.available()) return
 
@@ -292,6 +317,7 @@ export function useTweetComposer({
     setText,
     dismissMusic,
     discard,
+    recover,
     save,
     retry: load,
     editing: editSlug !== null,

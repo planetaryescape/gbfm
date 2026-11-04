@@ -127,10 +127,14 @@ test('publication receipts restore only for the same account and storage key', a
   const composer = fixture()
   await composer.submit()
   const fresh = { canSubmit: true, canSave: true, label: 'Reply' }
-  expect(composerControls(composer.owner.state('other-account/reply/thread'), fresh).editable).toBe(
-    true,
-  )
   const restored = createComposerOwner('account')
+  const foreign = createComposerOwner('other-account')
+  await Effect.runPromise(
+    foreign
+      .restore('other-account/reply/thread')
+      .pipe(Effect.provideService(ComposerReceiptStorage, composer.receipts)),
+  )
+  expect(composerControls(foreign.state('other-account/reply/thread'), fresh).editable).toBe(true)
   await Effect.runPromise(
     restored.restore(key).pipe(Effect.provideService(ComposerReceiptStorage, composer.receipts)),
   )

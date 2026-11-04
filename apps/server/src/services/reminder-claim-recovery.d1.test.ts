@@ -11,6 +11,7 @@ import { MusicReminderService, MusicReminderServiceLayer } from '@/services/musi
 import { processReminderJob } from '@/services/reminder-processor'
 import { withTestLayer } from '@/test/effect'
 import { createMigratedD1Database } from '@/test/migrate-d1'
+import { reminderClock } from '@/test/reminder-clock'
 
 describe('reminder claim read recovery', () => {
   test('post-claim edits deliver the freshly loaded title, URL and notes', async () => {
@@ -112,6 +113,7 @@ describe('reminder claim read recovery', () => {
               musicTitle: 'UpdatedTitle',
               musicUrl: 'https://example.test/updated',
               notes: 'UpdatedNotes',
+              reminderDate: new Date(0),
             })
           }),
           MusicReminderServiceLayer.pipe(Layer.provide(databaseLayer)),
@@ -170,6 +172,8 @@ describe('reminder claim read recovery', () => {
 
     let deliveries = 0
 
+    const clock = reminderClock()
+
     const layer = Layer.mergeAll(
       DatabaseLayer(failingRead),
       Layer.succeed(EmailDelivery, {
@@ -185,7 +189,7 @@ describe('reminder claim read recovery', () => {
             }
           }),
       }),
-    )
+    ).pipe(Layer.provideMerge(clock.layer))
 
     await expect(
       Effect.runPromise(withTestLayer(processReminderJob('pending'), layer)),
@@ -195,6 +199,7 @@ describe('reminder claim read recovery', () => {
       isSent: false,
     })
     expect(deliveries).toBe(0)
+    clock.advance()
     await Effect.runPromise(withTestLayer(processReminderJob('pending'), layer))
     await Effect.runPromise(withTestLayer(processReminderJob('pending'), layer))
     expect(deliveries).toBe(1)

@@ -2,7 +2,10 @@ import { Effect, Fiber, ManagedRuntime, Schema } from 'effect'
 import { TestClock } from 'effect/testing'
 import { expect, test } from 'vitest'
 
+import { receiptStorageFixture } from '@/test/composerReceiptStorage'
+
 import { composerControls, createComposerOwner } from './composerOwner'
+import { ComposerReceiptStorage } from './composerReceipts'
 import { ComposerSubmission } from './composerSubmission'
 import { emptyTweetDraft, type TweetDraft } from './draft'
 import { TweetDraftStorage } from './draftRestore'
@@ -16,7 +19,8 @@ class LocalStorageFailed extends Schema.TaggedError<LocalStorageFailed>()('Local
 }) {}
 
 const fixture = () => {
-  const owner = createComposerOwner()
+  const owner = createComposerOwner('account')
+  const receipts = receiptStorageFixture().storage
   const drafts = new Map<string, TweetDraft>([[key, draft]])
   const failures = new Set(['remove'])
   const requests: Array<string> = []
@@ -53,13 +57,16 @@ const fixture = () => {
     Effect.runPromise(
       owner
         .submit(key, current, publish, true, request)
-        .pipe(Effect.provideService(TweetDraftStorage, storage)),
+        .pipe(
+          Effect.provideService(TweetDraftStorage, storage),
+          Effect.provideService(ComposerReceiptStorage, receipts),
+        ),
     )
 
   const change = (next: TweetDraft) =>
     owner.change(key, () => Effect.runSync(storage.save(key, next).pipe(Effect.as(true))))
 
-  return { owner, drafts, failures, requests, writes, submit, change, storage }
+  return { owner, drafts, failures, requests, writes, submit, change, storage, receipts }
 }
 
 test('published cleanup blocks edits without changing memory or device storage', async () => {
@@ -116,14 +123,18 @@ test('cleanup keeps the publication snapshot and needs neither another request n
   expect(await composer.submit()).toBeNull()
 })
 
-test('the publication receipt belongs only to this mounted owner and storage key', async () => {
+test('publication receipts restore only for the same account and storage key', async () => {
   const composer = fixture()
   await composer.submit()
   const fresh = { canSubmit: true, canSave: true, label: 'Reply' }
   expect(composerControls(composer.owner.state('other-account/reply/thread'), fresh).editable).toBe(
     true,
   )
-  expect(composerControls(createComposerOwner().state(key), fresh).editable).toBe(true)
+  const restored = createComposerOwner('account')
+  await Effect.runPromise(
+    restored.restore(key).pipe(Effect.provideService(ComposerReceiptStorage, composer.receipts)),
+  )
+  expect(composerControls(restored.state(key), fresh).cleanupPending).toBe(true)
 })
 
 test('fresh drafts remain editable and keep their normal submission controls', () => {
@@ -175,7 +186,7 @@ test('an accepted reply with a lost response cannot be published again before ch
         const retried = yield* Fiber.join(retry)
         expect(composer.requests).toEqual(['accepted reply'])
         expect(retried).toBeNull()
-        expect(outcome && ComposerSubmission.$is('ReplyOutcomeUncertain')(outcome)).toBe(true)
+        expect(outcome && ComposerSubmission.$is('PublicationOutcomeUncertain')(outcome)).toBe(true)
         expect(composer.change({ ...draft, text: 'Another reply' })).toBe(false)
         expect(yield* composer.owner.submit(key, draft, false, true, request)).toBeNull()
         expect(composer.drafts.get(key)).toEqual(draft)
@@ -193,7 +204,11 @@ test('an accepted reply with a lost response cannot be published again before ch
           requiresThreadCheck: true,
           label: 'Check thread',
         })
-      }).pipe(Effect.provideService(TweetDraftStorage, composer.storage), Effect.scoped),
+      }).pipe(
+        Effect.provideService(TweetDraftStorage, composer.storage),
+        Effect.provideService(ComposerReceiptStorage, composer.receipts),
+        Effect.scoped,
+      ),
     )
   } finally {
     await runtime.dispose()

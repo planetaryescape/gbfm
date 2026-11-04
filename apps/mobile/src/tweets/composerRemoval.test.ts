@@ -12,8 +12,16 @@ import { emptyTweetDraft } from './draft'
 const Publication = Data.taggedEnum<ComposerPublication>()
 
 const states = [
-  Publication.CleanupPending({ draft: emptyTweetDraft('fixed'), slug: 'published' }),
-  Publication.ReplyUncertain({ draft: emptyTweetDraft('fixed'), message: 'Check thread' }),
+  Publication.CleanupPending({
+    draft: emptyTweetDraft('fixed'),
+    snapshot: emptyTweetDraft('fixed'),
+    slug: 'published',
+  }),
+  Publication.PublicationUncertain({
+    draft: emptyTweetDraft('fixed'),
+    message: 'Check thread',
+    replying: true,
+  }),
 ]
 
 test.each(

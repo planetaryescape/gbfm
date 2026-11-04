@@ -35,7 +35,7 @@ export const createIssuanceState = () => {
       if (!live) clear()
     },
     submit: () => {
-      if (!live || busy() || secret()) return false
+      if (!live || verifying || busy() || secret()) return false
       phase = Issuance.Validating()
 
       return true
@@ -54,7 +54,7 @@ export const createIssuanceState = () => {
     },
     issued: (value: Redacted.Redacted | null) => {
       verifying = false
-      phase = value && live ? Issuance.Issued({ secret: value }) : Issuance.Idle()
+      phase = value && live && input() ? Issuance.Issued({ secret: value }) : Issuance.Idle()
     },
   }
 }

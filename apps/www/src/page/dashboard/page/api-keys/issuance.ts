@@ -27,7 +27,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
       Effect.gen(function* () {
         const form = element.querySelector('[data-key-create-form]')
 
-        if (!(form instanceof HTMLFormElement)) return
+        if (!(form instanceof HTMLFormElement)) return yield* Effect.void
         const context = yield* Layer.build(KeyServiceLive)
         const service = Context.get(context, KeyService)
 
@@ -44,7 +44,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
           !(status instanceof HTMLElement) ||
           !(submitButton instanceof HTMLButtonElement)
         )
-          return
+          return yield* Effect.void
         const lifecycle = createIssuanceState()
 
         const clear = () => {
@@ -273,7 +273,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
           Effect.forkScoped,
         )
 
-        yield* Effect.never
+        return yield* Effect.never
       }),
     ),
 })

@@ -25,14 +25,23 @@ export const presentToastNotice = <Notice extends ToastNotice>(
   dismiss: (notice: Notice) => void,
   schedule: ScheduleHide = scheduleHide,
 ) => {
+  let active = true
   announce(notice.message)
   animation.stop()
   animation.reset()
   animation.animate(1, 180)
 
-  return schedule(2400, () => {
+  const cancelTimer = schedule(2400, () => {
+    if (!active) return
     animation.animate(0, 220, (finished) => {
-      if (finished) dismiss(notice)
+      if (active && finished) dismiss(notice)
     })
   })
+
+  return () => {
+    if (!active) return
+    active = false
+    cancelTimer()
+    animation.stop()
+  }
 }

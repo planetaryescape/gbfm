@@ -23,6 +23,7 @@ const memoryStorage = (): Storage => {
 
 export const spotifyFixture = async (
   configure: (service: SpotifyBrowser['Service']) => SpotifyBrowser['Service'],
+  localStorage: Storage = memoryStorage(),
 ) => {
   const runtime = ManagedRuntime.make(
     SpotifyBrowser.layer({
@@ -33,7 +34,7 @@ export const spotifyFixture = async (
         HttpClient.make(() => Effect.die(new Error('Unexpected provider request'))),
       ),
       session: {
-        localStorage: memoryStorage(),
+        localStorage,
         sessionStorage: memoryStorage(),
         history: {
           length: 0,
@@ -52,6 +53,7 @@ export const spotifyFixture = async (
   const service = configure(await runtime.runPromise(SpotifyBrowser))
 
   return {
+    tokens: () => service.auth.getTokens(),
     run: <A, E>(work: Effect.Effect<A, E, SpotifyBrowser>) =>
       runtime.runPromise(work.pipe(Effect.provideService(SpotifyBrowser, service))),
     dispose: () => runtime.dispose(),

@@ -51,6 +51,16 @@ const start = async (page: Page) => {
   await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeEnabled()
 }
 
+const setViewState = async (page: Page, state: 'Live' | 'Paused') => {
+  const fixture = page.locator('#fixture')
+  const version = Number(await fixture.getAttribute('data-view-version'))
+  await page.evaluate((state) => {
+    window.dispatchEvent(new Event(state === 'Live' ? 'fixture:live' : 'fixture:pause'))
+  }, state)
+  await expect(fixture).toHaveAttribute('data-view-version', String(version + 1))
+  await expect(fixture).toHaveAttribute('data-view-state', state)
+}
+
 const confirm = async (page: Page) => {
   await page.getByRole('button', { name: 'Create key', exact: true }).click()
   await page.getByRole('textbox', { name: 'Password', exact: true }).fill('disposable-password')
@@ -138,7 +148,7 @@ test('reports issuance during suspension without exposing the one-time secret', 
   await start(page)
   await confirm(page)
   await requested.promise
-  await page.evaluate(() => window.dispatchEvent(new Event('fixture:pause')))
+  await setViewState(page, 'Paused')
   await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeDisabled()
   release.resolve()
   await expect(page.locator('[data-key-status]')).toContainText(
@@ -169,7 +179,9 @@ for (const event of ['pagehide', 'fixture:pause']) {
     await start(page)
     await confirm(page)
     await requested.promise
-    await page.evaluate((event) => window.dispatchEvent(new Event(event)), event)
+
+    if (event === 'fixture:pause') await setViewState(page, 'Paused')
+    else await page.evaluate((event) => window.dispatchEvent(new Event(event)), event)
     await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeDisabled()
     release.resolve()
     await expect(page.locator('#fixture')).toHaveAttribute(
@@ -205,9 +217,12 @@ for (const { clear, restore } of [
     await start(page)
     await confirm(page)
     await requested.promise
-    await page.evaluate((event) => window.dispatchEvent(new Event(event)), clear)
 
-    if (restore !== 'none')
+    if (clear === 'fixture:pause') await setViewState(page, 'Paused')
+    else await page.evaluate((event) => window.dispatchEvent(new Event(event)), clear)
+
+    if (restore === 'fixture:live') await setViewState(page, 'Live')
+    else if (restore !== 'none')
       await page.evaluate((event) => window.dispatchEvent(new Event(event)), restore)
     await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeDisabled()
     release.resolve()
@@ -222,5 +237,58 @@ for (const { clear, restore } of [
       page.getByRole('textbox', { name: 'New API key secret', exact: true }),
     ).toBeVisible()
     expect(creations).toBe(2)
+  })
+}
+
+for (const failure of ['password', 'issuance']) {
+  test(`allows a fresh request after ${failure} fails following pagehide`, async ({ page }) => {
+    const requested = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    let confirmations = 0
+    let creations = 0
+    await page.route('**/auth/sign-in/email', async (route) => {
+      confirmations += 1
+
+      if (failure === 'password' && confirmations === 1) {
+        requested.resolve()
+        await release.promise
+
+        return route.fulfill({ status: 401, json: {} })
+      }
+
+      return route.fulfill({ json: {} })
+    })
+    await page.route('**/api/user/api-keys', async (route) => {
+      creations += 1
+
+      if (failure === 'issuance' && creations === 1) {
+        requested.resolve()
+        await release.promise
+
+        return route.fulfill({ status: 500, json: {} })
+      }
+
+      return route.fulfill({ json: issued })
+    })
+    await start(page)
+    await confirm(page)
+    await requested.promise
+    await page.evaluate(() => window.dispatchEvent(new Event('pagehide')))
+    release.resolve()
+    await expect(page.locator('#fixture')).toHaveAttribute(
+      'data-message',
+      'PasswordVerificationFailed',
+    )
+    await page.evaluate(() => document.querySelector('dialog')?.close())
+    await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeEnabled()
+    await expect(
+      page.getByRole('textbox', { name: 'New API key secret', exact: true }),
+    ).toHaveCount(0)
+    await confirm(page)
+    await expect(
+      page.getByRole('textbox', { name: 'New API key secret', exact: true }),
+    ).toBeVisible()
+    expect(confirmations).toBe(2)
+    expect(creations).toBe(failure === 'password' ? 1 : 2)
   })
 }

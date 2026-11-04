@@ -8,11 +8,22 @@ export const mountIssuanceFixture = () => {
 
   if (!element || !(dialog instanceof HTMLDialogElement)) throw new Error('Missing fixture')
   const changes = Effect.runSync(Queue.unbounded<'Live' | 'Paused'>())
+  let viewVersion = 0
   Queue.offerUnsafe(changes, 'Live')
 
   const fiber = Effect.runFork(
     IssueKey({ userId: 'owner' })
-      .f(element, Stream.fromQueue(changes))
+      .f(
+        element,
+        Stream.fromQueue(changes).pipe(
+          Stream.map((state) => {
+            element.dataset.viewState = state
+            element.dataset.viewVersion = String(++viewVersion)
+
+            return state
+          }),
+        ),
+      )
       .pipe(
         Stream.runForEach((message) =>
           Effect.sync(() => {

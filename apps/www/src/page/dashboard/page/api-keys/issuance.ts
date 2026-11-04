@@ -234,6 +234,8 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
                 Effect.match({
                   onFailure: (error) => {
                     lifecycle.verificationFailed()
+                    submitButton.disabled =
+                      !lifecycle.live() || lifecycle.busy() || lifecycle.secret() !== null
                     status.textContent = 'Key not created.'
                     Queue.offerUnsafe(
                       messages,

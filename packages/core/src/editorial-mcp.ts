@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 
 import { UserId } from './identity'
+import { canCreatePosts, Role } from './roles'
 
 const OpaqueIdentity = Schema.NonEmptyString.check(
   Schema.isMaxLength(2048),
@@ -76,8 +77,14 @@ export const EditorialPrincipal = Schema.Struct({
 
 export type EditorialPrincipal = typeof EditorialPrincipal.Type
 
+export const EditorialAccount = Schema.Struct({ role: Role, banned: Schema.NullOr(Schema.Boolean) })
+
+export type EditorialAccount = typeof EditorialAccount.Type
+
+export const canReadEditorial = (account: EditorialAccount) =>
+  !account.banned && canCreatePosts(account.role)
+
 export const EditorialOAuthSettings = Schema.Struct({
-  ownerUserId: UserId,
   resourceUrl: McpResourceUrl,
   issuer: OAuthIssuerUrl,
 }).check(

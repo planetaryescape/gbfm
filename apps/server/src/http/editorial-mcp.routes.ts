@@ -128,7 +128,6 @@ export const EditorialMcpRoutesLive = Layer.unwrap(
       )
 
     const endpoint = yield* Schema.decodeUnknownEffect(EditorialMcpSettings)({
-      ownerUserId: settings.ownerUserId,
       readScope: 'posts:read',
       environment: settings.resourceUrl.includes('.localhost/') ? 'local' : config.app.stage,
       resourceUrl: settings.resourceUrl,

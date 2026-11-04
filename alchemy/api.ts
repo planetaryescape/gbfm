@@ -31,8 +31,6 @@ export interface ApiWorkerInput {
   readonly cloudflareAccountId: string
   readonly turnstile: Cloudflare.Turnstile.Widget
   readonly mediaPreviewKey: Output.Output<Redacted.Redacted>
-  readonly mcpOwnerUserId?: string
-  readonly mcpResourceUrl?: string
 }
 
 export const apiWorker = ({
@@ -47,13 +45,9 @@ export const apiWorker = ({
   cloudflareAccountId,
   turnstile,
   mediaPreviewKey,
-  mcpOwnerUserId,
-  mcpResourceUrl,
 }: ApiWorkerInput) =>
   Effect.gen(function* () {
     const sentryDsn = secrets.SENTRY_BACKEND_DSN
-    const mcpResource = mcpResourceUrl ? URL.parse(mcpResourceUrl) : null
-    const mcpFrontendOrigin = mcpResource?.protocol === 'https:' ? mcpResource.origin : undefined
 
     const requestTelemetry = yield* Cloudflare.AnalyticsEngine.Dataset('ApiRequestTelemetry', {
       dataset: `gbfm_api_${config.stage}`,
@@ -109,11 +103,8 @@ export const apiWorker = ({
         MIXES_BUCKET_NAME: store.mixes.bucketName,
         SENTRY_ENVIRONMENT: config.stage,
         ADMIN_EMAIL: adminEmail,
-        ...(mcpOwnerUserId ? { MCP_OWNER_USER_ID: mcpOwnerUserId } : undefined),
-        ...(mcpResourceUrl ? { MCP_RESOURCE_URL: mcpResourceUrl } : undefined),
-        ...(config.isLocalDev && mcpFrontendOrigin
-          ? { FRONTEND_URL: mcpFrontendOrigin }
-          : undefined),
+        SHARE_URL: config.isLocalDev ? 'https://gbfm.localhost' : config.apiUrl,
+        ...(config.isLocalDev ? { FRONTEND_URL: 'https://gbfm.localhost' } : undefined),
         ...secrets,
         SENTRY_DSN: sentryDsn,
         R2AccountId: store.userContent.accountId,

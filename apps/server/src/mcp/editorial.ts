@@ -1,4 +1,4 @@
-import { EditorialPrincipal } from '@gbfm/core/editorial-mcp'
+import { canReadEditorial, EditorialAccount, EditorialPrincipal } from '@gbfm/core/editorial-mcp'
 import { eq } from 'drizzle-orm'
 import { Context, Effect, Layer, Option, Schema } from 'effect'
 
@@ -17,11 +17,9 @@ import {
 } from './contracts'
 import {
   accessDenied,
-  canReadAsOwner,
   type EditorialMcpSettings,
-  EditorialOwner,
+  EditorialReader,
   notFound,
-  OwnerAccount,
   PersistedPost,
   projectPost,
   unavailable,
@@ -65,8 +63,6 @@ export const EditorialReadServiceLayer = Layer.effect(
         Effect.mapError(accessDenied),
       )
 
-      if (principal.userId !== config.ownerUserId) return yield* accessDenied()
-
       const rows = yield* Effect.tryPromise({
         try: () =>
           db
@@ -78,21 +74,21 @@ export const EditorialReadServiceLayer = Layer.effect(
       }).pipe(
         Effect.tapError(() =>
           Effect.logError('editorial.authorization.unavailable', {
-            operation: 'owner.lookup',
+            operation: 'account.lookup',
             dependency: 'database',
           }),
         ),
       )
 
-      const owner = yield* Schema.decodeUnknownEffect(OwnerAccount)(rows[0]).pipe(
+      const account = yield* Schema.decodeUnknownEffect(EditorialAccount)(rows[0]).pipe(
         Effect.mapError(accessDenied),
       )
 
-      if (!canReadAsOwner(owner)) return yield* accessDenied()
+      if (!canReadEditorial(account)) return yield* accessDenied()
 
-      return yield* Schema.decodeUnknownEffect(EditorialOwner)({
+      return yield* Schema.decodeUnknownEffect(EditorialReader)({
         ...principal,
-        role: owner.role,
+        role: account.role,
       }).pipe(Effect.mapError(accessDenied))
     })
 

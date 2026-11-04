@@ -13,16 +13,13 @@ import {
 } from './contracts'
 
 export const EditorialMcpSettings = Schema.Struct({
-  ownerUserId: UserId,
   readScope: Schema.Literal('posts:read'),
   environment: EditorialEnvironment,
   resourceUrl: McpResourceUrl,
   frontendUrl: EditorialFrontendUrl,
 })
 
-export const OwnerAccount = Schema.Struct({ role: Role, banned: Schema.Boolean })
-
-export const EditorialOwner = Schema.Struct({ ...EditorialPrincipal.fields, role: Role })
+export const EditorialReader = Schema.Struct({ ...EditorialPrincipal.fields, role: Role })
 
 export const PostSource = Schema.TaggedUnion({
   Editorial: {},
@@ -65,13 +62,6 @@ export const notFound = () =>
 
 export const accessDenied = () =>
   new EditorialToolError({ code: 'access_denied', message: 'Editorial read access denied.' })
-
-export const canReadAsOwner = Match.type<typeof OwnerAccount.Type>().pipe(
-  Match.when({ banned: true }, () => false),
-  Match.when({ role: 'user' }, () => false),
-  Match.when({ role: Schema.is(Schema.Literals(['creator', 'editor', 'admin'])) }, () => true),
-  Match.orElse(() => false),
-)
 
 export const projectPost = Effect.fn('EditorialMcp.projectPost')(function* (
   post: typeof PersistedPost.Type,

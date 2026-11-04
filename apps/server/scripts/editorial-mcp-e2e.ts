@@ -21,7 +21,6 @@ await seedLocalUsers(db)
 const owner = await db.select({ id: user.id }).from(user).where(eq(user.username, 'local-editor'))
 
 const settings = Schema.decodeUnknownSync(EditorialOAuthSettings)({
-  ownerUserId: owner[0]?.id,
   resourceUrl: `${frontend}/mcp`,
   issuer: `${frontend}/auth`,
 })
@@ -35,9 +34,10 @@ await db.insert(postsTable).values({
   draft: true,
 })
 
-await db
-  .insert(postCreators)
-  .values({ postId: 'mcp-browser-draft', creatorId: settings.ownerUserId })
+await db.insert(postCreators).values({
+  postId: 'mcp-browser-draft',
+  creatorId: Schema.decodeUnknownSync(Schema.String)(owner[0]?.id),
+})
 
 const base = createConfig()
 

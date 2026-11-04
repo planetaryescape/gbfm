@@ -4,13 +4,13 @@ Issue: [#479](https://github.com/planetaryescape/gbfm/issues/479).
 
 ## Scope and delivery
 
-The first release serves the owner's GBFM account through standard Streamable HTTP. The AI client owns the conversation; GBFM exposes bounded editorial operations. Local and production connections use separate credentials, authorization records and data. There is no fallback between environments.
+The first release serves the GBFM user who signs in and approves the connection through standard Streamable HTTP. The AI client owns the conversation; GBFM exposes bounded editorial operations using that user's existing permissions. Local and production connections use separate credentials, authorization records and data. There is no fallback between environments.
 
 The implementation targets MCP `2026-07-28` using the request-scoped HTTP transport in Effect `4.0.6`. Older client revisions are not a compatibility requirement. Cloud-hosted clients cannot access the local `.localhost` address; public tunnels are outside this release.
 
 | PR | Delivered behavior | Dependencies |
 | --- | --- | --- |
-| 1 | Owner-only OAuth connection, independent disconnection, draft listing and post reading | None |
+| 1 | User-authorized OAuth connection, independent disconnection, draft listing and post reading | None |
 | 2 | Published catalogue search, music-entity lookup and selected editorial context | PR 1 |
 | 3 | Retry-safe creation of unpublished editorial drafts | PR 1 |
 | 4 | Retry-safe draft updates with caller-visible version checks | PR 3 |
@@ -28,7 +28,7 @@ AI client
   -> structured result with environment, stable identity and review URL
 ```
 
-Better Auth owns OAuth protocol validation and token issuance. GBFM owns owner-account eligibility, current connection authorization, per-operation permissions and content visibility. MCP is another interface, not a second editorial backend. OAuth credentials are not disguised as personal access keys or full-power browser sessions.
+Better Auth owns OAuth protocol validation and token issuance. GBFM checks the approving user's current editorial eligibility, connection authorization, per-operation permissions and content visibility. MCP is another interface, not a second editorial backend. OAuth credentials are not disguised as personal access keys or full-power browser sessions.
 
 Browser login, consent and connection management use the existing WWW app. OAuth discovery and protocol endpoints route to the API. Public URL configuration, rather than arbitrary forwarded headers, determines issuer and resource identity.
 
@@ -43,9 +43,11 @@ Only these two tools belong in the first slice. A model instruction or a client 
 - A missing or invalid bearer token cannot fall back to anonymous or browser-session access on `/mcp`.
 - Authentication covers protocol discovery, tool listing and tool calls.
 - Credentials are audience-bound to the configured MCP resource.
-- Only the configured owner account can authorize or use the connection.
+- The user who signs in and approves consent owns the grant; no deployment-level owner ID exists.
+- Existing creator, editor or admin permission is required for editorial access. Banned and impersonated sessions cannot authorize connections.
+- Drafts are restricted to the approving user's authored content, even for admins. Existing published-post visibility remains unchanged.
 - Current account eligibility and connection state are checked on protected requests.
-- Disconnecting one client prevents its next protected request without disconnecting another client.
+- Disconnecting one client prevents its next protected request without disconnecting another client or another user's connection to the same client. Signed-in users can manage their own connections even after losing editorial permission.
 - Removing consent alone is not token revocation.
 - Refresh, disconnect and reconnect interleavings must not restore a revoked grant.
 - Consent explicitly describes read-only access. Later write access requires a separate permission grant.
@@ -81,7 +83,9 @@ Required checks include relevant server and WWW tests, the WWW production build,
 
 ## Configuration and connection
 
-MCP is disabled unless both `MCP_OWNER_USER_ID` and `MCP_RESOURCE_URL` are supplied. Partial or malformed configuration disables MCP, logs only the failing field names, and makes `/mcp` return 503 without preventing unrelated API routes, queue consumers, or scheduled jobs from starting. These are configuration values, not credentials. The resource must be a canonical HTTPS URL ending in `/mcp`; its origin determines the issuer at `/auth`.
+MCP derives its resource (`/mcp`) and issuer (`/auth`) from the existing API URL in runtime configuration (`urls.share`), supplied by Alchemy's stage API URL through the existing `SHARE_URL` binding. There are no MCP-specific deployment variables or account IDs. Production uses the existing canonical API origin. Alchemy local development uses the existing HTTPS Portless frontend, whose proxy forwards MCP and OAuth endpoints to the local API.
+
+Plain HTTP loopback development leaves MCP disabled. An invalid API origin disables MCP, logs only the configuration field name and makes `/mcp` return 503 without preventing unrelated routes, queue consumers or scheduled jobs from starting.
 
 | Environment | Resource |
 | --- | --- |
@@ -89,7 +93,7 @@ MCP is disabled unless both `MCP_OWNER_USER_ID` and `MCP_RESOURCE_URL` are suppl
 | Worktree development | The worktree-prefixed Portless address plus `/mcp` |
 | Production | `https://api.goosebumps.fm/mcp` |
 
-Supply the existing account's ID in the matching database as the owner. Alchemy passes these optional values to the API. When local MCP is enabled, the configured resource origin is also the local frontend origin. Existing login behavior remains unchanged when MCP is disabled.
+Sign in with an existing creator, editor or admin account in the matching database. Consent binds the grant to that signed-in user, and each protected request rechecks current permissions and account state. Each user sees and disconnects only their own approved applications.
 
 After the approved migration has been verified and the environment configured, add separate OpenCode connections:
 

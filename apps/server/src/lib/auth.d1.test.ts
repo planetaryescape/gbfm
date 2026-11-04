@@ -168,8 +168,7 @@ test('AuthLive uses the explicit MCP issuer, durable rate limits and only truste
       Auth,
       authLayer(resource.database, transport, undefined, {
         ...workerBindings(),
-        MCP_OWNER_USER_ID: 'owner',
-        MCP_RESOURCE_URL: 'https://editorial-test.localhost/mcp',
+        SHARE_URL: 'https://editorial-test.localhost',
       }),
     ),
   )

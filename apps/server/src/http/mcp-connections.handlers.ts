@@ -1,23 +1,16 @@
 import { Api } from '@gbfm/api/api'
 import { AuthSession } from '@gbfm/api/middleware/auth'
 import { UserId } from '@gbfm/core/identity'
-import { Effect, Match, Schema } from 'effect'
+import { Effect, Schema } from 'effect'
 import { HttpServerRequest } from 'effect/http'
 import { HttpApiBuilder, HttpApiError } from 'effect/http-api'
 
 import { browserOrigins } from '@/lib/browser-origins'
 import { ConfigService } from '@/services/config.service'
-import {
-  EditorialOAuth,
-  type EditorialOAuthForbidden,
-  type EditorialOAuthUnavailable,
-} from '@/services/editorial-oauth.service'
+import { EditorialOAuth, type EditorialOAuthUnavailable } from '@/services/editorial-oauth.service'
 
-const managementFailure = Match.type<EditorialOAuthForbidden | EditorialOAuthUnavailable>().pipe(
-  Match.tag('EditorialOAuthForbidden', () => new HttpApiError.Forbidden()),
-  Match.tag('EditorialOAuthUnavailable', () => new HttpApiError.ServiceUnavailable()),
-  Match.exhaustive,
-)
+const managementFailure = (_error: EditorialOAuthUnavailable) =>
+  new HttpApiError.ServiceUnavailable()
 
 const sessionOwner = Effect.gen(function* () {
   const session = yield* AuthSession

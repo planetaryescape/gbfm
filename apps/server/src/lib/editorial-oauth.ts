@@ -1,12 +1,18 @@
 import { oauthProvider } from '@better-auth/oauth-provider'
-import { EditorialReadScopes, OAuthClientId, OAuthGrantId } from '@gbfm/core/editorial-mcp'
+import {
+  canReadEditorial,
+  EditorialAccount,
+  EditorialReadScopes,
+  OAuthClientId,
+  OAuthGrantId,
+} from '@gbfm/core/editorial-mcp'
 import { UserId } from '@gbfm/core/identity'
 import type { BetterAuthPlugin } from 'better-auth'
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { and, eq } from 'drizzle-orm'
-import { Match, Option, Redacted, Schema } from 'effect'
+import { Effect, Match, Option, Redacted, Schema } from 'effect'
 
-import { verification } from '@/db/auth.schema'
+import { user as userTable, verification } from '@/db/auth.schema'
 import type { DatabaseClient } from '@/db/layer'
 import {
   editorialOAuthEpoch,
@@ -26,6 +32,36 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
 
   if (!mcp) return []
 
+  const forbidden = () => new APIError('FORBIDDEN', { message: 'Editorial permission required' })
+
+  const parseUserId = (value: string) =>
+    Schema.decodeUnknownOption(UserId)(value).pipe(Option.getOrThrowWith(forbidden))
+
+  const GrantSession = Schema.Struct({ impersonatedBy: Schema.optional(Schema.NullOr(UserId)) })
+
+  const authorizeAccount = async (userId: UserId) => {
+    const [row] = await db
+      .select({ role: userTable.role, banned: userTable.banned })
+      .from(userTable)
+      .where(eq(userTable.id, userId))
+      .limit(1)
+      .catch(async () => {
+        await Effect.runPromise(
+          Effect.logError('editorial.authorization.unavailable', {
+            operation: 'account.lookup',
+            dependency: 'database',
+          }),
+        )
+        throw new APIError('SERVICE_UNAVAILABLE', { message: 'Editorial account unavailable' })
+      })
+
+    const account = Schema.decodeUnknownOption(EditorialAccount)(row).pipe(
+      Option.getOrThrowWith(forbidden),
+    )
+
+    if (!canReadEditorial(account)) throw forbidden()
+  }
+
   return [
     {
       id: 'editorial-oauth-policy' satisfies 'editorial-oauth-policy',
@@ -37,10 +73,14 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
               if (['/oauth2/authorize', '/oauth2/consent', '/oauth2/continue'].includes(ctx.path)) {
                 const session = await getSessionFromCtx(ctx)
 
-                if (session && session.user.id !== mcp.ownerUserId)
-                  throw new APIError('FORBIDDEN', {
-                    message: 'Editorial access is restricted to the owner',
-                  })
+                if (session) {
+                  const grantSession = Schema.decodeUnknownOption(GrantSession)(
+                    session.session,
+                  ).pipe(Option.getOrThrowWith(forbidden))
+
+                  if (grantSession.impersonatedBy) throw forbidden()
+                  await authorizeAccount(parseUserId(session.user.id))
+                }
               }
 
               if (ctx.path === '/oauth2/token') {
@@ -93,10 +133,7 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
                           ),
                         )
 
-                        if (payload.userId !== mcp.ownerUserId)
-                          throw new APIError('FORBIDDEN', {
-                            message: 'Editorial access is restricted to the owner',
-                          })
+                        await authorizeAccount(payload.userId)
 
                         if (!payload.referenceId || !payload.query)
                           throw new APIError('BAD_REQUEST', {
@@ -131,10 +168,7 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
                         .where(eq(oauthRefreshToken.token, hash))
                         .limit(1)
 
-                      if (refresh && refresh.userId !== mcp.ownerUserId)
-                        throw new APIError('FORBIDDEN', {
-                          message: 'Editorial access is restricted to the owner',
-                        })
+                      if (refresh) await authorizeAccount(parseUserId(refresh.userId))
                     }),
                     Match.exhaustive,
                   )
@@ -188,7 +222,7 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
       rateLimit: { register: { window: 60, max: 5 } },
       postLogin: {
         page: `${config.urls.frontend}/connect/gbfm`,
-        consentReferenceId: async ({ user, scopes }) => {
+        consentReferenceId: async ({ user, session, scopes }) => {
           Schema.decodeUnknownOption(EditorialReadScopes)(scopes).pipe(
             Option.getOrThrowWith(
               () =>
@@ -199,10 +233,12 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
             ),
           )
 
-          if (user.id !== mcp.ownerUserId)
-            throw new APIError('FORBIDDEN', {
-              message: 'Editorial access is restricted to the owner',
-            })
+          const grantSession = Schema.decodeUnknownOption(GrantSession)(session).pipe(
+            Option.getOrThrowWith(forbidden),
+          )
+
+          if (grantSession.impersonatedBy) throw forbidden()
+          await authorizeAccount(parseUserId(user.id))
 
           await db
             .insert(editorialOAuthEpoch)

@@ -60,8 +60,6 @@ export default Alchemy.Stack(
       cloudflareAccountId: deployment.cloudflareAccountId,
       turnstile,
       mediaPreviewKey: mediaPreviewKey.text,
-      mcpOwnerUserId: deployment.mcpOwnerUserId,
-      mcpResourceUrl: deployment.mcpResourceUrl,
     })
 
     if (email !== undefined) {

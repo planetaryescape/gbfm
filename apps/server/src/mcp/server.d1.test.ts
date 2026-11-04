@@ -48,7 +48,6 @@ const makePostLayer = (mdxLayer: Layer.Layer<MdxService>) =>
 const postLayer = makePostLayer(MdxServiceLayer)
 
 const config = Schema.decodeUnknownSync(EditorialMcpSettings)({
-  ownerUserId: ownerId,
   readScope,
   environment: 'test',
   resourceUrl: 'https://api.example.test/mcp',
@@ -437,8 +436,8 @@ describe('request-scoped editorial MCP', () => {
     }
   })
 
-  test('missing identity, different owner, or missing scopes produce typed tool errors', async () => {
-    for (const actor of ['', otherId]) {
+  test('missing identity or scopes produce typed tool errors', async () => {
+    for (const actor of ['']) {
       const response = await rpc('tools/call', { name: 'list_drafts', arguments: {} }, actor)
       const result = Schema.decodeUnknownSync(ToolResult)(response.body.result)
       expect(result.isError).toBe(true)
@@ -450,7 +449,22 @@ describe('request-scoped editorial MCP', () => {
     expect((await call('list_drafts')).isError).not.toBe(true)
   })
 
-  test('rechecks owner role and ban state on each tool call', async () => {
+  test('another eligible user reads only their own authored content, even with an admin role', async () => {
+    const result = await call('list_drafts', {}, otherId)
+    expect(result.isError).not.toBe(true)
+    const drafts = Schema.decodeUnknownSync(ListDraftsResult)(result.structuredContent)
+    expect(drafts.posts.map((post) => post.postId)).toEqual([privateId])
+    const own = await call('get_post', { postId: privateId }, otherId)
+    expect(own.isError).not.toBe(true)
+    expect(Schema.decodeUnknownSync(GetPostResult)(own.structuredContent).post.postId).toBe(
+      privateId,
+    )
+    const unrelated = await call('get_post', { postId: draftId }, otherId)
+    expect(unrelated.isError).toBe(true)
+    expect(JSON.stringify(unrelated)).not.toContain('A private editorial body.')
+  })
+
+  test('rechecks the acting user role and ban state on each tool call', async () => {
     try {
       await db.update(user).set({ role: 'user' }).where(eq(user.id, ownerId))
       expect((await call('list_drafts')).isError).toBe(true)

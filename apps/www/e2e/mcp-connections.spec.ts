@@ -17,7 +17,7 @@ test('malformed connection links cannot redirect the browser to a supplied callb
   ).toBeVisible()
 })
 
-test('owner signs in, denies, allows and disconnects a disposable read-only app', async ({
+test('an author signs in, denies, allows and disconnects a disposable read-only app', async ({
   page,
   request,
 }) => {

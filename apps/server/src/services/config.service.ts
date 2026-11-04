@@ -6,10 +6,10 @@ import {
   parseEditorialOAuthConfig,
 } from '@/lib/editorial-oauth-config'
 
-const parseMcpConfig = (bindings: WorkerConfigBindings | undefined) => {
+const parseMcpConfig = (apiUrl: string) => {
   try {
     return {
-      mcp: parseEditorialOAuthConfig(bindings?.MCP_OWNER_USER_ID, bindings?.MCP_RESOURCE_URL),
+      mcp: parseEditorialOAuthConfig(apiUrl),
     }
   } catch (error) {
     if (!(error instanceof EditorialOAuthConfigInvalid)) throw error
@@ -78,8 +78,6 @@ export type WorkerConfigBindings = Readonly<
       SENTRY_ENVIRONMENT?: string
       ADMIN_EMAIL?: string
       EMAIL_SENDER?: string
-      MCP_OWNER_USER_ID?: string
-      MCP_RESOURCE_URL?: string
     }
 >
 
@@ -211,7 +209,6 @@ function requiredInProduction(isProd: boolean, bindings: WorkerConfigBindings | 
 export function createConfig(bindings?: WorkerConfigBindings): ConfigService {
   const appStage = bindings?.APP_STAGE ?? 'dev'
   const isProd = appStage === 'prod' && bindings?.LOCAL_DEV !== 'true'
-  const mcpConfig = parseMcpConfig(bindings)
 
   const secrets = {
     SpotifyClientId: secretString('SpotifyClientId', '', bindings),
@@ -240,6 +237,8 @@ export function createConfig(bindings?: WorkerConfigBindings): ConfigService {
   const shareUrl = isProd
     ? 'https://api.goosebumps.fm'
     : stringValue(bindings?.SHARE_URL, 'http://127.0.0.1:3003')
+
+  const mcpConfig = parseMcpConfig(shareUrl)
 
   // Production serves the CDN router on its own domain. Every other stage gets
   // a generated workers.dev URL instead, so the deployed router is bound as

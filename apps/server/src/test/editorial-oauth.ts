@@ -1,7 +1,8 @@
 import { EditorialOAuthSettings, OAuthClientId } from '@gbfm/core/editorial-mcp'
+import { UserId } from '@gbfm/core/identity'
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
-import { bearer } from 'better-auth/plugins'
+import { admin, bearer } from 'better-auth/plugins'
 import { Effect, Layer, Schema } from 'effect'
 
 import * as schema from '@/db/exports'
@@ -26,7 +27,6 @@ export const createEditorialOAuthFixture = async () => {
     ...createConfig(),
     urls: { ...createConfig().urls, frontend: 'https://editorial-test.localhost' },
     mcp: Schema.decodeUnknownSync(EditorialOAuthSettings)({
-      ownerUserId: 'owner',
       resourceUrl: 'https://editorial-test.localhost/mcp',
       issuer: 'https://editorial-test.localhost/auth',
     }),
@@ -54,20 +54,24 @@ export const createEditorialOAuthFixture = async () => {
       },
       rateLimit: { enabled: true, storage: 'database', max: 1000, window: 60 },
       advanced: { ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] } },
-      plugins: [bearer(), ...editorialOAuthPlugins(config, db)],
+      plugins: [bearer(), admin(), ...editorialOAuthPlugins(config, db)],
     })
 
   let auth = makeAuth()
 
   const now = new Date()
 
-  for (const id of ['owner', 'other']) {
+  for (const { id, role } of [
+    { id: 'owner', role: 'editor' },
+    { id: 'other', role: 'creator' },
+    { id: 'reader', role: 'user' },
+  ]) {
     await db.insert(schema.user).values({
       id,
       name: id,
       email: `${id}@example.com`,
       emailVerified: true,
-      role: id === 'owner' ? 'editor' : 'user',
+      role,
       createdAt: now,
       updatedAt: now,
     })
@@ -151,11 +155,11 @@ export const createEditorialOAuthFixture = async () => {
       state: 'disposable-state',
     })
 
-  const authorize = async (clientId: OAuthClientId) => {
+  const authorize = async (clientId: OAuthClientId, actor = 'owner') => {
     const authorization = await request(
       `/oauth2/authorize?${authorizationQuery(clientId)}`,
       undefined,
-      'owner',
+      actor,
     )
 
     const location = authorization.headers.get('location')
@@ -169,7 +173,7 @@ export const createEditorialOAuthFixture = async () => {
     const consent = await request(
       '/oauth2/consent',
       { accept: true, oauth_query: url.searchParams.toString() },
-      'owner',
+      actor,
     )
 
     const result = Schema.decodeUnknownSync(Schema.Struct({ url: Schema.String }))(
@@ -191,6 +195,7 @@ export const createEditorialOAuthFixture = async () => {
 
   return {
     db,
+    userId: Schema.decodeUnknownSync(UserId)('owner'),
     config,
     service,
     request,

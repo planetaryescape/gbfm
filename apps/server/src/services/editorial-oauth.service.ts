@@ -35,11 +35,6 @@ export class EditorialOAuthUnavailable extends Schema.TaggedError<
   { readonly brand: unique symbol }
 >()('EditorialOAuthUnavailable', {}) {}
 
-export class EditorialOAuthForbidden extends Schema.TaggedError<
-  EditorialOAuthForbidden,
-  { readonly brand: unique symbol }
->()('EditorialOAuthForbidden', {}) {}
-
 export type EditorialOAuthPrincipal = EditorialPrincipal
 
 const PersistedGrant = Schema.Struct({
@@ -69,12 +64,6 @@ const makeEditorialOAuth = Effect.gen(function* () {
 
   const storage = <A>(run: () => Promise<A>) =>
     Effect.tryPromise({ try: run, catch: () => new EditorialOAuthUnavailable() })
-
-  const own = Effect.fn('EditorialOAuth.authorizeConnection')(function* (userId: UserId) {
-    if (config.mcp?.ownerUserId !== userId) return yield* Effect.fail(new EditorialOAuthForbidden())
-
-    return userId
-  })
 
   const verify = Effect.fn('EditorialOAuth.verify')(function* (credential: Redacted.Redacted) {
     const mcp = config.mcp
@@ -133,7 +122,6 @@ const makeEditorialOAuth = Effect.gen(function* () {
       grant.clientDisabled ||
       grant.userBanned ||
       !canCreatePosts(grant.role) ||
-      grant.userId !== mcp.ownerUserId ||
       grant.confirmation ||
       (grant.sessionId && (!grant.sessionExpiresAt || grant.sessionExpiresAt <= now)) ||
       grant.resources.length !== 1 ||
@@ -169,10 +157,8 @@ const makeEditorialOAuth = Effect.gen(function* () {
     }).pipe(Effect.mapError(() => new EditorialOAuthInvalidToken()))
   })
 
-  const listConnections = Effect.fn('EditorialOAuth.listConnections')(function* (
-    sessionUserId: UserId,
-  ) {
-    const userId = yield* own(sessionUserId)
+  const listConnections = Effect.fn('EditorialOAuth.listConnections')(function* (userId: UserId) {
+    if (!config.mcp) return yield* Effect.fail(new EditorialOAuthUnavailable())
 
     const rows = yield* storage(() =>
       db
@@ -211,10 +197,10 @@ const makeEditorialOAuth = Effect.gen(function* () {
   })
 
   const disconnect = Effect.fn('EditorialOAuth.disconnect')(function* (
-    sessionUserId: UserId,
+    userId: UserId,
     clientId: OAuthClientId,
   ) {
-    const userId = yield* own(sessionUserId)
+    if (!config.mcp) return yield* Effect.fail(new EditorialOAuthUnavailable())
 
     const now = new Date(yield* Clock.currentTimeMillis)
     yield* storage(() =>
@@ -312,6 +298,8 @@ const makeEditorialOAuth = Effect.gen(function* () {
           .where(and(eq(oauthConsent.userId, userId), eq(oauthConsent.clientId, clientId))),
       ]),
     )
+
+    return undefined
   })
 
   return { verify, listConnections, disconnect }

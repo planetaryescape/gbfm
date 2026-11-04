@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { Layer, Redacted, Schema } from 'effect'
+import { Layer, Match, Redacted, Schema } from 'effect'
 import { expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
@@ -26,8 +26,7 @@ test('invalid optional MCP settings isolate failure from health and existing aut
 
   const config = createConfig({
     APP_STAGE: 'test',
-    MCP_OWNER_USER_ID: 'owner',
-    MCP_RESOURCE_URL: 'https://invalid.test/mcp?secret=fixture',
+    SHARE_URL: 'https://user:synthetic-private@invalid.test',
     USER_CONTENT_BUCKET_NAME: 'disposable',
     MIXES_BUCKET_NAME: 'disposable',
     StorageRegion: 'auto',
@@ -64,7 +63,7 @@ test('invalid optional MCP settings isolate failure from health and existing aut
   }
 })
 
-test('composed HTTP MCP requires OAuth on discovery and calls and disconnects immediately', async () => {
+test('composed HTTP MCP scopes tokens, drafts, connections and disconnection to the approving user', async () => {
   await using fixture = await createEditorialOAuthFixture()
   await fixture.db.update(user).set({ role: 'editor' }).where(eq(user.id, 'owner'))
   await fixture.db.insert(postsTable).values({
@@ -76,12 +75,30 @@ test('composed HTTP MCP requires OAuth on discovery and calls and disconnects im
     draft: true,
   })
   await fixture.db.insert(postCreators).values({ postId: 'composed-draft', creatorId: 'owner' })
+  await fixture.db.insert(postsTable).values({
+    id: 'other-composed-draft',
+    type: 'post',
+    title: 'Other author draft',
+    slug: 'other-composed-draft',
+    content: 'Other private fixture.',
+    draft: true,
+  })
+  await fixture.db
+    .insert(postCreators)
+    .values({ postId: 'other-composed-draft', creatorId: 'other' })
 
   const clientId = await fixture.register()
 
   const tokens = Schema.decodeUnknownSync(OAuthTokens)(
     await (await fixture.exchange(clientId, await fixture.authorize(clientId))).json(),
   )
+
+  const otherTokens = Schema.decodeUnknownSync(OAuthTokens)(
+    await (await fixture.exchange(clientId, await fixture.authorize(clientId, 'other'))).json(),
+  )
+
+  const otherClientId = await fixture.register()
+  await fixture.authorize(otherClientId, 'other')
 
   const handler = createTestWebHandler(
     fixture.db.$client,
@@ -179,6 +196,33 @@ test('composed HTTP MCP requires OAuth on discovery and calls and disconnects im
       resourceUrl: fixture.config.mcp.resourceUrl,
     })
     expect(result.posts).toEqual([{ postId: 'composed-draft' }])
+    const otherRead = await rpc('tools/call', otherTokens.access_token, 'list_drafts')
+    expect(
+      Schema.decodeUnknownSync(ReadResult)(await otherRead.json()).result.structuredContent.posts,
+    ).toEqual([{ postId: 'other-composed-draft' }])
+
+    for (const actor of ['owner', 'other', 'reader']) {
+      const connections = await handler.handler(
+        new Request('https://editorial-test.localhost/api/user/mcp-connections', {
+          headers: { authorization: `Bearer ${actor}-session-token` },
+        }),
+      )
+
+      expect(connections.status).toBe(200)
+
+      const body = Schema.decodeUnknownSync(
+        Schema.Struct({ connections: Schema.Array(Schema.Struct({ clientId: Schema.String })) }),
+      )(await connections.json())
+
+      expect(body.connections.map((connection) => connection.clientId).toSorted()).toEqual(
+        Match.value(actor).pipe(
+          Match.when('reader', () => []),
+          Match.when('owner', () => [clientId]),
+          Match.orElse(() => [clientId, otherClientId].toSorted()),
+        ),
+      )
+    }
+
     expect(
       (await rpc('tools/list', tokens.access_token, undefined, 'https://evil.example')).status,
     ).toBe(403)
@@ -220,6 +264,7 @@ test('composed HTTP MCP requires OAuth on discovery and calls and disconnects im
 
     expect(revoked.status).toBe(200)
     expect((await rpc('tools/list', tokens.access_token)).status).toBe(401)
+    expect((await rpc('tools/list', otherTokens.access_token)).status).toBe(200)
   } finally {
     await handler.dispose()
   }

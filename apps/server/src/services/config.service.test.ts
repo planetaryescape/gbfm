@@ -40,61 +40,46 @@ const workerBindings = (): WorkerConfigBindings => ({
 })
 
 describe('editorial OAuth configuration', () => {
-  test('invalid configuration diagnostics name only the failing fields', () => {
-    for (const [owner, resource, fields] of [
-      ['', 'https://valid.test/mcp', ['MCP_OWNER_USER_ID']],
-      ['owner', 'https://user:synthetic-secret@invalid.test/mcp', ['MCP_RESOURCE_URL']],
-    ] satisfies Array<[string, string, Array<string>]>) {
-      const error = createConfig({
-        ...workerBindings(),
-        MCP_OWNER_USER_ID: owner,
-        MCP_RESOURCE_URL: resource,
-      }).mcpConfigurationError
+  test('invalid API origin diagnostics name only the field', () => {
+    const error = createConfig({
+      ...workerBindings(),
+      SHARE_URL: 'https://user:synthetic-secret@invalid.test',
+    }).mcpConfigurationError
 
-      expect(error).toBeInstanceOf(EditorialOAuthConfigInvalid)
-      expect(error?.fields).toEqual(fields)
-      expect(JSON.stringify(error)).not.toContain('synthetic-secret')
-    }
+    expect(error).toBeInstanceOf(EditorialOAuthConfigInvalid)
+    expect(error?.fields).toEqual(['SHARE_URL'])
+    expect(JSON.stringify(error)).not.toContain('synthetic-secret')
   })
-  test('stays disabled without explicit bindings and preserves the existing auth URL', () => {
+
+  test('leaves plain HTTP loopback development disabled and preserves the existing auth URL', () => {
     const config = createConfig(workerBindings())
     expect(config.mcp).toBeUndefined()
     expect(config.auth.betterAuthUrl).toBe('configured')
   })
 
-  test('derives a same-origin issuer for external and explicitly configured Portless resources', () => {
+  test('derives resource and issuer from existing API origins without identity configuration', () => {
     for (const origin of ['https://editorial.example.com', 'https://editorial-test.localhost']) {
       const config = createConfig({
         ...workerBindings(),
-        MCP_OWNER_USER_ID: 'owner',
-        MCP_RESOURCE_URL: `${origin}/mcp`,
+        SHARE_URL: `${origin}/`,
       })
 
       expect(config.mcp).toEqual({
-        ownerUserId: 'owner',
         resourceUrl: `${origin}/mcp`,
         issuer: `${origin}/auth`,
       })
     }
   })
 
-  test('rejects incomplete and malformed explicit configuration without leaking values', () => {
-    for (const bindings of [
-      { MCP_OWNER_USER_ID: 'owner' },
-      { MCP_RESOURCE_URL: 'https://editorial.example.com/mcp' },
-      { MCP_OWNER_USER_ID: '', MCP_RESOURCE_URL: 'https://editorial.example.com/mcp' },
-      ...[
-        'http://editorial.example.com/mcp',
-        'https://user:password@editorial.example.com/mcp',
-        'https://editorial.example.com/mcp?token=secret',
-        'https://editorial.example.com/mcp#fragment',
-        'https://editorial.example.com/auth',
-      ].map((MCP_RESOURCE_URL) => ({ MCP_OWNER_USER_ID: 'owner', MCP_RESOURCE_URL })),
+  test('isolates invalid API origins without leaking values', () => {
+    for (const SHARE_URL of [
+      'not-a-url',
+      'http://editorial.example.com',
+      'https://user:password@editorial.example.com',
+      'file:///private',
     ]) {
-      expect(() =>
-        parseEditorialOAuthConfig(bindings.MCP_OWNER_USER_ID, bindings.MCP_RESOURCE_URL),
-      ).toThrow(EditorialOAuthConfigInvalid)
-      const config = createConfig({ ...workerBindings(), ...bindings })
+      expect(() => parseEditorialOAuthConfig(SHARE_URL)).toThrow(EditorialOAuthConfigInvalid)
+      const config = createConfig({ ...workerBindings(), SHARE_URL })
       expect(config.mcp).toBeUndefined()
       expect(config.mcpConfigurationError).toBeInstanceOf(EditorialOAuthConfigInvalid)
       expect(config.auth.betterAuthUrl).toBe('configured')
@@ -102,6 +87,15 @@ describe('editorial OAuth configuration', () => {
         /password|token=secret|fragment/,
       )
     }
+  })
+
+  test('production enables MCP from its existing canonical API URL', () => {
+    const config = createConfig({ ...workerBindings(), APP_STAGE: 'prod' })
+    expect(config.mcp).toEqual({
+      resourceUrl: 'https://api.goosebumps.fm/mcp',
+      issuer: 'https://api.goosebumps.fm/auth',
+    })
+    expect(config.mcpConfigurationError).toBeUndefined()
   })
 
   test('LOCAL_DEV overrides production runtime URLs without changing APP_STAGE', () => {

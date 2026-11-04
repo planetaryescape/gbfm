@@ -2,6 +2,8 @@ import { Match, Option, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 
 import {
+  canReadEditorial,
+  EditorialAccount,
   EditorialOAuthConfiguration,
   EditorialOAuthSettings,
   EditorialPrincipal,
@@ -11,6 +13,20 @@ import {
 } from './editorial-mcp'
 
 describe('editorial MCP domain boundaries', () => {
+  test.each(['creator', 'editor', 'admin'])(
+    'allows an eligible %s without a configured identity',
+    (role) => {
+      const account = Schema.decodeUnknownSync(EditorialAccount)({ role, banned: false })
+      expect(canReadEditorial(account)).toBe(true)
+      expect(canReadEditorial({ ...account, banned: true })).toBe(false)
+    },
+  )
+
+  test('does not grant editorial permission merely because a user is signed in', () => {
+    expect(
+      canReadEditorial(Schema.decodeUnknownSync(EditorialAccount)({ role: 'user', banned: false })),
+    ).toBe(false)
+  })
   test.each([
     'https://gbfm.localhost/mcp',
     'https://479-editorial-mcp.gbfm.localhost/mcp',
@@ -36,7 +52,6 @@ describe('editorial MCP domain boundaries', () => {
     expect(
       Option.isNone(
         Schema.decodeUnknownOption(EditorialOAuthSettings)({
-          ownerUserId: 'owner',
           resourceUrl: 'https://gbfm.localhost/mcp',
           issuer: 'https://api.goosebumps.fm/auth',
         }),
@@ -88,7 +103,6 @@ describe('editorial MCP domain boundaries', () => {
         decode(
           EditorialOAuthConfiguration.cases.Enabled.make({
             settings: Schema.decodeUnknownSync(EditorialOAuthSettings)({
-              ownerUserId: 'owner',
               resourceUrl: 'https://gbfm.localhost/mcp',
               issuer: 'https://gbfm.localhost/auth',
             }),

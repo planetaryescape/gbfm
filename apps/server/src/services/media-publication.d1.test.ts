@@ -261,51 +261,133 @@ describe('media publication at the content/storage seam', () => {
     ).toMatchObject([{ status: 'attached', attachedToId: audio.id, attachedToTable: 'audio' }])
   })
 
-  test('post creator-save failure currently deletes existing creators, retains the content write, and creates no public copy', async () => {
+  test.each([
+    ['missing creator', ['missing-creator']],
+    ['mixed valid and invalid creators', [collaborator.userId, 'missing-creator']],
+    ['duplicate creators', [collaborator.userId, collaborator.userId]],
+  ])(
+    'post replacement with %s preserves existing creators and earlier content without copying',
+    async (_name, creatorIds) => {
+      await using h = await harness()
+
+      const post = await Effect.runPromise(
+        h.post.create(
+          {
+            title: 'Draft',
+            slug: 'partial',
+            type: 'post',
+            content: 'Draft content',
+            draft: true,
+            thumbnailUrl: assetUrl(imageKey),
+          },
+          [actor.userId],
+          actor,
+        ),
+      )
+
+      expect(
+        await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
+      ).toMatchObject([{ creatorId: actor.userId }])
+
+      const result = await Effect.runPromise(
+        h.post
+          .update('partial', actor.userId, actor.userRole, {
+            title: 'Saved before creator failure',
+            draft: false,
+            creatorIds,
+          })
+          .pipe(Effect.result),
+      )
+
+      expect(Result.isFailure(result) && result.failure).toBeInstanceOf(DatabaseError)
+      expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toMatchObject([
+        {
+          title: 'Saved before creator failure',
+          draft: false,
+          thumbnailUrl: assetUrl(publicKey(imageKey)),
+        },
+      ])
+      expect(
+        await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
+      ).toMatchObject([{ creatorId: actor.userId }])
+      expect(h.copies).toEqual([])
+      expect(h.objects.has(imageKey)).toBe(true)
+    },
+  )
+
+  test.each([
+    ['replacement', { creatorIds: [collaborator.userId] }, collaborator.userId],
+    ['omitted creators', {}, actor.userId],
+    ['empty creators', { creatorIds: [] }, actor.userId],
+  ])('post creator-only update preserves %s behavior', async (_name, data, expectedCreatorId) => {
     await using h = await harness()
 
     const post = await Effect.runPromise(
       h.post.create(
         {
           title: 'Draft',
-          slug: 'partial',
+          slug: 'creators-only',
           type: 'post',
           content: 'Draft content',
           draft: true,
-          thumbnailUrl: assetUrl(imageKey),
         },
         [actor.userId],
         actor,
       ),
     )
 
+    const originalRows = await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))
+
+    const updated = await Effect.runPromise(
+      h.post.update(post.slug, actor.userId, actor.userRole, data),
+    )
+
+    expect(updated.creators?.map((creator) => creator.id)).toEqual([expectedCreatorId])
     expect(
       await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
-    ).toMatchObject([{ creatorId: actor.userId }])
+    ).toMatchObject([{ creatorId: expectedCreatorId }])
+    expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toEqual(
+      originalRows,
+    )
+    expect(h.copies).toEqual([])
+  })
+
+  test('unauthorized post creator replacement changes neither creators nor content', async () => {
+    await using h = await harness()
+
+    const post = await Effect.runPromise(
+      h.post.create(
+        {
+          title: 'Draft',
+          slug: 'unauthorized-creators',
+          type: 'post',
+          content: 'Draft content',
+          draft: true,
+        },
+        [actor.userId],
+        actor,
+      ),
+    )
+
+    const originalRows = await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))
 
     const result = await Effect.runPromise(
       h.post
-        .update('partial', actor.userId, actor.userRole, {
-          title: 'Saved before creator failure',
-          draft: false,
-          creatorIds: ['missing-creator'],
+        .update(post.slug, collaborator.userId, collaborator.userRole, {
+          title: 'Unauthorized edit',
+          creatorIds: [collaborator.userId],
         })
         .pipe(Effect.result),
     )
 
-    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(DatabaseError)
-    expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toMatchObject([
-      {
-        title: 'Saved before creator failure',
-        draft: false,
-        thumbnailUrl: assetUrl(publicKey(imageKey)),
-      },
-    ])
-    expect(await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id))).toEqual(
-      [],
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(UnauthorizedError)
+    expect(
+      await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
+    ).toMatchObject([{ creatorId: actor.userId }])
+    expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toEqual(
+      originalRows,
     )
     expect(h.copies).toEqual([])
-    expect(h.objects.has(imageKey)).toBe(true)
   })
 
   test('post publication copy failure retains committed content and republishing repairs without replacing originals', async () => {

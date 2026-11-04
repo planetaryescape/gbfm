@@ -2,6 +2,7 @@ import { useAtomSet, useAtomValue } from '@effect/atom-react'
 import { Effect, Schema } from 'effect'
 import * as Atom from 'effect/reactivity/Atom'
 import { type PropsWithChildren, useEffect } from 'react'
+import { Appearance } from 'react-native'
 
 import { readLocal, writeLocal } from './localStorage'
 
@@ -25,6 +26,7 @@ export const useSetColorSchemePreference = () => {
 }
 
 export function PreferencesProvider({ children }: PropsWithChildren) {
+  const preference = useColorSchemePreference()
   const setPreference = useAtomSet(colorSchemePreference)
   const ready = useAtomValue(preferencesReady)
   const setReady = useAtomSet(preferencesReady)
@@ -41,6 +43,10 @@ export function PreferencesProvider({ children }: PropsWithChildren) {
     )
     setReady(true)
   }, [setPreference, setReady])
+
+  useEffect(() => {
+    if (ready) Appearance.setColorScheme(preference === 'system' ? 'auto' : preference)
+  }, [preference, ready])
 
   return ready ? children : null
 }

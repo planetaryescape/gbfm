@@ -10,6 +10,7 @@ import { Effect, Fiber, Layer, ManagedRuntime, Predicate, Stream } from 'effect'
 import type { AudioSample, AudioStatus } from 'expo-audio'
 import { describe, expect, it } from 'vitest'
 
+import { recordingJourneys } from '../test/recordingJourneys'
 import { ExpoAudioEngineLayer, type ExpoAudioEnginePlayer } from './expoAudioEngine'
 
 class PlatformPlayer implements ExpoAudioEnginePlayer {
@@ -117,6 +118,7 @@ const track = (id: string): QueueTrackType => ({
 
 const fixture = () => {
   const audio = new PlatformPlayer()
+  const journeys = recordingJourneys()
   const values = new Map<string, string>()
   const reads: Array<string> = []
   const cleared: Array<string> = []
@@ -142,7 +144,7 @@ const fixture = () => {
 
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
-      ExpoAudioEngineLayer(audio, 'native'),
+      ExpoAudioEngineLayer(audio, 'native', journeys.observer),
       storage,
       Layer.succeed(PlayReporter, {
         recordPlay: (id) =>
@@ -158,6 +160,7 @@ const fixture = () => {
 
   return {
     audio,
+    journeys,
     runtime,
     reads,
     cleared,
@@ -186,6 +189,91 @@ const fixture = () => {
 }
 
 describe('Expo native adapter with shared playback orchestration', () => {
+  it('ignores queued playing callbacks after replacement until the current source actually plays', async () => {
+    const f = fixture()
+
+    try {
+      await f.runtime.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const engine = yield* AudioEngine
+            yield* engine.changes.pipe(Stream.runDrain, Effect.forkScoped)
+            yield* Effect.yieldNow
+            yield* engine.replace('https://cdn.example/first.mp3', 1)
+            f.audio.ready()
+            yield* engine.play
+            expect(f.journeys.records).toHaveLength(1)
+            const stale = f.audio.currentStatus
+            yield* engine.pause
+            yield* engine.replace('https://cdn.example/second.mp3', 2)
+
+            for (const listener of f.audio.listeners) listener(stale)
+            expect(f.journeys.records).toHaveLength(1)
+            yield* engine.play
+            expect(f.journeys.records.map(({ outcome }) => outcome)).toEqual([
+              'succeeded',
+              'succeeded',
+            ])
+          }),
+        ),
+      )
+    } finally {
+      await f.runtime.dispose()
+      await f.journeys.dispose()
+    }
+  })
+
+  it('records playback only after the native platform starts', async () => {
+    const f = fixture()
+
+    try {
+      await f.runtime.runPromise(
+        Effect.gen(function* () {
+          const core = yield* f.core()
+          yield* core.requestPlayOnReady('private-track-id')
+          yield* core.setSource(track('private-track-id'))
+          expect(f.journeys.records).toEqual([])
+          f.audio.ready()
+          yield* Effect.promise(async () => {
+            await expect.poll(() => f.journeys.records.length).toBe(1)
+          })
+          expect(f.journeys.records[0]).toMatchObject({
+            name: 'playback.start',
+            outcome: 'succeeded',
+          })
+        }).pipe(Effect.scoped),
+      )
+    } finally {
+      await f.runtime.dispose()
+    }
+  })
+
+  it('records a rejected native play without changing the existing error outcome', async () => {
+    const f = fixture()
+    f.audio.rejectPlay = true
+    f.audio.ready()
+
+    try {
+      await f.runtime.runPromise(
+        Effect.gen(function* () {
+          const core = yield* f.core()
+          yield* core.requestPlayOnReady('one')
+          yield* core.setSource(track('one'))
+          yield* Effect.promise(async () => {
+            await expect.poll(() => f.journeys.records.length).toBe(1)
+          })
+          expect(f.journeys.records[0]).toMatchObject({
+            name: 'playback.start',
+            outcome: 'failed',
+          })
+          expect(f.errors.length).toBeGreaterThan(0)
+        }).pipe(Effect.scoped),
+      )
+    } finally {
+      await f.runtime.dispose()
+    }
+  })
+
   it('ignores completion already queued by the adapter before source replacement', async () => {
     const f = fixture()
     f.audio.ready()

@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Disposable observability fixture</title></head>
+  <body>
+    <button id="run" disabled>Run observability smoke</button>
+    <button id="reader" disabled>Run reader smoke</button>
+    <button id="playback" disabled>Run playback smoke</button>
+    <div id="root" data-reader-active="false" data-reader-request="0" data-reader-status="empty">Disposable reader</div>
+    <output id="result"></output>
+    <script type="module" src="/e2e/observability.fixture.test.ts"></script>
+  </body>
+</html>

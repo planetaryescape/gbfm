@@ -86,7 +86,8 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
             !(event.target instanceof HTMLDialogElement) ||
             !event.target.matches('[data-key-password-dialog]') ||
             lifecycle.verifying() ||
-            lifecycle.secret()
+            lifecycle.secret() ||
+            !lifecycle.busy()
           )
             return
           lifecycle.clear()
@@ -150,7 +151,10 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
 
               if (!lifecycle.live()) clear()
               submitButton.disabled =
-                !lifecycle.live() || lifecycle.busy() || lifecycle.secret() !== null
+                !lifecycle.live() ||
+                lifecycle.verifying() ||
+                lifecycle.busy() ||
+                lifecycle.secret() !== null
             }),
           ),
           Effect.forkScoped,
@@ -241,6 +245,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
                   },
                   onSuccess: (issued) => {
                     lifecycle.issued(issued?.secret ?? null)
+                    const secret = lifecycle.secret()
 
                     if (!issued) {
                       submitButton.disabled = !lifecycle.live()
@@ -254,17 +259,18 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
                       return
                     }
 
-                    if (!lifecycle.live()) {
+                    if (!secret) {
+                      submitButton.disabled = !lifecycle.live()
                       status.textContent =
-                        'A key was issued while the view was paused. Revoke it from the list and create a replacement.'
-                      Queue.offerUnsafe(messages, Message.Issued())
+                        'A key was issued after this confirmation was cleared. Revoke it from the list and create a replacement.'
+                      Queue.offerUnsafe(messages, Message.Issued({ disclosure: 'Discarded' }))
 
                       return
                     }
 
-                    showSecret(host, issued.secret)
+                    showSecret(host, secret)
                     status.textContent = 'Key created.'
-                    Queue.offerUnsafe(messages, Message.Issued())
+                    Queue.offerUnsafe(messages, Message.Issued({ disclosure: 'Shown' }))
                   },
                 }),
               )

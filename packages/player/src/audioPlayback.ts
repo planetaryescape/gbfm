@@ -1,10 +1,15 @@
-import { Data, Effect } from 'effect'
+import { Cause, Data, Effect, Exit, Fiber, Option } from 'effect'
 import type { ManagedRuntime } from 'effect'
 import type { Scope } from 'effect/Scope'
 
 import type { VolumeRecordType } from './audioStorage'
 import { AudioEngine, type EngineStatus } from './engine'
-import { hasCompleteCreators, type QueueTrackType } from './persistedQueue'
+import {
+  hasCompleteCreators,
+  type AudioStorageError,
+  type PersistedQueueType,
+  type QueueTrackType,
+} from './persistedQueue'
 import { playerCore } from './playerCore'
 import { PlayerStorage } from './playerStorage'
 import type { PlayReporter } from './playReporter'
@@ -437,58 +442,89 @@ export const makeAudioPlayback = (
 
     updateTransport({ ...transportState, isInitialized: true })
 
-    const loadQueue = Effect.gen(function* () {
-      const persisted = yield* storage.loadQueue.pipe(
-        Effect.catchCause((cause) =>
-          reportError(
-            'Unable to hydrate audio queue',
-            new Error('Unable to hydrate audio queue', { cause }),
-          ).pipe(Effect.as(null)),
+    const readHydration = <A>(read: Effect.Effect<A, AudioStorageError>, message: string) =>
+      read.pipe(
+        Effect.exit,
+        Effect.tap((result) =>
+          Exit.isFailure(result) && !Cause.hasInterrupts(result.cause)
+            ? reportError(message, new Error(message, { cause: result.cause }))
+            : Effect.void,
         ),
       )
 
-      if (!QueueHydration.$is('Hydrating')(queueHydration)) return
-      // No Effect yield here: merge, clear hydration, and publish are one
-      // cooperatively atomic step.
+    const queueRead = yield* Effect.forkScoped(
+      readHydration(storage.loadQueue, 'Unable to hydrate audio queue'),
+    )
+
+    const volumeRead = yield* Effect.forkScoped(
+      readHydration(storage.loadVolume, 'Unable to hydrate audio volume'),
+    )
+
+    const mergeQueue = (persisted: PersistedQueueType | null) => {
+      if (!QueueHydration.$is('Hydrating')(queueHydration)) return null
       const next = mergeHydratedQueue(persisted ?? initialQueueState, queueHydration.pending)
       queueHydration = QueueHydration.Hydrated()
       updateQueue(next)
+
+      if (next !== persisted) persistQueue(next)
+
+      return next
+    }
+
+    const loadQueue = Effect.gen(function* () {
+      const result = yield* Fiber.join(queueRead)
+
+      if (Exit.isFailure(result)) return
+      const next = mergeQueue(result.value)
+
+      if (!next) return
       const currentId = yield* core.currentTrackId
       const nextCurrent = selectQueueView(next).current
 
       if (nextCurrent?.id !== currentId) {
         yield* core.setSource(nextCurrent)
       }
-
-      if (next !== persisted) persistQueue(next)
     })
 
     const loadVolume = Effect.gen(function* () {
-      const persisted = yield* storage.loadVolume.pipe(
-        Effect.catchCause((cause) =>
-          reportError(
-            'Unable to hydrate audio volume',
-            new Error('Unable to hydrate audio volume', { cause }),
-          ).pipe(Effect.as(null)),
-        ),
-      )
+      const result = yield* Fiber.join(volumeRead)
+      const persisted = Exit.isSuccess(result) ? result.value : null
 
       if (!VolumeHydration.$is('Hydrating')(volumeHydration)) return
       const next = volumeHydration.pending ?? persisted ?? defaultVolume
       volumeHydration = VolumeHydration.Hydrated()
       updateVolume(next)
-      yield* applyVolumeToEngine(next)
 
       if (next !== persisted) persistVolume(next)
+      yield* applyVolumeToEngine(next)
     })
 
-    yield* Effect.forkScoped(loadQueue)
-    yield* Effect.forkScoped(loadVolume)
+    const queueApplication = yield* Effect.forkScoped(loadQueue)
+    const volumeApplication = yield* Effect.forkScoped(loadVolume)
 
     yield* Effect.addFinalizer(() =>
-      Effect.promise(() =>
-        Promise.allSettled([queueWriteTail, volumeWriteTail]).then(() => undefined),
-      ),
+      Effect.gen(function* () {
+        yield* Fiber.interruptAll([queueApplication, volumeApplication])
+
+        if (QueueHydration.$is('Hydrating')(queueHydration) && queueHydration.pending.length > 0) {
+          const result = yield* Fiber.join(queueRead).pipe(
+            Effect.interruptible,
+            Effect.timeoutOption('1 second'),
+          )
+
+          if (Option.isSome(result) && Exit.isSuccess(result.value)) mergeQueue(result.value.value)
+        }
+
+        if (VolumeHydration.$is('Hydrating')(volumeHydration) && volumeHydration.pending) {
+          persistVolume(volumeHydration.pending)
+          volumeHydration = VolumeHydration.Hydrated()
+        }
+
+        yield* Fiber.interruptAll([queueRead, volumeRead])
+        yield* Effect.promise(() =>
+          Promise.allSettled([queueWriteTail, volumeWriteTail]).then(() => undefined),
+        )
+      }),
     )
 
     yield* engine.setCommandHandlers({

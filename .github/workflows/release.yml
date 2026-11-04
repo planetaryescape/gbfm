@@ -84,9 +84,11 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/playwright:v1.64.1-noble
-      options: --user 1001
     timeout-minutes: 10
     steps:
+      - name: Install Bun archive dependency
+        run: apt-get update && apt-get install -y --no-install-recommends unzip
+
       - name: Checkout code
         uses: actions/checkout@v6
         with:

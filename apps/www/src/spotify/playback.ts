@@ -10,12 +10,13 @@ const Action = Schema.Literals(['connect', 'play', 'queue'])
 
 const Operation = Schema.TaggedUnion({
   Idle: { target: Schema.NullOr(Schema.String), notice: Schema.String },
-  Running: { action: Action, url: Schema.String },
+  Running: { action: Action, url: Schema.String, requestId: Schema.Number },
 })
 
 export const Model = Schema.Struct({
   status: Schema.NullOr(SpotifyStatus),
   statusRequestId: Schema.Number,
+  operationRequestId: Schema.Number,
   operation: Operation,
 })
 
@@ -24,6 +25,7 @@ export type Model = typeof Model.Type
 export const initialModel: Model = {
   status: null,
   statusRequestId: 0,
+  operationRequestId: 0,
   operation: Operation.cases.Idle.make({ target: null, notice: '' }),
 }
 
@@ -31,7 +33,8 @@ export const Message = defineMessageUnion({
   Requested: { action: Action, url: Schema.String },
   Loaded: { requestId: Schema.Number, status: SpotifyStatus },
   ConnectionChanged: { status: SpotifyStatus },
-  Completed: { notice: Schema.String },
+  StatusRefreshed: { status: SpotifyStatus },
+  Completed: { requestId: Schema.Number, notice: Schema.String },
 })
 
 export type Message = typeof Message.Type
@@ -48,9 +51,9 @@ export const Load = Command.define('Spotify.PlaybackStatus', {
 })
 
 const Request = Command.define('Spotify.Playback', {
-  args: { action: Action, url: Schema.String },
+  args: { action: Action, url: Schema.String, requestId: Schema.Number },
   messages: [Message.Completed],
-  execute: ({ action, url }) =>
+  execute: ({ action, url, requestId }) =>
     SpotifyConnection.pipe(
       Effect.flatMap((service) =>
         action === 'connect'
@@ -58,7 +61,7 @@ const Request = Command.define('Spotify.Playback', {
           : service.playback({ action, url }),
       ),
       Effect.catch((error) => Effect.succeed(error.message)),
-      Effect.map((notice) => Message.Completed({ notice })),
+      Effect.map((notice) => Message.Completed({ requestId, notice })),
     ),
 })
 
@@ -71,27 +74,47 @@ export const update = (
       Operation.guards.Running(model.operation)
         ? { model }
         : {
-            model: { ...model, operation: Operation.cases.Running.make({ action, url }) },
-            commands: [Request({ action, url })],
+            model: {
+              ...model,
+              operationRequestId: model.operationRequestId + 1,
+              operation: Operation.cases.Running.make({
+                action,
+                url,
+                requestId: model.operationRequestId + 1,
+              }),
+            },
+            commands: [Request({ action, url, requestId: model.operationRequestId + 1 })],
           },
     Loaded: ({ requestId, status }) => ({
       model: requestId === model.statusRequestId ? { ...model, status } : model,
     }),
-    ConnectionChanged: ({ status }) => ({
+    StatusRefreshed: ({ status }) => ({
       model: { ...model, status, statusRequestId: model.statusRequestId + 1 },
     }),
-    Completed: ({ notice }) => ({
+    ConnectionChanged: ({ status }) => ({
       model: {
         ...model,
-        operation: Operation.cases.Idle.make({
-          target: Operation.match(model.operation, {
-            Idle: ({ target }) => target,
-            Running: ({ url }) => url,
-          }),
-          notice,
-        }),
+        status,
+        statusRequestId: model.statusRequestId + 1,
+        operationRequestId: model.operationRequestId + 1,
+        operation: Operation.cases.Idle.make({ target: null, notice: '' }),
       },
     }),
+    Completed: ({ requestId, notice }) =>
+      !Operation.guards.Running(model.operation) || requestId !== model.operation.requestId
+        ? { model }
+        : {
+            model: {
+              ...model,
+              operation: Operation.cases.Idle.make({
+                target: Operation.match(model.operation, {
+                  Idle: ({ target }) => target,
+                  Running: ({ url }) => url,
+                }),
+                notice,
+              }),
+            },
+          },
   })
 
 export const view = <M>(

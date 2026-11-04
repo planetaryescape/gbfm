@@ -21,11 +21,13 @@ export const spotifyTokenStorage = (secure: {
     key: (index) => [...values.keys()][index] ?? null,
     getItem: (key) => values.get(key) ?? null,
     clear: () => {
+      if (!isCurrent()) return
       version += 1
       values.clear()
       persist(secure.remove)
     },
     removeItem: (key) => {
+      if (key === tokensKey && !isCurrent()) return
       values.delete(key)
 
       if (key === tokensKey) {
@@ -49,7 +51,11 @@ export const spotifyTokenStorage = (secure: {
     guardWrites: (guard: () => boolean) => {
       isCurrent = guard
     },
-    invalidate: () => storage.removeItem(tokensKey),
+    invalidate: () => {
+      version += 1
+      values.delete(tokensKey)
+      persist(secure.remove)
+    },
     hydrate: async () => {
       const started = version
       const value = await secure.read().catch(() => null)

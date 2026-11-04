@@ -112,7 +112,7 @@ const showPage = (
   navigationId: number,
   expected: string,
 ): Update.Return<Model, Message, Services> => {
-  const next = init(flags)
+  const next = init(flags, model.spotifyPlayback)
   const identityChanged = next.model.tweetReader.identity !== model.tweetReader.identity
 
   const keepPendingPublicAction =
@@ -141,7 +141,7 @@ const showPage = (
           : flags,
       repliesStatus: sameTweet ? model.repliesStatus : next.model.repliesStatus,
       player: model.player,
-      spotifyPlayback: model.spotifyPlayback,
+      spotifyPlayback: next.model.spotifyPlayback,
       skipSeen: model.skipSeen,
       mobileMenu: model.mobileMenu,
       menuDrag: model.menuDrag,
@@ -412,14 +412,22 @@ const updateApplication = (
         : { model },
     GotDashboardMessage: ({ message }) => {
       const child = Dashboard.update(model.dashboard, message)
+      let playback = model.spotifyPlayback
 
-      const playback =
-        Predicate.isTagged(message, 'SpotifyLoaded') && child.model !== model.dashboard
-          ? SpotifyPlayback.update(
-              model.spotifyPlayback,
-              SpotifyPlayback.Message.ConnectionChanged({ status: child.model.spotify }),
-            ).model
-          : model.spotifyPlayback
+      if (Predicate.isTagged(message, 'SpotifyLoaded') && child.model !== model.dashboard) {
+        const status = child.model.spotify
+
+        const unchangedRefresh =
+          model.dashboard.spotifyPending === 'status' &&
+          playback.status?.connected === status.connected &&
+          playback.status?.name === status.name
+
+        const synchronized = unchangedRefresh
+          ? SpotifyPlayback.Message.StatusRefreshed({ status })
+          : SpotifyPlayback.Message.ConnectionChanged({ status })
+
+        playback = SpotifyPlayback.update(playback, synchronized).model
+      }
 
       return {
         model: { ...model, dashboard: child.model, spotifyPlayback: playback },

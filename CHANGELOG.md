@@ -1,3 +1,20 @@
+# [2.123.0](https://github.com/planetaryescape/gbfm/compare/v2.122.2...v2.123.0) (2026-11-04)
+
+
+### Bug Fixes
+
+* **ci:** bound D1 workers and use preinstalled fixture browsers ([51879bd](https://github.com/planetaryescape/gbfm/commit/51879bd289d09b8dfb717670c215276337093a8c))
+* **ci:** expose Bun package runner to browser fixtures ([bfc9284](https://github.com/planetaryescape/gbfm/commit/bfc928423cf910c954a57576fc1dece3f12b49da))
+* **ci:** install Bun archive dependency in browser container ([beb37e9](https://github.com/planetaryescape/gbfm/commit/beb37e97fbd0239914a2264da90a5a62a8945fcc))
+* **ci:** isolate browser tests from host toolchain setup ([d914540](https://github.com/planetaryescape/gbfm/commit/d9145407d4c6cd90d6f55ca590a7ebe50d7f5175))
+* **mcp:** address OAuth and editorial review findings ([c9bfee9](https://github.com/planetaryescape/gbfm/commit/c9bfee9667e0cf68f8f933c02d92f7a7ab4e9914))
+* **mcp:** resolve deployed origins and keep revocation available ([a51a91f](https://github.com/planetaryescape/gbfm/commit/a51a91f53780d7d597ca0dd9bfd0f6a09f1a9cdc))
+
+
+### Features
+
+* **mcp:** add owner-only OAuth and read-only editorial tools ([72dd3a0](https://github.com/planetaryescape/gbfm/commit/72dd3a0d42856f77e22c16f1162ff6d5105862f8))
+
 ## [2.122.2](https://github.com/planetaryescape/gbfm/compare/v2.122.1...v2.122.2) (2026-11-04)
 
 

@@ -90,7 +90,12 @@ export const init = (input: InitInput): Update.Return<Model, Message, CreatorSer
     ? {
         model,
         commands: [
-          Hydrate({ key: keyOf(model.draft), kind: input.kind, editSlug: input.editSlug }),
+          Hydrate({
+            key: keyOf(model.draft),
+            kind: input.kind,
+            editSlug: input.editSlug,
+            editorId: model.editorId,
+          }),
         ],
       }
     : { model }

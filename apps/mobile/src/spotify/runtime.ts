@@ -4,10 +4,13 @@ import { type Context, Effect, Layer, Scope } from 'effect'
 
 import { env } from '@/env'
 
+import { spotifyConnectionLifecycle } from './connectionLifecycle'
 import { SPOTIFY_REDIRECT_URI } from './constants'
 import { installSpotifyCryptoPolyfill } from './cryptoPolyfill'
 import {
   hydrateSpotifyTokensFromSecureStore,
+  guardSpotifyTokenWrites,
+  invalidateSpotifyTokens,
   spotifyHistoryStub,
   spotifyLocalStorage,
   spotifySessionStorage,
@@ -64,3 +67,13 @@ export const makeSpotifyEffectRunner = <Requirements>(
 }
 
 export const runSpotifyEffect = makeSpotifyEffectRunner(buildSpotifyContext)
+
+export const spotifyLifecycle = spotifyConnectionLifecycle(async (work, options) => {
+  guardSpotifyTokenWrites(options?.isCurrent ?? (() => true))
+
+  try {
+    return await runSpotifyEffect(work)
+  } finally {
+    guardSpotifyTokenWrites(() => true)
+  }
+}, invalidateSpotifyTokens)

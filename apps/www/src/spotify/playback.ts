@@ -15,6 +15,7 @@ const Operation = Schema.TaggedUnion({
 
 export const Model = Schema.Struct({
   status: Schema.NullOr(SpotifyStatus),
+  statusRequestId: Schema.Number,
   operation: Operation,
 })
 
@@ -22,24 +23,28 @@ export type Model = typeof Model.Type
 
 export const initialModel: Model = {
   status: null,
+  statusRequestId: 0,
   operation: Operation.cases.Idle.make({ target: null, notice: '' }),
 }
 
 export const Message = defineMessageUnion({
   Requested: { action: Action, url: Schema.String },
-  Loaded: { status: SpotifyStatus },
+  Loaded: { requestId: Schema.Number, status: SpotifyStatus },
+  ConnectionChanged: { status: SpotifyStatus },
   Completed: { notice: Schema.String },
 })
 
 export type Message = typeof Message.Type
 
 export const Load = Command.define('Spotify.PlaybackStatus', {
+  args: { requestId: Schema.Number },
   messages: [Message.Loaded],
-  execute: SpotifyConnection.pipe(
-    Effect.flatMap((service) => service.status),
-    Effect.orElseSucceed(() => disconnected),
-    Effect.map((status) => Message.Loaded({ status })),
-  ),
+  execute: ({ requestId }) =>
+    SpotifyConnection.pipe(
+      Effect.flatMap((service) => service.status),
+      Effect.orElseSucceed(() => disconnected),
+      Effect.map((status) => Message.Loaded({ requestId, status })),
+    ),
 })
 
 const Request = Command.define('Spotify.Playback', {
@@ -69,7 +74,12 @@ export const update = (
             model: { ...model, operation: Operation.cases.Running.make({ action, url }) },
             commands: [Request({ action, url })],
           },
-    Loaded: ({ status }) => ({ model: { ...model, status } }),
+    Loaded: ({ requestId, status }) => ({
+      model: requestId === model.statusRequestId ? { ...model, status } : model,
+    }),
+    ConnectionChanged: ({ status }) => ({
+      model: { ...model, status, statusRequestId: model.statusRequestId + 1 },
+    }),
     Completed: ({ notice }) => ({
       model: {
         ...model,

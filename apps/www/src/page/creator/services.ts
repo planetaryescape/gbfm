@@ -39,7 +39,7 @@ export const reconcileStoredDraft = (
   Effect.gen(function* () {
     const failure = () =>
       new CreatorStorageError({
-        operation: 'clear',
+        operation: 'reconcile',
         message: 'Remote save succeeded, but the local draft could not be reconciled.',
       })
 
@@ -84,7 +84,7 @@ export const reconcileStoredDraft = (
 
         if (matches && !retained) storage.removeItem(key)
         else {
-          const latest = matches && retained ? retained : current
+          const latest = retained ?? current
           storage.setItem(
             key,
             JSON.stringify({
@@ -107,7 +107,7 @@ export class CreatorRequestError extends Data.TaggedError('CreatorRequestError')
 }> {}
 
 export class CreatorStorageError extends Data.TaggedError('CreatorStorageError')<{
-  readonly operation: 'read' | 'write' | 'clear'
+  readonly operation: 'read' | 'write' | 'clear' | 'reconcile'
   readonly message: string
 }> {}
 

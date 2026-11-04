@@ -413,8 +413,16 @@ const updateApplication = (
     GotDashboardMessage: ({ message }) => {
       const child = Dashboard.update(model.dashboard, message)
 
+      const playback =
+        Predicate.isTagged(message, 'SpotifyLoaded') && child.model !== model.dashboard
+          ? SpotifyPlayback.update(
+              model.spotifyPlayback,
+              SpotifyPlayback.Message.ConnectionChanged({ status: child.model.spotify }),
+            ).model
+          : model.spotifyPlayback
+
       return {
-        model: { ...model, dashboard: child.model },
+        model: { ...model, dashboard: child.model, spotifyPlayback: playback },
         commands: Command.mapMessages(child.commands ?? [], (message) =>
           Message.GotDashboardResult({ message, navigationId: model.navigationId }),
         ),

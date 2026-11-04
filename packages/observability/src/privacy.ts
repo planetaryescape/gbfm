@@ -96,10 +96,13 @@ const routes = new Set([
   '/actions/:action',
   '/:slug',
   '/unknown',
+  '/collections',
+  '/collections/:slug',
 ])
 
 const routePrefixes = new Map(
   Object.entries({
+    collections: '/collections/:slug',
     shows: '/shows/:slug',
     mixes: '/mixes/:slug',
     tracks: '/tracks/:slug',
@@ -120,7 +123,8 @@ const routePrefixes = new Map(
 )
 
 const safeSpanName = (value: string | undefined) => {
-  const route = value?.split(/[?#]/)[0]?.replace(/\/\([^/]+\)/g, '')
+  const stripped = value?.split(/[?#]/)[0]?.replace(/\/\([^/]+\)/g, '')
+  const route = value?.startsWith('/') ? stripped?.replace(/\/+$/, '') || '/' : stripped
 
   if (route && routes.has(route)) return route
 
@@ -225,7 +229,9 @@ const identity = (event: ErrorEvent | TransactionEvent): ErrorEvent => {
 
 export const sanitizeError = (event: ErrorEvent): ErrorEvent => ({
   ...identity(event),
-  exception: { values: (event.exception?.values ?? []).map(safeException) },
+  ...(event.exception?.values?.length
+    ? { exception: { values: event.exception.values.map(safeException) } }
+    : { message: 'Application diagnostic' }),
   breadcrumbs: (event.breadcrumbs ?? []).flatMap((breadcrumb) => {
     const safe = safeBreadcrumb(breadcrumb)
 

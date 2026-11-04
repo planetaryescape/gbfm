@@ -6,6 +6,8 @@
   "exports": {
     ".": "./src/observability.ts",
     "./callbacks": "./src/callbacks.ts",
+    "./reader": "./src/reader.ts",
+    "./playback": "./src/playback.ts",
     "./sentry": "./src/sentry.ts",
     "./privacy": "./src/privacy.ts",
     "./config": "./src/config.ts"

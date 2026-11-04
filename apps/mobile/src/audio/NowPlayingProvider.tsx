@@ -1,5 +1,6 @@
 import { useAtomValue } from '@effect/atom-react'
 import type { AudioResponse } from '@gbfm/api/audio'
+import { noJourneys } from '@gbfm/observability/callbacks'
 import {
   type AudioEngine,
   makeAudioPlayback,
@@ -113,7 +114,11 @@ export function NowPlayingProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     const runtime = ManagedRuntime.make(
       Layer.mergeAll(
-        ExpoAudioEngineLayer(player, Platform.OS === 'web' ? 'web' : 'native', journeys),
+        ExpoAudioEngineLayer(
+          player,
+          Platform.OS === 'web' ? 'web' : 'native',
+          Platform.OS === 'web' ? noJourneys : journeys,
+        ),
         PlayReporterLive,
       ).pipe(Layer.provideMerge(PlayerStorageLive)),
     )

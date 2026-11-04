@@ -42,9 +42,9 @@ The shared Sentry adapter translates this contract into spans, metrics and revie
 | Operation | Start | Completion |
 | --- | --- | --- |
 | `reader.open` | A focused reader begins an owned visit | The new request's ready/empty/error state commits in React, or focus/replacement cancels it |
-| `playback.start` | The native adapter replaces an audio source | Expo reports `playing`, reports an error, rejects play, or pause/replacement/disposal cancels the pending attempt |
+| `playback.start` | An intentional replacement, or first explicit play after paused hydration | Expo confirms the current requested source is playing, reports an error, rejects play, or pause/replacement/disposal cancels the pending attempt |
 
-Reading success means committed content, not an API response or final native paint. Cached content can succeed before background refresh finishes. A later refresh failure does not rewrite that success. Playback measures source replacement to the first playing callback, not the earlier button tap or checkpoint/storage work. It does not yet measure resume, stalls, or interruption recovery.
+Reading success means committed content, not an API response or final native paint. Cached content can succeed before background refresh finishes. A later refresh failure does not rewrite that success. Playback measures intentional replacement to the first playing callback, including preparation after replacement but not earlier button/queue work. Paused hydration creates no outstanding attempt; its first explicit play can start one later. Queued callbacks are checked against current native playing/loading state and the requested source generation. Later resume, stalls and interruption recovery are not new initial-start measurements. Expo web does not emit native-project journey measurements; WWW uses its own browser adapter and project.
 
 Each attempt settles once. Stale reader completions are ignored. The sink receives no post/track IDs, content, URLs, credentials, or raw player errors. Final `failed` outcomes create reviewed `ReaderOpenFailed` or `PlaybackStartFailed` issues; `canceled` and `empty` do not create incidents.
 

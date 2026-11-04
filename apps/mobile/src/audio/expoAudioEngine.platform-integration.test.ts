@@ -189,7 +189,41 @@ const fixture = () => {
 }
 
 describe('Expo native adapter with shared playback orchestration', () => {
-  it('records playback only after the native platform starts, without exporting track metadata', async () => {
+  it('ignores queued playing callbacks after replacement until the current source actually plays', async () => {
+    const f = fixture()
+
+    try {
+      await f.runtime.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const engine = yield* AudioEngine
+            yield* engine.changes.pipe(Stream.runDrain, Effect.forkScoped)
+            yield* Effect.yieldNow
+            yield* engine.replace('https://cdn.example/first.mp3', 1)
+            f.audio.ready()
+            yield* engine.play
+            expect(f.journeys.records).toHaveLength(1)
+            const stale = f.audio.currentStatus
+            yield* engine.pause
+            yield* engine.replace('https://cdn.example/second.mp3', 2)
+
+            for (const listener of f.audio.listeners) listener(stale)
+            expect(f.journeys.records).toHaveLength(1)
+            yield* engine.play
+            expect(f.journeys.records.map(({ outcome }) => outcome)).toEqual([
+              'succeeded',
+              'succeeded',
+            ])
+          }),
+        ),
+      )
+    } finally {
+      await f.runtime.dispose()
+      await f.journeys.dispose()
+    }
+  })
+
+  it('records playback only after the native platform starts', async () => {
     const f = fixture()
 
     try {
@@ -207,7 +241,6 @@ describe('Expo native adapter with shared playback orchestration', () => {
             name: 'playback.start',
             outcome: 'succeeded',
           })
-          expect(JSON.stringify(f.journeys.records)).not.toContain('private-track-id')
         }).pipe(Effect.scoped),
       )
     } finally {

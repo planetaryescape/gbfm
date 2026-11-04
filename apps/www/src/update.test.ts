@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { init } from './init'
 import { Message } from './message'
 import type { Flags } from './model'
+import { readerViewState } from './observability/reader-state'
 import { isCacheable, seedCache } from './page-cache'
 import { Message as CreatorMessage } from './page/creator/message'
 import { Message as DashboardMessage } from './page/dashboard/message'
@@ -81,6 +82,76 @@ const tweetFlags = (slug: string): Flags => {
 }
 
 const changed = (href: string) => Message.ChangedUrl({ url: Option.getOrThrow(fromString(href)) })
+
+describe('reader observability projection at the real model transition boundary', () => {
+  it('keeps the owned request loading until content commits and ignores stale completions', () => {
+    const initial = init({ ...flags, url: 'https://gbfm.co.za/about' }).model
+    const loading = update(initial, changed('https://gbfm.co.za/tweet/first')).model
+    expect(readerViewState(loading)).toEqual({
+      active: true,
+      request: loading.navigationId,
+      status: 'loading',
+    })
+    const next = update(loading, changed('https://gbfm.co.za/tweet/second')).model
+
+    const stale = update(
+      next,
+      Message.LoadedPage({
+        flags: tweetFlags('first'),
+        key: '/tweet/first',
+        navigationId: loading.navigationId,
+      }),
+    ).model
+
+    expect(readerViewState(stale)).toEqual({
+      active: true,
+      request: next.navigationId,
+      status: 'loading',
+    })
+
+    const committed = update(
+      stale,
+      Message.LoadedPage({
+        flags: tweetFlags('second'),
+        key: '/tweet/second',
+        navigationId: next.navigationId,
+      }),
+    ).model
+
+    expect(readerViewState(committed)).toEqual({
+      active: true,
+      request: next.navigationId,
+      status: 'ready',
+    })
+  })
+
+  it('distinguishes empty committed content from failed navigation', () => {
+    const initial = init({ ...flags, url: 'https://gbfm.co.za/about' }).model
+    const loading = update(initial, changed('https://gbfm.co.za/tweet/missing')).model
+
+    const failed = update(
+      loading,
+      Message.FailedPage({ key: '/tweet/missing', navigationId: loading.navigationId }),
+    ).model
+
+    expect(readerViewState(failed).status).toBe('error')
+
+    const empty = update(
+      loading,
+      Message.LoadedPage({
+        flags: { ...flags, url: 'https://gbfm.co.za/tweet/missing', status: 404 },
+        key: '/tweet/missing',
+        navigationId: loading.navigationId,
+      }),
+    ).model
+
+    expect(readerViewState(empty)).toEqual({
+      active: true,
+      request: loading.navigationId,
+      status: 'empty',
+    })
+  })
+})
 
 describe('page navigation and cached revalidation', () => {
   const about: Flags = { ...flags, url: 'https://gbfm.co.za/about', title: 'About' }

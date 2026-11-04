@@ -1,7 +1,7 @@
+import { playbackJourney } from '@gbfm/observability/playback'
 import { expect, test } from 'vitest'
 
 import { recordingJourneys } from '../test/recordingJourneys'
-import { playbackJourney } from './playbackJourney'
 
 test('source loading is not a playback success until the platform reports playing', () => {
   const f = recordingJourneys()
@@ -33,4 +33,19 @@ test('replacement, platform error, and disposal settle attempts without reportin
     { name: 'playback.start', outcome: 'failed', durationMs: 20 },
     { name: 'playback.start', outcome: 'canceled', durationMs: 30 },
   ])
+})
+
+test('paused hydration waits for explicit play, and resume is not a second initial start', () => {
+  const f = recordingJourneys()
+  const journey = playbackJourney(f.observer)
+  journey.replace('paused')
+  expect(f.starts).toEqual([])
+  f.advance(1000)
+  journey.play()
+  f.advance(25)
+  journey.status({ playing: true, error: null })
+  journey.cancel()
+  journey.play()
+  journey.status({ playing: true, error: null })
+  expect(f.records).toEqual([{ name: 'playback.start', outcome: 'succeeded', durationMs: 25 }])
 })

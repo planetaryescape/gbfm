@@ -1,4 +1,5 @@
 import { noJourneys, type JourneyObserver } from '@gbfm/observability/callbacks'
+import { playbackJourney } from '@gbfm/observability/playback'
 import {
   AudioEngine,
   PlaybackRejected,
@@ -10,7 +11,6 @@ import { Effect, Layer, Queue, Stream } from 'effect'
 import type { AudioMetadata, AudioPlayer, AudioStatus } from 'expo-audio'
 
 import { subscribeToPlaybackStatus } from './audioPlayerAdapter'
-import { playbackJourney } from './playbackJourney'
 
 const toEngineStatus = (status: AudioStatus, sourceGeneration: number | null): EngineStatus => ({
   sourceGeneration,
@@ -43,13 +43,15 @@ const makeExpoAudioEngine = (
 ) =>
   Effect.sync(() => {
     let sourceGeneration: number | null = null
+    let playRequestedGeneration: number | null = null
     const journey = playbackJourney(journeys)
 
     return {
-      replace: (url: string, generation: number) =>
+      replace: (url: string, generation: number, intent: 'play' | 'paused' = 'play') =>
         Effect.sync(() => {
-          journey.replace()
+          journey.replace(intent)
           sourceGeneration = generation
+          playRequestedGeneration = null
 
           try {
             player.replace(url)
@@ -61,10 +63,15 @@ const makeExpoAudioEngine = (
       clearSource: Effect.sync(() => {
         journey.cancel()
         sourceGeneration = null
+        playRequestedGeneration = null
         player.replace(null)
       }),
       play: Effect.try({
-        try: () => player.play(),
+        try: () => {
+          playRequestedGeneration = sourceGeneration
+          journey.play()
+          player.play()
+        },
         catch: (cause: unknown) => {
           journey.fail()
 
@@ -73,6 +80,7 @@ const makeExpoAudioEngine = (
       }),
       pause: Effect.sync(() => {
         journey.cancel()
+        playRequestedGeneration = null
         player.pause()
       }),
       setVolume: (volume: number) =>
@@ -89,7 +97,16 @@ const makeExpoAudioEngine = (
       changes: Stream.callback<EngineStatus>((queue) =>
         Effect.gen(function* () {
           const subscription = subscribeToPlaybackStatus(player, platform, (status) => {
-            journey.status(status)
+            const current = player.currentStatus
+
+            if (status.error && current.error === status.error) journey.fail()
+            else if (
+              status.playing &&
+              current.playing &&
+              current.isLoaded &&
+              playRequestedGeneration === sourceGeneration
+            )
+              journey.status({ playing: true, error: null })
             Queue.offerUnsafe(queue, toEngineStatus(status, sourceGeneration))
           })
 

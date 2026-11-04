@@ -101,6 +101,10 @@ test('behavior metrics keep bounded dimensions and drop ambient identity and oth
 
 test('browser and native route spans preserve bounded templates without concrete paths or queries', () => {
   const cases: Array<readonly [string, string]> = [
+    [`/collections/${secret}/`, '/collections/:slug'],
+    ['/collections/', '/collections'],
+    ['/privacy/', '/privacy'],
+    ['/(tabs)', '/'],
     [`/labels/${secret}?token=${secret}`, '/labels/:slug'],
     [`/auth/${secret}`, '/auth/:action'],
     [`/new/${secret}`, '/new/:kind'],
@@ -114,4 +118,11 @@ test('browser and native route spans preserve bounded templates without concrete
     expect(event.transaction).toBe(expected)
     expect(JSON.stringify(event)).not.toContain(secret)
   }
+})
+
+test('message events keep a reviewed diagnostic message without fabricating an exception', () => {
+  const event = sanitizeError({ type: undefined, message: secret, extra: { private: secret } })
+  expect(event.message).toBe('Application diagnostic')
+  expect(event.exception).toBeUndefined()
+  expect(JSON.stringify(event)).not.toContain(secret)
 })

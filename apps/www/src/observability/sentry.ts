@@ -11,6 +11,8 @@ import { sentryExporterLayer } from '@gbfm/observability/sentry'
 import * as Sentry from '@sentry/browser'
 import { Effect, Layer } from 'effect'
 
+import { browserReaderLayer } from './reader'
+
 const config = telemetryConfig({
   application: 'www',
   dsn: import.meta.env.VITE_PUBLIC_SENTRY_DSN,
@@ -63,16 +65,18 @@ const lifecycle = Layer.effectDiscard(
   }),
 )
 
+const signals = observabilityLayer.pipe(
+  Layer.provide(
+    sentryExporterLayer({
+      startInactiveSpan: Sentry.startInactiveSpan,
+      addBreadcrumb: Sentry.addBreadcrumb,
+      captureException: Sentry.captureException,
+      metrics: { count: Sentry.metrics.count, distribution: Sentry.metrics.distribution },
+    }),
+  ),
+  Layer.provide(lifecycle),
+)
+
 export const webObservabilityLayer = config.enabled
-  ? observabilityLayer.pipe(
-      Layer.provide(
-        sentryExporterLayer({
-          startInactiveSpan: Sentry.startInactiveSpan,
-          addBreadcrumb: Sentry.addBreadcrumb,
-          captureException: Sentry.captureException,
-          metrics: { count: Sentry.metrics.count, distribution: Sentry.metrics.distribution },
-        }),
-      ),
-      Layer.provide(lifecycle),
-    )
+  ? Layer.merge(signals, browserReaderLayer.pipe(Layer.provide(signals)))
   : disabledObservabilityLayer

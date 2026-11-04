@@ -1,7 +1,7 @@
+import { readerJourney } from '@gbfm/observability/reader'
 import { expect, test } from 'vitest'
 
 import { recordingJourneys } from '../test/recordingJourneys'
-import { readerJourney } from './readerJourney'
 
 test('reader outcomes follow committed state, ignore stale results, and distinguish empty from failure', () => {
   const f = recordingJourneys()

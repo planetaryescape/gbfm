@@ -1,6 +1,4 @@
-import type { JourneyObserver } from '@gbfm/observability/callbacks'
-
-import type { ReaderState } from './readerState'
+import type { JourneyObserver } from './callbacks'
 
 export const readerJourney = (observer: JourneyObserver) => {
   let pending:
@@ -19,9 +17,11 @@ export const readerJourney = (observer: JourneyObserver) => {
         if (pending?.request === request) pending = undefined
       }
     },
-    committed: (
-      state: Pick<ReaderState, 'request' | 'status'> & { readonly hasContent: boolean },
-    ) => {
+    committed: (state: {
+      readonly request: number
+      readonly status: 'loading' | 'ready' | 'empty' | 'error'
+      readonly hasContent: boolean
+    }) => {
       if (!pending || pending.request !== state.request || state.status === 'loading') return
 
       pending.finish(

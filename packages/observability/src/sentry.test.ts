@@ -74,6 +74,7 @@ test.each([false, true])(
       )
       const secret = 'synthetic-secret-do-not-export'
       Sentry.captureException(new Error(secret, { cause: new Error(secret) }))
+      Sentry.captureMessage(secret)
       expect(await Sentry.flush(2000)).toBe(true)
       const payload = JSON.stringify(envelopes)
       expect(payload.includes('gbfm.journey.completed')).toBe(!counterUnavailable)
@@ -82,6 +83,7 @@ test.each([false, true])(
       expect(payload).not.toContain('PlaybackStartFailed')
       expect(payload).not.toContain('NavigationFailed')
       expect(payload).not.toContain(secret)
+      expect(payload).toContain('Application diagnostic')
       expect(payload).toContain('gbfm.journey')
       expect(
         envelopes.reduce(

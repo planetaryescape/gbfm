@@ -1,4 +1,5 @@
 import { useAtomSet, useAtomValue } from '@effect/atom-react'
+import { readerJourney } from '@gbfm/observability/reader'
 import { Effect, Redacted } from 'effect'
 import * as Atom from 'effect/reactivity/Atom'
 import { useFocusEffect } from 'expo-router'
@@ -17,7 +18,6 @@ import { useJourneys } from '@/observability/context'
 
 import { readerAction } from './readerAction'
 import { readerCache, type ReaderCache } from './readerCache'
-import { readerJourney } from './readerJourney'
 import { readerOwnership } from './readerOwnership'
 import { readReaderPosition, saveReaderPosition } from './readerPosition'
 import { initialReaderState, ReaderEvent, reduceReader } from './readerState'

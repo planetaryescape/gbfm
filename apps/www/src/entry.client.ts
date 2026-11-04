@@ -20,7 +20,7 @@ import { startArtworkFallback } from './view/artwork'
 
 const clientResources = Layer.mergeAll(
   webObservabilityLayer,
-  Player.playerClientLayer,
+  Player.playerClientLayer.pipe(Layer.provide(webObservabilityLayer)),
   Creator.CreatorServiceLive,
   Creator.CreatorUploadLive,
   Dashboard.DashboardServiceLive,

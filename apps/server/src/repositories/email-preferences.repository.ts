@@ -86,16 +86,21 @@ export async function canReceiveEmail(
 }
 
 export async function globalUnsubscribe(userId: string, database: DatabaseClient) {
-  return updateEmailPreferences(
-    userId,
-    {
-      globalUnsubscribe: true,
-      mixReleaseEnabled: false,
-      promotionalEnabled: false,
-      systemEnabled: false,
-    },
-    database,
-  )
+  const updates = {
+    globalUnsubscribe: true,
+    mixReleaseEnabled: false,
+    promotionalEnabled: false,
+    systemEnabled: false,
+    updatedAt: new Date(),
+  }
+
+  const [preferences] = await database
+    .insert(userEmailPreferencesTable)
+    .values({ userId, unsubscribeToken: crypto.randomUUID(), ...updates })
+    .onConflictDoUpdate({ target: userEmailPreferencesTable.userId, set: updates })
+    .returning()
+
+  return preferences
 }
 
 export async function getEmailPreferencesByUnsubscribeToken(

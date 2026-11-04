@@ -1,5 +1,5 @@
 import { SPOTIFY_ENTITY_KIND, spotifyEntityFromUrl, type SpotifyEntityRef } from '@gbfm/spotify'
-import { useLayoutEffect, useMemo, useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import { Linking, Text, TouchableOpacity, View } from 'react-native'
 
 import { useThemeColors } from '@/theme/colors'
@@ -46,7 +46,7 @@ function EntityActions({
 }: Props & { readonly entity: SpotifyEntityRef; readonly generation: number }) {
   const [pending, setPending] = useState<'play' | 'queue' | null>(null)
   const colors = useThemeColors()
-  const lifetime = useMemo(() => spotifyEntityLifetime(), [])
+  const [lifetime] = useState(() => spotifyEntityLifetime())
 
   useLayoutEffect(() => {
     lifetime.activate()

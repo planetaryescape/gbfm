@@ -21,6 +21,94 @@ const device: Device = {
   volume_percent: 50,
 }
 
+test.each(['mounted', 'disposed', 'replacement'] as const)(
+  'a queued entity action rechecks its component owner before execution: %s',
+  async (transition) => {
+    const started = Deferred.makeUnsafe<void>()
+    const release = Deferred.makeUnsafe<void>()
+    const calls: Array<string> = []
+    const pending: Array<'play' | 'queue' | null> = []
+    const notices: Array<string> = []
+
+    const f = await spotifyFixture((service) => ({
+      ...service,
+      player: {
+        ...service.player,
+        getMyDevices: () => Effect.succeed([device]),
+        play: () =>
+          Effect.suspend(() => {
+            calls.push('play')
+
+            return calls.length === 1
+              ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
+              : Effect.void
+          }),
+        addToQueue: () =>
+          Effect.sync(() => {
+            calls.push('queue')
+          }),
+      },
+    }))
+
+    const lifecycle = spotifyConnectionLifecycle(f.run)
+    const firstLifetime = spotifyEntityLifetime()
+    const secondLifetime = spotifyEntityLifetime()
+    const shared = { lifecycle, generation: lifecycle.current(), entity, open: () => {} }
+
+    try {
+      const first = runSpotifyEntityAction({
+        ...shared,
+        lifetime: firstLifetime,
+        action: 'play',
+        setPending: () => {},
+        notice: () => {},
+      })
+
+      await Effect.runPromise(Deferred.await(started))
+
+      const secondInput = {
+        ...shared,
+        lifetime: secondLifetime,
+        setPending: (value: 'play' | 'queue' | null) => {
+          pending.push(value)
+        },
+        notice: (value: string) => {
+          notices.push(value)
+        },
+      }
+
+      const second = runSpotifyEntityAction({ ...secondInput, action: 'play' })
+      let replacement: Promise<void> | undefined
+
+      if (transition !== 'mounted') secondLifetime.dispose()
+
+      if (transition === 'replacement') {
+        secondLifetime.activate()
+        replacement = runSpotifyEntityAction({ ...secondInput, action: 'queue' })
+      }
+
+      await Effect.runPromise(Deferred.succeed(release, undefined))
+      await Promise.all([first, second, replacement])
+
+      const expected = {
+        mounted: { calls: ['play', 'play'], pending: ['play', null], notices: ['Playing track'] },
+        disposed: { calls: ['play'], pending: ['play'], notices: [] },
+        replacement: {
+          calls: ['play', 'queue'],
+          pending: ['play', 'queue', null],
+          notices: ['Added to queue'],
+        },
+      }[transition]
+
+      expect(calls).toEqual(expected.calls)
+      expect(pending).toEqual(expected.pending)
+      expect(notices).toEqual(expected.notices)
+    } finally {
+      await f.dispose()
+    }
+  },
+)
+
 test.each(['mounted', 'unmount', 'disconnect', 'replacement'] as const)(
   'entity admission is synchronous and completion is owned after %s',
   async (transition) => {

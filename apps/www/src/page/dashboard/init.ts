@@ -67,6 +67,8 @@ export const init =
         ),
       }
 
+    if (section === 'integrations' && !principal.id) return { model: { ...model, phase: 'ready' } }
+
     if (section === 'integrations' || section === 'spotify-callback')
       return {
         model: {

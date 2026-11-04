@@ -82,14 +82,17 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
           },
     Loaded: ({ page }) => ({ model: { ...model, page, phase: 'ready', error: null } }),
     Failed: ({ message }) => ({ model: { ...model, phase: 'ready', error: message } }),
-    Issued: () => {
+    Issued: ({ disclosure }) => {
       const child = Dialog.update(model.passwordDialog, Dialog.Message.RequestedClose())
 
       return {
         model: {
           ...model,
           phase: 'loading',
-          notice: 'Key created. Save the secret below before leaving this page.',
+          notice:
+            disclosure === 'Shown'
+              ? 'Key created. Save the secret below before leaving this page.'
+              : 'A key was issued after this confirmation was cleared. Revoke it from the list and create a replacement.',
           passwordDialog: child.model,
           verifyingPassword: false,
           passwordError: null,

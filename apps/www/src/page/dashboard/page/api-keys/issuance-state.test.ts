@@ -70,7 +70,7 @@ describe('restricted issuance lifecycle', () => {
     expect(state.secret()).toBeNull()
   })
 
-  it('characterizes pagehide clearing without treating it as view suspension', () => {
+  it('discards issuance after pagehide clears its input even while the view stays live', () => {
     const state = createIssuanceState()
     state.setLive(true)
     state.requestPassword(input)
@@ -78,9 +78,25 @@ describe('restricted issuance lifecycle', () => {
     state.clear()
     expect(state.live()).toBe(true)
     expect(state.verifying()).toBe(true)
+    expect(state.submit()).toBe(false)
     state.issued(Redacted.make('disposable-test-value'))
-    expect(state.secret()).not.toBeNull()
+    expect(state.secret()).toBeNull()
+    expect(state.verifying()).toBe(false)
+    expect(state.submit()).toBe(true)
     state.clear()
     expect(state.secret()).toBeNull()
+  })
+
+  it('does not restore a cancelled secret when the view resumes before issuance completes', () => {
+    const state = createIssuanceState()
+    state.setLive(true)
+    state.requestPassword(input)
+    state.verify()
+    state.setLive(false)
+    state.setLive(true)
+    state.issued(Redacted.make('disposable-test-value'))
+    expect(state.secret()).toBeNull()
+    expect(state.verifying()).toBe(false)
+    expect(state.submit()).toBe(true)
   })
 })

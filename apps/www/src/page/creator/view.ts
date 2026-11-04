@@ -701,6 +701,7 @@ export const view = defineView<Model, typeof Message.Type, ViewInputs>((model, i
     return h.section([h.Class('page narrow')], [h.p([], ['Loading draft…'])])
 
   const busy =
+    model.remoteSave !== null ||
     model.phase === 'saving' ||
     model.phase === 'uploading' ||
     model.uploadState !== 'idle' ||
@@ -741,7 +742,7 @@ export const view = defineView<Model, typeof Message.Type, ViewInputs>((model, i
                   h.DataAttribute('save-state', model.saveState),
                 ],
                 [
-                  model.phase === 'saving'
+                  model.remoteSave !== null
                     ? 'Saving…'
                     : Match.value(model.saveState).pipe(
                         Match.when('saved-locally', () => 'Draft saved locally'),
@@ -809,6 +810,9 @@ export const view = defineView<Model, typeof Message.Type, ViewInputs>((model, i
         ],
       ),
       model.error ? h.p([h.Class('form-error'), h.Role('alert')], [model.error]) : h.empty,
+      model.localError
+        ? h.p([h.Class('form-error'), h.Role('alert')], [model.localError])
+        : h.empty,
       model.episodeError
         ? h.p([h.Class('form-error'), h.Role('alert')], [model.episodeError])
         : h.empty,

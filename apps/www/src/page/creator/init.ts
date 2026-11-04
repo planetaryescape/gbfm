@@ -7,13 +7,27 @@ import { keyOf, MosaicState, type Model } from './model'
 import type { CreatorKind, CreatorService } from './services'
 
 export interface InitInput {
+  readonly editorId?: string
   readonly kind: CreatorKind
   readonly editSlug: string | null
   readonly creatorId: string
   readonly authorized: boolean
 }
 
-export const initialModel = ({ kind, editSlug, creatorId, authorized }: InitInput): Model => ({
+export const initialModel = ({
+  kind,
+  editSlug,
+  creatorId,
+  authorized,
+  editorId = crypto.randomUUID(),
+}: InitInput): Model => ({
+  editorId,
+  localDraftKey: `${kind}:${editSlug ?? 'new'}`,
+  revision: 0,
+  saveRequestId: 0,
+  remoteSave: null,
+  localError: null,
+  postMusicRequestId: 0,
   reviewDialog: Dialog.init({ id: 'publish-review' }),
   draft: {
     kind,

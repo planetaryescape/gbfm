@@ -2,6 +2,7 @@ import { AudioResponse } from '@gbfm/api/audio'
 import { CompiledPostResponse, PostResponse } from '@gbfm/api/post'
 import { expect, test, type Page } from '@playwright/test'
 import { Schema } from 'effect'
+import { HttpApiError } from 'effect/http-api'
 
 const signIn = async (page: Page, email = 'admin@gbfm.local') => {
   await page.goto('/auth/sign-in')
@@ -43,15 +44,76 @@ test('source diagnostics update after editing and restoring a local draft', asyn
   await expect(diagnostics).toHaveCount(0)
 })
 
+test('remote draft save retains edits made while its response is pending', async ({
+  page,
+}, testInfo) => {
+  await signIn(page)
+  await page.goto('/new/editorial')
+  const canvas = page.getByRole('textbox', { name: 'Writing canvas', exact: true })
+  const original = `Original fixture ${crypto.randomUUID()}`
+  await page.getByRole('textbox', { name: 'Title', exact: true }).fill(original)
+  await canvas.fill(original)
+  await expect(page.getByRole('status').filter({ hasText: 'Draft saved locally' })).toBeVisible()
+  const accepted = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  let requests = 0
+  await page.route('**/api/content/post', async (route) => {
+    requests += 1
+    const response = await route.fetch()
+    expect(response.ok()).toBe(true)
+    accepted.resolve()
+    await release.promise
+    await route.fulfill({ response })
+  })
+
+  try {
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+    await accepted.promise
+    await expect(page.getByRole('status').filter({ hasText: 'Saving…' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Save draft', exact: true })).toBeDisabled()
+    await canvas.fill('Newer unsaved fixture content')
+    release.resolve()
+    await expect(page.getByRole('status').filter({ hasText: 'Unsaved changes' })).toBeVisible()
+    await expect(canvas).toHaveValue('Newer unsaved fixture content')
+    expect(requests).toBe(1)
+    const retained = await page.evaluate(() => localStorage.getItem('gbfm:creator:post:new'))
+
+    const draft = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({ content: Schema.String, editSlug: Schema.String, postId: Schema.String }),
+      ),
+    )(retained)
+
+    expect(draft.content).toBe('Newer unsaved fixture content')
+    expect(draft.editSlug).not.toBe('')
+    expect(draft.postId).not.toBe('')
+    await testInfo.attach('creator-newer-edits-retained', {
+      body: await page.screenshot({
+        path: testInfo.outputPath('creator-newer-edits-retained.png'),
+      }),
+      contentType: 'image/png',
+    })
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'All changes saved' })).toBeVisible()
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem('gbfm:creator:post:new')))
+      .toBeNull()
+  } finally {
+    release.resolve()
+  }
+})
+
 test('a creator resolves a saved draft from the dashboard without saving other edits or publishing', async ({
   page,
 }, testInfo) => {
   await signIn(page, 'creator@gbfm.local')
   const slug = `e2e-manual-resolution-${crypto.randomUUID()}`
   const content = 'Listening: https://open.spotify.com/track/2Mf7lfHxdiABiO7j0BDbHc'
+
   const created = await page.request.post('/api/content/post', {
     data: { type: 'micro', title: 'Resolve my saved draft', content, slug, draft: true },
   })
+
   expect(created.ok()).toBe(true)
   const post = Schema.decodeUnknownSync(PostResponse)(await created.json())
   await page.goto('/dashboard/content/tweets')
@@ -91,9 +153,11 @@ test('a creator resolves a saved draft from the dashboard without saving other e
     body: await page.screenshot({ path: testInfo.outputPath('post-music-success.png') }),
     contentType: 'image/png',
   })
+
   const saved = Schema.decodeUnknownSync(CompiledPostResponse)(
     await (await page.request.get(`/api/content/posts/${slug}/edit`)).json(),
   )
+
   expect(saved).toMatchObject({
     content,
     draft: true,
@@ -111,11 +175,13 @@ test('a creator resolves a saved draft from the dashboard without saving other e
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await page.getByRole('button', { name: 'Update', exact: true }).click()
   await expect(page.locator('.creator-published')).toContainText('Published.')
+
   const resolvedAfterPublication = page.waitForResponse(
     (response) =>
       response.url().endsWith(`/posts/${post.id}/resolve-music-entity`) &&
       response.request().method() === 'POST',
   )
+
   await page.getByRole('button', { name: 'Re-resolve saved post music', exact: true }).click()
   expect((await resolvedAfterPublication).status()).toBe(200)
 })
@@ -125,6 +191,7 @@ test('saved-post resolution explains missing links and provider retry delays, th
 }, testInfo) => {
   await signIn(page, 'creator@gbfm.local')
   const slug = `e2e-resolution-errors-${crypto.randomUUID()}`
+
   const created = await page.request.post('/api/content/post', {
     data: {
       type: 'post',
@@ -134,6 +201,7 @@ test('saved-post resolution explains missing links and provider retry delays, th
       draft: true,
     },
   })
+
   expect(created.ok()).toBe(true)
   const post = Schema.decodeUnknownSync(PostResponse)(await created.json())
   await page.goto(`/new/editorial?edit=${slug}`)
@@ -152,7 +220,7 @@ test('saved-post resolution explains missing links and provider retry delays, th
     route.fulfill({
       status: 503,
       headers: { 'retry-after': '30' },
-      json: { _tag: 'ServiceUnavailable' },
+      json: new HttpApiError.ServiceUnavailable(),
     }),
   )
   await page.getByRole('button', { name: 'Attach & save music', exact: true }).click()
@@ -209,10 +277,12 @@ test('author selection supports keyboard search, removal, retry and saved identi
   const result = page.getByRole('button', { name: 'Local Creator · @local-creator', exact: true })
   await result.press('Enter')
   await expect(result).toHaveCount(0)
+
   const selectedResult = page.getByRole('button', {
     name: 'Local Creator · @local-creator — Selected',
     exact: true,
   })
+
   await expect(selectedResult).toBeDisabled()
   await authors
     .getByRole('listitem')
@@ -224,9 +294,11 @@ test('author selection supports keyboard search, removal, retry and saved identi
   await page.getByRole('textbox', { name: 'Story URL', exact: true }).fill(slug)
   await page.getByRole('button', { name: 'Publish', exact: true }).click()
   await expect(page.locator('.creator-published')).toContainText('Published.')
+
   const post = Schema.decodeUnknownSync(CompiledPostResponse)(
     await (await page.request.get(`/api/content/posts/${slug}/edit`)).json(),
   )
+
   expect(post.creators?.map(({ id }) => id).sort()).toEqual([...creatorIds].sort())
   await page.goto(`/new/tweet?edit=${slug}`)
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
@@ -239,9 +311,11 @@ test('author selection supports keyboard search, removal, retry and saved identi
     .click()
   await page.getByRole('button', { name: 'Update', exact: true }).click()
   await expect(page.locator('.creator-published')).toContainText('Published.')
+
   const edited = Schema.decodeUnknownSync(CompiledPostResponse)(
     await (await page.request.get(`/api/content/posts/${slug}/edit`)).json(),
   )
+
   expect(edited.creators?.map(({ id }) => id)).toEqual(creatorIds.slice(0, 1))
 })
 
@@ -271,6 +345,7 @@ test('mix creation satisfies the API contract and editing preserves audio and co
   await expect(
     page.getByRole('list', { name: 'Authors', exact: true }).getByRole('listitem'),
   ).toHaveCount(creatorNames.length)
+
   for (const name of creatorNames)
     await expect(page.getByRole('list', { name: 'Authors', exact: true })).toContainText(name ?? '')
   await expect(page.getByRole('textbox', { name: 'Author IDs', exact: true })).toBeHidden()
@@ -480,6 +555,7 @@ test('music references show published tweets without losing the draft and recove
   await signIn(page)
   const suffix = crypto.randomUUID()
   const entityId = '00000000-0000-4000-8000-000000000001'
+
   for (const draft of [false, true]) {
     const response = await page.request.post('/api/content/post', {
       data: {
@@ -491,8 +567,10 @@ test('music references show published tweets without losing the draft and recove
         musicEntityId: entityId,
       },
     })
+
     expect(response.ok()).toBe(true)
   }
+
   await page.goto('/new/tweet')
   const title = page.getByRole('textbox', { name: 'Title', exact: true })
   await title.fill('A fresh thought about this song')
@@ -501,9 +579,11 @@ test('music references show published tweets without losing the draft and recove
     .fill('https://open.spotify.com/track/E2ERootTrack')
   const endpoint = '**/api/content/posts/micro?musicEntityType=*'
   let release: () => void = () => {}
+
   const pending = new Promise<void>((resolve) => {
     release = resolve
   })
+
   await page.route(endpoint, async (route) => {
     await pending
     await route.continue()
@@ -571,8 +651,10 @@ test('an attached track and an embedded Bandcamp page preview and publish as pla
   page,
 }) => {
   const { creatorNames } = await signIn(page)
+
   const bandcamp =
     'https://babakushi.bandcamp.com/track/the-vigil-of-mashonisa-feat-b-man-lukorito-ntombela-alberto-ranfery-gusto-new-york-zulu-yuba-ushiii'
+
   const player = 'https://bandcamp.com/EmbeddedPlayer/track=1395951450/'
   const slug = `e2e-bandcamp-${Date.now()}`
 

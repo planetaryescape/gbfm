@@ -40,7 +40,11 @@ export class PlaybackRejected extends Data.TaggedError('PlaybackRejected')<{
 }> {}
 
 export interface AudioEngineContract {
-  readonly replace: (url: string, sourceGeneration: number) => Effect.Effect<void>
+  readonly replace: (
+    url: string,
+    sourceGeneration: number,
+    intent?: 'play' | 'paused',
+  ) => Effect.Effect<void>
   readonly clearSource: Effect.Effect<void>
   readonly play: Effect.Effect<void, PlaybackRejected>
   readonly pause: Effect.Effect<void>

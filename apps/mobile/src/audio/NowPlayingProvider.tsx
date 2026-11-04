@@ -1,5 +1,6 @@
 import { useAtomValue } from '@effect/atom-react'
 import type { AudioResponse } from '@gbfm/api/audio'
+import { noJourneys } from '@gbfm/observability/callbacks'
 import {
   type AudioEngine,
   makeAudioPlayback,
@@ -26,6 +27,7 @@ import { Platform } from 'react-native'
 import { ExpoAudioEngineLayer } from '@/audio/expoAudioEngine'
 import { PlayReporterLive } from '@/audio/playTracker'
 import { PlayerStorageLive } from '@/audio/queueStorage'
+import { useJourneys } from '@/observability/context'
 import { audioModeAtom } from '@/store/atoms/audio-mode'
 
 type Track = typeof AudioResponse.Type
@@ -84,6 +86,7 @@ const initialSnapshot: PlaybackSnapshot = {
 }
 
 export function NowPlayingProvider({ children }: PropsWithChildren) {
+  const journeys = useJourneys()
   useAtomValue(audioModeAtom)
 
   const player = useAudioPlayer(null, { updateInterval: 500, keepAudioSessionActive: true })
@@ -111,7 +114,11 @@ export function NowPlayingProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     const runtime = ManagedRuntime.make(
       Layer.mergeAll(
-        ExpoAudioEngineLayer(player, Platform.OS === 'web' ? 'web' : 'native'),
+        ExpoAudioEngineLayer(
+          player,
+          Platform.OS === 'web' ? 'web' : 'native',
+          Platform.OS === 'web' ? noJourneys : journeys,
+        ),
         PlayReporterLive,
       ).pipe(Layer.provideMerge(PlayerStorageLive)),
     )
@@ -134,7 +141,7 @@ export function NowPlayingProvider({ children }: PropsWithChildren) {
       runtimeRef.current = null
       void runtime.dispose()
     }
-  }, [player])
+  }, [player, journeys])
 
   const loadAndPlay = useCallback(
     (nextTrack: Track) => {

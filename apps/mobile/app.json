@@ -9,6 +9,14 @@
     },
     "plugins": [
       "./plugins/with-signing-team",
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "goosebumps-collective",
+          "project": "gbfm-mobile",
+          "url": "https://sentry.io/"
+        }
+      ],
       "expo-router",
       "expo-splash-screen",
       "expo-secure-store",

@@ -7,6 +7,8 @@ import { useColorScheme } from 'react-native'
 
 import { NowPlayingProvider } from '@/audio/NowPlayingProvider'
 import { QueueToast } from '@/components/NowPlaying/QueueToast'
+import { ObservabilityProvider } from '@/observability/context'
+import { instrumentRoot, mobileObservabilityLayer } from '@/observability/sentry'
 import { SpotifyConnectionProvider } from '@/spotify/connection'
 import { FontsLoadedBridge, splashHideAtom, useFontsReady } from '@/store/atoms/fonts'
 import { AuthProvider } from '@/store/auth'
@@ -29,15 +31,21 @@ const lightTheme = {
   colors: { ...DefaultTheme.colors, background: brandLight.bg },
 }
 
-export default function Layout() {
+function Layout() {
   return (
     <RegistryProvider>
-      <PreferencesProvider>
-        <AppLayout />
-      </PreferencesProvider>
+      <ObservabilityProvider layer={mobileObservabilityLayer}>
+        <PreferencesProvider>
+          <AppLayout />
+        </PreferencesProvider>
+      </ObservabilityProvider>
     </RegistryProvider>
   )
 }
+
+export default instrumentRoot(Layout, {
+  touchEventBoundaryProps: { extractTextFromChildren: false },
+})
 
 function AppLayout() {
   const systemColorScheme = useColorScheme()

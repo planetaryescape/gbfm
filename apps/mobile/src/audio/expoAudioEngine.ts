@@ -1,3 +1,5 @@
+import { noJourneys, type JourneyObserver } from '@gbfm/observability/callbacks'
+import { playbackJourney } from '@gbfm/observability/playback'
 import {
   AudioEngine,
   PlaybackRejected,
@@ -34,25 +36,53 @@ export type ExpoAudioEnginePlayer = Pick<
   | 'setActiveForLockScreen'
 >
 
-const makeExpoAudioEngine = (player: ExpoAudioEnginePlayer, platform: 'native' | 'web') =>
+const makeExpoAudioEngine = (
+  player: ExpoAudioEnginePlayer,
+  platform: 'native' | 'web',
+  journeys: JourneyObserver,
+) =>
   Effect.sync(() => {
     let sourceGeneration: number | null = null
+    let playRequestedGeneration: number | null = null
+    const journey = playbackJourney(journeys)
 
     return {
-      replace: (url: string, generation: number) =>
+      replace: (url: string, generation: number, intent: 'play' | 'paused' = 'play') =>
         Effect.sync(() => {
+          journey.replace(intent)
           sourceGeneration = generation
-          player.replace(url)
+          playRequestedGeneration = null
+
+          try {
+            player.replace(url)
+          } catch (error) {
+            journey.fail()
+            throw error
+          }
         }),
       clearSource: Effect.sync(() => {
+        journey.cancel()
         sourceGeneration = null
+        playRequestedGeneration = null
         player.replace(null)
       }),
       play: Effect.try({
-        try: () => player.play(),
-        catch: (cause: unknown) => new PlaybackRejected({ cause }),
+        try: () => {
+          playRequestedGeneration = sourceGeneration
+          journey.play()
+          player.play()
+        },
+        catch: (cause: unknown) => {
+          journey.fail()
+
+          return new PlaybackRejected({ cause })
+        },
       }),
-      pause: Effect.sync(() => player.pause()),
+      pause: Effect.sync(() => {
+        journey.cancel()
+        playRequestedGeneration = null
+        player.pause()
+      }),
       setVolume: (volume: number) =>
         Effect.sync(() => {
           player.volume = Math.max(0, Math.min(1, volume))
@@ -67,10 +97,25 @@ const makeExpoAudioEngine = (player: ExpoAudioEnginePlayer, platform: 'native' |
       changes: Stream.callback<EngineStatus>((queue) =>
         Effect.gen(function* () {
           const subscription = subscribeToPlaybackStatus(player, platform, (status) => {
+            const current = player.currentStatus
+
+            if (status.error && current.error === status.error) journey.fail()
+            else if (
+              status.playing &&
+              current.playing &&
+              current.isLoaded &&
+              playRequestedGeneration === sourceGeneration
+            )
+              journey.status({ playing: true, error: null })
             Queue.offerUnsafe(queue, toEngineStatus(status, sourceGeneration))
           })
 
-          yield* Effect.addFinalizer(() => Effect.sync(() => subscription.remove()))
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              journey.cancel()
+              subscription.remove()
+            }),
+          )
         }),
       ),
 
@@ -102,5 +147,8 @@ const makeExpoAudioEngine = (player: ExpoAudioEnginePlayer, platform: 'native' |
     }
   })
 
-export const ExpoAudioEngineLayer = (player: ExpoAudioEnginePlayer, platform: 'native' | 'web') =>
-  Layer.effect(AudioEngine, makeExpoAudioEngine(player, platform))
+export const ExpoAudioEngineLayer = (
+  player: ExpoAudioEnginePlayer,
+  platform: 'native' | 'web',
+  journeys: JourneyObserver = noJourneys,
+) => Layer.effect(AudioEngine, makeExpoAudioEngine(player, platform, journeys))

@@ -21,14 +21,6 @@ describe('editorial OAuth provider on migrated D1', () => {
       await (await fixture.exchange(clientId, await fixture.authorize(clientId, 'other'))).json(),
     )
 
-    const otherClientId = await fixture.register()
-
-    const exclusive = Schema.decodeUnknownSync(OAuthTokens)(
-      await (
-        await fixture.exchange(otherClientId, await fixture.authorize(otherClientId, 'other'))
-      ).json(),
-    )
-
     const otherId = Schema.decodeUnknownSync(UserId)('other')
 
     expect(await Effect.runPromise(fixture.service.verify(first.access_token))).toMatchObject({
@@ -46,19 +38,7 @@ describe('editorial OAuth provider on migrated D1', () => {
       (await Effect.runPromise(fixture.service.listConnections(otherId)))
         .map((connection) => connection.clientId)
         .toSorted(),
-    ).toEqual([clientId, otherClientId].toSorted())
-    expect(
-      await Effect.runPromise(
-        fixture.service.listConnections(Schema.decodeUnknownSync(UserId)('reader')),
-      ),
-    ).toEqual([])
-
-    const secondCode = await fixture.authorize(clientId, 'other')
-    await Effect.runPromise(fixture.service.disconnect(fixture.userId, otherClientId))
-    expect(await Effect.runPromise(fixture.service.verify(exclusive.access_token))).toMatchObject({
-      userId: 'other',
-      clientId: otherClientId,
-    })
+    ).toEqual([clientId])
     await Effect.runPromise(fixture.service.disconnect(fixture.userId, clientId))
     expect(await Effect.runPromise(fixture.service.listConnections(fixture.userId))).toEqual([])
     expect(
@@ -67,11 +47,6 @@ describe('editorial OAuth provider on migrated D1', () => {
     expect(await Effect.runPromise(fixture.service.verify(second.access_token))).toMatchObject({
       userId: 'other',
     })
-    expect(await Effect.runPromise(fixture.service.verify(exclusive.access_token))).toMatchObject({
-      userId: 'other',
-      clientId: otherClientId,
-    })
-    expect((await fixture.exchange(clientId, secondCode)).status).toBe(200)
 
     const refreshed = await fixture.request('/oauth2/token', {
       grant_type: 'refresh_token',
@@ -88,18 +63,58 @@ describe('editorial OAuth provider on migrated D1', () => {
         ),
       ),
     ).toMatchObject({ userId: 'other' })
+  })
+
+  test('another user cannot list or revoke an exclusive app and role demotion does not prevent managing grants', async () => {
+    await using fixture = await createEditorialOAuthFixture()
+    const clientId = await fixture.register()
+    const otherId = Schema.decodeUnknownSync(UserId)('other')
+
+    const tokens = Schema.decodeUnknownSync(OAuthTokens)(
+      await (await fixture.exchange(clientId, await fixture.authorize(clientId, 'other'))).json(),
+    )
+
+    expect(await Effect.runPromise(fixture.service.listConnections(fixture.userId))).toEqual([])
+    expect(
+      await Effect.runPromise(
+        fixture.service.listConnections(Schema.decodeUnknownSync(UserId)('reader')),
+      ),
+    ).toEqual([])
+    await Effect.runPromise(fixture.service.disconnect(fixture.userId, clientId))
+    expect(await Effect.runPromise(fixture.service.verify(tokens.access_token))).toMatchObject({
+      userId: 'other',
+      clientId,
+    })
     await fixture.db.update(user).set({ role: 'user' }).where(eq(user.id, otherId))
     expect(
       (await Effect.runPromise(fixture.service.listConnections(otherId)))
         .map((connection) => connection.clientId)
         .toSorted(),
-    ).toEqual([clientId, otherClientId].toSorted())
-    await Effect.runPromise(fixture.service.disconnect(otherId, otherClientId))
-    expect(
-      (await Effect.runPromise(fixture.service.listConnections(otherId))).map(
-        (connection) => connection.clientId,
-      ),
     ).toEqual([clientId])
+    await Effect.runPromise(fixture.service.disconnect(otherId, clientId))
+    expect(await Effect.runPromise(fixture.service.listConnections(otherId))).toEqual([])
+  })
+
+  test('disconnecting one user preserves another user pending code for the same client', async () => {
+    await using fixture = await createEditorialOAuthFixture()
+    const clientId = await fixture.register()
+
+    const first = Schema.decodeUnknownSync(OAuthTokens)(
+      await (await fixture.exchange(clientId, await fixture.authorize(clientId))).json(),
+    )
+
+    const secondCode = await fixture.authorize(clientId, 'other')
+    await Effect.runPromise(fixture.service.disconnect(fixture.userId, clientId))
+    const exchanged = await fixture.exchange(clientId, secondCode)
+    expect(exchanged.status).toBe(200)
+    const second = Schema.decodeUnknownSync(OAuthTokens)(await exchanged.json())
+    expect(await Effect.runPromise(fixture.service.verify(second.access_token))).toMatchObject({
+      userId: 'other',
+      clientId,
+    })
+    expect(
+      await Effect.runPromise(fixture.service.verify(first.access_token).pipe(Effect.result)),
+    ).toHaveProperty('_tag', 'Failure')
   })
 
   test('impersonated sessions cannot authorize an editorial connection', async () => {

@@ -110,7 +110,7 @@ export const init: Runtime.ApplicationInit<Model, Message, Flags, Services> = (f
       StartClient(),
       ...(flags.tweet
         ? [
-            Command.mapMessage(SpotifyPlayback.Load(), (message) =>
+            Command.mapMessage(SpotifyPlayback.Load({ requestId: 0 }), (message) =>
               Message.GotSpotifyPlaybackMessage({ message }),
             ),
           ]

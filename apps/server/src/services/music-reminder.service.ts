@@ -1,5 +1,6 @@
-import { eq } from 'drizzle-orm'
-import { Context, Effect, Layer } from 'effect'
+import { REMINDER_STATUS } from '@gbfm/core/status'
+import { eq, sql } from 'drizzle-orm'
+import { Clock, Context, Effect, Layer } from 'effect'
 
 import { Database } from '@/db/layer'
 import {
@@ -130,9 +131,24 @@ const updateEffect = (id: string, userId: string, data: Partial<NewMusicReminder
 
     if (data.notes !== undefined) updateValues.notes = data.notes
 
+    const now = yield* Clock.currentTimeMillis
+
+    const scheduleChanged =
+      data.reminderDate === undefined
+        ? sql`0`
+        : sql`${musicReminder.reminderDate} != ${data.reminderDate.getTime()}`
+
     const updatedRecords = yield* Effect.tryPromise({
       try: () =>
-        db.update(musicReminder).set(updateValues).where(eq(musicReminder.id, id)).returning(),
+        db
+          .update(musicReminder)
+          .set({
+            ...updateValues,
+            status: sql`case when ${musicReminder.status} = ${REMINDER_STATUS.PROCESSING} and ${musicReminder.isSent} = 0 and (${scheduleChanged}) then ${REMINDER_STATUS.PENDING} else ${musicReminder.status} end`,
+            updatedAt: sql`case when ${musicReminder.status} = ${REMINDER_STATUS.PROCESSING} and not (${scheduleChanged}) then ${musicReminder.updatedAt} else max(${musicReminder.updatedAt} + 1, ${now}) end`,
+          })
+          .where(eq(musicReminder.id, id))
+          .returning(),
       catch: (error) =>
         new DatabaseError({
           message: `Failed to update music reminder: ${getErrorMessage(error)}`,

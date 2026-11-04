@@ -1,10 +1,8 @@
 import * as SecureStore from 'expo-secure-store'
 
-const TOKENS_STORAGE_KEY = 'spotify-effect:tokens'
+import { spotifyTokenStorage } from './tokenStorage'
 
 const SECURE_STORE_KEY = 'gbfm_spotify_tokens'
-
-const secureStoreWritable = new Set([TOKENS_STORAGE_KEY])
 
 const makeMemoryStorage = (): Storage => {
   const store = new Map<string, string>()
@@ -25,41 +23,21 @@ const makeMemoryStorage = (): Storage => {
   }
 }
 
-const memoryLocalStorage = makeMemoryStorage()
-
 const memorySessionStorage = makeMemoryStorage()
 
-export const hydrateSpotifyTokensFromSecureStore = async () => {
-  const stored = await SecureStore.getItemAsync(SECURE_STORE_KEY).catch(() => null)
+const tokens = spotifyTokenStorage({
+  read: () => SecureStore.getItemAsync(SECURE_STORE_KEY),
+  write: (value) => SecureStore.setItemAsync(SECURE_STORE_KEY, value),
+  remove: () => SecureStore.deleteItemAsync(SECURE_STORE_KEY),
+})
 
-  if (stored) memoryLocalStorage.setItem(TOKENS_STORAGE_KEY, stored)
-}
+export const hydrateSpotifyTokensFromSecureStore = tokens.hydrate
 
-export const spotifyLocalStorage: Storage = {
-  get length() {
-    return memoryLocalStorage.length
-  },
-  clear: () => {
-    memoryLocalStorage.clear()
-    void SecureStore.deleteItemAsync(SECURE_STORE_KEY).catch(() => {})
-  },
-  getItem: (key) => memoryLocalStorage.getItem(key),
-  key: (index) => memoryLocalStorage.key(index),
-  removeItem: (key) => {
-    memoryLocalStorage.removeItem(key)
+export const guardSpotifyTokenWrites = tokens.guardWrites
 
-    if (secureStoreWritable.has(key)) {
-      void SecureStore.deleteItemAsync(SECURE_STORE_KEY).catch(() => {})
-    }
-  },
-  setItem: (key, value) => {
-    memoryLocalStorage.setItem(key, value)
+export const invalidateSpotifyTokens = tokens.invalidate
 
-    if (secureStoreWritable.has(key)) {
-      void SecureStore.setItemAsync(SECURE_STORE_KEY, value).catch(() => {})
-    }
-  },
-}
+export const spotifyLocalStorage = tokens.storage
 
 export const spotifySessionStorage: Storage = memorySessionStorage
 

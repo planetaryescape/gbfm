@@ -26,6 +26,7 @@ import {
 import { withTestLayer } from '@/test/effect'
 import { gatedPostDatabase } from '@/test/gated-post-database'
 import { createMigratedD1Database } from '@/test/migrate-d1'
+import { reminderClock } from '@/test/reminder-clock'
 
 const workerBindings = (): WorkerConfigBindings => ({
   APP_STAGE: 'test',
@@ -49,7 +50,7 @@ const workerBindings = (): WorkerConfigBindings => ({
   StorageSigningEndpoint: 'configured',
 })
 
-const reminderLayer = (d1: D1Database, messages: Array<OutboundEmailMessage>) => {
+const reminderLayer = (d1: D1Database, messages: Array<OutboundEmailMessage>, failFirst = true) => {
   let deliveryAttempts = 0
   const database = DatabaseLayer(d1)
 
@@ -58,7 +59,7 @@ const reminderLayer = (d1: D1Database, messages: Array<OutboundEmailMessage>) =>
       messages.push(message)
       deliveryAttempts += 1
 
-      return deliveryAttempts === 1
+      return failFirst && deliveryAttempts === 1
         ? Effect.fail(new EmailUnavailable({ providerCode: 'unknown' }))
         : Effect.succeed({ provider: 'cloudflare' as const, messageId: 'reminder-accepted' })
     },
@@ -78,6 +79,54 @@ const reminderLayer = (d1: D1Database, messages: Array<OutboundEmailMessage>) =>
 }
 
 describe('reminder queue delivery', () => {
+  test('provider acceptance without a persisted receipt remains ambiguous and recovery may duplicate mail', async () => {
+    await using resource = await createMigratedD1Database()
+    const clock = reminderClock()
+    const messages: Array<OutboundEmailMessage> = []
+
+    const layer = reminderLayer(resource.database, messages, false).pipe(
+      Layer.provideMerge(clock.layer),
+    )
+
+    const database = Effect.runSync(withTestLayer(Database, layer))
+    await database
+      .insert(user)
+      .values({ id: 'listener', name: 'Listener', email: 'l@example.test' })
+    await database.insert(musicReminder).values({
+      id: 'pending',
+      userId: 'listener',
+      musicTitle: 'Mix',
+      artistName: 'Artist',
+      musicUrl: 'https://example.test/mix',
+      reminderDate: new Date(0),
+    })
+    await database.run(
+      sql`CREATE TRIGGER reject_receipt BEFORE UPDATE ON email_delivery_logs WHEN NEW.status = 'SENT' BEGIN SELECT RAISE(ABORT, 'fixture receipt failure'); END`,
+    )
+    await expect(
+      Effect.runPromise(withTestLayer(processReminderJob('pending'), layer)),
+    ).rejects.toMatchObject({ stage: 'email' })
+    expect(messages).toHaveLength(1)
+    expect((await database.select().from(emailDeliveryLogsTable))[0]?.status).toBe('PENDING')
+    expect((await database.select().from(musicReminder))[0]?.status).toBe(REMINDER_STATUS.FAILED)
+    expect(await Effect.runPromise(withTestLayer(queryDueReminders, layer))).toEqual([])
+    await Effect.runPromise(withTestLayer(processReminderJob('pending'), layer))
+    expect(messages).toHaveLength(1)
+    await database.run(sql`DROP TRIGGER reject_receipt`)
+    clock.advance()
+    expect(await Effect.runPromise(withTestLayer(queryDueReminders, layer))).toHaveLength(1)
+    await Effect.runPromise(withTestLayer(processReminderJob('pending'), layer))
+    await Effect.runPromise(withTestLayer(processReminderJob('pending'), layer))
+    expect(messages).toHaveLength(2)
+    expect(
+      (await database.select().from(emailDeliveryLogsTable)).map((log) => log.status).sort(),
+    ).toEqual(['PENDING', 'SENT'])
+    expect((await database.select().from(musicReminder))[0]).toMatchObject({
+      status: REMINDER_STATUS.SENT,
+      isSent: true,
+    })
+  })
+
   test('a reminder removed after its claim finishes successfully without sending stale work', async () => {
     await using resource = await createMigratedD1Database()
     const database = Effect.runSync(withTestLayer(Database, DatabaseLayer(resource.database)))
@@ -166,7 +215,7 @@ describe('reminder queue delivery', () => {
     })
   })
 
-  test('duplicate queue claims skip delivery, while the batch alone reclaims stalled processing', async () => {
+  test('cron discovers stalled processing and queue recovery shares the bounded legacy helper', async () => {
     await using resource = await createMigratedD1Database()
     const database = Effect.runSync(withTestLayer(Database, DatabaseLayer(resource.database)))
     const messages: Array<OutboundEmailMessage> = []
@@ -185,13 +234,14 @@ describe('reminder queue delivery', () => {
       status: REMINDER_STATUS.PROCESSING,
     })
 
-    expect(await Effect.runPromise(withTestLayer(claimReminder('stalled'), layer))).toEqual({
-      claimed: false,
-    })
-    expect(await Effect.runPromise(withTestLayer(queryDueReminders, layer))).toEqual([])
-    await Effect.runPromise(withTestLayer(processReminderJob('stalled'), layer))
+    expect(await Effect.runPromise(withTestLayer(queryDueReminders, layer))).toEqual([
+      { id: 'stalled', reminderDate: new Date(0) },
+    ])
+    await expect(
+      Effect.runPromise(withTestLayer(processReminderJob('stalled'), layer)),
+    ).rejects.toMatchObject({ stage: 'email' })
     await Effect.runPromise(withTestLayer(processReminderJob('missing'), layer))
-    expect(messages).toHaveLength(0)
+    expect(messages).toHaveLength(1)
 
     await Effect.runPromise(withTestLayer(processPendingReminders, layer))
     expect(messages).toHaveLength(1)
@@ -228,7 +278,8 @@ describe('reminder queue delivery', () => {
     await using resource = await createMigratedD1Database()
     const database = Effect.runSync(withTestLayer(Database, DatabaseLayer(resource.database)))
     const messages: Array<OutboundEmailMessage> = []
-    const layer = reminderLayer(resource.database, messages)
+    const clock = reminderClock()
+    const layer = reminderLayer(resource.database, messages).pipe(Layer.provideMerge(clock.layer))
     await database
       .insert(user)
       .values({ id: 'listener', name: 'Listener', email: 'listener@example.test' })
@@ -243,6 +294,7 @@ describe('reminder queue delivery', () => {
     await expect(
       Effect.runPromise(withTestLayer(processReminderJob('pending'), layer)),
     ).rejects.toMatchObject({ stage: 'email' })
+    clock.advance()
     await database.run(
       sql`CREATE TRIGGER reject_sent BEFORE UPDATE ON music_reminder WHEN NEW.status = 'sent' BEGIN SELECT RAISE(ABORT, 'fixture sent failure'); END`,
     )
@@ -254,6 +306,7 @@ describe('reminder queue delivery', () => {
       (await database.select().from(emailDeliveryLogsTable)).filter((log) => log.status === 'SENT'),
     ).toHaveLength(1)
     await database.run(sql`DROP TRIGGER reject_sent`)
+    clock.advance()
     await Effect.runPromise(withTestLayer(processReminderJob('pending'), layer))
     await Effect.runPromise(withTestLayer(processReminderJob('pending'), layer))
     expect(messages).toHaveLength(3)
@@ -271,7 +324,8 @@ describe('reminder queue delivery', () => {
     const d1 = d1Resource.database
     const database = Effect.runSync(withTestLayer(Database, DatabaseLayer(d1)))
     const messages: Array<OutboundEmailMessage> = []
-    const layer = reminderLayer(d1, messages)
+    const clock = reminderClock()
+    const layer = reminderLayer(d1, messages).pipe(Layer.provideMerge(clock.layer))
     const userId = crypto.randomUUID()
     const reminderId = crypto.randomUUID()
 
@@ -314,6 +368,7 @@ describe('reminder queue delivery', () => {
       expect.objectContaining({ status: 'FAILED', failureCategory: 'unavailable' }),
     ])
 
+    clock.advance()
     const retryClaim = await Effect.runPromise(withTestLayer(claimReminder(reminderId), layer))
 
     const retryReminder = await Effect.runPromise(

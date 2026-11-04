@@ -232,8 +232,10 @@ describe('sendMixNotification', () => {
 
       await Promise.race([
         transport.fiveAdmitted,
-        pending.then(() => {
-          throw new Error('Delivery completed before five concurrent sends were admitted')
+        pending.then(async (response) => {
+          throw new Error(
+            `Delivery returned HTTP ${response.status} before five concurrent sends were admitted: ${await response.clone().text()}`,
+          )
         }),
       ])
       expect(transport.messages).toHaveLength(5)

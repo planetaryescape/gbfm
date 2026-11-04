@@ -4,7 +4,7 @@ import { AuthSession } from '@gbfm/api/middleware/auth'
 import { EMAIL_DELIVERY_STATUSES, type EmailDeliveryStatus } from '@gbfm/core/status'
 import { buildNewMixNotificationEmail } from '@gbfm/email/index'
 import { and, eq } from 'drizzle-orm'
-import { Data, Effect, Predicate } from 'effect'
+import { Effect } from 'effect'
 import { HttpApiBuilder, HttpApiError } from 'effect/http-api'
 
 import { audioTable } from '@/db/audio.schema'
@@ -24,6 +24,10 @@ import {
   getActiveMixRecipients,
 } from '@/repositories/email-preferences.repository'
 import { EmailDelivery } from '@/services/email-delivery.service'
+import {
+  deliverMixNotificationRecipients,
+  MixNotificationRecipientOutcome,
+} from '@/services/mix-notification-delivery'
 
 const dieOnDatabaseError = makeDieOnDatabaseError('email')
 
@@ -47,15 +51,6 @@ const EMAIL_STATUS_NORMALIZATION_MAP = new Map<string, EmailDeliveryStatus>([
   ['SUCCESS', EMAIL_DELIVERY_STATUSES.SENT],
   ['FAILURE', EMAIL_DELIVERY_STATUSES.FAILED],
 ])
-
-const MIX_NOTIFICATION_SEND_CONCURRENCY = 5
-
-type MixNotificationRecipientOutcome =
-  | { readonly _tag: 'sent'; readonly recipient: string; readonly emailId: string }
-  | { readonly _tag: 'skipped'; readonly recipient: string }
-  | { readonly _tag: 'failed'; readonly recipient: string }
-
-const MixNotificationRecipientOutcome = Data.taggedEnum<MixNotificationRecipientOutcome>()
 
 function normalizeRecipientEmail(value: string): string {
   return value.trim().toLowerCase()
@@ -159,7 +154,7 @@ const sendMixNotification = (input: SendMixNotificationInput) =>
             day: 'numeric',
           }))
 
-    const outcomes = yield* Effect.forEach(
+    const { sentTo, skipped, errors, emailIds } = yield* deliverMixNotificationRecipients(
       recipients,
       (recipient) =>
         Effect.gen(function* () {
@@ -225,23 +220,6 @@ const sendMixNotification = (input: SendMixNotificationInput) =>
               Effect.succeed(MixNotificationRecipientOutcome.failed({ recipient })),
           }),
         ),
-      { concurrency: MIX_NOTIFICATION_SEND_CONCURRENCY },
-    )
-
-    const sentTo = outcomes.flatMap((outcome) =>
-      Predicate.isTagged('sent')(outcome) ? [outcome.recipient] : [],
-    )
-
-    const skipped = outcomes.flatMap((outcome) =>
-      Predicate.isTagged('skipped')(outcome) ? [outcome.recipient] : [],
-    )
-
-    const errors = outcomes.flatMap((outcome) =>
-      Predicate.isTagged('failed')(outcome) ? [outcome.recipient] : [],
-    )
-
-    const emailIds = outcomes.flatMap((outcome) =>
-      Predicate.isTagged('sent')(outcome) ? [outcome.emailId] : [],
     )
 
     if (sentTo.length === 0 && skipped.length === 0) {

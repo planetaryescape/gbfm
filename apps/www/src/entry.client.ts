@@ -5,6 +5,7 @@ import { Runtime } from 'foldkit'
 import './styles/main.css'
 import { applicationConfig } from './config'
 import { animatePageTransition } from './navigation-transition'
+import { webObservabilityLayer } from './observability/sentry'
 import * as Creator from './page/creator'
 import * as Dashboard from './page/dashboard'
 import { startTweetShortcuts } from './page/tweet/navigation'
@@ -18,7 +19,8 @@ import { displayedPath } from './update'
 import { startArtworkFallback } from './view/artwork'
 
 const clientResources = Layer.mergeAll(
-  Player.playerClientLayer,
+  webObservabilityLayer,
+  Player.playerClientLayer.pipe(Layer.provide(webObservabilityLayer)),
   Creator.CreatorServiceLive,
   Creator.CreatorUploadLive,
   Dashboard.DashboardServiceLive,

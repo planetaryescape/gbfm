@@ -6,7 +6,17 @@ import {
   type QueueTrackType,
   type EngineStatus,
 } from '@gbfm/player'
-import { Context, Effect, Exit, Fiber, Layer, Predicate, Scope, Stream } from 'effect'
+import {
+  Context,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  Predicate,
+  Scope,
+  Stream,
+} from 'effect'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createPreviewSession } from '../media-preview/session'
@@ -67,7 +77,113 @@ class TestAudio extends EventTarget implements AudioPort {
 
 afterEach(() => vi.useRealTimers())
 
+const recordingJourneys = () => {
+  const records: Array<{ name: JourneyName; outcome: JourneyOutcome }> = []
+
+  const runtime = ManagedRuntime.make(
+    observabilityLayer.pipe(
+      Layer.provide(
+        Layer.succeed(JourneyExporter, {
+          open: (name) =>
+            Effect.succeed({
+              finish: (outcome) =>
+                Effect.sync(() => {
+                  records.push({ name, outcome })
+                }),
+            }),
+        }),
+      ),
+    ),
+  )
+
+  return {
+    records,
+    observer: journeyObserver(runtime.runSync(Observability)),
+    dispose: () => runtime.dispose(),
+  }
+}
+
 describe('HTML audio engine', () => {
+  it.each(['replace', 'clear', 'dispose'] as const)(
+    'preserves telemetry ownership when old callbacks arrive after %s',
+    async (action) => {
+      const journeys = recordingJourneys()
+      const instances: Array<TestAudio> = []
+
+      try {
+        await Effect.runPromise(
+          Effect.gen(function* () {
+            const scope = yield* Scope.make()
+
+            const engine = Context.get(
+              yield* Layer.buildWithScope(
+                makeHtmlAudioEngineLayer(
+                  () => {
+                    const audio = new TestAudio()
+                    instances.push(audio)
+
+                    return audio
+                  },
+                  undefined,
+                  journeys.observer,
+                ),
+                scope,
+              ),
+              AudioEngine,
+            )
+
+            yield* engine.replace('/first-private-identity.mp3', 1)
+            yield* engine.play
+            expect(journeys.records).toEqual([])
+            const old = instances[0]
+
+            if (!old) throw new Error('Expected first source')
+
+            if (action === 'replace') {
+              yield* engine.replace('/second-private-identity.mp3', 2)
+              yield* engine.play
+            } else if (action === 'clear') yield* engine.clearSource
+            else yield* Scope.close(scope, Exit.void)
+            old.paused = false
+            old.deliverRetained()
+            expect(journeys.records).toEqual([{ name: 'playback.start', outcome: 'canceled' }])
+            const current = instances.at(-1)
+
+            if (action === 'replace' && current) {
+              current.dispatchEvent(new Event('error'))
+              expect(journeys.records.map(({ outcome }) => outcome)).toEqual(['canceled', 'failed'])
+              yield* engine.replace('/third-private-identity.mp3', 3, 'paused')
+              const third = instances.at(-1)
+
+              if (!third) throw new Error('Expected third source')
+              third.paused = false
+              third.dispatchEvent(new Event('playing'))
+              expect(journeys.records).toHaveLength(2)
+              yield* engine.play
+              third.dispatchEvent(new Event('playing'))
+              expect(journeys.records.map(({ outcome }) => outcome)).toEqual([
+                'canceled',
+                'failed',
+                'succeeded',
+              ])
+            }
+
+            yield* Scope.close(scope, Exit.void)
+
+            for (const audio of instances) {
+              expect(audio.attached.size).toBe(0)
+              audio.deliverRetained()
+            }
+
+            expect(JSON.stringify(journeys.records)).not.toContain('private-identity')
+          }).pipe(Effect.scoped),
+        )
+      } finally {
+        await journeys.dispose()
+      }
+    },
+  )
+
   it('does not let an old play promise disturb a playing replacement', async () => {
     const completion = Promise.withResolvers<void>()
     const instances: Array<TestAudio> = []
@@ -557,3 +673,12 @@ describe('HTML audio engine', () => {
     )
   })
 })
+
+import {
+  JourneyExporter,
+  Observability,
+  observabilityLayer,
+  type JourneyName,
+  type JourneyOutcome,
+} from '@gbfm/observability'
+import { journeyObserver } from '@gbfm/observability/callbacks'

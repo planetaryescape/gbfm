@@ -3,9 +3,11 @@ import { createElement, useEffect } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { expect, test } from 'vitest'
 
+import { TweetAuthoringFailed } from '@/api/tweetAuthoring'
 import { receiptStorageFixture } from '@/test/composerReceiptStorage'
 
 import { ComposerReceiptStorage } from './composerReceipts'
+import { requestComposerRecovery } from './composerRecovery'
 import { emptyTweetDraft } from './draft'
 import { TweetDraftStorage } from './draftRestore'
 import { useComposerSession } from './useComposerSession'
@@ -98,7 +100,108 @@ test('the owning session gates same-render submission, aborts on account replace
     )
   })
   expect(requests).toHaveLength(1)
+  const confirmations: Array<() => void> = []
+  const recoveries: Array<Promise<unknown>> = []
+  requestComposerRecovery(
+    restored.owner.state('first/reply/thread'),
+    (_prompt, confirm) => confirmations.push(confirm),
+    () => {
+      const work = restored.run(
+        provide(restored.owner.recover('first/reply/thread')),
+        () => undefined,
+      )
+
+      if (work) recoveries.push(work)
+    },
+  )
+  expect(recoveries).toHaveLength(0)
+  expect(restored.owner.state('first/reply/thread')).toHaveProperty('_tag', 'PublicationUncertain')
+  await act(async () => {
+    confirmations[0]?.()
+    await Promise.all(recoveries)
+  })
+  expect(restored.owner.state('first/reply/thread')).toHaveProperty('_tag', 'Writable')
+  expect(requests).toHaveLength(1)
   await act(() => mounted.unmount())
   expect(restored.run(Effect.succeed('stale'), () => accepted.push('stale'))).toBeNull()
   expect(accepted).toEqual([])
+})
+
+test('the owning hook permits a fresh explicit submission after definitive rejection clears its receipt', async () => {
+  const receipts = receiptStorageFixture().storage
+  const draft = { ...emptyTweetDraft('retry'), text: 'Reply text' }
+
+  const drafts = TweetDraftStorage.of({
+    read: () => Effect.succeed(draft),
+    save: () => Effect.void,
+    remove: () => Effect.void,
+  })
+
+  let current: ReturnType<typeof useComposerSession> | undefined
+  let view: ReactTestRenderer | undefined
+
+  function Harness() {
+    const session = useComposerSession('account', 'account/reply/thread')
+    useEffect(() => {
+      current = session
+    })
+
+    return null
+  }
+
+  await act(() => {
+    view = create(createElement(Harness))
+  })
+
+  if (!current || !view) throw new Error('Session not mounted')
+  const session = current
+
+  const provide = <A, E>(work: Effect.Effect<A, E, ComposerReceiptStorage | TweetDraftStorage>) =>
+    work.pipe(
+      Effect.provideService(ComposerReceiptStorage, receipts),
+      Effect.provideService(TweetDraftStorage, drafts),
+    )
+
+  const outcomes: Array<string> = []
+  await act(async () => {
+    await session.run(
+      provide(
+        session.owner.submit(
+          'account/reply/thread',
+          draft,
+          true,
+          true,
+          Effect.fail(new TweetAuthoringFailed({ message: 'Expired session' })),
+        ),
+      ),
+      (outcome) => {
+        if (outcome) outcomes.push(outcome._tag)
+      },
+    )
+  })
+  expect(outcomes).toEqual(['RequestFailed'])
+  expect(session.available()).toBe(true)
+  expect(
+    await Effect.runPromise(
+      receipts.read({ principal: 'account', storageKey: 'account/reply/thread' }),
+    ),
+  ).toBeNull()
+  await act(async () => {
+    await session.run(
+      provide(
+        session.owner.submit(
+          'account/reply/thread',
+          draft,
+          true,
+          true,
+          Effect.succeed({ slug: 'retry-success' }),
+        ),
+      ),
+      (outcome) => {
+        if (outcome) outcomes.push(outcome._tag)
+      },
+    )
+  })
+  expect(outcomes).toEqual(['RequestFailed', 'Published'])
+  await act(() => view?.unmount())
 })

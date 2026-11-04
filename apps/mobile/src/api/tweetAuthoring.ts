@@ -1,6 +1,6 @@
 import { Api } from '@gbfm/api/api'
 import { Effect, Predicate, Schema, type Redacted } from 'effect'
-import { HttpClient, HttpClientRequest } from 'effect/http'
+import { HttpClient, HttpClientRequest, HttpClientError } from 'effect/http'
 import { HttpApiClient } from 'effect/http-api'
 
 import { getTweetScreen } from '@/api/tweets'
@@ -18,14 +18,33 @@ export class TweetAuthoringFailed extends Schema.TaggedError<TweetAuthoringFaile
   { message: Schema.String },
 ) {}
 
-const failure = (cause: unknown) =>
-  new TweetAuthoringFailed({
-    message: Predicate.isTagged(cause, 'Forbidden')
-      ? 'Your account does not have permission to publish tweets.'
-      : Predicate.isTagged(cause, 'Unauthorized')
-        ? 'Your session expired. Sign in again. Your draft is saved on this device.'
-        : 'Could not save your tweet. Your local draft is safe. Try again when you are connected.',
-  })
+export class TweetAuthoringUncertain extends Schema.TaggedError<TweetAuthoringUncertain>()(
+  'TweetAuthoringUncertain',
+  { message: Schema.String },
+) {}
+
+const failure = (cause: unknown) => {
+  const status = HttpClientError.isHttpClientError(cause) ? cause.response?.status : undefined
+
+  return Predicate.isTagged(cause, 'Forbidden') ||
+    Predicate.isTagged(cause, 'Unauthorized') ||
+    Predicate.isTagged(cause, 'BadRequest') ||
+    Predicate.isTagged(cause, 'NotFound') ||
+    Predicate.isTagged(cause, 'Conflict') ||
+    Predicate.isTagged(cause, 'ValidationHttpError') ||
+    (status !== undefined && [400, 401, 403, 404, 409, 422, 429].includes(status))
+    ? new TweetAuthoringFailed({
+        message: Predicate.isTagged(cause, 'Forbidden')
+          ? 'Your account does not have permission to publish tweets.'
+          : Predicate.isTagged(cause, 'Unauthorized')
+            ? 'Your session expired. Sign in again. Your draft is saved on this device.'
+            : 'Could not save your tweet. Your local draft is safe. Try again when you are connected.',
+      })
+    : new TweetAuthoringUncertain({
+        message:
+          'The connection or server failed before publication could be confirmed. Check whether your post or reply was published.',
+      })
+}
 
 const authenticatedClient = (connection: AuthoringConnection) =>
   HttpClient.mapRequest(

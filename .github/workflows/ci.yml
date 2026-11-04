@@ -5,7 +5,6 @@ env:
 
 on:
   pull_request:
-    branches: [prod]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -54,6 +53,9 @@ jobs:
       - name: Run unit and integration tests
         run: bun run test
 
+      - name: Run WWW unit and integration tests
+        run: bun run test:www
+
   build-www:
     runs-on: ubuntu-24.04
 
@@ -67,3 +69,22 @@ jobs:
 
       - name: Build www package
         run: cd apps/www && bun run build
+
+  observability-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup-bun-workspace
+
+      - name: Install fixture browsers
+        working-directory: apps/www
+        run: bunx playwright install --with-deps chromium webkit
+
+      - name: Verify browser observability transport
+        working-directory: apps/www
+        run: bun run e2e:observability

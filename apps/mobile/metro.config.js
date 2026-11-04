@@ -1,10 +1,10 @@
 const loadModule = module.require.bind(module)
 
-const { getDefaultConfig } = loadModule('expo/metro-config')
+const { getSentryExpoConfig } = loadModule('@sentry/react-native/metro')
 
 const { withNativewind } = loadModule('nativewind/metro')
 
-const config = getDefaultConfig(__dirname)
+const config = getSentryExpoConfig(__dirname)
 
 const configModule = module
 

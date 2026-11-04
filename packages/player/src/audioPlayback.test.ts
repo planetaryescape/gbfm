@@ -271,6 +271,140 @@ const makeReporter = () => {
 }
 
 describe('makeAudioPlayback', () => {
+  it('does not apply or persist defaults when the saved volume could not be read', async () => {
+    const volume = Deferred.makeUnsafe<VolumeRecordType | null, AudioStorageError>()
+    const storage = makeRecordingStorage({ loadVolume: Deferred.await(volume) })
+    const recording = await Effect.runPromise(makeRecordingEngine())
+    const reporting = makeReporter()
+    const runtime = makeRuntime(recording.engine, storage, makeRecordingPlayReporter())
+
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const playback = yield* makeAudioPlayback(runtime, reporting.reporter)
+          expect(playback.getSnapshot().volume).toEqual({ volume: 100, isMuted: false })
+          expect(recording.volumeStates).toEqual([])
+          expect(storage.savedVolumes).toEqual([])
+          yield* Deferred.fail(volume, new AudioStorageError('read'))
+          yield* Effect.yieldNow
+          expect(playback.getSnapshot().volume).toEqual({ volume: 100, isMuted: false })
+        }).pipe(Effect.scoped),
+      )
+      expect(recording.volumeStates).toEqual([])
+      expect(storage.savedVolumes).toEqual([])
+      expect(reporting.errors.map(({ message }) => message)).toEqual([
+        'Unable to hydrate audio volume',
+      ])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it('still applies and persists defaults after a successful read with no saved volume', async () => {
+    const volume = Deferred.makeUnsafe<VolumeRecordType | null>()
+    const saved = Deferred.makeUnsafe<void>()
+
+    const storage = makeRecordingStorage({
+      loadVolume: Deferred.await(volume),
+      saveVolume: () => Deferred.succeed(saved, undefined).pipe(Effect.asVoid),
+    })
+
+    const recording = await Effect.runPromise(makeRecordingEngine())
+    const reporting = makeReporter()
+    const runtime = makeRuntime(recording.engine, storage, makeRecordingPlayReporter())
+
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          yield* makeAudioPlayback(runtime, reporting.reporter)
+          expect(recording.volumeStates).toEqual([])
+          expect(storage.savedVolumes).toEqual([])
+          yield* Deferred.succeed(volume, null)
+          yield* Deferred.await(saved)
+        }).pipe(Effect.scoped),
+      )
+      expect(recording.volumeStates).toEqual([
+        { kind: 'volume', value: 1 },
+        { kind: 'muted', value: false },
+      ])
+      expect(storage.savedVolumes).toEqual([{ volume: 100, isMuted: false }])
+      expect(reporting.errors).toEqual([])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it('persists explicit volume changes after a failed read without waiting for shutdown', async () => {
+    const volume = Deferred.makeUnsafe<VolumeRecordType | null, AudioStorageError>()
+    const saved = Deferred.makeUnsafe<void>()
+
+    const storage = makeRecordingStorage({
+      loadVolume: Deferred.await(volume),
+      saveVolume: (next) =>
+        next.isMuted ? Deferred.succeed(saved, undefined).pipe(Effect.asVoid) : Effect.void,
+    })
+
+    const recording = await Effect.runPromise(makeRecordingEngine())
+    const reporting = makeReporter()
+    const runtime = makeRuntime(recording.engine, storage, makeRecordingPlayReporter())
+
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const playback = yield* makeAudioPlayback(runtime, reporting.reporter)
+          yield* Deferred.fail(volume, new AudioStorageError('read'))
+          yield* Effect.yieldNow
+          expect(recording.volumeStates).toEqual([])
+          expect(storage.savedVolumes).toEqual([])
+          yield* playback.setVolume(35)
+          yield* playback.toggleMute
+          yield* Deferred.await(saved)
+          expect(storage.savedVolumes).toEqual([
+            { volume: 35, isMuted: false },
+            { volume: 35, isMuted: true },
+          ])
+        }).pipe(Effect.scoped),
+      )
+      expect(storage.savedVolumes).toHaveLength(2)
+      expect(recording.volumeStates).toEqual([
+        { kind: 'volume', value: 0.35 },
+        { kind: 'muted', value: false },
+        { kind: 'volume', value: 0.35 },
+        { kind: 'muted', value: true },
+      ])
+      expect(reporting.errors.map(({ message }) => message)).toEqual([
+        'Unable to hydrate audio volume',
+      ])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it('drains a volume choice made after read failure when shutdown starts immediately', async () => {
+    const storage = makeRecordingStorage({ loadVolume: Effect.fail(new AudioStorageError('read')) })
+    const recording = await Effect.runPromise(makeRecordingEngine())
+    const reporting = makeReporter()
+    const runtime = makeRuntime(recording.engine, storage, makeRecordingPlayReporter())
+
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const playback = yield* makeAudioPlayback(runtime, reporting.reporter)
+          yield* Effect.yieldNow
+          expect(storage.savedVolumes).toEqual([])
+          expect(recording.volumeStates).toEqual([])
+          yield* playback.setVolume(20)
+        }).pipe(Effect.scoped),
+      )
+      expect(storage.savedVolumes).toEqual([{ volume: 20, isMuted: false }])
+      expect(reporting.errors.map(({ message }) => message)).toEqual([
+        'Unable to hydrate audio volume',
+      ])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
   it('keeps the latest user volume and mute changes ahead of delayed hydration', async () => {
     const hydration = Deferred.makeUnsafe<VolumeRecordType | null>()
     const storage = makeRecordingStorage({ loadVolume: Deferred.await(hydration) })
@@ -326,7 +460,7 @@ describe('makeAudioPlayback', () => {
         }).pipe(Effect.scoped),
       )
       expect(storage.savedQueues).toEqual([])
-      expect(storage.savedVolumes.at(-1)).toEqual({ volume: 25, isMuted: false })
+      expect(storage.savedVolumes).toEqual([{ volume: 25, isMuted: false }])
       expect(reporting.errors.map(({ message }) => message).sort()).toEqual([
         'Unable to hydrate audio queue',
         'Unable to hydrate audio volume',

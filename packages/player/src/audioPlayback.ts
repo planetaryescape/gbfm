@@ -488,9 +488,16 @@ export const makeAudioPlayback = (
 
     const loadVolume = Effect.gen(function* () {
       const result = yield* Fiber.join(volumeRead)
-      const persisted = Exit.isSuccess(result) ? result.value : null
 
       if (!VolumeHydration.$is('Hydrating')(volumeHydration)) return
+
+      if (Exit.isFailure(result) && volumeHydration.pending === null) {
+        volumeHydration = VolumeHydration.Hydrated()
+
+        return
+      }
+
+      const persisted = Exit.isSuccess(result) ? result.value : null
       const next = volumeHydration.pending ?? persisted ?? defaultVolume
       volumeHydration = VolumeHydration.Hydrated()
       updateVolume(next)

@@ -72,6 +72,9 @@ jobs:
 
   observability-browser:
     runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --user 1001
     timeout-minutes: 10
     steps:
       - name: Checkout code
@@ -80,10 +83,6 @@ jobs:
           fetch-depth: 1
 
       - uses: ./.github/actions/setup-bun-workspace
-
-      - name: Install fixture browsers
-        working-directory: apps/www
-        run: bunx playwright install --with-deps chromium webkit
 
       - name: Verify browser observability transport
         working-directory: apps/www

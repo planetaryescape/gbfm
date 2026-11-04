@@ -82,13 +82,33 @@ export const restoreAuthSession = Effect.fn('restoreAuthSession')(function* (
   setState: SetAuthLifecycle,
 ) {
   const storage = yield* AuthSessionStorage
+  let owner: AuthLifecycle | null = null
+  setState((current) => {
+    owner = current
+
+    return current
+  })
+
+  const ownsRestore = () => {
+    let owned = false
+    setState((current) => {
+      owned = current === owner
+
+      return current
+    })
+
+    return owned
+  }
+
   const stored = yield* storage.read.pipe(Effect.orElseSucceed(() => null))
 
-  if (!stored) return
+  if (!stored || !ownsRestore()) return
 
   const cached = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PersistedAuthSession))(
     stored,
   ).pipe(Effect.orElseSucceed(() => null))
+
+  if (!ownsRestore()) return
 
   if (!cached) {
     yield* storage.remove.pipe(Effect.ignore)

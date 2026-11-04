@@ -55,8 +55,9 @@ const fixture = (stored: string | null, response = Response.json({ user: wireUse
 
   const setState: SetAuthLifecycle = (update) => {
     const next = Predicate.isFunction(update) ? update(state) : update
+
+    if (next !== state) phases.push(next._tag)
     state = next
-    phases.push(next._tag)
   }
 
   const storage = AuthSessionStorage.of({
@@ -217,6 +218,49 @@ test('failed sign-out persistence does not clear the memory session', async () =
   ).toBe(true)
   expect(auth.session()).toEqual(cached)
 })
+
+test.each([
+  { stored: JSON.stringify(cached), operation: 'sign-in' },
+  { stored: '{invalid', operation: 'sign-in' },
+  { stored: JSON.stringify(cached), operation: 'sign-out' },
+  { stored: '{invalid', operation: 'sign-out' },
+])(
+  'a delayed initial storage read cannot replace or remove a newer $operation ($stored)',
+  async ({ stored, operation }) => {
+    const auth = fixture(stored)
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>()
+        const finish = yield* Deferred.make<void>()
+
+        const fiber = yield* restoreAuthSession(auth.setState).pipe(
+          Effect.provideService(AuthSessionStorage, {
+            ...auth.storage,
+            read: Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(finish)),
+              Effect.as(stored),
+            ),
+          }),
+          Effect.provideService(AuthSessionValidation, auth.validation),
+          Effect.forkScoped,
+        )
+
+        yield* Deferred.await(started)
+        yield* (
+          operation === 'sign-in'
+            ? acceptAuthSession({ ...cached, sessionToken: 'new-login-token' }, auth.setState)
+            : clearAuthSession(auth.setState)
+        ).pipe(Effect.provideService(AuthSessionStorage, auth.storage))
+        const newer = auth.state()
+        const persisted = auth.persisted.get('session')
+        yield* Deferred.succeed(finish, undefined)
+        yield* Fiber.join(fiber)
+        expect(auth.state()).toBe(newer)
+        expect(auth.persisted.get('session')).toBe(persisted)
+      }).pipe(Effect.scoped),
+    )
+  },
+)
 
 test.each([
   ['sign-out', 'success'],

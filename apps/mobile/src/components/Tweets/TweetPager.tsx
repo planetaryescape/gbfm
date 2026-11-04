@@ -115,14 +115,20 @@ function Pages({
 
 export function TweetPager() {
   const [attempt, setAttempt] = useState(0)
+  const identity = useAuthStore((auth) => auth.user?.id ?? 'anonymous')
 
-  return <Feed key={attempt} onRetry={() => setAttempt((value) => value + 1)} />
+  return (
+    <Feed
+      key={`${identity}:${attempt}`}
+      identity={identity}
+      onRetry={() => setAttempt((value) => value + 1)}
+    />
+  )
 }
 
 const RESUME_LIMIT = 300
 
-function Feed({ onRetry }: { readonly onRetry: () => void }) {
-  const identity = useAuthStore((auth) => auth.user?.id ?? 'anonymous')
+function Feed({ identity, onRetry }: { readonly identity: string; readonly onRetry: () => void }) {
   const sessionToken = useAuthStore((auth) => auth.sessionToken)
   const saved = useAtomValue(checkpoints)
   const [startSlug] = useState(() => saved[identity] ?? readReaderPosition(identity))

@@ -1,3 +1,11 @@
+## [2.121.3](https://github.com/planetaryescape/gbfm/compare/v2.121.2...v2.121.3) (2026-11-04)
+
+
+### Bug Fixes
+
+* **uploads:** preserve replacement ownership and confirmed completion ([ffaadec](https://github.com/planetaryescape/gbfm/commit/ffaadec8fe3841b4d6b5e2ac542a09e98cd73481))
+* **uploads:** preserve replacement ownership and confirmed completion ([#485](https://github.com/planetaryescape/gbfm/issues/485)) ([ce56be7](https://github.com/planetaryescape/gbfm/commit/ce56be7522bf0b6f6e64386e717c78ef859527c5))
+
 ## [2.121.2](https://github.com/planetaryescape/gbfm/compare/v2.121.1...v2.121.2) (2026-11-04)
 
 

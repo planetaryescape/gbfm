@@ -17,7 +17,7 @@ import {
   SaveReadMode,
   SetResolvedUrl,
 } from './command'
-import { init, type Services } from './init'
+import { initWithPlayback, type Services } from './init'
 import { Message } from './message'
 import type { Flags, Model, PageCache } from './model'
 import { isCacheable, pageKey, samePage, settlePage } from './page-cache'
@@ -112,7 +112,7 @@ const showPage = (
   navigationId: number,
   expected: string,
 ): Update.Return<Model, Message, Services> => {
-  const next = init(flags, model.spotifyPlayback)
+  const next = initWithPlayback(flags, model.spotifyPlayback)
   const identityChanged = next.model.tweetReader.identity !== model.tweetReader.identity
 
   const keepPendingPublicAction =

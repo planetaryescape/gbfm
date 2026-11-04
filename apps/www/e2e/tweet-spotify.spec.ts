@@ -41,7 +41,8 @@ const device = {
 test('a Spotify music card offers connection separately from its external link', async ({
   page,
 }) => {
-  await page.goto('/tweet/e2e-music-thread')
+  const response = await page.goto('/tweet/e2e-music-thread')
+  expect(response?.status()).toBe(200)
   await expect(page.getByRole('button', { name: 'Connect Spotify', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Spotify', exact: true })).toHaveAttribute(
     'target',
@@ -65,9 +66,10 @@ for (const kind of ['track', 'album', 'playlist'] as const) {
     page,
   }) => {
     await connect(page)
-    const plays: unknown[] = []
-    const queued: string[] = []
-    const offsets: number[] = []
+    const plays: Array<unknown> = []
+    const queued: Array<string> = []
+    const offsets: Array<number> = []
+
     const tracks = Array.from({ length: 51 }, (_, i) => ({
       uri: `spotify:track:Fixture${i}`,
       id: `Fixture${i}`,
@@ -84,26 +86,35 @@ for (const kind of ['track', 'album', 'playlist'] as const) {
       type: 'track',
       is_local: false,
     }))
+
     await page.route('https://api.spotify.com/v1/**', async (route) => {
       const request = route.request()
       const url = new URL(request.url())
+
       if (url.pathname === '/v1/me') return route.fallback()
+
       if (url.pathname === '/v1/me/player/devices')
         return route.fulfill({ json: { devices: [device] } })
+
       if (url.pathname === '/v1/me/player/play') {
         plays.push(request.postDataJSON())
+
         return route.fulfill({ status: 204 })
       }
+
       if (url.pathname === '/v1/me/player/queue') {
         queued.push(url.searchParams.get('uri') ?? '')
+
         return route.fulfill({ status: 204 })
       }
+
       if (
         url.pathname === `/v1/${kind === 'album' ? 'albums' : 'playlists'}/E2ECollection/tracks`
       ) {
         const offset = Number(url.searchParams.get('offset') ?? 0)
         offsets.push(offset)
         const items = tracks.slice(offset, offset + 50)
+
         return route.fulfill({
           json: {
             items:
@@ -124,21 +135,26 @@ for (const kind of ['track', 'album', 'playlist'] as const) {
           },
         })
       }
+
       throw new Error(`Unexpected Spotify request: ${request.method()} ${url.pathname}`)
     })
     const path = kind === 'track' ? '/tweet/e2e-music-thread' : `/tweet/e2e-spotify-${kind}`
     await page.goto(path)
     await page.getByRole('button', { name: 'Play on Spotify', exact: true }).click()
-    await expect(page.getByRole('status')).toContainText('Playing on your active Spotify device.')
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Playing on your active Spotify device.' }),
+    ).toBeVisible()
     expect(plays).toEqual([
       kind === 'track'
         ? { uris: ['spotify:track:E2ERootTrack'] }
         : { context_uri: `spotify:${kind}:E2ECollection` },
     ])
     await page.getByRole('button', { name: 'Queue on Spotify', exact: true }).click()
-    await expect(page.getByRole('status')).toContainText(
-      `Added ${kind === 'track' ? '1 track' : '51 tracks'} to your Spotify queue.`,
-    )
+    await expect(
+      page.getByRole('status').filter({
+        hasText: `Added ${kind === 'track' ? '1 track' : '51 tracks'} to your Spotify queue.`,
+      }),
+    ).toBeVisible()
     expect(queued).toEqual(
       kind === 'track' ? ['spotify:track:E2ERootTrack'] : tracks.map((track) => track.uri),
     )
@@ -157,11 +173,12 @@ test('missing, inactive, restricted, and disappearing devices give explicit feed
   page,
 }) => {
   await connect(page)
-  let devices: (typeof device)[] = []
+  let devices: Array<typeof device> = []
   let writes = 0
   await page.route('https://api.spotify.com/v1/me/player/**', async (route) => {
     if (route.request().url().endsWith('/devices')) return route.fulfill({ json: { devices } })
     writes += 1
+
     return route.fulfill({
       status: 404,
       json: {
@@ -170,6 +187,7 @@ test('missing, inactive, restricted, and disappearing devices give explicit feed
     })
   })
   await page.goto('/tweet/e2e-spotify-album')
+
   for (const candidates of [
     [],
     [{ ...device, is_active: false }],
@@ -180,14 +198,19 @@ test('missing, inactive, restricted, and disappearing devices give explicit feed
       page.waitForResponse('https://api.spotify.com/v1/me/player/devices'),
       page.getByRole('button', { name: 'Queue on Spotify', exact: true }).click(),
     ])
-    await expect(page.getByRole('status')).toContainText('No active Spotify device. Open Spotify')
+    await expect(
+      page.getByRole('status').filter({ hasText: 'No active Spotify device. Open Spotify' }),
+    ).toBeVisible()
     await expect(page.getByRole('button', { name: 'Queue on Spotify', exact: true })).toBeEnabled()
   }
+
   expect(writes).toBe(0)
   devices = [device]
   await page.getByRole('button', { name: 'Play on Spotify', exact: true }).click()
   await expect.poll(() => writes).toBe(1)
-  await expect(page.getByRole('status')).toContainText('No active Spotify device. Open Spotify')
+  await expect(
+    page.getByRole('status').filter({ hasText: 'No active Spotify device. Open Spotify' }),
+  ).toBeVisible()
   await expect(page).toHaveURL('/tweet/e2e-spotify-album')
 })
 
@@ -203,7 +226,9 @@ test('Spotify rejects playback without a silent external fallback', async ({ pag
   )
   await page.goto('/tweet/e2e-spotify-album')
   await page.getByRole('button', { name: 'Play on Spotify', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Check your Premium account and device')
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Check your Premium account and device' }),
+  ).toBeVisible()
   await expect(page.getByRole('button', { name: 'Play on Spotify', exact: true })).toBeEnabled()
   await expect(page).toHaveURL('/tweet/e2e-spotify-album')
 })

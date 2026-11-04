@@ -27,9 +27,9 @@ export type Services =
   | Dashboard.KeyService
   | SpotifyConnection
 
-export const init = (
+export const initWithPlayback = (
   flags: Flags,
-  retainedPlayback: SpotifyPlayback.Model = SpotifyPlayback.initialModel,
+  retainedPlayback: SpotifyPlayback.Model,
 ): ReturnType<Runtime.ApplicationInit<Model, Message, Flags, Services>> => {
   const spotifyPlayback = flags.tweet
     ? { ...retainedPlayback, statusRequestId: retainedPlayback.statusRequestId + 1 }
@@ -136,3 +136,6 @@ export const init = (
     ],
   }
 }
+
+export const init: Runtime.ApplicationInit<Model, Message, Flags, Services> = (flags) =>
+  initWithPlayback(flags, SpotifyPlayback.initialModel)

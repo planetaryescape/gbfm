@@ -722,7 +722,8 @@ test('an attached track and an embedded Bandcamp page preview and publish as pla
   await page.getByRole('button', { name: 'Publish', exact: true }).click()
   await expect(page.locator('.creator-published')).toContainText('Published.')
 
-  await page.goto(`/tweet/${slug}`)
+  const published = await page.goto(`/tweet/${slug}`)
+  expect(published?.status()).toBe(200)
   const embed = page.locator('figure.rich-content-media')
   await expect(embed).toContainText('Bandcamp')
   await expect(embed.locator('iframe').first()).toHaveAttribute('src', new RegExp(`^${player}`))

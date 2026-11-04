@@ -13,9 +13,11 @@ import {
   TweetReaderUnavailable,
 } from '@/api/tweetReader'
 import { env } from '@/env'
+import { mobileJourneys } from '@/observability/sentry'
 
 import { readerAction } from './readerAction'
 import { readerCache, type ReaderCache } from './readerCache'
+import { readerJourney } from './readerJourney'
 import { readerOwnership } from './readerOwnership'
 import { readReaderPosition, saveReaderPosition } from './readerPosition'
 import { initialReaderState, ReaderEvent, reduceReader } from './readerState'
@@ -150,6 +152,17 @@ export function useTweetReader(
 
   const [state, dispatch] = useReducer(reduceReader, initialReaderState)
   const [ownership] = useState(readerOwnership)
+  const [journey] = useState(() => readerJourney(mobileJourneys))
+
+  useEffect(
+    () =>
+      journey.committed({
+        request: state.request,
+        status: state.status,
+        hasContent: Boolean(state.screen),
+      }),
+    [journey, state.request, state.status, state.screen],
+  )
 
   useFocusEffect(
     useCallback(() => {
@@ -166,6 +179,7 @@ export function useTweetReader(
       }
 
       const { controller, request } = ownership.focus()
+      const cancelJourney = journey.start(request)
       dispatch(ReaderEvent.Started({ request }))
 
       const load = loadVisit({
@@ -186,9 +200,10 @@ export function useTweetReader(
       })
 
       return () => {
+        cancelJourney()
         ownership.blur(controller)
       }
-    }, [identity, sessionToken, initialSlug, target, remember, ownership]),
+    }, [identity, sessionToken, initialSlug, target, remember, ownership, journey]),
   )
 
   const go = (target: string | null) => {

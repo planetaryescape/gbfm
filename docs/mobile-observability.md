@@ -33,6 +33,23 @@ Sentry's Expo Router integration owns navigation tracing. Bounded route template
 - **JavaScript `beforeSend` does not filter native crashes.** Native network/system breadcrumbs and screenshot/view-hierarchy attachments are disabled, but native crash privacy and project-side scrubbing still need a representative review before production opt-in. Do not claim a JavaScript synthetic-secret test proves native payload safety.
 - The SDK owns bounded queues. On background/inactive transitions the application requests a two-second client flush; this is best effort, not a delivery guarantee after OS termination. Export failures must not change application results.
 
+## Reading and playback journeys
+
+| Operation | Start | Completion |
+| --- | --- | --- |
+| `reader.open` | A focused reader begins an owned visit | The new request's ready/empty/error state commits in React, or focus/replacement cancels it |
+| `playback.start` | The native adapter replaces an audio source | Expo reports `playing`, reports an error, rejects play, or pause/replacement/disposal cancels the pending attempt |
+
+Reading success means committed content, not an API response or final native paint. Cached content can succeed before background refresh finishes. A later refresh failure does not rewrite that success. Playback measures source replacement to the first playing callback, not the earlier button tap or checkpoint/storage work. It does not yet measure resume, stalls, or interruption recovery.
+
+Each attempt settles once. Stale reader completions are ignored. The sink receives no post/track IDs, content, URLs, credentials, or raw player errors. Final `failed` outcomes create reviewed `ReaderOpenFailed` or `PlaybackStartFailed` issues; `canceled` and `empty` do not create incidents.
+
+- `gbfm.journey.completed`: one counter increment per settled attempt, split by `operation` and `outcome`.
+- `gbfm.journey.duration`: duration distribution in milliseconds with the same dimensions.
+- `gbfm.journey` span: operation timing and bounded outcome, plus a completion breadcrumb.
+
+Behavior measurements are emitted independently of trace sampling. They remain best-effort device telemetry, not exact visitor counts, an audit trail, or a retention analysis. Use succeeded durations separately from fast failures/cancellations when comparing performance. Outstanding attempts without a terminal callback are not successful completions.
+
 ## Symbols and verification
 
 The plugin configures source-map and native-symbol upload. Authenticated upload requires `SENTRY_AUTH_TOKEN` supplied only to the trusted build process through the existing secure environment, never an `EXPO_PUBLIC_*` variable or plugin JSON. Use the same release identity for upload and runtime. Executor account access is not a build-upload token.
@@ -65,4 +82,4 @@ The owner's notes on Bluesky and other mobile apps informed early initialization
 - [Native versus JavaScript filtering](https://docs.sentry.io/platforms/react-native/configuration/filtering/)
 - [Application metrics](https://docs.sentry.io/platforms/react-native/metrics/)
 
-Follow-up slices cover reading/playback outcomes, web instrumentation, client/API correlation, a useful Sentry dashboard, remaining journeys, and approved retirement of old pipelines. #478 remains open until those checks are complete.
+Follow-up slices cover web instrumentation, client/API correlation, a useful Sentry dashboard, remaining journeys and playback recovery, and approved retirement of old pipelines. #478 remains open until those checks are complete.

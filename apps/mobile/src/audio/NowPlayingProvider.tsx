@@ -26,6 +26,7 @@ import { Platform } from 'react-native'
 import { ExpoAudioEngineLayer } from '@/audio/expoAudioEngine'
 import { PlayReporterLive } from '@/audio/playTracker'
 import { PlayerStorageLive } from '@/audio/queueStorage'
+import { mobileJourneys } from '@/observability/sentry'
 import { audioModeAtom } from '@/store/atoms/audio-mode'
 
 type Track = typeof AudioResponse.Type
@@ -111,7 +112,7 @@ export function NowPlayingProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     const runtime = ManagedRuntime.make(
       Layer.mergeAll(
-        ExpoAudioEngineLayer(player, Platform.OS === 'web' ? 'web' : 'native'),
+        ExpoAudioEngineLayer(player, Platform.OS === 'web' ? 'web' : 'native', mobileJourneys),
         PlayReporterLive,
       ).pipe(Layer.provideMerge(PlayerStorageLive)),
     )

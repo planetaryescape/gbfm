@@ -157,7 +157,12 @@ export const NewsletterHandlersLive = HttpApiBuilder.group(Api, 'newsletter', (h
               db
                 .update(newsletterSubscribersTable)
                 .set({ unsubscribedAt })
-                .where(eq(newsletterSubscribersTable.unsubscribeToken, payload.token))
+                .where(
+                  and(
+                    eq(newsletterSubscribersTable.unsubscribeToken, payload.token),
+                    isNull(newsletterSubscribersTable.unsubscribedAt),
+                  ),
+                )
                 .returning({
                   id: newsletterSubscribersTable.id,
                   email: newsletterSubscribersTable.email,
@@ -172,10 +177,34 @@ export const NewsletterHandlersLive = HttpApiBuilder.group(Api, 'newsletter', (h
           }),
         )
 
-        if (result.length === 0) return yield* new HttpApiError.NotFound()
+        const transitioned = result[0]
 
-        const subscriber = result[0]
-        const subscriberUserId = subscriber?.userId
+        const subscriber =
+          transitioned ??
+          (yield* dieOnDatabaseError(
+            Effect.tryPromise({
+              try: () =>
+                db
+                  .select({
+                    id: newsletterSubscribersTable.id,
+                    email: newsletterSubscribersTable.email,
+                    userId: newsletterSubscribersTable.userId,
+                  })
+                  .from(newsletterSubscribersTable)
+                  .where(eq(newsletterSubscribersTable.unsubscribeToken, payload.token))
+                  .limit(1),
+              catch: (cause) =>
+                new DatabaseError({
+                  message: `Failed to look up newsletter subscriber: ${getErrorMessage(cause)}`,
+                  operation: 'select',
+                  table: 'newsletter_subscribers',
+                }),
+            }),
+          ))[0]
+
+        if (!subscriber) return yield* new HttpApiError.NotFound()
+
+        const subscriberUserId = subscriber.userId
 
         if (subscriberUserId) {
           yield* dieOnDatabaseError(
@@ -191,7 +220,7 @@ export const NewsletterHandlersLive = HttpApiBuilder.group(Api, 'newsletter', (h
           )
         }
 
-        yield* notifyAdmin('unsubscribed', subscriber?.email ?? payload.token)
+        if (transitioned) yield* notifyAdmin('unsubscribed', subscriber.email)
 
         return { success: true }
       }),

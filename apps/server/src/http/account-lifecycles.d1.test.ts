@@ -4,10 +4,18 @@ import { Effect, Layer, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 
 import { account, user, verification } from '@/db/auth.schema'
-import { emailDeliveryLogsTable, userEmailPreferencesTable } from '@/db/email.schema'
+import {
+  EMAIL_NOTIFICATION_TYPES,
+  emailDeliveryLogsTable,
+  userEmailPreferencesTable,
+} from '@/db/email.schema'
 import { makeDatabaseClient } from '@/db/layer'
 import { newsletterSubscribersTable } from '@/db/newsletter.schema'
-import { getOrCreateEmailPreferencesByUserId } from '@/repositories/email-preferences.repository'
+import {
+  canReceiveEmail,
+  getActiveMixRecipients,
+  getOrCreateEmailPreferencesByUserId,
+} from '@/repositories/email-preferences.repository'
 import {
   linkOrCreateSubscriberForUser,
   markSubscriberUnsubscribedByUserId,
@@ -142,11 +150,17 @@ describe('account lifecycles', { timeout: 30000 }, () => {
     const token = subscriber?.unsubscribeToken
 
     if (!token) throw new Error('Expected unsubscribe token')
+    const [originalPreferences] = await f.db.select().from(userEmailPreferencesTable)
+    let firstUnsubscribedAt: Date | null | undefined
 
     for (let attempt = 0; attempt < 2; attempt++) {
       const response = await f.request('/api/newsletter/unsubscribe', { token })
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual({ success: true })
+      const [row] = await f.db.select().from(newsletterSubscribersTable)
+
+      if (attempt === 0) firstUnsubscribedAt = row?.unsubscribedAt
+      expect(row?.unsubscribedAt).toEqual(firstUnsubscribedAt)
     }
 
     expect((await f.db.select().from(userEmailPreferencesTable))[0]).toMatchObject({
@@ -154,9 +168,11 @@ describe('account lifecycles', { timeout: 30000 }, () => {
       promotionalEnabled: false,
       systemEnabled: false,
       mixReleaseEnabled: false,
+      id: originalPreferences?.id,
+      unsubscribeToken: originalPreferences?.unsubscribeToken,
     })
     const count = f.messages.length
-    expect(count).toBe(2)
+    expect(count).toBe(1)
 
     const subscribed = await f.request('/api/newsletter/subscribe', {
       email: 'listener@example.test',
@@ -199,12 +215,58 @@ describe('account lifecycles', { timeout: 30000 }, () => {
     }
   })
 
-  test('preference propagation failure leaves the subscriber opted out before a retry completes the account opt-out', async () => {
+  test.each(['INSERT', 'UPDATE'])(
+    'preference %s failure preserves newsletter opt-out and retry repairs preferences without notification',
+    async (operation) => {
+      await using f = await setup()
+      await f.db
+        .insert(user)
+        .values({ id: 'listener', name: 'Listener', email: 'listener@example.test' })
+
+      if (operation === 'UPDATE') await getOrCreateEmailPreferencesByUserId('listener', f.db)
+
+      const [subscriber] = await f.db
+        .insert(newsletterSubscribersTable)
+        .values({ email: 'listener@example.test', userId: 'listener' })
+        .returning()
+
+      if (!subscriber?.unsubscribeToken) throw new Error('Expected unsubscribe token')
+      await f.db.run(
+        sql.raw(
+          `CREATE TRIGGER reject_preferences BEFORE ${operation} ON user_email_preferences BEGIN SELECT RAISE(ABORT, 'fixture preferences failure'); END`,
+        ),
+      )
+      expect(
+        (await f.request('/api/newsletter/unsubscribe', { token: subscriber.unsubscribeToken }))
+          .status,
+      ).toBe(500)
+
+      const firstUnsubscribedAt = (await f.db.select().from(newsletterSubscribersTable))[0]
+        ?.unsubscribedAt
+
+      expect(firstUnsubscribedAt).toBeInstanceOf(Date)
+      expect((await f.db.select().from(userEmailPreferencesTable))[0]?.globalUnsubscribe).toBe(
+        operation === 'UPDATE' ? false : undefined,
+      )
+      expect(f.messages).toHaveLength(0)
+      await f.db.run(sql`DROP TRIGGER reject_preferences`)
+      expect(
+        (await f.request('/api/newsletter/unsubscribe', { token: subscriber.unsubscribeToken }))
+          .status,
+      ).toBe(200)
+      expect((await f.db.select().from(userEmailPreferencesTable))[0]?.globalUnsubscribe).toBe(true)
+      expect((await f.db.select().from(newsletterSubscribersTable))[0]?.unsubscribedAt).toEqual(
+        firstUnsubscribedAt,
+      )
+      expect(f.messages).toHaveLength(0)
+    },
+  )
+
+  test('unsubscribe creates missing preferences and suppresses account delivery and recipient selection', async () => {
     await using f = await setup()
     await f.db
       .insert(user)
       .values({ id: 'listener', name: 'Listener', email: 'listener@example.test' })
-    await getOrCreateEmailPreferencesByUserId('listener', f.db)
 
     const [subscriber] = await f.db
       .insert(newsletterSubscribersTable)
@@ -212,24 +274,103 @@ describe('account lifecycles', { timeout: 30000 }, () => {
       .returning()
 
     if (!subscriber?.unsubscribeToken) throw new Error('Expected unsubscribe token')
-    await f.db.run(
-      sql`CREATE TRIGGER reject_preferences BEFORE UPDATE ON user_email_preferences BEGIN SELECT RAISE(ABORT, 'fixture preferences failure'); END`,
-    )
-    expect(
-      (await f.request('/api/newsletter/unsubscribe', { token: subscriber.unsubscribeToken }))
-        .status,
-    ).toBe(500)
-    expect(
-      (await f.db.select().from(newsletterSubscribersTable))[0]?.unsubscribedAt,
-    ).toBeInstanceOf(Date)
-    expect((await f.db.select().from(userEmailPreferencesTable))[0]?.globalUnsubscribe).toBe(false)
-    expect(f.messages).toHaveLength(0)
-    await f.db.run(sql`DROP TRIGGER reject_preferences`)
+
     expect(
       (await f.request('/api/newsletter/unsubscribe', { token: subscriber.unsubscribeToken }))
         .status,
     ).toBe(200)
+    const [preferences] = await f.db.select().from(userEmailPreferencesTable)
+    expect(preferences).toMatchObject({
+      globalUnsubscribe: true,
+      mixReleaseEnabled: false,
+      promotionalEnabled: false,
+      systemEnabled: false,
+    })
+    expect(preferences?.unsubscribeToken).toBeTruthy()
+
+    for (const type of [
+      EMAIL_NOTIFICATION_TYPES.MIX_RELEASE,
+      EMAIL_NOTIFICATION_TYPES.PROMOTIONAL,
+      EMAIL_NOTIFICATION_TYPES.SYSTEM,
+    ]) {
+      expect(await canReceiveEmail('listener', type, f.db)).toBe(false)
+    }
+
+    expect(await canReceiveEmail('listener', EMAIL_NOTIFICATION_TYPES.TRANSACTIONAL, f.db)).toBe(
+      true,
+    )
+    expect(await getActiveMixRecipients(f.db)).toEqual([])
+  })
+
+  test('concurrent valid repeats preserve first timestamp and claim only one admin notification', async () => {
+    await using f = await setup()
+    await f.db
+      .insert(user)
+      .values({ id: 'listener', name: 'Listener', email: 'listener@example.test' })
+
+    const [subscriber] = await f.db
+      .insert(newsletterSubscribersTable)
+      .values({ email: 'listener@example.test', userId: 'listener' })
+      .returning()
+
+    if (!subscriber?.unsubscribeToken) throw new Error('Expected unsubscribe token')
+    const token = subscriber.unsubscribeToken
+
+    const responses = await Promise.all(
+      Array.from({ length: 4 }, () => f.request('/api/newsletter/unsubscribe', { token })),
+    )
+
+    for (const response of responses) {
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ success: true })
+    }
+
+    expect(f.messages).toHaveLength(1)
+    expect(await f.db.select().from(userEmailPreferencesTable)).toHaveLength(1)
+
+    const firstUnsubscribedAt = (await f.db.select().from(newsletterSubscribersTable))[0]
+      ?.unsubscribedAt
+
+    await f.db
+      .update(userEmailPreferencesTable)
+      .set({ globalUnsubscribe: false, mixReleaseEnabled: true })
+      .where(eq(userEmailPreferencesTable.userId, 'listener'))
+    expect((await f.request('/api/newsletter/unsubscribe', { token })).status).toBe(200)
     expect((await f.db.select().from(userEmailPreferencesTable))[0]?.globalUnsubscribe).toBe(true)
+    expect((await f.db.select().from(newsletterSubscribersTable))[0]?.unsubscribedAt).toEqual(
+      firstUnsubscribedAt,
+    )
+    expect(f.messages).toHaveLength(1)
+  })
+
+  test('anonymous opt-out survives unavailable notification transport without retrying the notice', async () => {
+    await using f = await setup(true)
+
+    const [subscriber] = await f.db
+      .insert(newsletterSubscribersTable)
+      .values({ email: 'anonymous@example.test' })
+      .returning()
+
+    if (!subscriber?.unsubscribeToken) throw new Error('Expected unsubscribe token')
+    const token = subscriber.unsubscribeToken
+    expect((await f.request('/api/newsletter/unsubscribe', { token })).status).toBe(200)
+
+    const firstUnsubscribedAt = (await f.db.select().from(newsletterSubscribersTable))[0]
+      ?.unsubscribedAt
+
+    expect(firstUnsubscribedAt).toBeInstanceOf(Date)
+    expect((await f.request('/api/newsletter/unsubscribe', { token })).status).toBe(200)
+    expect((await f.db.select().from(newsletterSubscribersTable))[0]?.unsubscribedAt).toEqual(
+      firstUnsubscribedAt,
+    )
+    expect(await f.db.select().from(userEmailPreferencesTable)).toEqual([])
+    expect((await f.db.select().from(emailDeliveryLogsTable)).map((row) => row.status)).toEqual([
+      'FAILED',
+    ])
+    expect(
+      (await f.request('/api/newsletter/unsubscribe', { token: crypto.randomUUID() })).status,
+    ).toBe(404)
+    expect(await f.db.select().from(emailDeliveryLogsTable)).toHaveLength(1)
   })
 
   test('anonymous newsletter opt-out is carried into account preferences by real signup', async () => {

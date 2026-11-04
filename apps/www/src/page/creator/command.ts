@@ -7,8 +7,8 @@ import type { CreatorDraft, CreatorError } from './services'
 import { CreatorDraftSchema as Draft, CreatorService } from './services'
 import { CreatorUpload } from './upload/runtime'
 
-const failure = (operation: string) => (error: CreatorError) =>
-  Message.Failed({ operation, message: error.message })
+const failure = (operation: string, editorId: string) => (error: CreatorError) =>
+  Message.Failed({ operation, editorId, message: error.message })
 
 export const FindMusicReferences = Command.define('Creator.FindMusicReferences', {
   args: {
@@ -76,9 +76,14 @@ export const PersistDraft = Command.define('Creator.PersistDraft', {
 })
 
 export const Hydrate = Command.define('Creator.Hydrate', {
-  args: { key: Schema.String, kind: Kind, editSlug: Schema.NullOr(Schema.String) },
+  args: {
+    key: Schema.String,
+    kind: Kind,
+    editSlug: Schema.NullOr(Schema.String),
+    editorId: Schema.String,
+  },
   messages: [Message.Hydrated, Message.Failed],
-  execute: ({ key, kind, editSlug }) =>
+  execute: ({ key, kind, editSlug, editorId }) =>
     Effect.gen(function* () {
       const service = yield* CreatorService
 
@@ -90,13 +95,13 @@ export const Hydrate = Command.define('Creator.Hydrate', {
         creators: editable?.creators ?? [],
         source: editable ? 'remote' : draft ? 'local' : 'empty',
       })
-    }).pipe(Effect.catch((error) => Effect.succeed(failure('load')(error)))),
+    }).pipe(Effect.catch((error) => Effect.succeed(failure('load', editorId)(error)))),
 })
 
 export const ResolveMusic = Command.define('Creator.ResolveMusic', {
-  args: { url: Schema.String, kind: Kind },
+  args: { url: Schema.String, kind: Kind, editorId: Schema.String },
   messages: [Message.MusicResolved, Message.Failed],
-  execute: ({ url, kind }) =>
+  execute: ({ url, kind, editorId }) =>
     Effect.flatMap(CreatorService, (service) => service.resolveMusic(url, kind)).pipe(
       Effect.map(({ entityType, entityId, title, artistNames, coverImageUrl }) =>
         Message.MusicResolved({
@@ -108,7 +113,7 @@ export const ResolveMusic = Command.define('Creator.ResolveMusic', {
           coverImageUrl,
         }),
       ),
-      Effect.catch((error) => Effect.succeed(failure('resolve music')(error))),
+      Effect.catch((error) => Effect.succeed(failure('resolve music', editorId)(error))),
     ),
 })
 
@@ -127,12 +132,12 @@ export const ResolvePostMusic = Command.define('Creator.ResolvePostMusic', {
 })
 
 export const ResolveQuote = Command.define('Creator.ResolveQuote', {
-  args: { slug: Schema.String },
+  args: { slug: Schema.String, editorId: Schema.String },
   messages: [Message.QuoteResolved, Message.Failed],
-  execute: ({ slug }) =>
+  execute: ({ slug, editorId }) =>
     Effect.flatMap(CreatorService, (service) => service.resolveQuote(slug)).pipe(
       Effect.map(({ id, title, content }) => Message.QuoteResolved({ id, slug, title, content })),
-      Effect.catch((error) => Effect.succeed(failure('resolve quote')(error))),
+      Effect.catch((error) => Effect.succeed(failure('resolve quote', editorId)(error))),
     ),
 })
 
@@ -184,12 +189,12 @@ export const ReconcileLocalDraft = Command.define('Creator.ReconcileLocalDraft',
 })
 
 export const UploadArtwork = Command.define('Creator.UploadArtwork', {
-  args: { file: Schema.instanceOf(File) },
+  args: { file: Schema.instanceOf(File), editorId: Schema.String },
   messages: [Message.ArtworkUploaded, Message.Failed],
-  execute: ({ file }) =>
+  execute: ({ file, editorId }) =>
     Effect.flatMap(CreatorService, (service) => service.uploadImage(file)).pipe(
       Effect.map((url) => Message.ArtworkUploaded({ url })),
-      Effect.catch((error) => Effect.succeed(failure('artwork upload')(error))),
+      Effect.catch((error) => Effect.succeed(failure('artwork upload', editorId)(error))),
     ),
 })
 

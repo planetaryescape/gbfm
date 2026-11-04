@@ -17,14 +17,15 @@ import {
 import { login } from '@/api/auth'
 import { Screen } from '@/components/Screen'
 import { useSetAuth } from '@/store/auth'
-import { idleLoginSubmission, LoginSubmission, submitLogin } from '@/store/loginSubmission'
+import { LoginSubmission } from '@/store/loginSubmission'
+import { useLoginSubmission } from '@/store/useLoginSubmission'
 import { useThemeColors } from '@/theme/colors'
 
 export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [submission, setSubmission] = useState<LoginSubmission>(idleLoginSubmission)
+  const { submission, submit } = useLoginSubmission()
   const isSubmitting = LoginSubmission.$is('Submitting')(submission)
 
   const errorMessage = LoginSubmission.$match(submission, {
@@ -43,13 +44,9 @@ export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void
   const handleLogin = () => {
     if (!canSubmit) return
 
-    const runLogin = submitLogin(
-      login({ email: email.trim(), password }).pipe(Effect.tap(setAuth)),
-      setSubmission,
-      () => (onSignedIn ? onSignedIn() : router.replace('/profile')),
+    void submit(login({ email: email.trim(), password }).pipe(Effect.tap(setAuth)), () =>
+      onSignedIn ? onSignedIn() : router.replace('/profile'),
     )
-
-    void Effect.runPromise(runLogin)
   }
 
   return (

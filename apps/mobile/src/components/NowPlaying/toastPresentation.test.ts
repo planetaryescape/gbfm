@@ -6,6 +6,7 @@ const fixture = () => {
   let hide: (() => void) | null = null
   const frames: Array<{ target: number; duration: number }> = []
   const completions = new Map<number, (finished: boolean) => void>()
+  const scheduled: Array<() => void> = []
   const announced: Array<string> = []
   const dismissed: Array<{ message: string }> = []
   let stopped = 0
@@ -32,6 +33,7 @@ const fixture = () => {
       (delay, callback) => {
         expect(delay).toBe(2400)
         hide = callback
+        scheduled.push(callback)
 
         return () => {
           hide = null
@@ -45,6 +47,7 @@ const fixture = () => {
     dismissed,
     frames,
     expire: () => hide?.(),
+    deliverTimer: (index: number) => scheduled[index]?.(),
     finish: (frame: number, finished: boolean) => {
       const complete = completions.get(frame)
 
@@ -95,12 +98,12 @@ test('replacement cancels the old timer and resets animation even for equal mess
   f.finish(2, true)
   expect(f.dismissed).toEqual([second])
   expect(f.dismissed[0]).toBe(second)
-  expect(f.stopped()).toBe(2)
+  expect(f.stopped()).toBe(3)
   expect(f.reset()).toBe(2)
 })
 
 test.each([false, true])(
-  'a late old completion with finished=%s retains its original notice after replacement',
+  'a released completion with finished=%s cannot dismiss after replacement',
   (finished) => {
     const f = fixture()
     const first = { message: 'Playing track' }
@@ -117,12 +120,10 @@ test.each([false, true])(
       { target: 0, duration: 220 },
     ])
     f.finish(1, finished)
-    expect(f.dismissed).toEqual(finished ? [first] : [])
-
-    expect(f.dismissed[0]).toBe(finished ? first : undefined)
+    expect(f.dismissed).toEqual([])
     expect(f.dismissed).not.toContain(second)
     f.finish(3, true)
-    expect(f.dismissed).toEqual(finished ? [first, second] : [second])
+    expect(f.dismissed).toEqual([second])
     expect(f.dismissed.at(-1)).toBe(second)
   },
 )
@@ -136,12 +137,27 @@ test('unmount cancels a waiting timer', () => {
   expect(f.dismissed).toEqual([])
 })
 
-test('characterizes cleanup during fade-out: the native completion remains owned by Animated', () => {
+test('release during fade-out stops animation and invalidates native completion', () => {
   const f = fixture()
   const notice = { message: 'Added to queue' }
   const release = f.start(notice)
   f.expire()
   release()
+  release()
   f.finish(1, true)
-  expect(f.dismissed[0]).toBe(notice)
+  expect(f.dismissed).toEqual([])
+  expect(f.stopped()).toBe(2)
+})
+
+test('an already queued timer cannot animate after release or replacement', () => {
+  const f = fixture()
+  const release = f.start({ message: 'First notice' })
+  release()
+  f.start({ message: 'Replacement notice' })
+  f.deliverTimer(0)
+  expect(f.frames).toEqual([
+    { target: 1, duration: 180 },
+    { target: 1, duration: 180 },
+  ])
+  expect(f.dismissed).toEqual([])
 })

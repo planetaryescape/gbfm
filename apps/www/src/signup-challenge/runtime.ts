@@ -34,6 +34,7 @@ export const startSignupChallenge = (input: {
   readonly redirect: (url: string) => void
 }) => {
   let challenge: Challenge = Challenge.Waiting()
+  let challengeGeneration = 0
   let widget: string | undefined
   let unloadScript: (() => void) | undefined
   let submitting = false
@@ -44,7 +45,11 @@ export const startSignupChallenge = (input: {
   }
 
   const fail = () => {
-    if (!Challenge.$is('Disposed')(challenge)) challenge = Challenge.Waiting()
+    if (!Challenge.$is('Disposed')(challenge)) {
+      challengeGeneration += 1
+      challenge = Challenge.Waiting()
+    }
+
     status('failed')
   }
 
@@ -61,6 +66,7 @@ export const startSignupChallenge = (input: {
         'response-field': false,
         callback: (token) => {
           if (Challenge.$is('Disposed')(challenge)) return
+          challengeGeneration += 1
           challenge = Challenge.Ready({ token })
           status('ready')
         },
@@ -92,6 +98,7 @@ export const startSignupChallenge = (input: {
     },
     retry() {
       if (Challenge.$is('Disposed')(challenge)) return
+      challengeGeneration += 1
       challenge = Challenge.Waiting()
       status('verifying')
       const api = input.widget()
@@ -105,6 +112,7 @@ export const startSignupChallenge = (input: {
       submitting = true
       status('submitting')
       const token = challenge.token
+      const generation = challengeGeneration
 
       try {
         const request = input.prepare(token, controller.signal)
@@ -119,9 +127,9 @@ export const startSignupChallenge = (input: {
           return
         }
 
-        fail()
+        if (generation === challengeGeneration) fail()
       } catch {
-        fail()
+        if (generation === challengeGeneration) fail()
       } finally {
         submitting = false
       }

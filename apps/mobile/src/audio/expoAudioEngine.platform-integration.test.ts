@@ -5,10 +5,11 @@ import {
   makePlayerCore,
   PlayReporter,
   type QueueTrackType,
+  type EngineStatus,
 } from '@gbfm/player'
-import { Effect, Fiber, Layer, ManagedRuntime, Predicate, Stream } from 'effect'
+import { Effect, Exit, Fiber, Layer, ManagedRuntime, Predicate, Scope, Stream } from 'effect'
 import type { AudioSample, AudioStatus } from 'expo-audio'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { ExpoAudioEngineLayer, type ExpoAudioEnginePlayer } from './expoAudioEngine'
 
@@ -63,6 +64,7 @@ class PlatformPlayer implements ExpoAudioEnginePlayer {
   }
 
   pause() {
+    this.calls.push('pause')
     this.emit({ playing: false })
   }
 
@@ -102,8 +104,16 @@ class PlatformPlayer implements ExpoAudioEnginePlayer {
     }
   }
 
-  clearLockScreenControls() {}
-  setActiveForLockScreen() {}
+  clearLockScreenControls() {
+    this.calls.push('clearLockScreen')
+  }
+  setActiveForLockScreen() {
+    this.calls.push('lockScreen')
+  }
+  remove() {
+    this.src = null
+    this.calls.push('remove')
+  }
 }
 
 const track = (id: string): QueueTrackType => ({
@@ -116,7 +126,9 @@ const track = (id: string): QueueTrackType => ({
 })
 
 const fixture = () => {
-  const audio = new PlatformPlayer()
+  let audio = new PlatformPlayer()
+  const initial = audio
+  const instances: Array<PlatformPlayer> = []
   const values = new Map<string, string>()
   const reads: Array<string> = []
   const cleared: Array<string> = []
@@ -142,7 +154,20 @@ const fixture = () => {
 
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
-      ExpoAudioEngineLayer(audio, 'native'),
+      ExpoAudioEngineLayer(() => {
+        const next = new PlatformPlayer()
+        next.currentStatus = {
+          ...initial.currentStatus,
+          playing: false,
+          currentTime: 0,
+          didJustFinish: false,
+        }
+        next.rejectPlay = initial.rejectPlay
+        audio = next
+        instances.push(next)
+
+        return next
+      }, 'native'),
       storage,
       Layer.succeed(PlayReporter, {
         recordPlay: (id) =>
@@ -157,7 +182,10 @@ const fixture = () => {
   const checkpoint = (position: number) => JSON.stringify({ position, updatedAt: 0 })
 
   return {
-    audio,
+    get audio() {
+      return audio
+    },
+    instances,
     runtime,
     reads,
     cleared,
@@ -186,6 +214,132 @@ const fixture = () => {
 }
 
 describe('Expo native adapter with shared playback orchestration', () => {
+  it('releases Expo web completion polling along with each owned instance', async () => {
+    vi.useFakeTimers()
+    const players: Array<PlatformPlayer> = []
+
+    const runtime = ManagedRuntime.make(
+      ExpoAudioEngineLayer(() => {
+        const player = new PlatformPlayer()
+        players.push(player)
+
+        return player
+      }, 'web'),
+    )
+
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const engine = yield* AudioEngine
+          yield* engine.replace(track('one').url, 1)
+          expect(vi.getTimerCount()).toBe(1)
+          yield* engine.replace(track('two').url, 2)
+          expect(vi.getTimerCount()).toBe(1)
+          expect(players[0]?.listeners.size).toBe(0)
+          yield* engine.clearSource
+          expect(vi.getTimerCount()).toBe(0)
+          yield* engine.replace(track('three').url, 3)
+          expect(vi.getTimerCount()).toBe(1)
+        }),
+      )
+      await runtime.dispose()
+      expect(vi.getTimerCount()).toBe(0)
+      expect(players.every((player) => player.listeners.size === 0)).toBe(true)
+    } finally {
+      await runtime.dispose()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(['replace', 'clear', 'dispose'] as const)(
+    'ignores retained native callbacks after %s and releases only the old player',
+    async (action) => {
+      const instances: Array<PlatformPlayer> = []
+      const seen: Array<EngineStatus> = []
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const scope = yield* Scope.make()
+
+          const context = yield* Layer.buildWithScope(
+            ExpoAudioEngineLayer(() => {
+              const audio = new PlatformPlayer()
+              instances.push(audio)
+
+              return audio
+            }, 'native'),
+            scope,
+          )
+
+          const engine = yield* AudioEngine.pipe(Effect.provideContext(context))
+          yield* Stream.runForEach(engine.changes, (value) =>
+            Effect.sync(() => {
+              seen.push(value)
+            }),
+          ).pipe(Effect.forkScoped)
+          yield* Effect.yieldNow
+          yield* engine.setVolume(0.25)
+          yield* engine.setMuted(true)
+          yield* engine.replace(track('one').url, 1)
+          const old = instances[0]
+
+          if (!old) throw new Error('Expected player')
+          const retained = [...old.listeners]
+          yield* engine.setNowPlaying({ title: 'One' })
+
+          if (action === 'replace') {
+            yield* engine.replace(track('two').url, 2)
+            yield* engine.setNowPlaying({ title: 'Two' })
+            yield* engine.play
+          } else if (action === 'clear') yield* engine.clearSource
+          else yield* Scope.close(scope, Exit.void)
+          yield* Effect.yieldNow
+          seen.length = 0
+
+          for (const listener of retained) {
+            listener({ ...old.currentStatus, isLoaded: true, duration: 999, playing: true })
+            listener({ ...old.currentStatus, didJustFinish: true, currentTime: 999 })
+          }
+
+          yield* Effect.yieldNow
+          expect(seen).toEqual([])
+          expect(old.listeners.size).toBe(0)
+          expect(old.calls.filter((value) => value === 'remove')).toHaveLength(1)
+          expect(old.calls).toContain('clearLockScreen')
+          const current = instances.at(-1)
+
+          if (action === 'replace' && current) {
+            expect(current).not.toBe(old)
+            expect(current.volume).toBe(0.25)
+            expect(current.muted).toBe(true)
+            expect(current.calls).not.toContain('pause')
+            expect(current.calls).not.toContain('remove')
+            expect(current.calls).not.toContain('clearLockScreen')
+            current.ready(120)
+            yield* Effect.yieldNow
+            expect(seen).toEqual([
+              expect.objectContaining({
+                sourceGeneration: 2,
+                isLoaded: true,
+                duration: 120,
+                didJustFinish: false,
+              }),
+            ])
+          } else
+            expect(yield* engine.currentStatus).toMatchObject({
+              sourceGeneration: null,
+              isLoaded: false,
+            })
+          yield* Scope.close(scope, Exit.void)
+
+          for (const player of instances) {
+            expect(player.listeners.size).toBe(0)
+            expect(player.calls.filter((value) => value === 'remove')).toHaveLength(1)
+          }
+        }).pipe(Effect.scoped),
+      )
+    },
+  )
+
   it('ignores completion already queued by the adapter before source replacement', async () => {
     const f = fixture()
     f.audio.ready()
@@ -436,7 +590,7 @@ describe('Expo native adapter with shared playback orchestration', () => {
     }
   })
 
-  it('labels an old native status snapshot with the current source generation', async () => {
+  it('drops an old native instance status rather than stamping current source generation', async () => {
     const f = fixture()
 
     try {
@@ -444,14 +598,22 @@ describe('Expo native adapter with shared playback orchestration', () => {
         Effect.gen(function* () {
           const engine = yield* AudioEngine
           yield* engine.replace(track('one').url, 1)
-          const old = { ...f.audio.currentStatus, didJustFinish: true, duration: 87 }
+          const previous = f.audio
+          const old = [...previous.listeners]
           yield* engine.replace(track('two').url, 2)
           const event = yield* Effect.forkScoped(Stream.runHead(engine.changes))
           yield* Effect.yieldNow
 
-          for (const listener of f.audio.listeners) listener(old)
+          for (const listener of old)
+            listener({
+              ...previous.currentStatus,
+              isLoaded: true,
+              didJustFinish: true,
+              duration: 87,
+            })
+          f.audio.ready(120)
           expect(yield* Fiber.join(event)).toMatchObject({
-            value: { sourceGeneration: 2, didJustFinish: true, duration: 87 },
+            value: { sourceGeneration: 2, didJustFinish: false, duration: 120 },
           })
         }).pipe(Effect.scoped),
       )

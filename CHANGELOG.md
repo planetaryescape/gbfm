@@ -1,3 +1,21 @@
+# [2.122.0](https://github.com/planetaryescape/gbfm/compare/v2.121.3...v2.122.0) (2026-11-04)
+
+
+### Bug Fixes
+
+* **build:** refuse public source maps after authenticated upload ([5cb05a4](https://github.com/planetaryescape/gbfm/commit/5cb05a4be7cedb393de99560b998558b4fea9506))
+* **mobile:** bind observability consumers to the active provider lifetime ([0fe2e3d](https://github.com/planetaryescape/gbfm/commit/0fe2e3d189bc1e6020c5c660be08a9ba92206034))
+* **mobile:** initialize observability before Router evaluation ([083d248](https://github.com/planetaryescape/gbfm/commit/083d248a48a67a28f2c2b82c31c2ccbbca1290db))
+* **observability:** isolate signals and own in-flight journey admission ([c628d66](https://github.com/planetaryescape/gbfm/commit/c628d6624b715f40c6ba36b3371f002e905a0173))
+
+
+### Features
+
+* **mobile:** establish privacy-bounded Sentry observability ([85de466](https://github.com/planetaryescape/gbfm/commit/85de466bd1940732091d8a84dc332e85216caed4))
+* **mobile:** observe reading and native playback outcomes ([e74c334](https://github.com/planetaryescape/gbfm/commit/e74c334591d236a810ddb1fdf1ff83ddc3d14049))
+* **observability:** align web journeys and gate capture on source-map uploads ([c8d825f](https://github.com/planetaryescape/gbfm/commit/c8d825fffdb2b99f47db459a66dfa909a8dab061))
+* **www:** observe browser navigation through shared Effect services ([290a57f](https://github.com/planetaryescape/gbfm/commit/290a57f4df1a3b9901a7ddd8420ad1408c2507e6))
+
 ## [2.121.3](https://github.com/planetaryescape/gbfm/compare/v2.121.2...v2.121.3) (2026-11-04)
 
 

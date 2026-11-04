@@ -1,6 +1,6 @@
 import { Effect, Predicate } from 'effect'
-import { createElement, useEffect } from 'react'
-import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { act, createElement, useEffect } from 'react'
+import { createRoot } from 'test-renderer'
 import { expect, test } from 'vitest'
 
 import {
@@ -10,6 +10,7 @@ import {
   AuthStorageFailed,
   currentAuthSession,
   emptyAuthSession,
+  makeAuthSessionStorage,
   type AuthSession,
 } from './authLifecycle'
 import { LoginSubmission } from './loginSubmission'
@@ -40,24 +41,23 @@ test('the login hook gates two submissions from the same render and cancels on u
     return null
   }
 
-  let view: ReactTestRenderer | undefined
-  await act(() => {
-    view = create(createElement(LoginHarness))
+  const mounted = createRoot()
+  await act(async () => {
+    mounted.render(createElement(LoginHarness))
   })
 
-  if (!current || !view) throw new Error('login not mounted')
-  const mounted = view
+  if (!current) throw new Error('login not mounted')
   const sameRender = current
   let first: ReturnType<typeof sameRender.submit> | undefined
   let duplicate: ReturnType<typeof sameRender.submit> | undefined
-  await act(() => {
+  await act(async () => {
     first = sameRender.submit(request, () => navigations.push('profile'))
     duplicate = sameRender.submit(request, () => navigations.push('profile'))
   })
   expect(signals).toHaveLength(1)
   expect(duplicate).toBeNull()
   expect(current.submission).toEqual(LoginSubmission.Submitting())
-  await act(() => mounted.unmount())
+  await act(async () => mounted.unmount())
   expect(signals[0]?.aborted).toBe(true)
   finish?.()
   await first
@@ -92,14 +92,19 @@ test('the login hook retains authenticated memory on storage failure and permits
         auth = Predicate.isFunction(update) ? update(auth) : update
       }),
     ),
-    Effect.provideService(AuthSessionStorage, {
-      read: Effect.succeed(null),
-      remove: Effect.void,
-      write: () =>
-        Effect.suspend(() =>
-          failWrite ? Effect.fail(new AuthStorageFailed({ message: 'Write failed' })) : Effect.void,
-        ),
-    }),
+    Effect.provideService(
+      AuthSessionStorage,
+      makeAuthSessionStorage({
+        read: Effect.succeed(null),
+        remove: Effect.void,
+        write: () =>
+          Effect.suspend(() =>
+            failWrite
+              ? Effect.fail(new AuthStorageFailed({ message: 'Write failed' }))
+              : Effect.void,
+          ),
+      }),
+    ),
   )
 
   function LoginHarness() {
@@ -111,13 +116,12 @@ test('the login hook retains authenticated memory on storage failure and permits
     return null
   }
 
-  let view: ReactTestRenderer | undefined
-  await act(() => {
-    view = create(createElement(LoginHarness))
+  const mounted = createRoot()
+  await act(async () => {
+    mounted.render(createElement(LoginHarness))
   })
 
-  if (!current || !view) throw new Error('login not mounted')
-  const mounted = view
+  if (!current) throw new Error('login not mounted')
   const initialRender = current
   await act(async () => {
     await initialRender.submit(request, () => navigations.push('profile'))
@@ -133,5 +137,5 @@ test('the login hook retains authenticated memory on storage failure and permits
   })
   expect(current.submission).toEqual(LoginSubmission.Idle())
   expect(navigations).toEqual(['profile'])
-  await act(() => mounted.unmount())
+  await act(async () => mounted.unmount())
 })

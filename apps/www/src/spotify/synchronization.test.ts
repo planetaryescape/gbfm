@@ -1,4 +1,6 @@
-import { Deferred, Effect, Fiber } from 'effect'
+import { MicroPostScreenResponse } from '@gbfm/api/post'
+import { Deferred, Effect, Fiber, Option, Schema } from 'effect'
+import { fromString } from 'foldkit/url'
 import { describe, expect, it } from 'vitest'
 
 import { init } from '../init'
@@ -32,6 +34,121 @@ const flags: Flags = {
 }
 
 describe('Spotify application synchronization', () => {
+  it('does not retain a pending Spotify request when anonymous init drops dashboard commands', () => {
+    const anonymous = init({ ...flags, principal: null })
+    expect(anonymous.model.dashboard.spotifyPending).toBeNull()
+
+    const connect = update(
+      anonymous.model,
+      Message.GotDashboardMessage({
+        message: DashboardMessage.SpotifyRequested({ action: 'connect' }),
+      }),
+    )
+
+    expect(connect.commands?.some(({ name }) => name === 'Spotify.Connection')).toBe(true)
+  })
+
+  it('allocates a fresh status load from retained playback on actual tweet navigation', async () => {
+    const post = {
+      id: 'fixture-post',
+      slug: 'fixture',
+      title: null,
+      description: null,
+      thumbnailUrl: null,
+      content: 'Fixture',
+      draft: false,
+      tags: [],
+      type: 'micro',
+      musicEntityType: null,
+      musicEntityId: null,
+      parentPostId: null,
+      rootPostId: null,
+      depth: 0,
+      quotedPostId: null,
+      createdAt: '2024-04-01T00:00:00Z',
+      updatedAt: '2024-04-01T00:00:00Z',
+      compiledContent: 'Fixture',
+      music: null,
+    }
+
+    const tweetFlags: Flags = {
+      ...flags,
+      url: 'https://fixture.test/tweet/fixture',
+      tweet: Schema.decodeUnknownSync(MicroPostScreenResponse)({
+        post,
+        root: post,
+        replies: [],
+        quote: null,
+      }),
+    }
+
+    const initial = init(flags).model
+
+    const connected = update(
+      initial,
+      Message.GotDashboardMessage({
+        message: DashboardMessage.SpotifyLoaded({
+          requestId: 1,
+          status: { connected: true, name: 'Previous account' },
+        }),
+      }),
+    ).model
+
+    const oldId = connected.spotifyPlayback.statusRequestId
+    const gate = Deferred.makeUnsafe<typeof disconnected>()
+
+    const service = SpotifyConnection.of({
+      status: Effect.succeed(disconnected),
+      connect: Effect.void,
+      completeCallback: Effect.void,
+      disconnect: Effect.succeed(disconnected),
+      playback: () => Effect.succeed('unused'),
+    })
+
+    const oldLoad = Effect.runPromise(
+      Playback.Load({ requestId: oldId }).effect.pipe(
+        Effect.provideService(SpotifyConnection, { ...service, status: Deferred.await(gate) }),
+      ),
+    )
+
+    const navigating = update(
+      connected,
+      Message.ChangedUrl({ url: Option.getOrThrow(fromString(tweetFlags.url)) }),
+    ).model
+
+    const shown = update(
+      navigating,
+      Message.LoadedPage({
+        flags: tweetFlags,
+        key: '/tweet/fixture',
+        navigationId: navigating.navigationId,
+      }),
+    )
+
+    const freshId = shown.model.spotifyPlayback.statusRequestId
+    expect(freshId).toBeGreaterThan(oldId)
+    expect(shown.commands?.find(({ name }) => name === 'Spotify.PlaybackStatus')).toMatchObject({
+      args: { requestId: freshId },
+    })
+
+    const result = await Effect.runPromise(
+      Playback.Load({ requestId: freshId }).effect.pipe(
+        Effect.provideService(SpotifyConnection, service),
+      ),
+    )
+
+    const refreshed = update(
+      shown.model,
+      Message.GotSpotifyPlaybackMessage({ message: result }),
+    ).model
+
+    expect(refreshed.spotifyPlayback.status).toEqual(disconnected)
+    await Effect.runPromise(Deferred.succeed(gate, { connected: true, name: 'Obsolete load' }))
+    expect(
+      update(refreshed, Message.GotSpotifyPlaybackMessage({ message: await oldLoad })).model
+        .spotifyPlayback,
+    ).toBe(refreshed.spotifyPlayback)
+  })
   it.each(['success', 'failure'] as const)(
     'fences a real delayed dashboard %s and initial playback load after disconnect',
     async (outcome) => {

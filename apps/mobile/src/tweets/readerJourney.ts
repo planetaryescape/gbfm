@@ -1,15 +1,16 @@
-import { startJourney, type JourneySink } from '../observability/journey'
+import type { JourneyObserver } from '@gbfm/observability/callbacks'
+
 import type { ReaderState } from './readerState'
 
-export const readerJourney = (sink: JourneySink, now: () => number = () => performance.now()) => {
+export const readerJourney = (observer: JourneyObserver) => {
   let pending:
-    | { readonly request: number; readonly finish: ReturnType<typeof startJourney> }
+    | { readonly request: number; readonly finish: ReturnType<JourneyObserver['start']> }
     | undefined
 
   return {
     start: (request: number) => {
       pending?.finish('canceled')
-      const finish = startJourney(sink, 'reader.open', now)
+      const finish = observer.start('reader.open')
       pending = { request, finish }
 
       return () => {

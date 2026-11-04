@@ -5,12 +5,12 @@ import type {
   Metric,
   StackFrame,
   TransactionEvent,
-} from '@sentry/react-native'
+} from '@sentry/core'
 import { flow, Option, Schema } from 'effect'
 
 const safeJourneyName = flow(
-  Schema.decodeUnknownOption(Schema.Literals(['reader.open', 'playback.start'])),
-  Option.getOrElse(() => 'mobile.operation'),
+  Schema.decodeUnknownOption(Schema.Literals(['reader.open', 'playback.start', 'navigation'])),
+  Option.getOrElse(() => 'application.operation'),
 )
 
 const safeOutcome = flow(
@@ -22,7 +22,7 @@ const safeOperation = flow(
   Schema.decodeUnknownOption(
     Schema.Literals(['gbfm.journey', 'ui.load', 'navigation', 'app.start', 'http.client']),
   ),
-  Option.getOrElse(() => 'mobile.operation'),
+  Option.getOrElse(() => 'application.operation'),
 )
 
 const errorTypes = new Set([
@@ -33,12 +33,13 @@ const errorTypes = new Set([
   'SyntaxError',
   'ReaderOpenFailed',
   'PlaybackStartFailed',
+  'NavigationFailed',
 ])
 
 const metricIdentity = Schema.decodeUnknownOption(
   Schema.Struct({
     'sentry.release': Schema.optional(
-      Schema.String.pipe(Schema.check(Schema.isPattern(/^gbfm-mobile@[a-f0-9]{40}$/))),
+      Schema.String.pipe(Schema.check(Schema.isPattern(/^gbfm-(mobile|www)@[a-f0-9]{40}$/))),
     ),
     'sentry.environment': Schema.optional(
       Schema.Literals(['development', 'preview', 'production']),
@@ -58,6 +59,19 @@ const routes = new Set([
   '/music-reminders',
   '/now-playing',
   '/expo-sharing',
+  '/tweet/:slug',
+  '/tweets',
+  '/shows',
+  '/shows/:slug',
+  '/mixes',
+  '/mixes/:slug',
+  '/tracks',
+  '/tracks/:slug',
+  '/editorial',
+  '/editorial/:slug',
+  '/dashboard',
+  '/dashboard/:section',
+  '/profile/:username',
 ])
 
 const safeSpanName = (value: string | undefined) => {

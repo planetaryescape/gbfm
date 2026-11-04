@@ -5,7 +5,7 @@ import { playbackJourney } from './playbackJourney'
 
 test('source loading is not a playback success until the platform reports playing', () => {
   const f = recordingJourneys()
-  const journey = playbackJourney(f.sink, f.now)
+  const journey = playbackJourney(f.observer)
   journey.replace()
   journey.status({ playing: false, error: null })
   expect(f.records).toEqual([])
@@ -18,7 +18,7 @@ test('source loading is not a playback success until the platform reports playin
 
 test('replacement, platform error, and disposal settle attempts without reporting raw errors', () => {
   const f = recordingJourneys()
-  const journey = playbackJourney(f.sink, f.now)
+  const journey = playbackJourney(f.observer)
   journey.replace()
   f.advance(10)
   journey.replace()

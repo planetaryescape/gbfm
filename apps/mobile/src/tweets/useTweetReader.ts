@@ -13,7 +13,7 @@ import {
   TweetReaderUnavailable,
 } from '@/api/tweetReader'
 import { env } from '@/env'
-import { mobileJourneys } from '@/observability/sentry'
+import { useJourneys } from '@/observability/context'
 
 import { readerAction } from './readerAction'
 import { readerCache, type ReaderCache } from './readerCache'
@@ -152,7 +152,8 @@ export function useTweetReader(
 
   const [state, dispatch] = useReducer(reduceReader, initialReaderState)
   const [ownership] = useState(readerOwnership)
-  const [journey] = useState(() => readerJourney(mobileJourneys))
+  const journeys = useJourneys()
+  const [journey] = useState(() => readerJourney(journeys))
 
   useEffect(
     () =>

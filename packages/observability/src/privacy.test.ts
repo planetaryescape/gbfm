@@ -78,7 +78,7 @@ test('automatic span and transaction metadata cannot export raw paths, SQL, or a
   expect(safeBreadcrumb({ category: 'navigation', data: { to: secret } })).toBeNull()
   expect(
     safeBreadcrumb({ category: 'gbfm.journey', message: secret, data: { outcome: secret } }),
-  ).toMatchObject({ message: 'mobile.operation', data: { outcome: 'unknown' } })
+  ).toMatchObject({ message: 'application.operation', data: { outcome: 'unknown' } })
 })
 
 test('behavior metrics keep bounded dimensions and drop ambient identity and other metric names', () => {

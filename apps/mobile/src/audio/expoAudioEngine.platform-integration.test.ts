@@ -144,7 +144,7 @@ const fixture = () => {
 
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
-      ExpoAudioEngineLayer(audio, 'native', journeys.sink),
+      ExpoAudioEngineLayer(audio, 'native', journeys.observer),
       storage,
       Layer.succeed(PlayReporter, {
         recordPlay: (id) =>

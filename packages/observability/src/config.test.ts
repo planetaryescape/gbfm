@@ -2,15 +2,16 @@ import { expect, test } from 'vitest'
 
 import { telemetryConfig } from './config'
 
-const dsn = 'https://public-key@o1.ingest.sentry.io/123'
+const dsn = 'https://abc123@o1.ingest.sentry.io/123'
 
 const input = {
+  application: 'mobile',
   dsn,
   enabled: 'true',
   environment: 'development',
   development: true,
   release: 'gbfm-mobile@0123456789abcdef0123456789abcdef01234567',
-}
+} satisfies Parameters<typeof telemetryConfig>[0]
 
 test('telemetry needs explicit opt-in and a valid DSN; bad telemetry config never blocks startup', () => {
   expect(telemetryConfig(input)).toMatchObject({ enabled: true, tracesSampleRate: 1 })

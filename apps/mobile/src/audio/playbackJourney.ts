@@ -1,12 +1,10 @@
-import { noJourneySink, startJourney, type JourneySink } from '../observability/journey'
+import type { JourneyOutcome } from '@gbfm/observability'
+import { noJourneys, type JourneyObserver } from '@gbfm/observability/callbacks'
 
-export const playbackJourney = (
-  sink: JourneySink = noJourneySink,
-  now: () => number = () => performance.now(),
-) => {
-  let pending: ReturnType<typeof startJourney> | undefined
+export const playbackJourney = (observer: JourneyObserver = noJourneys) => {
+  let pending: ReturnType<JourneyObserver['start']> | undefined
 
-  const finish = (outcome: Parameters<ReturnType<typeof startJourney>>[0]) => {
+  const finish = (outcome: JourneyOutcome) => {
     const complete = pending
     pending = undefined
     complete?.(outcome)
@@ -15,7 +13,7 @@ export const playbackJourney = (
   return {
     replace: () => {
       finish('canceled')
-      pending = startJourney(sink, 'playback.start', now)
+      pending = observer.start('playback.start')
     },
     status: (status: { readonly playing: boolean; readonly error: string | null }) => {
       if (status.error) finish('failed')

@@ -5,7 +5,6 @@ env:
 
 on:
   pull_request:
-    branches: [prod]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -53,6 +52,9 @@ jobs:
 
       - name: Run unit and integration tests
         run: bun run test
+
+      - name: Run WWW unit and integration tests
+        run: bun run test:www
 
   build-www:
     runs-on: ubuntu-24.04

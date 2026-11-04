@@ -1,11 +1,19 @@
+import { disabledObservabilityLayer, observabilityLayer } from '@gbfm/observability'
+import { telemetryConfig } from '@gbfm/observability/config'
+import {
+  safeBreadcrumb,
+  safeMetric,
+  safeSpan,
+  sanitizeError,
+  sanitizeTransaction,
+} from '@gbfm/observability/privacy'
+import { sentryExporterLayer } from '@gbfm/observability/sentry'
 import * as Sentry from '@sentry/react-native'
+import { Effect, Layer } from 'effect'
 import { AppState } from 'react-native'
 
-import { telemetryConfig } from './config'
-import type { JourneySink } from './journey'
-import { safeBreadcrumb, safeMetric, safeSpan, sanitizeError, sanitizeTransaction } from './privacy'
-
 const config = telemetryConfig({
+  application: 'mobile',
   dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
   enabled: process.env.EXPO_PUBLIC_SENTRY_ENABLED,
   environment: process.env.EXPO_PUBLIC_SENTRY_ENVIRONMENT,
@@ -42,40 +50,27 @@ if (config.enabled) {
     beforeSendTransaction: sanitizeTransaction,
     beforeSendMetric: safeMetric,
   })
-
-  AppState.addEventListener('change', (state) => {
-    if (state !== 'active') void Promise.resolve(Sentry.getClient()?.flush(2000)).catch(() => false)
-  })
 }
 
-export const mobileJourneys: JourneySink = {
-  start: (name) => {
-    if (!config.enabled) return () => {}
+const flush = () => Promise.resolve(Sentry.getClient()?.flush(2000)).catch(() => false)
 
-    const span = Sentry.startInactiveSpan({
-      name,
-      op: 'gbfm.journey',
-      forceTransaction: true,
-      attributes: { 'gbfm.operation': name },
+const lifecycle = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') void flush()
     })
 
-    return (outcome, durationMs) => {
-      span.setAttribute('gbfm.outcome', outcome)
-      span.setStatus({ code: outcome === 'failed' ? 2 : 1 })
-      span.end()
-      Sentry.addBreadcrumb({ category: 'gbfm.journey', message: name, data: { outcome } })
-      const attributes = { operation: name, outcome }
-      Sentry.metrics.count('gbfm.journey.completed', 1, { attributes })
-      Sentry.metrics.distribution('gbfm.journey.duration', durationMs, {
-        unit: 'millisecond',
-        attributes,
-      })
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        subscription.remove()
+        await flush()
+      }),
+    )
+  }),
+)
 
-      if (outcome === 'failed') {
-        const error = new Error('Application operation failed')
-        error.name = name === 'reader.open' ? 'ReaderOpenFailed' : 'PlaybackStartFailed'
-        Sentry.captureException(error)
-      }
-    }
-  },
-}
+export const mobileObservabilityLayer = config.enabled
+  ? observabilityLayer.pipe(Layer.provide(sentryExporterLayer(Sentry)), Layer.provide(lifecycle))
+  : disabledObservabilityLayer
+
+export const instrumentRoot = Sentry.wrap

@@ -1,4 +1,5 @@
 export const telemetryConfig = (input: {
+  readonly application: 'mobile' | 'www'
   readonly dsn: string | undefined
   readonly enabled: string | undefined
   readonly environment: string | undefined
@@ -12,7 +13,7 @@ export const telemetryConfig = (input: {
 
     if (
       parsed.protocol === 'https:' &&
-      parsed.username &&
+      /^[a-f0-9]+$/i.test(parsed.username) &&
       !parsed.password &&
       /^\/[0-9]+$/.test(parsed.pathname) &&
       !parsed.search &&
@@ -30,7 +31,9 @@ export const telemetryConfig = (input: {
         ? 'development'
         : 'production'
 
-  const release = /^gbfm-mobile@[a-f0-9]{40}$/.test(input.release ?? '') ? input.release : undefined
+  const release = new RegExp(`^gbfm-${input.application}@[a-f0-9]{40}$`).test(input.release ?? '')
+    ? input.release
+    : undefined
 
   return {
     dsn,

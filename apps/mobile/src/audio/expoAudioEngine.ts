@@ -1,3 +1,4 @@
+import { noJourneys, type JourneyObserver } from '@gbfm/observability/callbacks'
 import {
   AudioEngine,
   PlaybackRejected,
@@ -8,7 +9,6 @@ import {
 import { Effect, Layer, Queue, Stream } from 'effect'
 import type { AudioMetadata, AudioPlayer, AudioStatus } from 'expo-audio'
 
-import { noJourneySink, type JourneySink } from '../observability/journey'
 import { subscribeToPlaybackStatus } from './audioPlayerAdapter'
 import { playbackJourney } from './playbackJourney'
 
@@ -39,7 +39,7 @@ export type ExpoAudioEnginePlayer = Pick<
 const makeExpoAudioEngine = (
   player: ExpoAudioEnginePlayer,
   platform: 'native' | 'web',
-  journeys: JourneySink,
+  journeys: JourneyObserver,
 ) =>
   Effect.sync(() => {
     let sourceGeneration: number | null = null
@@ -133,5 +133,5 @@ const makeExpoAudioEngine = (
 export const ExpoAudioEngineLayer = (
   player: ExpoAudioEnginePlayer,
   platform: 'native' | 'web',
-  journeys: JourneySink = noJourneySink,
+  journeys: JourneyObserver = noJourneys,
 ) => Layer.effect(AudioEngine, makeExpoAudioEngine(player, platform, journeys))

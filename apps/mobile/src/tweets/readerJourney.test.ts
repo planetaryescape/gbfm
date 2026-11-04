@@ -5,7 +5,7 @@ import { readerJourney } from './readerJourney'
 
 test('reader outcomes follow committed state, ignore stale results, and distinguish empty from failure', () => {
   const f = recordingJourneys()
-  const journey = readerJourney(f.sink, f.now)
+  const journey = readerJourney(f.observer)
   const cancelFirst = journey.start(1)
   f.advance(25)
   journey.start(2)
@@ -26,7 +26,7 @@ test('reader outcomes follow committed state, ignore stale results, and distingu
 
 test('a committed cached post succeeds once and later network failure or blur cannot rewrite it', () => {
   const f = recordingJourneys()
-  const journey = readerJourney(f.sink, f.now)
+  const journey = readerJourney(f.observer)
   const cancel = journey.start(1)
   journey.committed({ request: 1, status: 'loading', hasContent: true })
   expect(f.records).toEqual([])

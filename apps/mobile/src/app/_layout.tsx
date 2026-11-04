@@ -1,6 +1,5 @@
 import { RegistryProvider, useAtomMount } from '@effect/atom-react'
 import { brandDark, brandLight } from '@gbfm/theme'
-import * as Sentry from '@sentry/react-native'
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
@@ -8,6 +7,8 @@ import { useColorScheme } from 'react-native'
 
 import { NowPlayingProvider } from '@/audio/NowPlayingProvider'
 import { QueueToast } from '@/components/NowPlaying/QueueToast'
+import { ObservabilityProvider } from '@/observability/context'
+import { instrumentRoot, mobileObservabilityLayer } from '@/observability/sentry'
 import { SpotifyConnectionProvider } from '@/spotify/connection'
 import { FontsLoadedBridge, splashHideAtom, useFontsReady } from '@/store/atoms/fonts'
 import { AuthProvider } from '@/store/auth'
@@ -33,14 +34,18 @@ const lightTheme = {
 function Layout() {
   return (
     <RegistryProvider>
-      <PreferencesProvider>
-        <AppLayout />
-      </PreferencesProvider>
+      <ObservabilityProvider layer={mobileObservabilityLayer}>
+        <PreferencesProvider>
+          <AppLayout />
+        </PreferencesProvider>
+      </ObservabilityProvider>
     </RegistryProvider>
   )
 }
 
-export default Sentry.wrap(Layout, { touchEventBoundaryProps: { extractTextFromChildren: false } })
+export default instrumentRoot(Layout, {
+  touchEventBoundaryProps: { extractTextFromChildren: false },
+})
 
 function AppLayout() {
   const systemColorScheme = useColorScheme()

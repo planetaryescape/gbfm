@@ -35,6 +35,10 @@ Sentry's Expo Router integration owns navigation tracing. Bounded route template
 
 ## Reading and playback journeys
 
+`@gbfm/observability` owns the Effect `Observability` service and `JourneyExporter` port. The service owns monotonic Effect-clock timing, once-only completion, exporter-failure isolation and cancellation at scope closure. It retains at most 30 outstanding attempts; excess attempts become no-ops until capacity is released. The callback bridge is for synchronous SDK enqueue adapters, not network I/O. Both service and callback APIs share the same completion policy.
+
+The shared Sentry adapter translates this contract into spans, metrics and reviewed exceptions. Shared privacy/config modules import no native SDK. Mobile bootstrap selects the adapter Layer, and its React provider owns the runtime, AppState subscription and final flush. Reader and player components depend on the injected observer, not a Sentry singleton. Closing the runtime cancels outstanding journeys before removing the listener and requesting a bounded flush.
+
 | Operation | Start | Completion |
 | --- | --- | --- |
 | `reader.open` | A focused reader begins an owned visit | The new request's ready/empty/error state commits in React, or focus/replacement cancels it |

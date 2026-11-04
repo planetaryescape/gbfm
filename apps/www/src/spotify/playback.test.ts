@@ -22,7 +22,7 @@ const service = (
 describe('Spotify playback ownership', () => {
   it('releases connect ownership on error without changing loaded status', async () => {
     const status = { connected: false, name: '' }
-    const model = update(initialModel, Message.Loaded({ status })).model
+    const model = update(initialModel, Message.Loaded({ requestId: 0, status })).model
     const request = update(model, Message.Requested({ action: 'connect', url: track }))
     const command = request.commands?.[0]
     expect(command).toBeDefined()
@@ -51,13 +51,13 @@ describe('Spotify playback ownership', () => {
   })
   it('loads status and preserves the disconnected fallback on failure', async () => {
     const loaded = await Effect.runPromise(
-      Load().effect.pipe(Effect.provideService(SpotifyConnection, service())),
+      Load({ requestId: 0 }).effect.pipe(Effect.provideService(SpotifyConnection, service())),
     )
 
     expect(update(initialModel, loaded).model.status).toEqual({ connected: true, name: 'Fixture' })
 
     const failed = await Effect.runPromise(
-      Load().effect.pipe(
+      Load({ requestId: 0 }).effect.pipe(
         Effect.provideService(
           SpotifyConnection,
           service({
@@ -166,7 +166,7 @@ describe('Spotify playback ownership', () => {
 
         const disconnectedModel = update(
           request.model,
-          Message.Loaded({ status: disconnected }),
+          Message.Loaded({ requestId: 0, status: disconnected }),
         ).model
 
         expect(disconnectedModel.operation).toEqual(request.model.operation)
@@ -192,11 +192,16 @@ describe('Spotify playback ownership', () => {
     expect(stale.operation).toEqual(
       Operation.cases.Idle.make({ target: 'second', notice: 'late first' }),
     )
-    const disconnectedModel = update(stale, Message.Loaded({ status: disconnected })).model
+
+    const disconnectedModel = update(
+      stale,
+      Message.Loaded({ requestId: 0, status: disconnected }),
+    ).model
+
     expect(
       update(
         disconnectedModel,
-        Message.Loaded({ status: { connected: true, name: 'stale status' } }),
+        Message.Loaded({ requestId: 0, status: { connected: true, name: 'stale status' } }),
       ).model.status?.connected,
     ).toBe(true)
     expect(

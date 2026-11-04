@@ -295,7 +295,10 @@ export const update = (
       const slug = tweetSlug(model.draft.quoteUrl)
 
       return slug
-        ? { model: { ...model, error: null }, commands: [ResolveQuote({ slug })] }
+        ? {
+            model: { ...model, error: null },
+            commands: [ResolveQuote({ slug, editorId: model.editorId })],
+          }
         : {
             model: {
               ...model,
@@ -445,7 +448,13 @@ export const update = (
         ? { model }
         : {
             model: { ...model, error: null },
-            commands: [ResolveMusic({ url: model.draft.musicUrl.trim(), kind: model.draft.kind })],
+            commands: [
+              ResolveMusic({
+                url: model.draft.musicUrl.trim(),
+                kind: model.draft.kind,
+                editorId: model.editorId,
+              }),
+            ],
           },
     MusicResolved: ({ entityType, entityId, url, title, artistNames, coverImageUrl }) =>
       model.draft.musicUrl.trim() !== url
@@ -567,6 +576,7 @@ export const update = (
           },
           phase: published ? 'published' : 'writing',
           saveState: newerEdits ? 'unsaved' : 'saved',
+          localError: newerEdits ? model.localError : null,
           error: null,
         },
         commands: [
@@ -595,12 +605,11 @@ export const update = (
         : { model },
     LocalSaveFailed: ({ editorId, revision, message }) => ({
       model:
-        model.editorId === editorId && model.revision === revision
+        model.editorId === editorId && model.revision === revision && model.saveState !== 'saved'
           ? {
               ...model,
               localError: `autosave: ${message}`,
-              saveState:
-                model.remoteSave || model.saveState === 'saved' ? model.saveState : 'failed',
+              saveState: model.remoteSave ? model.saveState : 'failed',
             }
           : model,
     }),
@@ -611,13 +620,16 @@ export const update = (
           ? { ...model, localError: message }
           : model,
     }),
-    Failed: ({ operation, message }) => ({
-      model: {
-        ...model,
-        phase: model.remoteSave ? 'saving' : 'writing',
-        saveState: model.remoteSave ? model.saveState : 'failed',
-        error: `${operation}: ${message}`,
-      },
+    Failed: ({ operation, editorId, message }) => ({
+      model:
+        model.editorId === editorId
+          ? {
+              ...model,
+              phase: model.remoteSave ? 'saving' : 'writing',
+              saveState: model.remoteSave ? model.saveState : 'failed',
+              error: `${operation}: ${message}`,
+            }
+          : model,
     }),
     Hydrated: ({ draft, creators, source }) =>
       Update.combine(model, [
@@ -651,7 +663,10 @@ export const update = (
     }),
     ArtworkChosen: ({ files }) =>
       files[0]
-        ? { model: { ...model, phase: 'uploading' }, commands: [UploadArtwork({ file: files[0] })] }
+        ? {
+            model: { ...model, phase: 'uploading' },
+            commands: [UploadArtwork({ file: files[0], editorId: model.editorId })],
+          }
         : { model },
     ArtworkUploaded: ({ url }) =>
       changed({ ...model, phase: 'writing' }, { ...model.draft, thumbnailUrl: url }),

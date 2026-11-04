@@ -76,6 +76,27 @@ test('remote draft save retains edits made while its response is pending', async
     await expect(page.getByRole('status').filter({ hasText: 'Unsaved changes' })).toBeVisible()
     await expect(canvas).toHaveValue('Newer unsaved fixture content')
     expect(requests).toBe(1)
+    await expect
+      .poll(async () => {
+        const value = await page.evaluate(() => localStorage.getItem('gbfm:creator:post:new'))
+
+        return value === null
+          ? null
+          : Schema.decodeUnknownSync(
+              Schema.fromJsonString(
+                Schema.Struct({
+                  content: Schema.String,
+                  editSlug: Schema.NullOr(Schema.String),
+                  postId: Schema.optional(Schema.String),
+                }),
+              ),
+            )(value)
+      })
+      .toMatchObject({
+        content: 'Newer unsaved fixture content',
+        editSlug: expect.stringMatching(/\S/),
+        postId: expect.stringMatching(/\S/),
+      })
     const retained = await page.evaluate(() => localStorage.getItem('gbfm:creator:post:new'))
 
     const draft = Schema.decodeUnknownSync(

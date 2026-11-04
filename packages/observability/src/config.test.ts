@@ -36,3 +36,18 @@ test('telemetry needs explicit opt-in and a valid DSN; bad telemetry config neve
     'development',
   )
 })
+
+test('web and mobile require their own immutable release identity', () => {
+  const web = {
+    ...input,
+    application: 'www',
+    release: 'gbfm-www@0123456789abcdef0123456789abcdef01234567',
+  } satisfies Parameters<typeof telemetryConfig>[0]
+
+  expect(telemetryConfig(web)).toMatchObject({ enabled: true, tracesSampleRate: 1 })
+  expect(telemetryConfig({ ...input, release: web.release }).enabled).toBe(false)
+  expect(telemetryConfig({ ...web, release: input.release }).enabled).toBe(false)
+  expect(
+    telemetryConfig({ ...web, dsn: 'https://not-a-key@o1.ingest.sentry.io/123' }).enabled,
+  ).toBe(false)
+})

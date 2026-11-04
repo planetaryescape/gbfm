@@ -86,4 +86,4 @@ The owner's notes on Bluesky and other mobile apps informed early initialization
 - [Native versus JavaScript filtering](https://docs.sentry.io/platforms/react-native/configuration/filtering/)
 - [Application metrics](https://docs.sentry.io/platforms/react-native/metrics/)
 
-Follow-up slices cover web instrumentation, client/API correlation, a useful Sentry dashboard, remaining journeys and playback recovery, and approved retirement of old pipelines. #478 remains open until those checks are complete.
+The shared web slice is documented in [Web Sentry](web-observability.md). Follow-up slices cover client/API correlation, a useful Sentry dashboard, remaining journeys and playback recovery, and approved retirement of old pipelines. #478 remains open until those checks are complete.

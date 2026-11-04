@@ -70,7 +70,17 @@ const lifecycle = Layer.effectDiscard(
 )
 
 export const mobileObservabilityLayer = config.enabled
-  ? observabilityLayer.pipe(Layer.provide(sentryExporterLayer(Sentry)), Layer.provide(lifecycle))
+  ? observabilityLayer.pipe(
+      Layer.provide(
+        sentryExporterLayer({
+          startInactiveSpan: Sentry.startInactiveSpan,
+          addBreadcrumb: Sentry.addBreadcrumb,
+          captureException: Sentry.captureException,
+          metrics: { count: Sentry.metrics.count, distribution: Sentry.metrics.distribution },
+        }),
+      ),
+      Layer.provide(lifecycle),
+    )
   : disabledObservabilityLayer
 
 export const instrumentRoot = Sentry.wrap

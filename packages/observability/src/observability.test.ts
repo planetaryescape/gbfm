@@ -1,4 +1,4 @@
-import { Effect, Layer, ManagedRuntime } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Layer, ManagedRuntime } from 'effect'
 import { TestClock } from 'effect/testing'
 import { expect, test } from 'vitest'
 
@@ -7,6 +7,7 @@ import {
   JourneyExporter,
   Observability,
   observabilityLayer,
+  observeJourney,
   type JourneyName,
   type JourneyOutcome,
 } from './observability'
@@ -120,4 +121,38 @@ test('outstanding native attempts are bounded and capacity is released on settle
     }),
   )
   expect(f.records).toHaveLength(31)
+})
+
+test('Effect operation observation preserves values and typed failures', async () => {
+  const f = fixture()
+  await f.run(
+    Effect.gen(function* () {
+      expect(yield* observeJourney('navigation', Effect.succeed(42))).toBe(42)
+
+      const failure = yield* observeJourney('navigation', Effect.fail('unavailable')).pipe(
+        Effect.exit,
+      )
+
+      expect(failure).toEqual(Exit.fail('unavailable'))
+    }),
+  )
+  expect(f.records.map(({ outcome }) => outcome)).toEqual(['succeeded', 'failed'])
+})
+
+test('interruption settles a canceled operation, not an incident', async () => {
+  const f = fixture()
+  await f.run(
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>()
+
+      const pending = yield* observeJourney(
+        'navigation',
+        Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
+      ).pipe(Effect.forkChild)
+
+      yield* Deferred.await(entered)
+      yield* Fiber.interrupt(pending)
+    }),
+  )
+  expect(f.records.map(({ outcome }) => outcome)).toEqual(['canceled'])
 })

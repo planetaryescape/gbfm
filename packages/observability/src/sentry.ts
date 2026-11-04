@@ -5,8 +5,8 @@ import { ExportUnavailable, JourneyExporter } from './observability'
 
 type SentryClient = Pick<
   typeof Sentry,
-  'startInactiveSpan' | 'addBreadcrumb' | 'metrics' | 'captureException'
->
+  'startInactiveSpan' | 'addBreadcrumb' | 'captureException'
+> & { readonly metrics: Pick<typeof Sentry.metrics, 'count' | 'distribution'> }
 
 const failureNames = {
   'reader.open': 'ReaderOpenFailed',

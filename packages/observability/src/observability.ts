@@ -1,4 +1,4 @@
-import { Clock, Context, Effect, Layer, Schema } from 'effect'
+import { Cause, Clock, Context, Effect, Exit, Layer, Schema } from 'effect'
 
 export const JourneyName = Schema.Literals(['reader.open', 'playback.start', 'navigation'])
 
@@ -95,4 +95,21 @@ export const observabilityLayer = Layer.effect(
 
 export const disabledObservabilityLayer = Layer.succeed(Observability, {
   start: () => Effect.succeed(inactive),
+})
+
+export const observeJourney = Effect.fnUntraced(function* <A, E, R>(
+  name: JourneyName,
+  work: Effect.Effect<A, E, R>,
+) {
+  const service = yield* Observability
+
+  return yield* Effect.acquireUseRelease(
+    service.start(name),
+    () => work,
+    (journey, exit) => {
+      if (Exit.isSuccess(exit)) return journey.finish('succeeded')
+
+      return journey.finish(Cause.hasInterruptsOnly(exit.cause) ? 'canceled' : 'failed')
+    },
+  )
 })

@@ -82,4 +82,26 @@ describe('deploymentConfig', () => {
     expect(config.cloudflareAccountId).toBe('')
     expect(Object.values(config.secrets).every((value) => value === '')).toBe(true)
   })
+
+  test('keeps optional MCP configuration outside secret resources', () => {
+    vi.stubEnv('MCP_OWNER_USER_ID', 'editorial-owner')
+    vi.stubEnv('MCP_RESOURCE_URL', 'https://gbfm.localhost/mcp')
+
+    const config = Effect.runSync(deploymentConfig(true))
+
+    expect(config.mcpOwnerUserId).toBe('editorial-owner')
+    expect(config.mcpResourceUrl).toBe('https://gbfm.localhost/mcp')
+    expect(config.secrets).not.toHaveProperty('MCP_OWNER_USER_ID')
+    expect(config.secrets).not.toHaveProperty('MCP_RESOURCE_URL')
+  })
+
+  test('does not opt into MCP when configuration is absent', () => {
+    vi.stubEnv('MCP_OWNER_USER_ID', undefined)
+    vi.stubEnv('MCP_RESOURCE_URL', undefined)
+
+    const config = Effect.runSync(deploymentConfig(true))
+
+    expect(config.mcpOwnerUserId).toBeUndefined()
+    expect(config.mcpResourceUrl).toBeUndefined()
+  })
 })

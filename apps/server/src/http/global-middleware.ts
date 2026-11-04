@@ -35,6 +35,9 @@ export const CorsLive = Layer.unwrap(
         allowedHeaders: [
           'Content-Type',
           'Authorization',
+          'MCP-Protocol-Version',
+          'Mcp-Method',
+          'Mcp-Name',
           'Cookie',
           'Refresh-Token',
           'x-captcha-response',
@@ -43,7 +46,7 @@ export const CorsLive = Layer.unwrap(
           'b3',
           'traceparent',
         ],
-        exposedHeaders: ['Set-Cookie'],
+        exposedHeaders: ['Set-Cookie', 'WWW-Authenticate'],
         credentials: true,
       }),
       { global: true },

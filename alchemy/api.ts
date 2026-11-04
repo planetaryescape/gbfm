@@ -31,6 +31,8 @@ export interface ApiWorkerInput {
   readonly cloudflareAccountId: string
   readonly turnstile: Cloudflare.Turnstile.Widget
   readonly mediaPreviewKey: Output.Output<Redacted.Redacted>
+  readonly mcpOwnerUserId?: string
+  readonly mcpResourceUrl?: string
 }
 
 export const apiWorker = ({
@@ -45,6 +47,8 @@ export const apiWorker = ({
   cloudflareAccountId,
   turnstile,
   mediaPreviewKey,
+  mcpOwnerUserId,
+  mcpResourceUrl,
 }: ApiWorkerInput) =>
   Effect.gen(function* () {
     const sentryDsn = secrets.SENTRY_BACKEND_DSN
@@ -103,6 +107,11 @@ export const apiWorker = ({
         MIXES_BUCKET_NAME: store.mixes.bucketName,
         SENTRY_ENVIRONMENT: config.stage,
         ADMIN_EMAIL: adminEmail,
+        ...(mcpOwnerUserId ? { MCP_OWNER_USER_ID: mcpOwnerUserId } : undefined),
+        ...(mcpResourceUrl ? { MCP_RESOURCE_URL: mcpResourceUrl } : undefined),
+        ...(config.isLocalDev && mcpResourceUrl
+          ? { FRONTEND_URL: new URL(mcpResourceUrl).origin }
+          : undefined),
         ...secrets,
         SENTRY_DSN: sentryDsn,
         R2AccountId: store.userContent.accountId,

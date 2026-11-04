@@ -4,6 +4,7 @@ import { Schema } from 'effect'
 import { SpotifyStatus } from '../../spotify/connection'
 import { DashboardDocument, Row } from './document'
 import * as ApiKeys from './page/api-keys'
+import * as Connections from './page/connections'
 import * as Emails from './page/emails'
 import * as Playlists from './page/playlists'
 import * as Sessions from './page/sessions'
@@ -36,6 +37,7 @@ export const Model = Schema.Struct({
   shows: Shows.Model,
   playlists: Playlists.Model,
   apiKeys: ApiKeys.Model,
+  connections: Connections.Model,
   catalogRevision: Schema.Number,
   catalogNotice: Schema.String,
 })

@@ -11,6 +11,7 @@ import { adminHub } from './page/admin'
 import * as ApiKeys from './page/api-keys'
 import { catalogView, entityRoute } from './page/catalog'
 import { historyView, subscribersView } from './page/comms'
+import { connectionsView } from './page/connections'
 import { contentListView, isContentList } from './page/content'
 import * as Emails from './page/emails'
 import * as Playlists from './page/playlists'
@@ -307,6 +308,9 @@ export const view = defineView<Model, typeof Message.Type, ViewInputs>((model, i
         toParentMessage: (message) => Message.GotApiKeyMessage({ message }),
       }),
     )
+
+  if (model.section === 'connections')
+    return shell('Connections', connectionsView(model.connections, inputs.url, h))
 
   const content =
     model.section === 'emails' && model.phase === 'ready'

@@ -34,6 +34,8 @@ export interface DeploymentConfig {
   readonly adminEmail: string
   readonly cloudflareAccountId: string
   readonly emailTestRecipient: string | undefined
+  readonly mcpOwnerUserId: string | undefined
+  readonly mcpResourceUrl: string | undefined
 }
 
 export class IncompleteDeploymentConfigError extends Error {
@@ -80,5 +82,7 @@ export const deploymentConfig = (isLocalDev: boolean) =>
       adminEmail: read('ADMIN_EMAIL'),
       cloudflareAccountId: read('CLOUDFLARE_ACCOUNT_ID'),
       emailTestRecipient: process.env.EMAIL_TEST_RECIPIENT,
+      mcpOwnerUserId: process.env.MCP_OWNER_USER_ID,
+      mcpResourceUrl: process.env.MCP_RESOURCE_URL,
     } satisfies DeploymentConfig
   })

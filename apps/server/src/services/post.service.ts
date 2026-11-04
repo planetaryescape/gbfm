@@ -1,5 +1,8 @@
 import type { Actor } from '@gbfm/api/middleware/actor'
 import { KeyAccessDenied, type KeyInputInvalid } from '@gbfm/api/personal-access-keys'
+import type { PostId } from '@gbfm/core/editorial-mcp'
+import { UserId } from '@gbfm/core/identity'
+import { Role } from '@gbfm/core/roles'
 import { LINK_STATUS } from '@gbfm/core/status'
 import type { RichContentDocument } from '@gbfm/rich-content/schema'
 import type { TweetCardEntityInput, TweetCardPresentationInput } from '@gbfm/social-card'
@@ -20,7 +23,7 @@ import {
   or,
   sql,
 } from 'drizzle-orm'
-import { Context, Effect, Layer, Match } from 'effect'
+import { Context, Effect, Layer, Match, Schema } from 'effect'
 
 import { user as usersTable } from '@/db/auth.schema'
 import { postIdsForCreator } from '@/db/creator-membership'
@@ -112,7 +115,24 @@ type EditorialSummary = {
   draft: boolean
 }
 
+export const PostSourceAccess = Schema.TaggedUnion({
+  Published: {},
+  Authored: { userId: UserId, userRole: Role },
+})
+
+export type SourcePost = SelectPost & {
+  readonly creators: NonNullable<SelectMdxCompiledPost['creators']>
+}
+
 export interface PostService {
+  readonly getSourcesForEdit: (
+    options: { limit: number; offset: number; draft?: boolean; type?: PostType },
+    reader: typeof PostSourceAccess.cases.Authored.Type,
+  ) => Effect.Effect<{ data: Array<SourcePost>; pagination: PaginationMetadata }, DatabaseError>
+  readonly getSourceById: (
+    postId: PostId,
+    access: typeof PostSourceAccess.Type,
+  ) => Effect.Effect<SourcePost, DatabaseError | NotFoundError>
   readonly getAll: (options: {
     limit: number
     offset: number
@@ -750,6 +770,63 @@ const getAllEffect = (
       attributes: { 'post.type': options.type ?? 'all' },
     }),
   )
+
+const loadSourcePosts = Effect.fn('post.loadSourcePosts')(function* (rows: Array<PostRow>) {
+  const { rows: projectedRows, creatorsByPostId } = yield* loadPostRelations(rows)
+
+  return projectedRows.map((post) => ({
+    ...post,
+    creators: creatorsByPostId.get(post.id) ?? [],
+  }))
+})
+
+const getSourcesForEditEffect = Effect.fn('post.getSourcesForEdit')(function* (
+  options: Parameters<PostService['getSourcesForEdit']>[0],
+  reader: typeof PostSourceAccess.cases.Authored.Type,
+) {
+  const { data, pagination } = yield* getPostRowsEffect(options, {
+    userId: reader.userId,
+    userRole: reader.userRole,
+    access: 'owned',
+  })
+
+  return { data: yield* loadSourcePosts(data), pagination }
+})
+
+const getSourceByIdEffect = Effect.fn('post.getSourceById')(function* (
+  postId: PostId,
+  access: typeof PostSourceAccess.Type,
+) {
+  const db = yield* Database
+
+  const readerId = Match.value(access).pipe(
+    Match.tag('Published', () => undefined),
+    Match.tag('Authored', (reader) => reader.userId),
+    Match.exhaustive,
+  )
+
+  const rows = yield* Effect.tryPromise({
+    try: () =>
+      db
+        .select()
+        .from(postsTable)
+        .where(and(eq(postsTable.id, postId), readablePosts(db, readerId)))
+        .limit(1),
+    catch: () =>
+      new DatabaseError({
+        message: 'Failed to read post source',
+        operation: 'select',
+        table: 'posts',
+      }),
+  })
+
+  const [post] = yield* loadSourcePosts(rows)
+
+  if (!post)
+    return yield* new NotFoundError({ message: 'Post not found', resource: 'post', id: postId })
+
+  return post
+})
 
 const getPostTagsEffect = () =>
   Effect.gen(function* () {
@@ -2709,6 +2786,8 @@ export const PostServiceLayer = Layer.effect(
     const provideDb = Effect.provideService(Database, db)
 
     return {
+      getSourcesForEdit: (opts, reader) => provideDb(getSourcesForEditEffect(opts, reader)),
+      getSourceById: (postId, access) => provideDb(getSourceByIdEffect(postId, access)),
       getAll: (opts) => provideDb(getAllEffect(opts, mdx)),
       getAllForEdit: (opts, userId, userRole, access) =>
         provideDb(getAllEffect(opts, mdx, { userId, userRole, access })),

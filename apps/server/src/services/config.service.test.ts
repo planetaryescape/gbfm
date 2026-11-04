@@ -35,6 +35,62 @@ const workerBindings = (): WorkerConfigBindings => ({
   StorageSigningEndpoint: 'configured',
 })
 
+describe('editorial OAuth configuration', () => {
+  test('stays disabled without explicit bindings and preserves the existing auth URL', () => {
+    const config = createConfig(workerBindings())
+    expect(config.mcp).toBeUndefined()
+    expect(config.auth.betterAuthUrl).toBe('configured')
+  })
+
+  test('derives a same-origin issuer for external and explicitly configured Portless resources', () => {
+    for (const origin of ['https://editorial.example.com', 'https://editorial-test.localhost']) {
+      const config = createConfig({
+        ...workerBindings(),
+        MCP_OWNER_USER_ID: 'owner',
+        MCP_RESOURCE_URL: `${origin}/mcp`,
+      })
+
+      expect(config.mcp).toEqual({
+        ownerUserId: 'owner',
+        resourceUrl: `${origin}/mcp`,
+        issuer: `${origin}/auth`,
+      })
+    }
+  })
+
+  test('rejects incomplete and malformed explicit configuration without leaking values', () => {
+    for (const bindings of [
+      { MCP_OWNER_USER_ID: 'owner' },
+      { MCP_RESOURCE_URL: 'https://editorial.example.com/mcp' },
+      { MCP_OWNER_USER_ID: '', MCP_RESOURCE_URL: 'https://editorial.example.com/mcp' },
+      ...[
+        'http://editorial.example.com/mcp',
+        'https://user:password@editorial.example.com/mcp',
+        'https://editorial.example.com/mcp?token=secret',
+        'https://editorial.example.com/mcp#fragment',
+        'https://editorial.example.com/auth',
+      ].map((MCP_RESOURCE_URL) => ({ MCP_OWNER_USER_ID: 'owner', MCP_RESOURCE_URL })),
+    ]) {
+      expect(() => createConfig({ ...workerBindings(), ...bindings })).toThrow()
+    }
+  })
+
+  test('LOCAL_DEV overrides production runtime URLs without changing APP_STAGE', () => {
+    const config = createConfig({
+      ...workerBindings(),
+      APP_STAGE: 'prod',
+      LOCAL_DEV: 'true',
+      FRONTEND_URL: 'https://editorial-test.localhost',
+      SHARE_URL: 'https://api.editorial-test.localhost',
+    })
+
+    expect(config.app.stage).toBe('prod')
+    expect(config.app.nodeEnv).toBe('development')
+    expect(config.urls.frontend).toBe('https://editorial-test.localhost')
+    expect(config.urls.share).toBe('https://api.editorial-test.localhost')
+  })
+})
+
 describe('StorageConfigSchema', () => {
   test('uses Worker bindings instead of SST resources', () => {
     const config = createConfig(workerBindings())

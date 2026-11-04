@@ -9,6 +9,7 @@ import { HealthGroup } from './health'
 import { InternalGroup } from './internal'
 import { InviteGroup } from './invite'
 import { ListeningGroup } from './listening'
+import { McpConnectionsGroup } from './mcp-connections'
 import { MusicGroup } from './music'
 import { MusicRemindersGroup } from './music-reminders'
 import { NavigationGroup } from './navigation'
@@ -42,6 +43,7 @@ export const Api = HttpApi.make('gbfm')
   .add(EmailGroup)
   .add(FavoritesGroup)
   .add(ListeningGroup)
+  .add(McpConnectionsGroup)
   .add(MusicRemindersGroup)
   .add(NavigationGroup)
   .add(NewsletterGroup)

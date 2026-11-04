@@ -1,4 +1,10 @@
+import { EditorialOAuthSettings } from '@gbfm/core/editorial-mcp'
 import { Context, Effect, Layer, Redacted, Schema } from 'effect'
+
+import { parseEditorialOAuthConfig } from '@/lib/editorial-oauth-config'
+
+const parseMcpConfig = (bindings: WorkerConfigBindings | undefined) =>
+  parseEditorialOAuthConfig(bindings?.MCP_OWNER_USER_ID, bindings?.MCP_RESOURCE_URL)
 
 const secretNames = [
   'SpotifyClientId',
@@ -57,6 +63,8 @@ export type WorkerConfigBindings = Readonly<
       SENTRY_ENVIRONMENT?: string
       ADMIN_EMAIL?: string
       EMAIL_SENDER?: string
+      MCP_OWNER_USER_ID?: string
+      MCP_RESOURCE_URL?: string
     }
 >
 
@@ -117,6 +125,7 @@ export const StorageConfigSchema = Schema.Struct({
 )
 
 const ConfigSchema = Schema.Struct({
+  mcp: Schema.optional(EditorialOAuthSettings),
   urls: Schema.Struct({
     frontend: Schema.String,
     share: Schema.String,
@@ -185,7 +194,8 @@ function requiredInProduction(isProd: boolean, bindings: WorkerConfigBindings | 
 
 export function createConfig(bindings?: WorkerConfigBindings): ConfigService {
   const appStage = bindings?.APP_STAGE ?? 'dev'
-  const isProd = appStage === 'prod'
+  const isProd = appStage === 'prod' && bindings?.LOCAL_DEV !== 'true'
+  const mcp = parseMcpConfig(bindings)
 
   const secrets = {
     SpotifyClientId: secretString('SpotifyClientId', '', bindings),
@@ -255,6 +265,7 @@ export function createConfig(bindings?: WorkerConfigBindings): ConfigService {
     (['dev', 'local'].includes(appStage) ? 'http://localhost:4318' : '')
 
   return {
+    mcp,
     urls: {
       frontend: frontendUrl,
       share: shareUrl,

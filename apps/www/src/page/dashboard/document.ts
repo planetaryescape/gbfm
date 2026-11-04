@@ -11,6 +11,7 @@ import {
   SendMixNotificationResponse,
 } from '@gbfm/api/email'
 import { GetFavoritesResponse } from '@gbfm/api/favorites'
+import { McpConnectionsResponse } from '@gbfm/api/mcp-connections'
 import {
   ImportSpotifyPlaylistResponse,
   PlaylistListResponse,
@@ -61,6 +62,7 @@ export const DashboardDocument = Schema.Struct({
   emailLogs: Schema.optional(EmailLogsResponse),
   announcementOptions: Schema.optional(MixAnnouncementOptions),
   emailSend: Schema.optional(SendMixNotificationResponse),
+  connections: Schema.optional(McpConnectionsResponse.fields.connections),
 })
 
 export type DashboardDocument = typeof DashboardDocument.Type
@@ -86,6 +88,11 @@ export const parseDashboardDocument = (
   input: unknown,
 ): Effect.Effect<DashboardDocument, Schema.SchemaError | UnsupportedDashboardEndpoint> => {
   const pathname = new URL(path, 'http://localhost').pathname
+
+  if (pathname === '/api/user/mcp-connections')
+    return Schema.decodeUnknownEffect(McpConnectionsResponse)(input).pipe(
+      Effect.map(({ connections }) => ({ ...emptyDocument, connections })),
+    )
 
   if (/^\/api\/music\/playlists\/[^/]+\/tracks$/.test(pathname))
     return Schema.decodeUnknownEffect(Schema.Array(PlaylistTrackEntry))(input).pipe(

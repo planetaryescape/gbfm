@@ -15,6 +15,7 @@ import { type CatalogOperation, Message } from './message'
 import type { Model } from './model'
 import * as ApiKeys from './page/api-keys'
 import { entityRoute } from './page/catalog'
+import * as Connections from './page/connections'
 import * as Emails from './page/emails'
 import * as Playlists from './page/playlists'
 import * as Sessions from './page/sessions'
@@ -197,6 +198,12 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
       model: { ...model, phase: 'ready', toggles: preferences },
     }),
     LoadRequested: () => {
+      if (model.section === 'connections')
+        return {
+          model: { ...model, phase: 'loading', error: null, connections: Connections.initialModel },
+          commands: [Load({ path: '/api/user/mcp-connections' })],
+        }
+
       if (model.section === 'integrations')
         return {
           model: { ...model, phase: 'loading', error: null },
@@ -216,6 +223,11 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
           ...model,
           phase: 'ready',
           rows: document.rows,
+          connections: document.connections
+            ? Connections.Model.cases.Ready.make({ connections: document.connections })
+            : model.section === 'connections'
+              ? Connections.Model.cases.Failed.make({ message: 'Connections are unavailable.' })
+              : model.connections,
           pagination: document.pagination,
           fields: document.fields,
           toggles: document.toggles,
@@ -243,7 +255,17 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
           : [],
       }
     },
-    Failed: ({ message: error }) => ({ model: { ...model, phase: 'error', error } }),
+    Failed: ({ message: error }) => ({
+      model: {
+        ...model,
+        phase: 'error',
+        error,
+        connections:
+          model.section === 'connections'
+            ? Connections.Model.cases.Failed.make({ message: error })
+            : model.connections,
+      },
+    }),
     FieldChanged: ({ name, value }) => ({
       model: { ...model, fields: { ...model.fields, [name]: value } },
     }),

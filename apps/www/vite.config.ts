@@ -12,6 +12,7 @@ import { repoChangelogPlugin } from './plugins/repo-changelog.ts'
 // requests cross-site and dropping the session cookie.
 const VPS_PROXY_TARGET =
   process.env.VPS_PROXY_TARGET || process.env.VITE_VPS_BASE_URL || 'http://127.0.0.1:3003'
+
 // Let Foldkit coordinate generated production IDs across Vite environments.
 const buildId = process.env.FOLDKIT_BUILD_ID ?? process.env.APP_RELEASE
 
@@ -56,6 +57,9 @@ export default defineConfig(({ command }) => ({
     host: '0.0.0.0',
     allowedHosts: true,
     proxy: {
+      '/mcp': vpsProxy,
+      '/.well-known/oauth-protected-resource': vpsProxy,
+      '/.well-known/oauth-authorization-server': vpsProxy,
       '/api': vpsProxy,
       '/health': vpsProxy,
       '/rss.xml': vpsProxy,

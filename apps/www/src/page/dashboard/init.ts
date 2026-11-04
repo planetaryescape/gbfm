@@ -11,6 +11,7 @@ import {
 import { Message } from './message'
 import type { Model, Principal } from './model'
 import * as ApiKeys from './page/api-keys'
+import * as Connections from './page/connections'
 import * as Emails from './page/emails'
 import * as Playlists from './page/playlists'
 import * as Sessions from './page/sessions'
@@ -31,6 +32,7 @@ export const initialModel = (section: string, principal: Principal): Model => ({
   shows: Shows.initialModel,
   playlists: Playlists.initialModel,
   apiKeys: ApiKeys.initialModel,
+  connections: Connections.initialModel,
   catalogRevision: 0,
   catalogNotice: '',
 })

@@ -1,6 +1,6 @@
 import * as Dialog from '@foldkit/ui/dialog'
 import { mediaReference, SUPPORTED_MEDIA_HINT } from '@gbfm/rich-content/media'
-import { Option } from 'effect'
+import { Match, Option } from 'effect'
 import { Update } from 'foldkit'
 
 import {
@@ -10,6 +10,7 @@ import {
   GenerateMosaic,
   PauseUpload,
   PersistDraft,
+  ReconcileLocalDraft,
   RenderPreview,
   ResolveMusic,
   ResolvePostMusic,
@@ -72,6 +73,9 @@ const changed = (
   const next: Model = {
     ...model,
     draft,
+    localDraftKey: draft.kind === model.draft.kind ? model.localDraftKey : keyOf(draft),
+    revision: model.revision + 1,
+    resolvingPostMusic: draft.musicUrl === model.draft.musicUrl ? model.resolvingPostMusic : false,
     saveState: 'unsaved',
     error: null,
     diagnostics: contentChanged ? [] : model.diagnostics,
@@ -91,13 +95,60 @@ const changed = (
   return {
     model: references.model,
     commands: [
-      PersistDraft({ key: keyOf(draft), draft }),
+      PersistDraft({
+        key: next.localDraftKey,
+        draft,
+        editorId: model.editorId,
+        revision: next.revision,
+      }),
       ...(contentChanged ? [Diagnose({ content: draft.content })] : []),
       ...(preview.commands ?? []),
       ...(musicChanged ? (references.commands ?? []) : []),
     ],
   }
 }
+
+const requestSave = (
+  model: Model,
+  publish: boolean,
+): Update.Return<Model, Message, CreatorService> => {
+  if (
+    model.remoteSave ||
+    model.resolvingPostMusic ||
+    draftValidationError(model.draft) ||
+    (model.draft.kind === 'mix' && model.episodeError)
+  )
+    return { model }
+
+  if (!model.authorized) return { model: { ...model, phase: 'forbidden' } }
+  const owner = { editorId: model.editorId, requestId: model.saveRequestId + 1 }
+
+  return {
+    model: {
+      ...model,
+      phase: 'saving',
+      saveRequestId: owner.requestId,
+      remoteSave: { owner, revision: model.revision, draft: model.draft },
+      error: null,
+    },
+    commands: [Save({ draft: model.draft, creatorId: model.creatorId, publish, owner })],
+  }
+}
+
+const ownsSave = (model: Model, owner: { readonly editorId: string; readonly requestId: number }) =>
+  model.editorId === owner.editorId && model.remoteSave?.owner.requestId === owner.requestId
+
+const ownsMusic = (
+  model: Model,
+  owner: { readonly editorId: string; readonly requestId: number },
+  postId: string,
+  requestedUrl: string,
+) =>
+  model.editorId === owner.editorId &&
+  model.postMusicRequestId === owner.requestId &&
+  model.resolvingPostMusic &&
+  model.draft.postId === postId &&
+  model.draft.musicUrl === requestedUrl
 
 /** Accepts only links the renderer can turn into a player, normalised so the directive stays valid. */
 const mediaUrl = (value: string): string | null => {
@@ -330,22 +381,39 @@ export const update = (
         },
       ),
     KindChanged: ({ kind }) =>
-      model.draft.editSlug ? { model } : changed(model, { ...model.draft, kind }),
+      model.draft.editSlug || model.remoteSave
+        ? { model }
+        : changed(model, { ...model.draft, kind }),
     ReviewRequested: () => Update.combine(model, [openReviewDialog, requestPreview]),
     ReviewClosed: () => closeReviewDialog(model),
     GotReviewDialogMessage: ({ message }) => updateReviewDialog(model, message),
     ResolvePostMusicRequested: () =>
       model.authorized &&
+      !model.remoteSave &&
       (model.phase === 'writing' || model.phase === 'published') &&
       !model.resolvingPostMusic &&
       model.draft.kind !== 'mix' &&
       model.draft.postId
         ? {
-            model: { ...model, resolvingPostMusic: true, postMusicNotice: null, error: null },
-            commands: [ResolvePostMusic({ postId: model.draft.postId, url: model.draft.musicUrl })],
+            model: {
+              ...model,
+              resolvingPostMusic: true,
+              postMusicRequestId: model.postMusicRequestId + 1,
+              postMusicNotice: null,
+              error: null,
+            },
+            commands: [
+              ResolvePostMusic({
+                postId: model.draft.postId,
+                url: model.draft.musicUrl,
+                owner: { editorId: model.editorId, requestId: model.postMusicRequestId + 1 },
+              }),
+            ],
           }
         : { model },
     PostMusicResolved: ({
+      owner,
+      requestedUrl,
       postId,
       entityType,
       entityId,
@@ -354,7 +422,7 @@ export const update = (
       artistNames,
       coverImageUrl,
     }) =>
-      model.draft.postId !== postId || !model.resolvingPostMusic
+      !ownsMusic(model, owner, postId, requestedUrl)
         ? { model }
         : changed(
             {
@@ -367,11 +435,10 @@ export const update = (
             },
             { ...model.draft, musicEntityType: entityType, musicEntityId: entityId, musicUrl: url },
           ),
-    PostMusicFailed: ({ postId, message }) => ({
-      model:
-        model.draft.postId === postId
-          ? { ...model, resolvingPostMusic: false, error: message }
-          : model,
+    PostMusicFailed: ({ postId, owner, requestedUrl, message }) => ({
+      model: ownsMusic(model, owner, postId, requestedUrl)
+        ? { ...model, resolvingPostMusic: false, error: message }
+        : model,
     }),
     ResolveMusicRequested: () =>
       model.resolvingPostMusic
@@ -470,49 +537,89 @@ export const update = (
         },
       }
     },
-    DraftSaveRequested: () =>
-      model.resolvingPostMusic ||
-      draftValidationError(model.draft) ||
-      (model.draft.kind === 'mix' && model.episodeError)
-        ? { model }
-        : model.authorized
-          ? {
-              model: { ...model, phase: 'saving' },
-              commands: [Save({ draft: model.draft, creatorId: model.creatorId, publish: false })],
-            }
-          : { model: { ...model, phase: 'forbidden' } },
-    PublishRequested: () =>
-      model.resolvingPostMusic ||
-      draftValidationError(model.draft) ||
-      (model.draft.kind === 'mix' && model.episodeError)
-        ? { model }
-        : model.authorized
-          ? Update.combine(model, [
-              closeReviewDialog,
-              (model) => ({
-                model: { ...model, phase: 'saving' },
-                commands: [Save({ draft: model.draft, creatorId: model.creatorId, publish: true })],
-              }),
-            ])
-          : { model: { ...model, phase: 'forbidden' } },
-    Saved: ({ id, slug, published }) => ({
-      model: {
-        ...model,
-        draft: {
-          ...model.draft,
-          slug,
-          editSlug: slug,
-          postId: model.draft.kind === 'mix' ? undefined : id,
+    DraftSaveRequested: () => requestSave(model, false),
+    PublishRequested: () => {
+      const requested = requestSave(model, true)
+
+      if (requested.model === model || !requested.model.remoteSave) return requested
+      const closed = closeReviewDialog(requested.model)
+
+      return {
+        model: closed.model,
+        commands: [...(requested.commands ?? []), ...(closed.commands ?? [])],
+      }
+    },
+    Saved: ({ owner, id, slug, published }) => {
+      const pending = model.remoteSave
+
+      if (!pending || !ownsSave(model, owner)) return { model }
+      const newerEdits = model.revision !== pending.revision
+
+      return {
+        model: {
+          ...model,
+          remoteSave: null,
+          draft: {
+            ...model.draft,
+            slug: model.draft.slug === pending.draft.slug ? slug : model.draft.slug,
+            editSlug: slug,
+            postId: model.draft.kind === 'mix' ? undefined : id,
+          },
+          phase: published ? 'published' : 'writing',
+          saveState: newerEdits ? 'unsaved' : 'saved',
+          error: null,
         },
-        phase: published ? 'published' : 'writing',
-        saveState: 'saved',
-        error: null,
-      },
+        commands: [
+          ReconcileLocalDraft({
+            key: model.localDraftKey,
+            draft: pending.draft,
+            retained: newerEdits ? model.draft : null,
+            owner,
+            id,
+            slug,
+          }),
+        ],
+      }
+    },
+    SaveFailed: ({ owner, message }) =>
+      ownsSave(model, owner)
+        ? {
+            model: {
+              ...model,
+              remoteSave: null,
+              phase: 'writing',
+              saveState: 'failed',
+              error: `save: ${message}`,
+            },
+          }
+        : { model },
+    LocalSaveFailed: ({ editorId, revision, message }) => ({
+      model:
+        model.editorId === editorId && model.revision === revision
+          ? {
+              ...model,
+              localError: `autosave: ${message}`,
+              saveState:
+                model.remoteSave || model.saveState === 'saved' ? model.saveState : 'failed',
+            }
+          : model,
+    }),
+    LocalSaveReconciled: () => ({ model }),
+    LocalSaveReconcileFailed: ({ owner, message }) => ({
+      model:
+        model.editorId === owner.editorId && model.saveRequestId === owner.requestId
+          ? { ...model, localError: message }
+          : model,
     }),
     Failed: ({ operation, message }) => ({
-      model: { ...model, phase: 'writing', saveState: 'failed', error: `${operation}: ${message}` },
+      model: {
+        ...model,
+        phase: model.remoteSave ? 'saving' : 'writing',
+        saveState: model.remoteSave ? model.saveState : 'failed',
+        error: `${operation}: ${message}`,
+      },
     }),
-    Hydrated: ({ draft, creators }) =>
+    Hydrated: ({ draft, creators, source }) =>
       Update.combine(model, [
         (model) => ({
           model: {
@@ -522,17 +629,25 @@ export const update = (
             tagsInput: (draft ?? model.draft).tags.join(', '),
             episodeInput: (draft ?? model.draft).episodeNumber?.toString() ?? '',
             phase: 'writing',
-            saveState: draft ? 'saved-locally' : model.saveState,
+            saveState: Match.value(source).pipe(
+              Match.when('local', () => 'saved-locally' as const),
+              Match.when('remote', () => 'saved' as const),
+              Match.when('empty', () => model.saveState),
+              Match.exhaustive,
+            ),
           },
           commands: [Diagnose({ content: (draft ?? model.draft).content })],
         }),
         requestMusicReferences,
       ]),
-    LocallySaved: () => ({
+    LocallySaved: ({ editorId, revision }) => ({
       model:
-        model.phase === 'saving' || model.phase === 'published'
+        model.editorId !== editorId ||
+        model.revision !== revision ||
+        model.remoteSave ||
+        model.saveState === 'saved'
           ? model
-          : { ...model, saveState: 'saved-locally' },
+          : { ...model, saveState: 'saved-locally', localError: null },
     }),
     ArtworkChosen: ({ files }) =>
       files[0]

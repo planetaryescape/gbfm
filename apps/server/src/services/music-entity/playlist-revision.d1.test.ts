@@ -1,9 +1,10 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { Effect, Layer } from 'effect'
 import { expect, test } from 'vitest'
 
 import { Database, makeDatabaseClient } from '@/db/layer'
 import {
+  musicEntityLinksTable,
   musicPlaylistsTable,
   musicPlaylistTracksTable,
   musicTracksTable,
@@ -260,18 +261,11 @@ test('import replaces membership, preserves last duplicate positions, and can cl
   expect(initialTracks.map((track) => track.position)).toEqual([0, 1])
   expect(first.playlist.revision).toBe(1)
   expect(first.trackCount).toBe(2)
-  await h.db
-    .update(musicPlaylistTracksTable)
-    .set({ addedAt: new Date(0) })
-    .where(eq(musicPlaylistTracksTable.playlistId, imported.playlistId))
-
   const second = await imported.run([secondProviderTrack, secondProviderTrack])
   expect(second.playlist.revision).toBe(2)
   expect(await imported.membership()).toMatchObject([
     { trackId: initialTracks[1]?.trackId, position: 1 },
   ])
-  expect((await imported.membership())[0]?.addedAt.getTime()).toBeGreaterThan(0)
-
   const cleared = await imported.run([])
   expect(cleared.playlist.revision).toBe(3)
   expect(await imported.membership()).toEqual([])
@@ -317,9 +311,22 @@ test('a successful import retry replaces membership after a lost revision', asyn
   const result = await imported.run([firstProviderTrack])
   expect(result.playlist.revision).toBe(2)
   const membership = await imported.membership()
-  expect(membership).toHaveLength(1)
-  expect(membership[0]?.trackId).not.toBe('first')
-  expect(membership[0]?.position).toBe(0)
+
+  const canonicalLinks = await h.db
+    .select({ trackId: musicEntityLinksTable.entityId })
+    .from(musicEntityLinksTable)
+    .where(
+      and(
+        eq(musicEntityLinksTable.entityType, 'track'),
+        eq(musicEntityLinksTable.platform, 'spotify'),
+        eq(musicEntityLinksTable.url, firstProviderTrack.trackUrl),
+      ),
+    )
+
+  expect(canonicalLinks).toHaveLength(1)
+  expect(membership.map(({ trackId, position }) => ({ trackId, position }))).toEqual(
+    canonicalLinks.map(({ trackId }) => ({ trackId, position: 0 })),
+  )
 })
 
 test('a failed reorder write rolls back its revision advance', async () => {

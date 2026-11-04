@@ -1,3 +1,20 @@
+## [2.121.1](https://github.com/planetaryescape/gbfm/compare/v2.121.0...v2.121.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **api-keys:** make issuance generator exits explicit ([affdf4a](https://github.com/planetaryescape/gbfm/commit/affdf4a800fb334288f5499d311d8c12f451e17a))
+* **auth:** ignore validation results from superseded restores ([af3c2a9](https://github.com/planetaryescape/gbfm/commit/af3c2a91133aa1155f701aeac67cd285bf223763))
+* **dashboard:** report show operations accurately and verify playlist reloads ([040c6dc](https://github.com/planetaryescape/gbfm/commit/040c6dc91a7a6283c49dbe7eeaabfaa4d5ca3584))
+* **mobile:** guard uncertain replies and composer navigation ([db9f8c6](https://github.com/planetaryescape/gbfm/commit/db9f8c691dc80c36f48fb06d74927c67acebd646))
+* **mobile:** make published composer cleanup read-only ([e5a8102](https://github.com/planetaryescape/gbfm/commit/e5a8102459db197e3b6b29816b71651fe74a008e))
+* **mobile:** retry composer cleanup without duplicate content ([30d23f1](https://github.com/planetaryescape/gbfm/commit/30d23f1e66e8491c726955c5154b2c2a95f83c61))
+* **preview:** make session disposal terminal ([c55a9e5](https://github.com/planetaryescape/gbfm/commit/c55a9e5e5dd66f5c4f7d55fb81a11b2d73210ffd))
+* **reader:** short-circuit pending visits and verify identity guards ([e083258](https://github.com/planetaryescape/gbfm/commit/e083258b00db9bbd582bbc309355dfb51e336cc4))
+* **reminders:** deliver post-claim edits from the fresh row ([edd0e7d](https://github.com/planetaryescape/gbfm/commit/edd0e7db61b7cdff1d465825c597fc8074d70b68))
+* **reminders:** keep post-claim read failures retryable ([036eb73](https://github.com/planetaryescape/gbfm/commit/036eb73ed68b83eca93ac6f83e050397a5ae86f6))
+* **signup:** recover preparation failures and guard disposed retries ([99a8d19](https://github.com/planetaryescape/gbfm/commit/99a8d19196963b12b2441178e1d06e61c232e7f1))
+
 # [2.121.0](https://github.com/planetaryescape/gbfm/compare/v2.120.0...v2.121.0) (2026-11-03)
 
 

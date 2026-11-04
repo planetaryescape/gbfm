@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
-import { createElement, useEffect } from 'react'
-import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { act, createElement, useEffect } from 'react'
+import { createRoot } from 'test-renderer'
 import { expect, test } from 'vitest'
 
 import { TweetAuthoringFailed } from '@/api/tweetAuthoring'
@@ -25,7 +25,6 @@ test('the owning session gates same-render submission, aborts on account replace
   })
 
   let current: ReturnType<typeof useComposerSession> | undefined
-  let view: ReactTestRenderer | undefined
 
   const requests: Array<{
     readonly signal: AbortSignal
@@ -56,15 +55,15 @@ test('the owning session gates same-render submission, aborts on account replace
       Effect.provideService(TweetDraftStorage, drafts),
     )
 
-  await act(() => {
-    view = create(createElement(Harness, { principal: 'first' }))
+  const mounted = createRoot()
+  await act(async () => {
+    mounted.render(createElement(Harness, { principal: 'first' }))
   })
 
-  if (!current || !view) throw new Error('Session not mounted')
+  if (!current) throw new Error('Session not mounted')
   const first = current
-  const mounted = view
   const pending: Array<Promise<unknown>> = []
-  await act(() => {
+  await act(async () => {
     const started = first.run(
       provide(first.owner.submit('first/reply/thread', draft, true, true, request)),
       () => accepted.push('first'),
@@ -79,14 +78,14 @@ test('the owning session gates same-render submission, aborts on account replace
   })
   expect(requests).toHaveLength(1)
   expect(current.busy).toBe(true)
-  await act(() => mounted.update(createElement(Harness, { principal: 'second' })))
+  await act(async () => mounted.render(createElement(Harness, { principal: 'second' })))
   expect(requests[0]?.signal.aborted).toBe(true)
   expect(current.owner.state('second/reply/thread')).toHaveProperty('_tag', 'Writable')
   expect(first.available()).toBe(false)
   requests[0]?.finish({ slug: 'accepted-remotely' })
   await Promise.all(pending)
   expect(accepted).toEqual([])
-  await act(() => mounted.update(createElement(Harness, { principal: 'first' })))
+  await act(async () => mounted.render(createElement(Harness, { principal: 'first' })))
   const restored = current
   await act(async () => {
     await restored.run(provide(restored.owner.restore('first/reply/thread')), () => undefined)
@@ -122,7 +121,7 @@ test('the owning session gates same-render submission, aborts on account replace
   })
   expect(restored.owner.state('first/reply/thread')).toHaveProperty('_tag', 'Writable')
   expect(requests).toHaveLength(1)
-  await act(() => mounted.unmount())
+  await act(async () => mounted.unmount())
   expect(restored.run(Effect.succeed('stale'), () => accepted.push('stale'))).toBeNull()
   expect(accepted).toEqual([])
 })
@@ -138,7 +137,6 @@ test('the owning hook permits a fresh explicit submission after definitive rejec
   })
 
   let current: ReturnType<typeof useComposerSession> | undefined
-  let view: ReactTestRenderer | undefined
 
   function Harness() {
     const session = useComposerSession('account', 'account/reply/thread')
@@ -149,11 +147,12 @@ test('the owning hook permits a fresh explicit submission after definitive rejec
     return null
   }
 
-  await act(() => {
-    view = create(createElement(Harness))
+  const mounted = createRoot()
+  await act(async () => {
+    mounted.render(createElement(Harness))
   })
 
-  if (!current || !view) throw new Error('Session not mounted')
+  if (!current) throw new Error('Session not mounted')
   const session = current
 
   const provide = <A, E>(work: Effect.Effect<A, E, ComposerReceiptStorage | TweetDraftStorage>) =>
@@ -203,5 +202,5 @@ test('the owning hook permits a fresh explicit submission after definitive rejec
     )
   })
   expect(outcomes).toEqual(['RequestFailed', 'Published'])
-  await act(() => view?.unmount())
+  await act(async () => mounted.unmount())
 })

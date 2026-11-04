@@ -11,6 +11,7 @@ import { Effect, Exit, Fiber, Layer, ManagedRuntime, Predicate, Scope, Stream } 
 import type { AudioSample, AudioStatus } from 'expo-audio'
 import { describe, expect, it, vi } from 'vitest'
 
+import { recordingJourneys } from '../test/recordingJourneys'
 import { ExpoAudioEngineLayer, type ExpoAudioEnginePlayer } from './expoAudioEngine'
 
 class PlatformPlayer implements ExpoAudioEnginePlayer {
@@ -129,6 +130,7 @@ const fixture = () => {
   let audio = new PlatformPlayer()
   const initial = audio
   const instances: Array<PlatformPlayer> = []
+  const journeys = recordingJourneys()
   const values = new Map<string, string>()
   const reads: Array<string> = []
   const cleared: Array<string> = []
@@ -154,20 +156,24 @@ const fixture = () => {
 
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
-      ExpoAudioEngineLayer(() => {
-        const next = new PlatformPlayer()
-        next.currentStatus = {
-          ...initial.currentStatus,
-          playing: false,
-          currentTime: 0,
-          didJustFinish: false,
-        }
-        next.rejectPlay = initial.rejectPlay
-        audio = next
-        instances.push(next)
+      ExpoAudioEngineLayer(
+        () => {
+          const next = new PlatformPlayer()
+          next.currentStatus = {
+            ...initial.currentStatus,
+            playing: false,
+            currentTime: 0,
+            didJustFinish: false,
+          }
+          next.rejectPlay = initial.rejectPlay
+          audio = next
+          instances.push(next)
 
-        return next
-      }, 'native'),
+          return next
+        },
+        'native',
+        journeys.observer,
+      ),
       storage,
       Layer.succeed(PlayReporter, {
         recordPlay: (id) =>
@@ -186,6 +192,7 @@ const fixture = () => {
       return audio
     },
     instances,
+    journeys,
     runtime,
     reads,
     cleared,
@@ -214,6 +221,93 @@ const fixture = () => {
 }
 
 describe('Expo native adapter with shared playback orchestration', () => {
+  it.each(['replace', 'clear', 'dispose'] as const)(
+    'keeps journey delivery bound to the owning native source after %s',
+    async (action) => {
+      const journeys = recordingJourneys()
+      const players: Array<PlatformPlayer> = []
+
+      try {
+        await Effect.runPromise(
+          Effect.gen(function* () {
+            const scope = yield* Scope.make()
+
+            const context = yield* Layer.buildWithScope(
+              ExpoAudioEngineLayer(
+                () => {
+                  const player = new PlatformPlayer()
+                  players.push(player)
+
+                  return player
+                },
+                'native',
+                journeys.observer,
+              ),
+              scope,
+            )
+
+            const engine = yield* AudioEngine.pipe(Effect.provideContext(context))
+            yield* engine.replace(track('private-first').url, 1)
+            yield* engine.play
+            expect(journeys.records).toEqual([])
+            const old = players[0]
+
+            if (!old) throw new Error('Expected first source')
+            const retained = [...old.listeners]
+
+            if (action === 'replace') {
+              yield* engine.replace(track('private-second').url, 2)
+              yield* engine.play
+            } else if (action === 'clear') yield* engine.clearSource
+            else yield* Scope.close(scope, Exit.void)
+            old.currentStatus = {
+              ...old.currentStatus,
+              isLoaded: true,
+              playing: true,
+              error: 'private-error-canary',
+            }
+
+            for (const listener of retained) {
+              listener(old.currentStatus)
+              listener({ ...old.currentStatus, error: null, didJustFinish: true })
+            }
+
+            expect(journeys.records.map(({ outcome }) => outcome)).toEqual(['canceled'])
+            const current = players.at(-1)
+
+            if (action === 'replace' && current) {
+              current.emit({ error: 'private-error-canary' })
+              expect(journeys.records.map(({ outcome }) => outcome)).toEqual(['canceled', 'failed'])
+              yield* engine.replace(track('private-third').url, 3, 'paused')
+              const third = players.at(-1)
+
+              if (!third) throw new Error('Expected third source')
+              third.emit({ isLoaded: true, playing: true })
+              expect(journeys.records).toHaveLength(2)
+              yield* engine.play
+              expect(journeys.records.map(({ outcome }) => outcome)).toEqual([
+                'canceled',
+                'failed',
+                'succeeded',
+              ])
+            }
+
+            yield* Scope.close(scope, Exit.void)
+
+            for (const player of players) {
+              expect(player.listeners.size).toBe(0)
+              expect(player.calls.filter((call) => call === 'remove')).toHaveLength(1)
+            }
+
+            expect(JSON.stringify(journeys.records)).not.toContain('private-')
+          }).pipe(Effect.scoped),
+        )
+      } finally {
+        await journeys.dispose()
+      }
+    },
+  )
+
   it('releases Expo web completion polling along with each owned instance', async () => {
     vi.useFakeTimers()
     const players: Array<PlatformPlayer> = []
@@ -339,6 +433,93 @@ describe('Expo native adapter with shared playback orchestration', () => {
       )
     },
   )
+  it('ignores queued playing callbacks after replacement until the current source actually plays', async () => {
+    const f = fixture()
+
+    try {
+      await f.runtime.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const engine = yield* AudioEngine
+            yield* engine.changes.pipe(Stream.runDrain, Effect.forkScoped)
+            yield* Effect.yieldNow
+            yield* engine.replace('https://cdn.example/first.mp3', 1)
+            f.audio.ready()
+            yield* engine.play
+            expect(f.journeys.records).toHaveLength(1)
+            const previous = f.audio
+            const stale = previous.currentStatus
+            const retained = [...previous.listeners]
+            yield* engine.pause
+            yield* engine.replace('https://cdn.example/second.mp3', 2)
+
+            for (const listener of retained) listener(stale)
+            expect(f.journeys.records).toHaveLength(1)
+            f.audio.ready()
+            yield* engine.play
+            expect(f.journeys.records.map(({ outcome }) => outcome)).toEqual([
+              'succeeded',
+              'succeeded',
+            ])
+          }),
+        ),
+      )
+    } finally {
+      await f.runtime.dispose()
+      await f.journeys.dispose()
+    }
+  })
+
+  it('records playback only after the native platform starts', async () => {
+    const f = fixture()
+
+    try {
+      await f.runtime.runPromise(
+        Effect.gen(function* () {
+          const core = yield* f.core()
+          yield* core.requestPlayOnReady('private-track-id')
+          yield* core.setSource(track('private-track-id'))
+          expect(f.journeys.records).toEqual([])
+          f.audio.ready()
+          yield* Effect.promise(async () => {
+            await expect.poll(() => f.journeys.records.length).toBe(1)
+          })
+          expect(f.journeys.records[0]).toMatchObject({
+            name: 'playback.start',
+            outcome: 'succeeded',
+          })
+        }).pipe(Effect.scoped),
+      )
+    } finally {
+      await f.runtime.dispose()
+    }
+  })
+
+  it('records a rejected native play without changing the existing error outcome', async () => {
+    const f = fixture()
+    f.audio.rejectPlay = true
+    f.audio.ready()
+
+    try {
+      await f.runtime.runPromise(
+        Effect.gen(function* () {
+          const core = yield* f.core()
+          yield* core.requestPlayOnReady('one')
+          yield* core.setSource(track('one'))
+          yield* Effect.promise(async () => {
+            await expect.poll(() => f.journeys.records.length).toBe(1)
+          })
+          expect(f.journeys.records[0]).toMatchObject({
+            name: 'playback.start',
+            outcome: 'failed',
+          })
+          expect(f.errors.length).toBeGreaterThan(0)
+        }).pipe(Effect.scoped),
+      )
+    } finally {
+      await f.runtime.dispose()
+    }
+  })
 
   it('ignores completion already queued by the adapter before source replacement', async () => {
     const f = fixture()

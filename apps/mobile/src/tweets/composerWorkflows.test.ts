@@ -3,7 +3,9 @@ import { TestClock } from 'effect/testing'
 import { expect, test } from 'vitest'
 
 import { TweetAuthoringFailed } from '@/api/tweetAuthoring'
+import { receiptStorageFixture } from '@/test/composerReceiptStorage'
 
+import { ComposerReceiptStorage } from './composerReceipts'
 import { ComposerSubmission, submitComposerDraft } from './composerSubmission'
 import { emptyTweetDraft, type TweetDraft } from './draft'
 import { restoreDraft, TweetDraftStorage } from './draftRestore'
@@ -24,6 +26,8 @@ class StorageFailed extends Schema.TaggedError<StorageFailed>()('LocalStorageFai
 }) {}
 
 const draft = { ...emptyTweetDraft('fixed'), text: 'A record' }
+
+const scope = { principal: 'account', storageKey: 'account' }
 
 const music = {
   entityType: 'album' as const,
@@ -56,7 +60,7 @@ const storageFixture = (initial: ReadonlyArray<readonly [string, TweetDraft]> = 
           }),
   })
 
-  return { drafts, failures, store }
+  return { drafts, failures, store, receipts: receiptStorageFixture().storage }
 }
 
 test('restores existing drafts and adopts guest text without replacing the account slug', async () => {
@@ -164,8 +168,9 @@ test('remote draft save distinguishes device write failure without losing remote
   storage.failures.add('save')
 
   const outcome = await Effect.runPromise(
-    submitComposerDraft('account', draft, false, false, Effect.succeed({ slug: draft.slug })).pipe(
+    submitComposerDraft(scope, draft, false, false, Effect.succeed({ slug: draft.slug })).pipe(
       Effect.provideService(TweetDraftStorage, storage.store),
+      Effect.provideService(ComposerReceiptStorage, storage.receipts),
     ),
   )
 
@@ -179,8 +184,9 @@ test('remote draft success persists the same identity as an account draft', asyn
   const storage = storageFixture([['account', draft]])
 
   const outcome = await Effect.runPromise(
-    submitComposerDraft('account', draft, false, false, Effect.succeed({ slug: draft.slug })).pipe(
+    submitComposerDraft(scope, draft, false, false, Effect.succeed({ slug: draft.slug })).pipe(
       Effect.provideService(TweetDraftStorage, storage.store),
+      Effect.provideService(ComposerReceiptStorage, storage.receipts),
     ),
   )
 
@@ -195,8 +201,9 @@ test('publication success is not a request failure when local cleanup fails', as
   storage.failures.add('remove')
 
   const outcome = await Effect.runPromise(
-    submitComposerDraft('account', draft, true, false, Effect.succeed({ slug: draft.slug })).pipe(
+    submitComposerDraft(scope, draft, true, false, Effect.succeed({ slug: draft.slug })).pipe(
       Effect.provideService(TweetDraftStorage, storage.store),
+      Effect.provideService(ComposerReceiptStorage, storage.receipts),
     ),
   )
 
@@ -210,8 +217,9 @@ test('successful publication clears the local draft and returns the server slug'
   const storage = storageFixture([['account', draft]])
 
   const outcome = await Effect.runPromise(
-    submitComposerDraft('account', draft, true, false, Effect.succeed({ slug: 'saved-slug' })).pipe(
+    submitComposerDraft(scope, draft, true, false, Effect.succeed({ slug: 'saved-slug' })).pipe(
       Effect.provideService(TweetDraftStorage, storage.store),
+      Effect.provideService(ComposerReceiptStorage, storage.receipts),
     ),
   )
 
@@ -225,42 +233,52 @@ test('reply cleanup retries preserve the draft and never publish another reply',
   let requests = 0
   const request = Effect.sync(() => ({ slug: `reply-${++requests}` }))
 
-  const submit = (publishedSlug: string | null) =>
+  const submit = () =>
     Effect.runPromise(
-      submitComposerDraft('account/reply/thread', draft, true, true, request, publishedSlug).pipe(
+      submitComposerDraft(
+        { ...scope, storageKey: 'account/reply/thread' },
+        draft,
+        true,
+        true,
+        request,
+      ).pipe(
         Effect.provideService(TweetDraftStorage, storage.store),
+        Effect.provideService(ComposerReceiptStorage, storage.receipts),
       ),
     )
 
-  const first = await submit(null)
+  const first = await submit()
   expect(ComposerSubmission.$is('PublishedNotCleared')(first)).toBe(true)
   expect(storage.drafts.get('account/reply/thread')).toEqual(draft)
-  const retry = await submit('reply-1')
+  const retry = await submit()
   expect(requests).toBe(1)
   expect(retry).toEqual(first)
   expect(first).toEqual(
     ComposerSubmission.PublishedNotCleared({ draft: { ...draft, remote: true }, slug: 'reply-1' }),
   )
   storage.failures.clear()
-  expect(await submit('reply-1')).toEqual(ComposerSubmission.Published({ slug: 'reply-1' }))
+  expect(await submit()).toEqual(ComposerSubmission.Published({ slug: 'reply-1' }))
   expect(requests).toBe(1)
   expect(storage.drafts.has('account/reply/thread')).toBe(false)
 })
 
-test('failed requests preserve device storage and their user-facing failure', async () => {
+test('failed publication requests preserve device storage and report conservative uncertainty', async () => {
   const storage = storageFixture([['account', draft]])
 
   const outcome = await Effect.runPromise(
     submitComposerDraft(
-      'account',
+      scope,
       draft,
       true,
       false,
       Effect.fail(new TweetAuthoringFailed({ message: 'Denied' })),
-    ).pipe(Effect.provideService(TweetDraftStorage, storage.store)),
+    ).pipe(
+      Effect.provideService(TweetDraftStorage, storage.store),
+      Effect.provideService(ComposerReceiptStorage, storage.receipts),
+    ),
   )
 
-  expect(outcome).toEqual(ComposerSubmission.RequestFailed({ message: 'Denied' }))
+  expect(outcome).toHaveProperty('_tag', 'PublicationOutcomeUncertain')
   expect(storage.drafts.get('account')).toEqual(draft)
 })
 
@@ -270,31 +288,22 @@ test.each([false, true])(
     const storage = storageFixture([['account', draft]])
     await runWithClock(
       Effect.gen(function* () {
-        const fiber = yield* submitComposerDraft(
-          'account',
-          draft,
-          true,
-          replying,
-          Effect.never,
-        ).pipe(Effect.forkScoped)
+        const fiber = yield* submitComposerDraft(scope, draft, true, replying, Effect.never).pipe(
+          Effect.forkScoped,
+        )
 
         yield* TestClock.adjust('30 seconds')
         const outcome = yield* Fiber.join(fiber)
-        expect(
-          replying
-            ? ComposerSubmission.$is('ReplyOutcomeUncertain')(outcome)
-            : ComposerSubmission.$is('RequestFailed')(outcome),
-        ).toBe(true)
+        expect(ComposerSubmission.$is('PublicationOutcomeUncertain')(outcome)).toBe(true)
 
-        if (
-          ComposerSubmission.$is('RequestFailed')(outcome) ||
-          ComposerSubmission.$is('ReplyOutcomeUncertain')(outcome)
-        )
-          expect(outcome.message).toContain(
-            replying ? 'do not reply twice' : 'without creating a second one',
-          )
+        if (ComposerSubmission.$is('PublicationOutcomeUncertain')(outcome))
+          expect(outcome.message).toContain(replying ? 'do not reply twice' : 'Check the post')
         expect(storage.drafts.get('account')).toEqual(draft)
-      }).pipe(Effect.provideService(TweetDraftStorage, storage.store), Effect.scoped),
+      }).pipe(
+        Effect.provideService(TweetDraftStorage, storage.store),
+        Effect.provideService(ComposerReceiptStorage, storage.receipts),
+        Effect.scoped,
+      ),
     )
   },
 )
@@ -306,7 +315,7 @@ test('aborting a pending submission interrupts the request without clearing loca
       const started = yield* Deferred.make<void>()
       const request = Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
 
-      const fiber = yield* submitComposerDraft('account', draft, true, false, request).pipe(
+      const fiber = yield* submitComposerDraft(scope, draft, true, false, request).pipe(
         Effect.forkScoped,
       )
 
@@ -314,7 +323,11 @@ test('aborting a pending submission interrupts the request without clearing loca
       yield* Fiber.interrupt(fiber)
       expect(Exit.isFailure(yield* Fiber.await(fiber))).toBe(true)
       expect(storage.drafts.get('account')).toEqual(draft)
-    }).pipe(Effect.provideService(TweetDraftStorage, storage.store), Effect.scoped),
+    }).pipe(
+      Effect.provideService(TweetDraftStorage, storage.store),
+      Effect.provideService(ComposerReceiptStorage, storage.receipts),
+      Effect.scoped,
+    ),
   )
 })
 

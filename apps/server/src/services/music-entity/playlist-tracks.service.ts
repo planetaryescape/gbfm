@@ -176,6 +176,15 @@ export const reorderPlaylistTracksEffect = (playlistId: string, trackIds: Array<
 
           const revision = playlist.revision + 1
 
+          const incoming = db
+            .select({
+              trackId: sql<string>`value`.as('track_id'),
+              position: sql<number>`max(cast(key as integer))`.as('incoming_position'),
+            })
+            .from(sql`json_each(${JSON.stringify(trackIds)})`)
+            .groupBy(sql`value`)
+            .as('incoming')
+
           const [advanced] = await db.batch([
             db
               .update(musicPlaylistsTable)
@@ -187,23 +196,17 @@ export const reorderPlaylistTracksEffect = (playlistId: string, trackIds: Array<
                 ),
               )
               .returning({ id: musicPlaylistsTable.id }),
-            ...trackIds.map((trackId, position) =>
-              db
-                .update(musicPlaylistTracksTable)
-                .set({ position })
-                .where(
-                  and(
-                    eq(musicPlaylistTracksTable.playlistId, playlistId),
-                    eq(musicPlaylistTracksTable.trackId, trackId),
-                    sql`exists (
-                      select 1
-                      from ${musicPlaylistsTable}
-                      where ${musicPlaylistsTable.id} = ${playlistId}
-                        and ${musicPlaylistsTable.revision} = ${revision}
-                    )`,
-                  ),
+            db
+              .update(musicPlaylistTracksTable)
+              .set({ position: sql`${incoming.position}` })
+              .from(incoming)
+              .where(
+                and(
+                  eq(musicPlaylistTracksTable.playlistId, playlistId),
+                  eq(musicPlaylistTracksTable.trackId, incoming.trackId),
+                  sql`changes() > 0`,
                 ),
-            ),
+              ),
           ])
 
           if (advanced.length > 0) return
@@ -489,7 +492,9 @@ export const importSpotifyPlaylistEffect = (
 
           if (!current) throw new Error('Spotify playlist no longer exists')
           const revision = current.revision + 1
+          const trackIds = JSON.stringify(tracks.map((track) => track.trackId))
 
+          // Each dependent statement checks changes() from the preceding write in this atomic batch.
           const [advanced] = await db.batch([
             db
               .update(musicPlaylistsTable)
@@ -508,41 +513,39 @@ export const importSpotifyPlaylistEffect = (
                 ),
               )
               .returning({ id: musicPlaylistsTable.id }),
-            db.delete(musicPlaylistTracksTable).where(
-              and(
-                eq(musicPlaylistTracksTable.playlistId, current.id),
-                sql`exists (
-                    select 1
-                    from ${musicPlaylistsTable}
-                    where ${musicPlaylistsTable.id} = ${current.id}
-                      and ${musicPlaylistsTable.revision} = ${revision}
-                  )`,
-              ),
-            ),
-            ...tracks.map((track, position) =>
-              db
-                .insert(musicPlaylistTracksTable)
-                .select(
+            ...(tracks.length === 0
+              ? []
+              : [
                   db
-                    .select({
-                      playlistId: sql<string>`${current.id}`.as('playlistId'),
-                      trackId: sql<string>`${track.trackId}`.as('trackId'),
-                      position: sql<number>`${position}`.as('position'),
-                      addedAt: sql<Date>`${Date.now()}`.as('addedAt'),
-                    })
-                    .from(musicPlaylistsTable)
-                    .where(
-                      and(
-                        eq(musicPlaylistsTable.id, current.id),
-                        eq(musicPlaylistsTable.revision, revision),
-                      ),
-                    ),
-                )
-                .onConflictDoUpdate({
-                  target: [musicPlaylistTracksTable.playlistId, musicPlaylistTracksTable.trackId],
-                  set: { position },
-                }),
-            ),
+                    .insert(musicPlaylistTracksTable)
+                    .select(
+                      db
+                        .select({
+                          playlistId: sql<string>`${current.id}`.as('playlistId'),
+                          trackId: sql<string>`value`.as('trackId'),
+                          position: sql<number>`cast(key as integer)`.as('position'),
+                          addedAt: sql<Date>`${Date.now()}`.as('addedAt'),
+                        })
+                        .from(sql`json_each(${trackIds})`)
+                        .where(sql`changes() > 0`),
+                    )
+                    .onConflictDoUpdate({
+                      target: [
+                        musicPlaylistTracksTable.playlistId,
+                        musicPlaylistTracksTable.trackId,
+                      ],
+                      set: { position: sql`excluded.position`, addedAt: sql`excluded."addedAt"` },
+                    }),
+                ]),
+            db
+              .delete(musicPlaylistTracksTable)
+              .where(
+                and(
+                  eq(musicPlaylistTracksTable.playlistId, current.id),
+                  sql`changes() > 0`,
+                  sql`${musicPlaylistTracksTable.trackId} not in (select value from json_each(${trackIds}))`,
+                ),
+              ),
           ])
 
           if (advanced.length === 0) continue

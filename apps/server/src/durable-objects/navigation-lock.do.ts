@@ -119,38 +119,54 @@ export class NavigationLockDurableObject extends DurableObject<NavigationLockEnv
 
   decide(request: NavigationLockRequestDto): NavigationLockDecisionDto {
     const local = this.readSession()
+    // Negative cursors encode pending positions as -(position + 1), keeping committed rows unchanged.
+    const cursor = local ? (local.cursor < 0 ? -local.cursor - 1 : local.cursor) : null
 
-    if (local?.lastIntentToken === request.intentToken && local.sessionId) {
+    if (
+      local &&
+      local.cursor >= 0 &&
+      local.lastIntentToken === request.intentToken &&
+      local.sessionId
+    ) {
       return NavigationLockDecisionDto.Duplicate({ sessionId: local.sessionId })
     }
 
-    if (local && (local.cursor !== request.cursor || local.updatedAtMs !== request.updatedAtMs)) {
+    if (local && (cursor !== request.cursor || local.updatedAtMs !== request.updatedAtMs)) {
       return NavigationLockDecisionDto.Retry()
     }
 
-    const position = (local?.cursor ?? request.cursor ?? -1) + 1
+    const position = (cursor ?? request.cursor ?? -1) + 1
     const sessionId = local?.sessionId ?? request.sessionId
     this.writeSession({
       sessionId,
-      cursor: position,
+      cursor: -(position + 1),
       updatedAtMs: request.updatedAtMs,
-      lastIntentToken: null,
+      lastIntentToken: request.intentToken,
     })
 
     return NavigationLockDecisionDto.Proceed({ sessionId, position })
   }
 
   commit(input: NavigationLockCommitDto): void {
+    this.ctx.storage.sql.exec(
+      `UPDATE session_state SET session_id = ?, cursor = ?, updated_at_ms = ?, last_intent_token = ?
+       WHERE id = 0 AND cursor = ? AND last_intent_token = ?`,
+      input.sessionId,
+      input.position,
+      input.updatedAtMs,
+      input.intentToken,
+      -(input.position + 1),
+      input.intentToken,
+    )
+  }
+
+  sync(input: NavigationLockCommitDto): void {
     this.writeSession({
       sessionId: input.sessionId,
       cursor: input.position,
       updatedAtMs: input.updatedAtMs,
       lastIntentToken: input.intentToken,
     })
-  }
-
-  sync(input: NavigationLockCommitDto): void {
-    this.commit(input)
   }
 
   reset(): void {

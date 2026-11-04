@@ -27,6 +27,7 @@ beforeAll(async () => {
     scriptPath,
   ])
   runtime = new Miniflare({
+    name: 'navigation-lock-test',
     scriptPath,
     modulesRoot: directory,
     modules: true,
@@ -65,10 +66,53 @@ test('an abandoned reservation still consumes a position when the caller supplie
   })
 })
 
-test('late commits currently resurrect reset state and overwrite newer sync state', async () => {
+test('late commits cannot resurrect reset state or overwrite newer sync state', async () => {
   const response = await runtime.dispatchFetch('https://lock.example.test/late')
   expect(await response.json()).toEqual({
-    resurrected: Decision.Duplicate({ sessionId: 'session' }),
-    overwritten: Decision.Duplicate({ sessionId: 'session' }),
+    afterReset: { canonicalName: null, hasSession: false },
+    newer: Decision.Duplicate({ sessionId: 'session' }),
   })
+})
+
+test('only the current reservation can commit, including after reset and cursor reuse', async () => {
+  const response = await runtime.dispatchFetch('https://lock.example.test/ownership')
+  expect(await response.json()).toEqual({
+    pending: Decision.Retry(),
+    wrongOwner: Decision.Retry(),
+    stale: Decision.Retry(),
+    committed: Decision.Duplicate({ sessionId: 'replacement-session' }),
+    replay: Decision.Duplicate({ sessionId: 'replacement-session' }),
+  })
+})
+
+test('a superseded reservation cannot commit over a newer pending reservation', async () => {
+  const response = await runtime.dispatchFetch('https://lock.example.test/superseded')
+  expect(await response.json()).toEqual({
+    next: Decision.Proceed({ sessionId: null, position: 1 }),
+    stale: Decision.Retry(),
+    current: Decision.Duplicate({ sessionId: 'session' }),
+  })
+})
+
+test('reservation ownership and reset fencing survive object eviction', async () => {
+  const request = (action: string) =>
+    runtime.dispatchFetch(`https://lock.example.test/persistent?action=${action}`)
+
+  const evict = () =>
+    runtime.unsafeEvictDurableObject('navigation-lock-test', 'NavigationLockDurableObject', {
+      name: '/persistent',
+    })
+
+  expect(await (await request('reserve')).json()).toEqual(
+    Decision.Proceed({ sessionId: null, position: 0 }),
+  )
+  await evict()
+  expect(await (await request('commit')).json()).toEqual(
+    Decision.Duplicate({ sessionId: 'session' }),
+  )
+  expect(await (await request('reset')).json()).toEqual({ canonicalName: null, hasSession: false })
+  await evict()
+  expect(await (await request('commit')).json()).toEqual(
+    Decision.Proceed({ sessionId: null, position: 1 }),
+  )
 })

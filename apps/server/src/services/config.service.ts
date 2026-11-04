@@ -1,4 +1,25 @@
+import { EditorialOAuthSettings } from '@gbfm/core/editorial-mcp'
 import { Context, Effect, Layer, Redacted, Schema } from 'effect'
+
+import {
+  EditorialOAuthConfigInvalid,
+  parseEditorialOAuthConfig,
+} from '@/lib/editorial-oauth-config'
+
+const parseMcpConfig = (apiUrl: string) => {
+  try {
+    return {
+      mcp: parseEditorialOAuthConfig(apiUrl),
+    }
+  } catch (error) {
+    if (!(error instanceof EditorialOAuthConfigInvalid)) throw error
+    Effect.runSync(
+      Effect.logError('editorial.oauth.configuration.invalid', { fields: error.fields }),
+    )
+
+    return { mcp: undefined, mcpConfigurationError: error }
+  }
+}
 
 const secretNames = [
   'SpotifyClientId',
@@ -117,6 +138,8 @@ export const StorageConfigSchema = Schema.Struct({
 )
 
 const ConfigSchema = Schema.Struct({
+  mcp: Schema.optional(EditorialOAuthSettings),
+  mcpConfigurationError: Schema.optional(EditorialOAuthConfigInvalid),
   urls: Schema.Struct({
     frontend: Schema.String,
     share: Schema.String,
@@ -185,7 +208,7 @@ function requiredInProduction(isProd: boolean, bindings: WorkerConfigBindings | 
 
 export function createConfig(bindings?: WorkerConfigBindings): ConfigService {
   const appStage = bindings?.APP_STAGE ?? 'dev'
-  const isProd = appStage === 'prod'
+  const isProd = appStage === 'prod' && bindings?.LOCAL_DEV !== 'true'
 
   const secrets = {
     SpotifyClientId: secretString('SpotifyClientId', '', bindings),
@@ -214,6 +237,8 @@ export function createConfig(bindings?: WorkerConfigBindings): ConfigService {
   const shareUrl = isProd
     ? 'https://api.goosebumps.fm'
     : stringValue(bindings?.SHARE_URL, 'http://127.0.0.1:3003')
+
+  const mcpConfig = parseMcpConfig(shareUrl)
 
   // Production serves the CDN router on its own domain. Every other stage gets
   // a generated workers.dev URL instead, so the deployed router is bound as
@@ -255,6 +280,7 @@ export function createConfig(bindings?: WorkerConfigBindings): ConfigService {
     (['dev', 'local'].includes(appStage) ? 'http://localhost:4318' : '')
 
   return {
+    ...mcpConfig,
     urls: {
       frontend: frontendUrl,
       share: shareUrl,

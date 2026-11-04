@@ -1,6 +1,10 @@
 import { Redacted, Schema, Effect } from 'effect'
 import { describe, expect, test } from 'vitest'
 
+import {
+  EditorialOAuthConfigInvalid,
+  parseEditorialOAuthConfig,
+} from '@/lib/editorial-oauth-config'
 import { withTestLayer } from '@/test/effect'
 
 import {
@@ -33,6 +37,110 @@ const workerBindings = (): WorkerConfigBindings => ({
   StorageAccessKeyId: 'configured',
   StorageSecretAccessKey: 'configured',
   StorageSigningEndpoint: 'configured',
+})
+
+describe('editorial OAuth configuration', () => {
+  test('invalid API origin diagnostics name only the field', () => {
+    const error = createConfig({
+      ...workerBindings(),
+      SHARE_URL: 'https://user:synthetic-secret@invalid.test',
+    }).mcpConfigurationError
+
+    expect(error).toBeInstanceOf(EditorialOAuthConfigInvalid)
+    expect(error?.fields).toEqual(['SHARE_URL'])
+    expect(JSON.stringify(error)).not.toContain('synthetic-secret')
+  })
+
+  test('leaves plain HTTP loopback development disabled and preserves the existing auth URL', () => {
+    const config = createConfig(workerBindings())
+    expect(config.mcp).toBeUndefined()
+    expect(config.auth.betterAuthUrl).toBe('configured')
+  })
+
+  test.each([
+    'http://localhost',
+    'http://127.0.0.1:3003',
+    'http://[::1]:3003',
+    'http://gbfm.localhost',
+    'http://479-editorial-mcp.gbfm.localhost',
+  ])('disables plain HTTP loopback without a configuration error: %s', (SHARE_URL) => {
+    const config = createConfig({ ...workerBindings(), SHARE_URL })
+    expect(config.mcp).toBeUndefined()
+    expect(config.mcpConfigurationError).toBeUndefined()
+    expect(config.auth.betterAuthUrl).toBe('configured')
+  })
+
+  test('uses actual generated Worker origins for non-production OAuth and browser consent', () => {
+    const config = createConfig({
+      ...workerBindings(),
+      APP_STAGE: 'preview',
+      SHARE_URL: 'https://gbfm-preview-api.example.workers.dev',
+      FRONTEND_URL: 'https://gbfm-preview-www.example.workers.dev',
+    })
+
+    expect(config.mcp).toEqual({
+      resourceUrl: 'https://gbfm-preview-api.example.workers.dev/mcp',
+      issuer: 'https://gbfm-preview-api.example.workers.dev/auth',
+    })
+    expect(config.urls.frontend).toBe('https://gbfm-preview-www.example.workers.dev')
+    expect(config.auth.betterAuthUrl).toBe('configured')
+  })
+
+  test('derives resource and issuer from existing API origins without identity configuration', () => {
+    for (const origin of ['https://editorial.example.com', 'https://editorial-test.localhost']) {
+      const config = createConfig({
+        ...workerBindings(),
+        SHARE_URL: `${origin}/`,
+      })
+
+      expect(config.mcp).toEqual({
+        resourceUrl: `${origin}/mcp`,
+        issuer: `${origin}/auth`,
+      })
+    }
+  })
+
+  test('isolates invalid API origins without leaking values', () => {
+    for (const SHARE_URL of [
+      'not-a-url',
+      'http://editorial.example.com',
+      'https://user:password@editorial.example.com',
+      'file:///private',
+    ]) {
+      expect(() => parseEditorialOAuthConfig(SHARE_URL)).toThrow(EditorialOAuthConfigInvalid)
+      const config = createConfig({ ...workerBindings(), SHARE_URL })
+      expect(config.mcp).toBeUndefined()
+      expect(config.mcpConfigurationError).toBeInstanceOf(EditorialOAuthConfigInvalid)
+      expect(config.auth.betterAuthUrl).toBe('configured')
+      expect(JSON.stringify(config.mcpConfigurationError)).not.toMatch(
+        /password|token=secret|fragment/,
+      )
+    }
+  })
+
+  test('production enables MCP from its existing canonical API URL', () => {
+    const config = createConfig({ ...workerBindings(), APP_STAGE: 'prod' })
+    expect(config.mcp).toEqual({
+      resourceUrl: 'https://api.goosebumps.fm/mcp',
+      issuer: 'https://api.goosebumps.fm/auth',
+    })
+    expect(config.mcpConfigurationError).toBeUndefined()
+  })
+
+  test('LOCAL_DEV overrides production runtime URLs without changing APP_STAGE', () => {
+    const config = createConfig({
+      ...workerBindings(),
+      APP_STAGE: 'prod',
+      LOCAL_DEV: 'true',
+      FRONTEND_URL: 'https://editorial-test.localhost',
+      SHARE_URL: 'https://api.editorial-test.localhost',
+    })
+
+    expect(config.app.stage).toBe('prod')
+    expect(config.app.nodeEnv).toBe('development')
+    expect(config.urls.frontend).toBe('https://editorial-test.localhost')
+    expect(config.urls.share).toBe('https://api.editorial-test.localhost')
+  })
 })
 
 describe('StorageConfigSchema', () => {

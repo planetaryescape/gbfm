@@ -4,6 +4,7 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./mcp-connections": "./src/mcp-connections.ts",
     "./personal-access-keys": "./src/personal-access-keys.ts",
     "./middleware/actor": "./src/middleware/actor.ts",
     "./api": "./src/api.ts",

@@ -72,6 +72,9 @@ export default defineConfig(({ command }) => ({
     host: '0.0.0.0',
     allowedHosts: true,
     proxy: {
+      '/mcp': vpsProxy,
+      '/.well-known/oauth-protected-resource': vpsProxy,
+      '/.well-known/oauth-authorization-server': vpsProxy,
       '/api': vpsProxy,
       '/health': vpsProxy,
       '/rss.xml': vpsProxy,

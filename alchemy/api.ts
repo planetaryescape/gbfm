@@ -103,6 +103,8 @@ export const apiWorker = ({
         MIXES_BUCKET_NAME: store.mixes.bucketName,
         SENTRY_ENVIRONMENT: config.stage,
         ADMIN_EMAIL: adminEmail,
+        SHARE_URL: config.isLocalDev ? 'https://gbfm.localhost' : Cloudflare.Worker.URL,
+        ...(config.isLocalDev ? { FRONTEND_URL: 'https://gbfm.localhost' } : undefined),
         ...secrets,
         SENTRY_DSN: sentryDsn,
         R2AccountId: store.userContent.accountId,

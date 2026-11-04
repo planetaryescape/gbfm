@@ -1,9 +1,12 @@
+import { OAuthClientId } from '@gbfm/core/editorial-mcp'
 import { isRole } from '@gbfm/core/roles'
 import { Match, Option, Schema } from 'effect'
 import * as Server from 'foldkit/experimental/server'
 
 import { authErrorKey, authErrorLocation, readAuthErrorCode } from '../page/auth/errors'
 import { authHref, safeReturnPath } from '../page/auth/links'
+import { loginOAuthQuery, providerRedirect } from '../page/connect/continuation'
+import { ProviderOutcome } from '../page/connect/domain'
 import { handleListeningAction } from '../page/listening/form-action'
 import { readModeCookie } from '../page/tweet/navigation'
 import { apiRequest } from './api'
@@ -31,6 +34,29 @@ export const handleFormAction = async (request: Request): Promise<Server.Respond
   const action = url.pathname
 
   if (action.startsWith('/actions/listening/')) return handleListeningAction(request, form)
+
+  if (action === '/actions/connections/revoke') {
+    const clientId = Option.getOrNull(
+      Schema.decodeUnknownOption(OAuthClientId)(form.get('clientId')),
+    )
+
+    if (!clientId) return redirect('/dashboard/connections?notice=failed')
+
+    const response = await apiRequest(
+      request,
+      `/api/user/mcp-connections/${encodeURIComponent(clientId)}/revoke`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: url.origin },
+        body: '{}',
+      },
+    )
+
+    return redirect(
+      `/dashboard/connections?notice=${response.ok ? 'disconnected' : 'failed'}`,
+      response.headers.getSetCookie(),
+    )
+  }
 
   if (action.startsWith('/actions/admin/')) {
     const operation = action.slice('/actions/admin/'.length)
@@ -202,6 +228,10 @@ export const handleFormAction = async (request: Request): Promise<Server.Respond
   if (!path) return Server.Responded(new Response('Not found', { status: 404 }))
 
   const signup = action === '/auth/sign-up'
+
+  const signedOAuthQuery =
+    action === '/auth/sign-in' ? loginOAuthQuery(field('returnTo'), url.origin) : null
+
   const headers = new Headers({ 'content-type': 'application/json', origin: url.origin })
 
   if (signup) {
@@ -224,6 +254,7 @@ export const handleFormAction = async (request: Request): Promise<Server.Respond
 
   const response = await apiRequest(request, path, {
     method: 'POST',
+    redirect: 'manual',
     headers,
     body: JSON.stringify(
       authPath
@@ -234,6 +265,7 @@ export const handleFormAction = async (request: Request): Promise<Server.Respond
             token: field('token'),
             newPassword: field('password'),
             redirectTo: `${url.origin}/auth/reset-password`,
+            oauth_query: signedOAuthQuery ?? undefined,
           }
         : { content: field('content') },
     ),
@@ -246,6 +278,19 @@ export const handleFormAction = async (request: Request): Promise<Server.Respond
         headers: { 'cache-control': 'no-store' },
       }),
     )
+
+  if (signedOAuthQuery && response.ok) {
+    return ProviderOutcome.match(await providerRedirect(response, url.origin, signedOAuthQuery), {
+      Redirect: ({ location, cookies }) => redirect(location, cookies),
+      Rejected: ({ status }) =>
+        Server.Responded(
+          new Response('Connection failed. Start again from your app.', {
+            status,
+            headers: { 'cache-control': 'no-store' },
+          }),
+        ),
+    })
+  }
 
   if (!response.ok && authPath)
     return redirect(

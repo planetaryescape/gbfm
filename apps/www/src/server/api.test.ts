@@ -9,6 +9,48 @@ import { contentItems, json } from './page-data/shared'
 
 afterEach(() => vi.unstubAllEnvs())
 
+test('OAuth form forwarding retains the original Cloudflare address with explicit headers', async () => {
+  const addresses: Array<string | Array<string> | undefined> = []
+
+  const server = createServer((request, response) => {
+    addresses.push(request.headers['cf-connecting-ip'])
+    request.resume()
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end('{}')
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+
+  try {
+    const address = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(
+      server.address(),
+    )
+
+    vi.stubEnv('VPS_PROXY_TARGET', `http://127.0.0.1:${address.port}`)
+
+    for (const clientIp of ['192.0.2.10', '192.0.2.11']) {
+      await apiRequest(
+        new Request('https://goosebumps.fm/connect/gbfm', {
+          method: 'POST',
+          headers: { 'cf-connecting-ip': clientIp },
+        }),
+        '/auth/sign-in/email',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: '{}',
+        },
+      )
+    }
+
+    expect(addresses).toEqual(['192.0.2.10', '192.0.2.11'])
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    )
+  }
+})
+
 test('editorial list navigation uses summaries without changing article detail reads', () => {
   expect(endpointFor(parseRoute('/editorial'))).toBe('/api/content/editorial-summaries')
   expect(endpointFor(parseRoute('/editorial/a-story'))).toBe(

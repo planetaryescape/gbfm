@@ -36,6 +36,7 @@ export const Message = defineMessageUnion({
   LoadRequested: {},
   Loaded: { document: DashboardDocument },
   Failed: { message: Schema.String },
+  ConnectionsUnavailable: {},
   FieldChanged: { name: Schema.String, value: Schema.String },
   ToggleChanged: { name: Schema.String, value: Schema.Boolean },
   SaveProfile: {},

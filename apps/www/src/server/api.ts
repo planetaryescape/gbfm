@@ -11,10 +11,13 @@ export const apiRequest = async (
   const headers = new Headers(init?.headers ?? request.headers)
   const cookie = request.headers.get('cookie')
   const traceparent = request.headers.get('traceparent')
+  const clientIp = request.headers.get('cf-connecting-ip')
 
   if (cookie) headers.set('cookie', cookie)
 
   if (traceparent) headers.set('traceparent', traceparent)
+
+  if (clientIp) headers.set('cf-connecting-ip', clientIp)
   headers.delete('host')
   headers.delete('content-length')
   headers.set('x-request-id', resolveRequestId(request.headers.get('x-request-id')))

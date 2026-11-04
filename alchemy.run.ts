@@ -1,5 +1,6 @@
 import * as Alchemy from 'alchemy'
 import * as Cloudflare from 'alchemy/Cloudflare'
+import * as Output from 'alchemy/Output'
 import { Random } from 'alchemy/Random'
 import { retain } from 'alchemy/RemovalPolicy'
 import * as Effect from 'effect/Effect'
@@ -78,6 +79,21 @@ export default Alchemy.Stack(
       apiUrl: api.url,
       turnstileSitekey: turnstile.sitekey,
     })
+
+    if (!config.isLocalDev && !config.isProduction)
+      yield* api.bind`FrontendUrl`({
+        bindings: [
+          {
+            type: 'plain_text',
+            name: 'FRONTEND_URL',
+            text: Output.map(www.url, (url) => {
+              if (url === undefined) throw new Error('Website Worker URL is missing')
+
+              return url
+            }),
+          },
+        ],
+      })
 
     return {
       apiUrl: api.url,

@@ -1,8 +1,8 @@
 import { Observability, type JourneyName } from '@gbfm/observability'
 import type { JourneyObserver } from '@gbfm/observability/callbacks'
 import { Deferred, Effect, Layer } from 'effect'
-import { useEffect, type ReactElement } from 'react'
-import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { act, useEffect, type ReactElement } from 'react'
+import { createRoot } from 'react-dom/client'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 
 import { ObservabilityProvider, useJourneys } from './context'
@@ -22,17 +22,22 @@ afterAll(() => {
   else Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT')
 })
 
-type RenderedRoot = { root?: ReactTestRenderer }
-
 const render = async (element: ReactElement) => {
-  const container: RenderedRoot = {}
-  await act(() => {
-    container.root = create(element)
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  await act(async () => {
+    root.render(element)
   })
 
-  if (!container.root) throw new Error('Renderer was not created')
-
-  return container.root
+  return {
+    text: () => container.textContent,
+    update: (next: ReactElement) => root.render(next),
+    unmount: () => {
+      root.unmount()
+      container.remove()
+    },
+  }
 }
 
 function Consumer({ ready }: { readonly ready: (observer: JourneyObserver) => void }) {
@@ -113,14 +118,16 @@ test('the provider waits for its Effect layer and exposes the acquired observer'
 
   try {
     await f.entered()
-    expect(root.toJSON()).toBeNull()
+    expect(root.text()).toBe('')
     await act(f.release)
-    expect(root.toJSON()).toBe('ready')
+    expect(root.text()).toBe('ready')
     f.observed[0]?.start('reader.open')('succeeded')
     expect(f.starts).toEqual(['reader.open'])
     expect(f.completions).toEqual(['succeeded'])
   } finally {
-    await act(() => root.unmount())
+    await act(async () => {
+      root.unmount()
+    })
     await f.disposed()
   }
 })
@@ -136,12 +143,14 @@ test('failed acquisition renders children with a no-op observer instead of block
 
   try {
     await act(f.release)
-    expect(root.toJSON()).toBe('ready')
+    expect(root.text()).toBe('ready')
     expect(f.observed).toHaveLength(1)
     expect(() => f.observed[0]?.start('reader.open')('failed')).not.toThrow()
     expect(f.starts).toEqual([])
   } finally {
-    await act(() => root.unmount())
+    await act(async () => {
+      root.unmount()
+    })
     await f.disposed()
   }
 })
@@ -162,7 +171,7 @@ test('replacing a layer hides the disposed observer while the new layer is pendi
 
     if (!old) throw new Error('Observer was not acquired')
     const oldFinish = old.start('reader.open')
-    await act(() =>
+    await act(async () =>
       root.update(
         <ObservabilityProvider layer={second.layer}>
           <Consumer ready={second.ready} />
@@ -171,17 +180,19 @@ test('replacing a layer hides the disposed observer while the new layer is pendi
     )
     await second.entered()
     await first.disposed()
-    expect(root.toJSON()).toBeNull()
+    expect(root.text()).toBe('')
     old.start('reader.open')('failed')
     oldFinish('failed')
     expect(first.starts).toEqual(['reader.open'])
     expect(first.completions).toEqual([])
     await act(second.release)
-    expect(root.toJSON()).toBe('ready')
+    expect(root.text()).toBe('ready')
     second.observed[0]?.start('playback.start')('succeeded')
     expect(second.starts).toEqual(['playback.start'])
   } finally {
-    await act(() => root.unmount())
+    await act(async () => {
+      root.unmount()
+    })
     await second.disposed()
   }
 })
@@ -198,10 +209,12 @@ test.each([false, true])(
     )
 
     await f.entered()
-    await act(() => root.unmount())
+    await act(async () => {
+      root.unmount()
+    })
     await act(f.release)
     await f.disposed()
-    expect(root.toJSON()).toBeNull()
+    expect(root.text()).toBe('')
     expect(f.observed).toEqual([])
     expect(f.starts).toEqual([])
   },

@@ -105,7 +105,7 @@ export const observeReader = (root: Element, observer: JourneyObserver) => {
 export const browserReaderLayer = Layer.effectDiscard(
   Effect.gen(function* () {
     const service = yield* Observability
-    const root = document.getElementById('root')
+    const root = document.body
 
     if (!root) return
     yield* Effect.acquireRelease(

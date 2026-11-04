@@ -65,6 +65,7 @@ test('reader visits follow committed DOM states, replacement, empty results and 
   page,
 }) => {
   const envelopes = await start(page)
+  await expect(page.locator('#root')).toHaveCount(0)
   await page.getByRole('button', { name: 'Run reader smoke' }).click()
   await expect(page.locator('#result')).toHaveText('Reader outcomes delivered')
   await expect

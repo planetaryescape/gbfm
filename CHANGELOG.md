@@ -1,3 +1,43 @@
+# [2.121.0](https://github.com/planetaryescape/gbfm/compare/v2.120.0...v2.121.0) (2026-11-03)
+
+
+### Bug Fixes
+
+* **mobile:** keep short tweets swipeable and show navigation readiness ([20d2234](https://github.com/planetaryescape/gbfm/commit/20d223415bcb1f9c48dfd3f028ddfc3692b33f0f))
+* **mobile:** keep tweet gestures anchored and content visible while loading ([fd9e4e0](https://github.com/planetaryescape/gbfm/commit/fd9e4e01854b13167d6a3610942e5387e42e81d1))
+* **mobile:** reject reading actions from inactive readers ([e09b734](https://github.com/planetaryescape/gbfm/commit/e09b7349217c176275393cee5813541d2dd35c70))
+* **mobile:** retain session roles and wait for auth restoration ([bcc08d2](https://github.com/planetaryescape/gbfm/commit/bcc08d25fe43e4ac314d020403169f2bf3866065))
+* **www:** confirm API key creation with a password dialog ([07beb55](https://github.com/planetaryescape/gbfm/commit/07beb554e1e97de78f28430dc2954bdcbd028f9b))
+* **www:** give archive months consistent touch-sized controls ([14f022f](https://github.com/planetaryescape/gbfm/commit/14f022f31e1225b5e3649e0c2ca4cc1a672a53dd))
+* **www:** hold the current tweet on screen until its replacement arrives ([c7773ae](https://github.com/planetaryescape/gbfm/commit/c7773aebd24e4699b0d4909220db1d28280760cd))
+* **www:** keep 1Password popups interactive during key confirmation ([84cb766](https://github.com/planetaryescape/gbfm/commit/84cb766dc72777508abdaa8e8192a92ce0cee646))
+* **www:** keep tweet prose readable in manual dark mode ([56da3c7](https://github.com/planetaryescape/gbfm/commit/56da3c7ad07a1141bd9bb4457af484dabbfe95c6))
+* **www:** let shared .btn styles apply inside the dashboard ([c52626a](https://github.com/planetaryescape/gbfm/commit/c52626a1de22e2b12920110395944bf30a517e43))
+* **www:** persist account-scoped tweet positions across restarts ([3ae9dec](https://github.com/planetaryescape/gbfm/commit/3ae9dec5221e61bca0787543bb7d2b56c859e4c7))
+* **www:** prevent autofill interactions dismissing password confirmation ([7e7790a](https://github.com/planetaryescape/gbfm/commit/7e7790a737b4dc027fa5cb7f59d3470b1d64c9f6))
+
+
+### Features
+
+* **design:** share geometry and button roles across platforms ([662c6ad](https://github.com/planetaryescape/gbfm/commit/662c6ad4cd42d8e61bddaab67545461736ed6552))
+* **mobile:** add compose tab access and refine playback styling ([93125d5](https://github.com/planetaryescape/gbfm/commit/93125d554b5c593a28e5a6b640ad2a06d208c370))
+* **mobile:** add paged reading, replies and persistent progress ([c8e8ffc](https://github.com/planetaryescape/gbfm/commit/c8e8ffc1d3f39ad4294d958d36a276c979935974))
+* **mobile:** add shared haptic feedback ([efc9437](https://github.com/planetaryescape/gbfm/commit/efc943728f3781d1c3d31d5c50f15313e7290f04))
+* **mobile:** align tweet reading and navigation with web ([3b78d51](https://github.com/planetaryescape/gbfm/commit/3b78d51408d069d9e94c4d273ca421533ec7f8ca))
+* **mobile:** browse tweet previews with separate date filters ([a118da3](https://github.com/planetaryescape/gbfm/commit/a118da323aca56f0ee3e10088084dd62533c64ab))
+* **mobile:** compose tweets from saved drafts and incoming shares ([6729342](https://github.com/planetaryescape/gbfm/commit/67293420cc4f5d2e426054042b80e185ec8037f8))
+* **mobile:** declutter tweet reading with swipe navigation ([45bd601](https://github.com/planetaryescape/gbfm/commit/45bd601f1385338a28fd04e6291efbd8eabd6d2e))
+* **mobile:** make tweet swipes track the finger on the UI thread ([a191603](https://github.com/planetaryescape/gbfm/commit/a191603e8a3e4a2100abbdd6846fdae47a659902))
+* **mobile:** unify tweet composition with tags, editing and replies ([bfac222](https://github.com/planetaryescape/gbfm/commit/bfac2227a0ba1736a7ff3b48557e298c24b83e87))
+* **mobile:** use custom angular navigation and playback icons ([f20ee37](https://github.com/planetaryescape/gbfm/commit/f20ee374d04135e49303d6734373b3d81b542807))
+* **reader:** accept swipes by distance and recent release velocity ([435e8e2](https://github.com/planetaryescape/gbfm/commit/435e8e2a6b4eeebf62472d7aad1073bf78a8eebf))
+* **reader:** replace timeline browsing with deliberate month visits ([969ef04](https://github.com/planetaryescape/gbfm/commit/969ef04e20a1c933a95c5e22c72fc34bc228f784))
+* **www:** animate tweet dragging, snap-back, and swipe transitions ([98b533e](https://github.com/planetaryescape/gbfm/commit/98b533ea18fd922e041dffae2d6da89510860a12))
+* **www:** browse tweet previews beside the swipe reader ([49d79d8](https://github.com/planetaryescape/gbfm/commit/49d79d8213ee1db43abf841979b4df50e35ab888))
+* **www:** manage personal API keys from settings ([9765b12](https://github.com/planetaryescape/gbfm/commit/9765b12f907dc10074fb7247b313ae606b4cd5ed))
+* **www:** simplify reader chrome and add touch navigation ([3958ea1](https://github.com/planetaryescape/gbfm/commit/3958ea14de0a803f19467d807c57472291c7fac6))
+* **www:** surface newer unread tweets and keep a return point ([b1c989b](https://github.com/planetaryescape/gbfm/commit/b1c989ba4be5df56b67bd34de796301ccb916c9a))
+
 # [2.120.0](https://github.com/planetaryescape/gbfm/compare/v2.119.0...v2.120.0) (2026-11-01)
 
 

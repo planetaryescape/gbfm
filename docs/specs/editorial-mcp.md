@@ -83,14 +83,20 @@ Required checks include relevant server and WWW tests, the WWW production build,
 
 ## Configuration and connection
 
-MCP derives its resource (`/mcp`) and issuer (`/auth`) from the existing API URL in runtime configuration (`urls.share`), supplied by Alchemy's stage API URL through the existing `SHARE_URL` binding. There are no MCP-specific deployment variables or account IDs. Production uses the existing canonical API origin. Alchemy local development uses the existing HTTPS Portless frontend, whose proxy forwards MCP and OAuth endpoints to the local API.
+MCP derives its resource (`/mcp`) and issuer (`/auth`) from runtime configuration (`urls.share`) through the existing `SHARE_URL` binding. For deployed Workers, Alchemy's `Worker.URL` supplies the actual API endpoint: the existing canonical custom domain in production and the generated Workers endpoint in non-production. Deployed non-production APIs receive `FRONTEND_URL` from the website Worker's actual URL through an Alchemy binding. Production keeps its existing canonical frontend. No new custom-domain routes, MCP-specific deployment variables or account IDs are needed.
+
+Alchemy local development fixes both bindings to `https://gbfm.localhost`, whose proxy forwards MCP and OAuth endpoints to the local API. It does not automatically derive a worktree-prefixed origin. The isolated browser fixture supports a separately supplied Portless frontend address.
 
 Plain HTTP loopback development leaves MCP disabled. An invalid API origin disables MCP, logs only the configuration field name and makes `/mcp` return 503 without preventing unrelated routes, queue consumers or scheduled jobs from starting.
+
+Signed-in users can still list and revoke their own existing connections while MCP is disabled or misconfigured. Revocation persists when configuration is restored; disabling MCP does not postpone disconnection.
 
 | Environment | Resource |
 | --- | --- |
 | Normal local development | `https://gbfm.localhost/mcp` |
-| Worktree development | The worktree-prefixed Portless address plus `/mcp` |
+| Alchemy in a worktree | `https://gbfm.localhost/mcp`, not automatically worktree-prefixed |
+| Isolated browser fixture | Its explicitly supplied Portless frontend address plus `/mcp` |
+| Deployed non-production | The API Worker's deployed URL plus `/mcp` |
 | Production | `https://api.goosebumps.fm/mcp` |
 
 Sign in with an existing creator, editor or admin account in the matching database. Consent binds the grant to that signed-in user, and each protected request rechecks current permissions and account state. Each user sees and disconnects only their own approved applications.

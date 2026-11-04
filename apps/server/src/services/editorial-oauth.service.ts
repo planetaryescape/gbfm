@@ -158,8 +158,6 @@ const makeEditorialOAuth = Effect.gen(function* () {
   })
 
   const listConnections = Effect.fn('EditorialOAuth.listConnections')(function* (userId: UserId) {
-    if (!config.mcp) return yield* Effect.fail(new EditorialOAuthUnavailable())
-
     const rows = yield* storage(() =>
       db
         .select({
@@ -200,8 +198,6 @@ const makeEditorialOAuth = Effect.gen(function* () {
     userId: UserId,
     clientId: OAuthClientId,
   ) {
-    if (!config.mcp) return yield* Effect.fail(new EditorialOAuthUnavailable())
-
     const now = new Date(yield* Clock.currentTimeMillis)
     yield* storage(() =>
       db.batch([

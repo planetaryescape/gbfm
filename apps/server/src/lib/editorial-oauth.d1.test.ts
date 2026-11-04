@@ -1,14 +1,89 @@
 import { UserId } from '@gbfm/core/identity'
 import { eq } from 'drizzle-orm'
-import { Effect, Redacted, Schema } from 'effect'
+import { Effect, Layer, Redacted, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 
 import { session, user, verification as authVerification } from '@/db/auth.schema'
+import { Database } from '@/db/layer'
 import { oauthAccessToken, oauthRefreshToken, rateLimit } from '@/db/oauth.schema'
 import { hashEditorialOAuthToken } from '@/lib/editorial-oauth-token'
+import { ConfigService, createConfig } from '@/services/config.service'
+import { EditorialOAuth, EditorialOAuthLive } from '@/services/editorial-oauth.service'
 import { createEditorialOAuthFixture, OAuthTokens } from '@/test/editorial-oauth'
+import { withTestLayer } from '@/test/effect'
 
 describe('editorial OAuth provider on migrated D1', () => {
+  test.each(['http://gbfm.localhost', 'https://user:synthetic-private@invalid.test'])(
+    'users can revoke grants while MCP configuration is disabled or invalid: %s',
+    async (shareUrl) => {
+      await using fixture = await createEditorialOAuthFixture()
+      const clientId = await fixture.register()
+
+      const tokens = Schema.decodeUnknownSync(OAuthTokens)(
+        await (await fixture.exchange(clientId, await fixture.authorize(clientId))).json(),
+      )
+
+      const unavailableConfig = {
+        ...fixture.config,
+        mcp: createConfig({
+          APP_STAGE: 'test',
+          SHARE_URL: shareUrl,
+          USER_CONTENT_BUCKET_NAME: 'disposable',
+          MIXES_BUCKET_NAME: 'disposable',
+          StorageRegion: 'auto',
+          BETTER_AUTH_SECRET: '',
+          BETTER_AUTH_URL: '',
+          SpotifyClientId: '',
+          SpotifyClientSecret: '',
+          SENTRY_BACKEND_DSN: '',
+          VITE_PUBLIC_SENTRY_DSN: '',
+          CloudflareAnalyticsApiToken: '',
+        }).mcp,
+      }
+
+      const service = await Effect.runPromise(
+        withTestLayer(
+          EditorialOAuth,
+          EditorialOAuthLive.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.succeed(Database, fixture.db),
+                Layer.succeed(ConfigService, unavailableConfig),
+              ),
+            ),
+          ),
+        ),
+      )
+
+      expect(unavailableConfig.mcp).toBeUndefined()
+      expect(await Effect.runPromise(service.listConnections(fixture.userId))).toMatchObject([
+        { clientId },
+      ])
+      await Effect.runPromise(
+        service.disconnect(Schema.decodeUnknownSync(UserId)('other'), clientId),
+      )
+      expect(await Effect.runPromise(fixture.service.verify(tokens.access_token))).toMatchObject({
+        userId: 'owner',
+        clientId,
+      })
+      await Effect.runPromise(service.disconnect(fixture.userId, clientId))
+      expect(await Effect.runPromise(service.listConnections(fixture.userId))).toEqual([])
+      expect(
+        await Effect.runPromise(fixture.service.verify(tokens.access_token).pipe(Effect.result)),
+      ).toHaveProperty('_tag', 'Failure')
+
+      const refresh = await fixture.request('/oauth2/token', {
+        grant_type: 'refresh_token',
+        client_id: clientId,
+        refresh_token: Redacted.value(tokens.refresh_token),
+        resource: fixture.config.mcp.resourceUrl,
+      })
+
+      expect(refresh.status).toBe(400)
+      expect(await refresh.json()).toMatchObject({ error: 'invalid_grant' })
+    },
+  )
+
   test('two eligible users independently connect the same client and disconnect only their own grants', async () => {
     await using fixture = await createEditorialOAuthFixture()
     const clientId = await fixture.register()

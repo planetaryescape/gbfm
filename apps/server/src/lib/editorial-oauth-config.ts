@@ -12,7 +12,9 @@ export function parseEditorialOAuthConfig(apiUrl: string) {
   const url = URL.parse(apiUrl)
 
   const localHttp =
-    url?.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+    url?.protocol === 'http:' &&
+    (['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) ||
+      url.hostname.endsWith('.localhost'))
 
   const configuration: EditorialOAuthConfiguration = localHttp
     ? EditorialOAuthConfiguration.cases.Disabled.make({})

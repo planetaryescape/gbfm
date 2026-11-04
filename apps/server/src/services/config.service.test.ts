@@ -57,6 +57,35 @@ describe('editorial OAuth configuration', () => {
     expect(config.auth.betterAuthUrl).toBe('configured')
   })
 
+  test.each([
+    'http://localhost',
+    'http://127.0.0.1:3003',
+    'http://[::1]:3003',
+    'http://gbfm.localhost',
+    'http://479-editorial-mcp.gbfm.localhost',
+  ])('disables plain HTTP loopback without a configuration error: %s', (SHARE_URL) => {
+    const config = createConfig({ ...workerBindings(), SHARE_URL })
+    expect(config.mcp).toBeUndefined()
+    expect(config.mcpConfigurationError).toBeUndefined()
+    expect(config.auth.betterAuthUrl).toBe('configured')
+  })
+
+  test('uses actual generated Worker origins for non-production OAuth and browser consent', () => {
+    const config = createConfig({
+      ...workerBindings(),
+      APP_STAGE: 'preview',
+      SHARE_URL: 'https://gbfm-preview-api.example.workers.dev',
+      FRONTEND_URL: 'https://gbfm-preview-www.example.workers.dev',
+    })
+
+    expect(config.mcp).toEqual({
+      resourceUrl: 'https://gbfm-preview-api.example.workers.dev/mcp',
+      issuer: 'https://gbfm-preview-api.example.workers.dev/auth',
+    })
+    expect(config.urls.frontend).toBe('https://gbfm-preview-www.example.workers.dev')
+    expect(config.auth.betterAuthUrl).toBe('configured')
+  })
+
   test('derives resource and issuer from existing API origins without identity configuration', () => {
     for (const origin of ['https://editorial.example.com', 'https://editorial-test.localhost']) {
       const config = createConfig({

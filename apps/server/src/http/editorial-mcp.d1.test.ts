@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { Layer, Match, Redacted, Schema } from 'effect'
+import { Effect, Layer, Match, Redacted, Schema } from 'effect'
 import { expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
@@ -23,10 +23,16 @@ const ReadResult = Schema.Struct({
 
 test('invalid optional MCP settings isolate failure from health and existing authentication', async () => {
   await using fixture = await createEditorialOAuthFixture()
+  const clientId = await fixture.register()
+
+  const tokens = Schema.decodeUnknownSync(OAuthTokens)(
+    await (await fixture.exchange(clientId, await fixture.authorize(clientId))).json(),
+  )
 
   const config = createConfig({
     APP_STAGE: 'test',
     SHARE_URL: 'https://user:synthetic-private@invalid.test',
+    FRONTEND_URL: 'https://editorial-test.localhost',
     USER_CONTENT_BUCKET_NAME: 'disposable',
     MIXES_BUCKET_NAME: 'disposable',
     StorageRegion: 'auto',
@@ -58,6 +64,32 @@ test('invalid optional MCP settings isolate failure from health and existing aut
     expect(
       (await handler.handler(new Request('https://editorial-test.localhost/mcp'))).status,
     ).toBe(503)
+
+    const connections = await handler.handler(
+      new Request('https://editorial-test.localhost/api/user/mcp-connections', {
+        headers: { authorization: 'Bearer owner-session-token' },
+      }),
+    )
+
+    expect(connections.status).toBe(200)
+    expect(await connections.json()).toMatchObject({ connections: [{ clientId }] })
+
+    const revoked = await handler.handler(
+      new Request(`https://editorial-test.localhost/api/user/mcp-connections/${clientId}/revoke`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer owner-session-token',
+          origin: 'https://editorial-test.localhost',
+          'sec-fetch-site': 'same-origin',
+        },
+      }),
+    )
+
+    expect(revoked.status).toBe(200)
+    expect(await revoked.json()).toEqual({ success: true })
+    expect(
+      await Effect.runPromise(fixture.service.verify(tokens.access_token).pipe(Effect.result)),
+    ).toHaveProperty('_tag', 'Failure')
   } finally {
     await handler.dispose()
   }

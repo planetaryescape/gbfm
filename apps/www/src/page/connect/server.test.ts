@@ -64,7 +64,7 @@ it('keeps consent server-only, preserves provider state, and forwards login and 
       response.end(
         JSON.stringify({
           redirect: true,
-          url: `/connect/gbfm/consent?${query}`,
+          url: `http://127.0.0.1:${address.port}/connect/gbfm/consent?${query}`,
         }),
       )
     } else

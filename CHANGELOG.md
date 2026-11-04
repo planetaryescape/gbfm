@@ -1,3 +1,12 @@
+## [2.121.2](https://github.com/planetaryescape/gbfm/compare/v2.121.1...v2.121.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* **api-keys:** discard issuance secrets after pagehide ([d6d6ff4](https://github.com/planetaryescape/gbfm/commit/d6d6ff4e49c7af85a4510de21a0d6f454efa692c))
+* **api-keys:** recover cleared confirmation failures ([6693ba5](https://github.com/planetaryescape/gbfm/commit/6693ba52ce9903bca3b43e541009aba41800adcb))
+* **server:** fence playlist and navigation writes by attempt ownership ([eccaf03](https://github.com/planetaryescape/gbfm/commit/eccaf0324fd8a9c4f1d311ca088e9c4bcb3a6ac7))
+
 ## [2.121.1](https://github.com/planetaryescape/gbfm/compare/v2.121.0...v2.121.1) (2026-11-04)
 
 

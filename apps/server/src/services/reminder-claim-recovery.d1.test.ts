@@ -113,6 +113,7 @@ describe('reminder claim read recovery', () => {
               musicTitle: 'UpdatedTitle',
               musicUrl: 'https://example.test/updated',
               notes: 'UpdatedNotes',
+              reminderDate: new Date(0),
             })
           }),
           MusicReminderServiceLayer.pipe(Layer.provide(databaseLayer)),

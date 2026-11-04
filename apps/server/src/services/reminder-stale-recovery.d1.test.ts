@@ -207,13 +207,20 @@ describe('bounded reminder recovery on local D1', () => {
         .values({ id: 'listener', name: 'Listener', email: 'l@example.test' })
       await database.insert(musicReminder).values(reminder('paused'))
 
-      const pending = Effect.runPromise(withTestLayer(processReminderJob('paused'), layer)).then(
+      const pending = Effect.runPromise(withTestLayer(processReminderJob('paused'), layer))
+
+      const outcome = pending.then(
         () => 'success',
         () => 'failure',
       )
 
       try {
-        await entered.promise
+        await Promise.race([
+          entered.promise,
+          pending.then(() => {
+            throw new Error('Expected provider gate')
+          }),
+        ])
         const [old] = await database.select().from(musicReminder)
         clock.advance(300_000)
 
@@ -233,7 +240,7 @@ describe('bounded reminder recovery on local D1', () => {
           await Effect.runPromise(withTestLayer(sendClaimedReminder(current), layer))
         const [before] = await database.select().from(musicReminder)
         released.resolve()
-        expect(await pending).toBe(oldOutcome)
+        expect(await outcome).toBe(oldOutcome)
         expect((await database.select().from(musicReminder))[0]).toEqual(before)
 
         if (newState === 'processing')
@@ -244,7 +251,7 @@ describe('bounded reminder recovery on local D1', () => {
         })
       } finally {
         released.resolve()
-        await pending
+        await outcome
       }
     },
   )
@@ -279,7 +286,12 @@ describe('bounded reminder recovery on local D1', () => {
     )
 
     try {
-      await gate.reached
+      await Promise.race([
+        gate.reached,
+        pending.then(() => {
+          throw new Error('Expected post-claim read gate')
+        }),
+      ])
       clock.advance(300_000)
       await Effect.runPromise(withTestLayer(processReminderJob('paused'), layer))
       gate.release()

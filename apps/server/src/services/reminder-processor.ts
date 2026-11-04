@@ -62,6 +62,25 @@ const deliverReminderEmail = (reminder: typeof musicReminder.$inferSelect) =>
       ),
     )
 
+    const now = yield* Clock.currentTimeMillis
+
+    const eligible = yield* Effect.tryPromise({
+      try: () =>
+        db
+          .select({ id: musicReminder.id })
+          .from(musicReminder)
+          .where(and(ownsClaim(reminder), lte(musicReminder.reminderDate, new Date(now))))
+          .limit(1),
+      catch: (cause) =>
+        new ReminderProcessingError({
+          message: `Failed to revalidate reminder delivery: ${getErrorMessage(cause)}`,
+          reminderId: reminder.id,
+          stage: 'query',
+        }),
+    })
+
+    if (eligible.length === 0) return false
+
     yield* delivery
       .deliver(
         omitUndefined({
@@ -83,7 +102,7 @@ const deliverReminderEmail = (reminder: typeof musicReminder.$inferSelect) =>
         ),
       )
 
-    return undefined
+    return true
   })
 
 // Process all pending music reminders
@@ -280,7 +299,9 @@ export const sendClaimedReminder = (reminder: typeof musicReminder.$inferSelect)
 
     if (!currentReminder) return
 
-    yield* deliverReminderEmail(currentReminder)
+    const delivered = yield* deliverReminderEmail(currentReminder)
+
+    if (!delivered) return
     const now = yield* Clock.currentTimeMillis
 
     yield* Effect.tryPromise({

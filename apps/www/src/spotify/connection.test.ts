@@ -3,6 +3,33 @@ import { describe, expect, it } from 'vitest'
 import { consumeCallback, safeReturnPath } from './runtime'
 
 describe('Spotify authorization boundary', () => {
+  it('consumes cancelled login state without producing an exchangeable callback', () => {
+    const values = new Map([
+      ['gbfm:spotify-oauth-state', 'expected'],
+      ['gbfm:spotify-return-path', '/tweet/fixture'],
+    ])
+
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      removeItem: (key: string) => {
+        values.delete(key)
+      },
+    }
+
+    expect(
+      consumeCallback(
+        new URL('https://goosebumps.fm/spotify/callback?error=access_denied&state=expected'),
+        storage,
+      ),
+    ).toBeNull()
+    expect(values.size).toBe(0)
+    expect(
+      consumeCallback(
+        new URL('https://goosebumps.fm/spotify/callback?code=late-code&state=expected'),
+        storage,
+      ),
+    ).toBeNull()
+  })
   it.each([
     'https://other.example/path',
     '//other.example',

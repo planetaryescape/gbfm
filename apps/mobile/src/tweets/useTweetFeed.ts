@@ -1,4 +1,4 @@
-import { Effect, Exit } from 'effect'
+import { Data, Effect, Exit } from 'effect'
 import { useEffect, useState } from 'react'
 
 import { getTweetsPage } from '@/api/tweets'
@@ -7,9 +7,25 @@ import { useTweetPages } from './useTweetPages'
 
 type FirstPage = Effect.Success<ReturnType<typeof getTweetsPage>>
 
+type FeedState =
+  | { readonly _tag: 'Loading' }
+  | { readonly _tag: 'Ready'; readonly page: FirstPage }
+  | { readonly _tag: 'Failed' }
+
+const FeedState = Data.taggedEnum<FeedState>()
+
+const initial = FeedState.Loading()
+
 export function useTweetFeed() {
-  const [first, setFirst] = useState<FirstPage | null>(null)
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [state, setState] = useState<FeedState>(initial)
+  const first = FeedState.$is('Ready')(state) ? state.page : null
+
+  const status = FeedState.$match(state, {
+    Loading: () => 'loading' as const,
+    Ready: () => 'ready' as const,
+    Failed: () => 'error' as const,
+  })
+
   const pages = useTweetPages(first)
 
   useEffect(() => {
@@ -21,10 +37,9 @@ export function useTweetFeed() {
       if (controller.signal.aborted) return
 
       if (Exit.isSuccess(exit)) {
-        setFirst(exit.value)
-        setStatus('ready')
+        setState(FeedState.Ready({ page: exit.value }))
       } else {
-        setStatus('error')
+        setState(FeedState.Failed())
       }
     })
 

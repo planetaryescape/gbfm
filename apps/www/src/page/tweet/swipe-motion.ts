@@ -1,9 +1,34 @@
+import { Data } from 'effect'
+
+type Motion =
+  | { readonly _tag: 'Idle' }
+  | { readonly _tag: 'Dragging' }
+  | { readonly _tag: 'Returning' }
+  | { readonly _tag: 'Exiting' }
+  | {
+      readonly _tag: 'AwaitingDestination'
+      readonly slug: string
+      readonly direction: 'older' | 'newer'
+    }
+  | { readonly _tag: 'Entering' }
+
+const Motion = Data.taggedEnum<Motion>()
+
 export const createSwipeMotion = () => {
   let element: HTMLElement | null = null
   let animation: Animation | null = null
-  let pending: { readonly slug: string; readonly direction: 'older' | 'newer' } | null = null
-  let busy = false
+  let phase: Motion = Motion.Idle()
   const reduced = matchMedia('(prefers-reduced-motion: reduce)')
+
+  const busy = () =>
+    Motion.$match(phase, {
+      Idle: () => false,
+      Dragging: () => false,
+      Returning: () => false,
+      Exiting: () => true,
+      AwaitingDestination: () => true,
+      Entering: () => true,
+    })
 
   const stop = () => {
     animation?.cancel()
@@ -15,8 +40,7 @@ export const createSwipeMotion = () => {
 
   const reset = () => {
     stop()
-    pending = null
-    busy = false
+    phase = Motion.Idle()
   }
 
   const animate = (frames: Array<Keyframe>, duration: number, easing: string, done: () => void) => {
@@ -37,7 +61,7 @@ export const createSwipeMotion = () => {
   }
 
   const observer = new MutationObserver(() => {
-    if (!pending) return
+    if (!Motion.$is('AwaitingDestination')(phase)) return
 
     const surface = document.querySelector('[data-tweet-swipe]')
     const slug = surface?.getAttribute('data-tweet-swipe')
@@ -48,11 +72,11 @@ export const createSwipeMotion = () => {
       return
     }
 
-    if (slug === pending.slug) return
+    if (slug === phase.slug) return
 
-    const direction = pending.direction
+    const direction = phase.direction
     stop()
-    pending = null
+    phase = Motion.Entering()
     const next = surface?.querySelector('[data-tweet-motion]')
 
     if (!(next instanceof HTMLElement)) {
@@ -82,21 +106,23 @@ export const createSwipeMotion = () => {
   })
 
   return {
-    busy: () => busy,
+    busy,
     drag: (surface: Element, offset: number) => {
-      if (busy) return
+      if (busy()) return
       const target = surface.querySelector('[data-tweet-motion]')
 
       if (!(target instanceof HTMLElement)) return
       stop()
       element = target
+      phase = Motion.Dragging()
       element.setAttribute('data-swipe-phase', 'dragging')
       element.style.transform = `translateX(${reduced.matches ? 0 : offset}px)`
     },
     rebound: () => {
-      if (!element || busy) return
+      if (!element || busy()) return
       const transform = getComputedStyle(element).transform
       stop()
+      phase = Motion.Returning()
       element.setAttribute('data-swipe-phase', 'returning')
       animate(
         [{ transform }, { transform: 'translateX(0)' }],
@@ -118,7 +144,7 @@ export const createSwipeMotion = () => {
       const transform = getComputedStyle(target).transform
       stop()
       element = target
-      busy = true
+      phase = Motion.Exiting()
       element.setAttribute('data-swipe-phase', 'exiting')
       animate(
         [
@@ -131,16 +157,16 @@ export const createSwipeMotion = () => {
         170,
         'cubic-bezier(0.4, 0, 1, 1)',
         () => {
-          pending = { slug, direction }
+          phase = Motion.AwaitingDestination({ slug, direction })
           navigate()
         },
       )
     },
     navigationEnded: () => {
       if (
-        pending &&
+        Motion.$is('AwaitingDestination')(phase) &&
         document.querySelector('[data-tweet-swipe]')?.getAttribute('data-tweet-swipe') ===
-          pending.slug
+          phase.slug
       )
         reset()
     },

@@ -60,12 +60,7 @@ import {
 } from '@/services/playlist-enrichment-queue'
 import { cleanupExpiredQrPdfs } from '@/services/qr-cache-cleanup'
 import { QRCodeServiceLayer } from '@/services/qrcode.service'
-import {
-  claimReminder,
-  findReminderById,
-  queryDueReminders,
-  sendClaimedReminder,
-} from '@/services/reminder-processor'
+import { processReminderJob, queryDueReminders } from '@/services/reminder-processor'
 import { ReminderQueue, ReminderQueueLayer, type ReminderJob } from '@/services/reminder-queue'
 import { RequestTelemetryLive } from '@/services/request-telemetry.service'
 import { resolveSecretBindings } from '@/services/secrets-store.service'
@@ -319,22 +314,10 @@ const runMaintenanceSweep = (env: ApiEnv) =>
 // retry-eligible after a prior delivery invocation returns an error. Zero rows
 // means another invocation owns the reminder, so this delivery can be acked.
 const processReminderMessage = (env: ApiEnv, job: ReminderJob) =>
-  Effect.gen(function* () {
-    const claim = yield* claimReminder(job.reminderId)
-
-    if (!claim.claimed) {
-      return
-    }
-
-    const reminder = yield* findReminderById(job.reminderId)
-
-    if (!reminder) {
-      return
-    }
-
-    yield* sendClaimedReminder(reminder)
+  processReminderJob(job.reminderId).pipe(
     // oxlint-disable-next-line effecttsgo/strict-effect-provide -- Queue dispatch is an Effect application entry point.
-  }).pipe(Effect.provide(appServicesLive(env)))
+    Effect.provide(appServicesLive(env)),
+  )
 
 const processPlaylistEnrichmentMessage = (env: ApiEnv, payload: PlaylistEnrichmentJob) =>
   Effect.gen(function* () {

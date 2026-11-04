@@ -6,6 +6,7 @@ import { describe, expect, test } from 'vitest'
 import { cancelProgram } from './program'
 import type { PersistedResumableUpload } from './protocol'
 import { ResumableUploadStorage, ResumableUploadStorageInMemory } from './storage'
+import { UploadTransport } from './transport'
 
 const makePersisted = (
   overrides: Partial<PersistedResumableUpload> = {},
@@ -73,7 +74,13 @@ describe('ResumableUploadStorage in-memory', () => {
       Effect.gen(function* () {
         const storage = yield* ResumableUploadStorage
         yield* storage.write(persisted)
-        const failure = yield* cancelProgram(persisted, controller.signal).pipe(Effect.flip)
+
+        const failure = yield* cancelProgram(persisted, controller.signal).pipe(
+          Effect.provideService(UploadTransport, {
+            fetch: () => Promise.resolve(Response.error()),
+          }),
+          Effect.flip,
+        )
 
         return { failure, checkpoint: yield* storage.read(persisted.fileFingerprint) }
       }),

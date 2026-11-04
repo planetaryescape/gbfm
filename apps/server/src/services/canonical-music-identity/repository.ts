@@ -61,6 +61,8 @@ export type ClaimResult =
 
 export const ClaimResult = Data.taggedEnum<ClaimResult>()
 
+export type SettledClaim = Extract<ClaimResult, { readonly _tag: 'owned' | 'resolved' }>
+
 const storageError = (operation: string, cause: unknown) =>
   new MusicIdentityStorageError({
     operation,

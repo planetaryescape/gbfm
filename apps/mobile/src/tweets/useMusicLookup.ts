@@ -6,6 +6,7 @@ import { resolveTweetMusic } from '@/api/tweetAuthoring'
 import { env } from '@/env'
 
 import type { MusicAttachment } from './draft'
+import { lookupMusic } from './musicLookup'
 
 export function useMusicLookup(
   link: string | null,
@@ -19,9 +20,7 @@ export function useMusicLookup(
     if (!link || !sessionToken) return undefined
     const abort = new AbortController()
 
-    const work = Effect.sleep('700 millis').pipe(
-      Effect.tap(() => Effect.sync(() => setLoading(true))),
-      Effect.andThen(getHttpClient),
+    const request = getHttpClient.pipe(
       Effect.flatMap((httpClient) =>
         resolveTweetMusic(
           {
@@ -32,10 +31,9 @@ export function useMusicLookup(
           link,
         ),
       ),
-      Effect.timeout('20 seconds'),
-      Effect.tap((music) => Effect.sync(() => resolved(music))),
-      Effect.ensuring(Effect.sync(() => setLoading(false))),
     )
+
+    const work = lookupMusic(request, setLoading, resolved)
 
     void Effect.runPromiseExit(work, { signal: abort.signal })
 

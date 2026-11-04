@@ -1,47 +1,28 @@
 import { useAtomMount, useAtomSet, useAtomValue } from '@effect/atom-react'
 import {
-  exchangeSpotifyPkceCodeEffect,
   fetchSpotifyProfileEffect,
   getValidSpotifyAuthSessionEffect,
   logoutSpotifyEffect,
-  readAuthorizationCallback,
-  SPOTIFY_WEB_SCOPES,
   spotifyErrorMessage,
-  startSpotifyPkceLoginEffect,
-  type SpotifyAuthSession,
-  type SpotifyProfile,
   type SpotifyRequestError,
 } from '@gbfm/spotify'
-import { Data, Effect } from 'effect'
+import { Effect } from 'effect'
 import * as Atom from 'effect/reactivity/Atom'
 import * as WebBrowser from 'expo-web-browser'
 import { type PropsWithChildren, useCallback, useMemo } from 'react'
 
 import { env } from '@/env'
 
+import { connectSpotify } from './connectionLogin'
+import { SpotifyConnectionState, type SetConnectionState } from './connectionState'
 import { SPOTIFY_REDIRECT_URI } from './constants'
 import { runSpotifyEffect } from './runtime'
 
-export type SpotifyConnectionState =
-  | { readonly _tag: 'Bootstrapping' }
-  | { readonly _tag: 'Disconnected'; readonly error?: string }
-  | { readonly _tag: 'Connecting' }
-  | {
-      readonly _tag: 'Connected'
-      readonly session: SpotifyAuthSession
-      readonly profile?: SpotifyProfile
-      readonly error?: string
-    }
-
-export const SpotifyConnectionState = Data.taggedEnum<SpotifyConnectionState>()
+export { SpotifyConnectionState } from './connectionState'
 
 export const spotifyConnectionState = Atom.make<SpotifyConnectionState>(
   SpotifyConnectionState.Bootstrapping(),
 ).pipe(Atom.keepAlive)
-
-type SetConnectionState = (
-  update: (state: SpotifyConnectionState) => SpotifyConnectionState,
-) => void
 
 const loadProfile = (setState: SetConnectionState) =>
   runSpotifyEffect(
@@ -118,82 +99,18 @@ export const SpotifyConnectionProvider = ({ children }: PropsWithChildren) => {
 export const useConnectSpotify = () => {
   const setState = useSetSpotifyConnectionState()
 
-  return useCallback(async () => {
-    if (!env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID) {
-      setState(() =>
-        SpotifyConnectionState.Disconnected({ error: 'Missing EXPO_PUBLIC_SPOTIFY_CLIENT_ID.' }),
-      )
-
-      return
-    }
-
-    setState(() => SpotifyConnectionState.Connecting())
-
-    try {
-      const authUrl = await runSpotifyEffect(
-        startSpotifyPkceLoginEffect(SPOTIFY_WEB_SCOPES, SPOTIFY_REDIRECT_URI),
-      )
-
-      if (!authUrl) return
-
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, SPOTIFY_REDIRECT_URI)
-
-      if (result.type !== 'success') return
-
-      const callback = readAuthorizationCallback(new URL(result.url))
-
-      if (callback.error) {
-        setState(() =>
-          SpotifyConnectionState.Disconnected({
-            error: callback.error ?? 'Spotify login failed.',
-          }),
-        )
-
-        return
-      }
-
-      if (!callback.code) return
-
-      await runSpotifyEffect(exchangeAndPersist(callback.code, setState))
-    } finally {
-      setState((state) =>
-        SpotifyConnectionState.$is('Connecting')(state)
-          ? SpotifyConnectionState.Disconnected({})
-          : state,
-      )
-    }
-  }, [setState])
-}
-
-const exchangeAndPersist = (code: string, setState: SetConnectionState) =>
-  Effect.gen(function* () {
-    const session = yield* exchangeSpotifyPkceCodeEffect(code)
-    setState(() => SpotifyConnectionState.Connected({ session }))
-    yield* fetchSpotifyProfileEffect().pipe(
-      Effect.map((profile) =>
-        setState((state) =>
-          SpotifyConnectionState.$is('Connected')(state)
-            ? SpotifyConnectionState.Connected({ session: state.session, profile })
-            : state,
-        ),
-      ),
-      Effect.catch((error: SpotifyRequestError) =>
-        Effect.sync(() =>
-          setState((state) =>
-            SpotifyConnectionState.$is('Connected')(state)
-              ? SpotifyConnectionState.Connected({ ...state, error: spotifyErrorMessage(error) })
-              : state,
-          ),
-        ),
-      ),
-    )
-  }).pipe(
-    Effect.catch((error: SpotifyRequestError) =>
-      Effect.sync(() =>
-        setState(() => SpotifyConnectionState.Disconnected({ error: spotifyErrorMessage(error) })),
-      ),
-    ),
+  return useCallback(
+    () =>
+      connectSpotify({
+        clientId: env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID,
+        redirectUri: SPOTIFY_REDIRECT_URI,
+        setState,
+        run: runSpotifyEffect,
+        openLogin: WebBrowser.openAuthSessionAsync,
+      }),
+    [setState],
   )
+}
 
 export const useDisconnectSpotify = () => {
   const setState = useSetSpotifyConnectionState()

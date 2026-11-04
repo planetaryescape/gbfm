@@ -1,96 +1,84 @@
 import { useAtomMount, useAtomSet, useAtomValue } from '@effect/atom-react'
-import { Effect, Schema } from 'effect'
+import { Effect } from 'effect'
 import * as Atom from 'effect/reactivity/Atom'
 import * as SecureStore from 'expo-secure-store'
 import { type PropsWithChildren, useMemo } from 'react'
 
-import { getSession, SessionExpired, type SessionUser } from '@/api/auth'
+import { getSession, SessionExpired, SessionUnavailable } from '@/api/auth'
 
-export type AuthSession = {
-  readonly user: SessionUser | null
-  readonly sessionToken: string | null
-}
+import {
+  acceptAuthSession,
+  AuthLifecycle,
+  AuthSessionStorage,
+  AuthSessionValidation,
+  AuthStorageFailed,
+  clearAuthSession,
+  currentAuthSession,
+  restoreAuthSession,
+  type AuthSession,
+} from './authLifecycle'
 
-const emptyAuthState: AuthSession = { user: null, sessionToken: null }
-
-const PersistedAuthSession = Schema.Struct({
-  user: Schema.Struct({
-    role: Schema.optionalKey(Schema.NullOr(Schema.String)),
-    id: Schema.String,
-    name: Schema.String,
-    username: Schema.NullOr(Schema.String),
-    email: Schema.String,
-    avatarUrl: Schema.NullOr(Schema.String),
-    verified: Schema.Boolean,
-    createdAt: Schema.String,
-    updatedAt: Schema.String,
-  }),
-  sessionToken: Schema.String,
-})
+export type { AuthSession } from './authLifecycle'
 
 const storageKey = 'gbfm.auth-session'
 
-export const authState = Atom.make<AuthSession>(emptyAuthState).pipe(Atom.keepAlive)
+const storage = AuthSessionStorage.of({
+  read: Effect.tryPromise({
+    try: () => SecureStore.getItemAsync(storageKey),
+    catch: () => new AuthStorageFailed({ message: 'Could not read the saved session.' }),
+  }),
+  write: (session) =>
+    Effect.tryPromise({
+      try: () => SecureStore.setItemAsync(storageKey, JSON.stringify(session)),
+      catch: () => new AuthStorageFailed({ message: 'Could not save the session.' }),
+    }),
+  remove: Effect.tryPromise({
+    try: () => SecureStore.deleteItemAsync(storageKey),
+    catch: () => new AuthStorageFailed({ message: 'Could not remove the saved session.' }),
+  }),
+})
+
+const lifecycle = Atom.make<AuthLifecycle>(AuthLifecycle.Bootstrapping()).pipe(Atom.keepAlive)
+
+export const authState = Atom.make((get) => currentAuthSession(get(lifecycle))).pipe(Atom.keepAlive)
 
 const authReady = Atom.make(false).pipe(Atom.keepAlive)
 
 export const useAuthReady = () => useAtomValue(authReady)
 
-const persistAuth = (session: AuthSession) =>
-  session.user && session.sessionToken
-    ? Effect.tryPromise(() => SecureStore.setItemAsync(storageKey, JSON.stringify(session)))
-    : Effect.tryPromise(() => SecureStore.deleteItemAsync(storageKey))
-
-const makeRestoreAuth = (setState: (session: AuthSession) => void) =>
-  Effect.gen(function* () {
-    const stored = yield* Effect.tryPromise(() => SecureStore.getItemAsync(storageKey)).pipe(
-      Effect.catch(() => Effect.succeed(null)),
-    )
-
-    if (!stored) return
-
-    const cached = yield* Effect.try({ try: () => JSON.parse(stored), catch: () => null }).pipe(
-      Effect.flatMap((value) => Schema.decodeUnknownEffect(PersistedAuthSession)(value)),
-      Effect.catch(() => Effect.succeed(null)),
-    )
-
-    if (!cached) {
-      yield* Effect.tryPromise(() => SecureStore.deleteItemAsync(storageKey)).pipe(Effect.ignore)
-
-      return
-    }
-
-    setState(cached)
-
-    yield* getSession(cached.sessionToken).pipe(
-      Effect.tap((user) =>
-        Effect.gen(function* () {
-          const refreshed = { user, sessionToken: cached.sessionToken }
-          setState(refreshed)
-          yield* persistAuth(refreshed)
+const makeRestoreAuthAtom = (
+  setState: (state: AuthLifecycle | ((current: AuthLifecycle) => AuthLifecycle)) => void,
+  setReady: (ready: boolean) => void,
+) =>
+  Atom.make(
+    restoreAuthSession(setState).pipe(
+      Effect.provideService(AuthSessionStorage, storage),
+      Effect.provideService(AuthSessionValidation, {
+        validate: (token) =>
+          getSession(token).pipe(
+            Effect.mapError((error) =>
+              error instanceof SessionUnavailable || error instanceof SessionExpired
+                ? error
+                : new SessionUnavailable({ message: 'Unable to refresh session.' }),
+            ),
+          ),
+      }),
+      Effect.ensuring(
+        Effect.sync(() => {
+          setState((current) =>
+            AuthLifecycle.$is('Bootstrapping')(current) ? AuthLifecycle.SignedOut() : current,
+          )
+          setReady(true)
         }),
       ),
-      Effect.catch((error) =>
-        error instanceof SessionExpired
-          ? Effect.gen(function* () {
-              setState(emptyAuthState)
-              yield* persistAuth(emptyAuthState)
-            })
-          : Effect.void,
-      ),
-    )
-  })
-
-const makeRestoreAuthAtom = (
-  setState: (session: AuthSession) => void,
-  setReady: (ready: boolean) => void,
-) => Atom.make(makeRestoreAuth(setState).pipe(Effect.ensuring(Effect.sync(() => setReady(true)))))
+    ),
+  )
 
 export const useAuthStore = <T>(selector: (state: AuthSession) => T) =>
   useAtomValue(authState, selector)
 
 export const AuthProvider = ({ children }: PropsWithChildren) => {
-  const setState = useAtomSet(authState)
+  const setState = useAtomSet(lifecycle)
   const setReady = useAtomSet(authReady)
   const restoreAtom = useMemo(() => makeRestoreAuthAtom(setState, setReady), [setState, setReady])
   useAtomMount(restoreAtom)
@@ -99,21 +87,14 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
 }
 
 export const useSetAuth = () => {
-  const setState = useAtomSet(authState)
+  const setState = useAtomSet(lifecycle)
 
-  return (session: AuthSession) => {
-    setState(session)
-
-    return persistAuth(session)
-  }
+  return (session: AuthSession) =>
+    acceptAuthSession(session, setState).pipe(Effect.provideService(AuthSessionStorage, storage))
 }
 
 export const useClearAuth = () => {
-  const setState = useAtomSet(authState)
+  const setState = useAtomSet(lifecycle)
 
-  return () => {
-    return persistAuth(emptyAuthState).pipe(
-      Effect.tap(() => Effect.sync(() => setState(emptyAuthState))),
-    )
-  }
+  return () => clearAuthSession(setState).pipe(Effect.provideService(AuthSessionStorage, storage))
 }

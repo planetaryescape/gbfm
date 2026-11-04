@@ -15,7 +15,7 @@ import {
   type PlaybackCommandHandlers,
   type NowPlayingMetadata,
 } from './engine'
-import type { AudioStorageError, QueueTrackType, PersistedQueueType } from './persistedQueue'
+import { AudioStorageError, type QueueTrackType, type PersistedQueueType } from './persistedQueue'
 import { PlayerStorage, type PositionRecord } from './playerStorage'
 import { PlayReporter } from './playReporter'
 
@@ -264,6 +264,187 @@ const makeReporter = () => {
 }
 
 describe('makeAudioPlayback', () => {
+  it('keeps the latest user volume and mute changes ahead of delayed hydration', async () => {
+    const hydration = Deferred.makeUnsafe<VolumeRecordType | null>()
+    const storage = makeRecordingStorage({ loadVolume: Deferred.await(hydration) })
+    const recording = await Effect.runPromise(makeRecordingEngine())
+    const runtime = makeRuntime(recording.engine, storage, makeRecordingPlayReporter())
+
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const playback = yield* makeAudioPlayback(runtime)
+          yield* playback.setVolume(35)
+          yield* playback.toggleMute
+          expect(storage.savedVolumes).toEqual([])
+          yield* Deferred.succeed(hydration, { volume: 80, isMuted: false })
+          yield* Effect.yieldNow
+          expect(playback.getSnapshot().volume).toEqual({ volume: 35, isMuted: true })
+          expect(recording.volumeStates.slice(-2)).toEqual([
+            { kind: 'volume', value: 0.35 },
+            { kind: 'muted', value: true },
+          ])
+        }).pipe(Effect.scoped),
+      )
+      expect(storage.savedVolumes).toEqual([{ volume: 35, isMuted: true }])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it('preserves buffered user changes and reports failed queue and volume reads', async () => {
+    const queue = Deferred.makeUnsafe<PersistedQueueType | null, AudioStorageError>()
+    const volume = Deferred.makeUnsafe<VolumeRecordType | null, AudioStorageError>()
+
+    const storage = makeRecordingStorage({
+      loadQueue: Deferred.await(queue),
+      loadVolume: Deferred.await(volume),
+    })
+
+    const recording = await Effect.runPromise(makeRecordingEngine())
+    const reporting = makeReporter()
+    const runtime = makeRuntime(recording.engine, storage, makeRecordingPlayReporter())
+
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const playback = yield* makeAudioPlayback(runtime, reporting.reporter)
+          yield* playback.enqueue(track('early'))
+          yield* playback.setVolume(25)
+          yield* Deferred.fail(queue, new AudioStorageError('read'))
+          yield* Deferred.fail(volume, new AudioStorageError('read'))
+          yield* Effect.yieldNow
+          expect(playback.getSnapshot().queue.tracks.map(({ id }) => id)).toEqual(['early'])
+          expect(playback.getSnapshot().volume).toEqual({ volume: 25, isMuted: false })
+        }).pipe(Effect.scoped),
+      )
+      expect(storage.savedQueues.at(-1)?.tracks.map(({ id }) => id)).toEqual(['early'])
+      expect(storage.savedVolumes.at(-1)).toEqual({ volume: 25, isMuted: false })
+      expect(reporting.errors.map(({ message }) => message).sort()).toEqual([
+        'Unable to hydrate audio queue',
+        'Unable to hydrate audio volume',
+      ])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it('serializes each persistence stream, continues after failed writes and drains both on close', async () => {
+    const queueStarted = Deferred.makeUnsafe<void>()
+    const volumeStarted = Deferred.makeUnsafe<void>()
+    const releaseQueue = Deferred.makeUnsafe<void>()
+    const releaseVolume = Deferred.makeUnsafe<void>()
+    let queueWrites = 0
+    let volumeWrites = 0
+
+    const storage = makeRecordingStorage({
+      loadQueue: Effect.succeed({ tracks: [], currentIndex: -1 }),
+      loadVolume: Effect.succeed({ volume: 100, isMuted: false }),
+      saveQueue: () =>
+        Effect.gen(function* () {
+          queueWrites += 1
+
+          if (queueWrites !== 1) return yield* Effect.void
+          yield* Deferred.succeed(queueStarted, undefined)
+          yield* Deferred.await(releaseQueue)
+
+          return yield* Effect.fail(new AudioStorageError('write'))
+        }),
+      saveVolume: () =>
+        Effect.gen(function* () {
+          volumeWrites += 1
+
+          if (volumeWrites !== 1) return yield* Effect.void
+          yield* Deferred.succeed(volumeStarted, undefined)
+          yield* Deferred.await(releaseVolume)
+
+          return yield* Effect.fail(new AudioStorageError('write'))
+        }),
+    })
+
+    const recording = await Effect.runPromise(makeRecordingEngine())
+    const reporting = makeReporter()
+    const runtime = makeRuntime(recording.engine, storage, makeRecordingPlayReporter())
+
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const playback = yield* makeAudioPlayback(runtime, reporting.reporter)
+          yield* Effect.yieldNow
+          yield* playback.enqueue(track('one'))
+          yield* playback.enqueue(track('two'))
+          yield* playback.setVolume(30)
+          yield* playback.setVolume(60)
+          yield* Deferred.await(queueStarted)
+          yield* Deferred.await(volumeStarted)
+          expect(queueWrites).toBe(1)
+          expect(volumeWrites).toBe(1)
+          yield* Deferred.succeed(releaseQueue, undefined)
+          yield* Deferred.succeed(releaseVolume, undefined)
+        }).pipe(Effect.scoped),
+      )
+      expect(storage.savedQueues.map(({ tracks }) => tracks.map(({ id }) => id))).toEqual([
+        ['one'],
+        ['one', 'two'],
+      ])
+      expect(storage.savedVolumes).toEqual([
+        { volume: 30, isMuted: false },
+        { volume: 60, isMuted: false },
+      ])
+      expect(queueWrites).toBe(2)
+      expect(volumeWrites).toBe(2)
+      expect(reporting.errors.map(({ message }) => message).sort()).toEqual([
+        'Unable to persist audio queue',
+        'Unable to persist audio volume',
+      ])
+      expect(recording.getHandlers()).toBeNull()
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it('interrupts pending hydration reads without writing buffered changes on scope closure', async () => {
+    const queueStarted = Deferred.makeUnsafe<void>()
+    const volumeStarted = Deferred.makeUnsafe<void>()
+    const interrupted: Array<string> = []
+
+    const pendingRead = (name: string, started: Deferred.Deferred<void>) =>
+      Deferred.succeed(started, undefined).pipe(
+        Effect.andThen(Effect.never),
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            interrupted.push(name)
+          }),
+        ),
+      )
+
+    const storage = makeRecordingStorage({
+      loadQueue: pendingRead('queue', queueStarted),
+      loadVolume: pendingRead('volume', volumeStarted),
+    })
+
+    const recording = await Effect.runPromise(makeRecordingEngine())
+    const runtime = makeRuntime(recording.engine, storage, makeRecordingPlayReporter())
+
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const playback = yield* makeAudioPlayback(runtime)
+          yield* Deferred.await(queueStarted)
+          yield* Deferred.await(volumeStarted)
+          yield* playback.enqueue(track('buffered'))
+          yield* playback.setVolume(20)
+        }).pipe(Effect.scoped),
+      )
+      expect(interrupted.sort()).toEqual(['queue', 'volume'])
+      expect(storage.savedQueues).toEqual([])
+      expect(storage.savedVolumes).toEqual([])
+      expect(recording.getHandlers()).toBeNull()
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
   it('repairs a queued track without overwriting the newly selected media metadata', async () => {
     const storage = makeRecordingStorage()
     const recording = await Effect.runPromise(makeRecordingEngine())

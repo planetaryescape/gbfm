@@ -45,15 +45,26 @@ const emptyForm: typeof Form.Type = {
 
 const Tracks = Schema.Array(PlaylistTrackEntry)
 
+const Editor = Schema.TaggedUnion({
+  Listing: {},
+  Creating: {},
+  Editing: { id: Schema.String },
+})
+
+const Action = Schema.Literals(['save', 'delete', 'import', 'add', 'remove', 'reorder', 'sync'])
+
+const busy = (model: Model) => model.operation !== 'idle'
+
+const selectedId = (model: Model) => (Editor.guards.Editing(model.editor) ? model.editor.id : null)
+
 export const Model = Schema.Struct({
   listing: PlaylistListResponse,
-  selected: Schema.NullOr(Schema.String),
-  creating: Schema.Boolean,
+  editor: Editor,
   form: Form,
   tracks: Tracks,
   importUrl: Schema.String,
   trackUrl: Schema.String,
-  busy: Schema.Boolean,
+  operation: Schema.Union([Schema.Literals(['idle', 'loading']), Action]),
   deleting: Schema.Boolean,
   error: Schema.NullOr(Schema.String),
   notice: Schema.String,
@@ -63,13 +74,12 @@ export type Model = typeof Model.Type
 
 export const initialModel: Model = {
   listing: [],
-  selected: null,
-  creating: false,
+  editor: Editor.cases.Listing.make({}),
   form: emptyForm,
   tracks: [],
   importUrl: '',
   trackUrl: '',
-  busy: false,
+  operation: 'idle',
   deleting: false,
   error: null,
   notice: '',
@@ -134,8 +144,6 @@ const Load = Command.define('Playlists.Load', {
       })
     }).pipe(Effect.catch((error) => Effect.succeed(Message.Failed({ message: error.message })))),
 })
-
-const Action = Schema.Literals(['save', 'delete', 'import', 'add', 'remove', 'reorder', 'sync'])
 
 const Write = Command.define('Playlists.Write', {
   args: {
@@ -233,14 +241,15 @@ const write = (
   trackId = '',
   trackIds: ReadonlyArray<string> = [],
 ): Result => {
-  if (model.busy || (!model.selected && action !== 'save' && action !== 'import')) return { model }
+  if (busy(model) || (!selectedId(model) && action !== 'save' && action !== 'import'))
+    return { model }
 
   return {
-    model: { ...model, busy: true, error: null, notice: '' },
+    model: { ...model, operation: action, error: null, notice: '' },
     commands: [
       Write({
         action,
-        selected: model.selected,
+        selected: selectedId(model),
         form: model.form,
         url: action === 'import' ? model.importUrl : model.trackUrl,
         trackId,
@@ -253,28 +262,34 @@ const write = (
 export const update = (model: Model, message: Message): Result =>
   Message.match<Result>(message, {
     FieldChanged: ({ field, value }) =>
-      model.busy ? { model } : { model: { ...model, form: { ...model.form, [field]: value } } },
+      busy(model) ? { model } : { model: { ...model, form: { ...model.form, [field]: value } } },
     ImportUrlChanged: ({ value }) =>
-      model.busy ? { model } : { model: { ...model, importUrl: value } },
+      busy(model) ? { model } : { model: { ...model, importUrl: value } },
     TrackUrlChanged: ({ value }) =>
-      model.busy ? { model } : { model: { ...model, trackUrl: value } },
+      busy(model) ? { model } : { model: { ...model, trackUrl: value } },
     New: () =>
-      model.busy
+      busy(model)
         ? { model }
-        : { model: { ...initialModel, listing: model.listing, creating: true } },
-    Back: () => (model.busy ? { model } : { model: { ...initialModel, listing: model.listing } }),
+        : {
+            model: {
+              ...initialModel,
+              listing: model.listing,
+              editor: Editor.cases.Creating.make({}),
+            },
+          },
+    Back: () => (busy(model) ? { model } : { model: { ...initialModel, listing: model.listing } }),
     Select: ({ id }) => {
       const playlist = model.listing.find((item) => item.id === id)
 
-      if (model.busy || !playlist) return { model }
+      if (busy(model) || !playlist) return { model }
 
       return {
         model: {
           ...model,
-          selected: id,
+          editor: Editor.cases.Editing.make({ id }),
           form: formFor(playlist),
           tracks: [],
-          busy: true,
+          operation: 'loading',
           error: null,
           notice: '',
           deleting: false,
@@ -300,30 +315,31 @@ export const update = (model: Model, message: Message): Result =>
       return write(model, 'reorder', '', ids)
     },
     AskDelete: () =>
-      model.busy || !model.selected ? { model } : { model: { ...model, deleting: true } },
-    CancelDelete: () => (model.busy ? { model } : { model: { ...model, deleting: false } }),
+      busy(model) || !selectedId(model) ? { model } : { model: { ...model, deleting: true } },
+    CancelDelete: () => (busy(model) ? { model } : { model: { ...model, deleting: false } }),
     ConfirmDelete: () => (model.deleting ? write(model, 'delete') : { model }),
     Loaded: ({ listing, tracks, resetForm }) => {
-      const playlist = listing.find((item) => item.id === model.selected)
+      const playlist = listing.find((item) => item.id === selectedId(model))
 
       const form = resetForm ? (playlist ? formFor(playlist) : emptyForm) : model.form
 
-      return { model: { ...model, listing, tracks, form, busy: false, error: null } }
+      return { model: { ...model, listing, tracks, form, operation: 'idle', error: null } }
     },
     Saved: ({ selected, notice, resetForm }) => ({
       model: {
         ...model,
-        selected,
-        creating: false,
+        editor: selected
+          ? Editor.cases.Editing.make({ id: selected })
+          : Editor.cases.Listing.make({}),
         notice,
         deleting: false,
         trackUrl: '',
         importUrl: '',
-        busy: true,
+        operation: 'loading',
       },
       commands: [Load({ selected, resetForm })],
     }),
-    Failed: ({ message }) => ({ model: { ...model, busy: false, error: message } }),
+    Failed: ({ message }) => ({ model: { ...model, operation: 'idle', error: message } }),
   })
 
 const labels = {
@@ -358,10 +374,10 @@ const listView = (model: Model, h: HtmlBuilder<Message>) =>
                   h.AriaLabel('Spotify playlist URL'),
                   h.Placeholder('https://open.spotify.com/playlist/...'),
                   h.Value(model.importUrl),
-                  h.Disabled(model.busy),
+                  h.Disabled(busy(model)),
                   h.OnInput((value) => Message.ImportUrlChanged({ value })),
                 ]),
-                h.button([h.Type('submit'), h.Disabled(model.busy)], ['Import playlist']),
+                h.button([h.Type('submit'), h.Disabled(busy(model))], ['Import playlist']),
               ],
             ),
           ],
@@ -371,7 +387,7 @@ const listView = (model: Model, h: HtmlBuilder<Message>) =>
           [
             h.Type('button'),
             h.Class('dashboard-button-primary'),
-            h.Disabled(model.busy),
+            h.Disabled(busy(model)),
             h.OnClick(Message.New()),
           ],
           ['New playlist'],
@@ -393,7 +409,7 @@ const listView = (model: Model, h: HtmlBuilder<Message>) =>
               h.strong([], [item.title]),
               item.slug,
               h.button(
-                [h.Disabled(model.busy), h.OnClick(Message.Select({ id: item.id }))],
+                [h.Disabled(busy(model)), h.OnClick(Message.Select({ id: item.id }))],
                 ['Edit'],
               ),
             ],
@@ -422,13 +438,13 @@ const playlistForm = (model: Model, h: HtmlBuilder<Message>) =>
           field === 'description'
             ? h.textarea([
                 h.Value(model.form[field]),
-                h.Disabled(model.busy),
+                h.Disabled(busy(model)),
                 h.Rows(3),
                 h.OnInput((value) => Message.FieldChanged({ field, value })),
               ])
             : h.input([
                 h.Value(model.form[field]),
-                h.Disabled(model.busy),
+                h.Disabled(busy(model)),
                 h.Required(field === 'title' || field === 'slug'),
                 h.OnInput((value) => Message.FieldChanged({ field, value })),
               ]),
@@ -438,8 +454,8 @@ const playlistForm = (model: Model, h: HtmlBuilder<Message>) =>
         [h.Class('admin-form-actions')],
         [
           h.button(
-            [h.Type('submit'), h.Class('dashboard-button-primary'), h.Disabled(model.busy)],
-            [model.selected ? 'Save playlist' : 'Create playlist'],
+            [h.Type('submit'), h.Class('dashboard-button-primary'), h.Disabled(busy(model))],
+            [selectedId(model) ? 'Save playlist' : 'Create playlist'],
           ),
         ],
       ),
@@ -457,10 +473,10 @@ const tracksView = (model: Model, h: HtmlBuilder<Message>) =>
           h.AriaLabel('Spotify track URL'),
           h.Placeholder('Add a Spotify track URL'),
           h.Value(model.trackUrl),
-          h.Disabled(model.busy),
+          h.Disabled(busy(model)),
           h.OnInput((value) => Message.TrackUrlChanged({ value })),
         ]),
-        h.button([h.Type('submit'), h.Disabled(model.busy)], ['Add Spotify track']),
+        h.button([h.Type('submit'), h.Disabled(busy(model))], ['Add Spotify track']),
       ],
     ),
     dataTable(h, {
@@ -483,7 +499,7 @@ const tracksView = (model: Model, h: HtmlBuilder<Message>) =>
             [
               h.button(
                 [
-                  h.Disabled(model.busy || index === 0),
+                  h.Disabled(busy(model) || index === 0),
                   h.AriaLabel(`Move ${row.track.title} up`),
                   h.Title('Move up'),
                   h.OnClick(Message.MoveTrack({ id: row.track.id, direction: 'up' })),
@@ -492,7 +508,7 @@ const tracksView = (model: Model, h: HtmlBuilder<Message>) =>
               ),
               h.button(
                 [
-                  h.Disabled(model.busy || index === model.tracks.length - 1),
+                  h.Disabled(busy(model) || index === model.tracks.length - 1),
                   h.AriaLabel(`Move ${row.track.title} down`),
                   h.Title('Move down'),
                   h.OnClick(Message.MoveTrack({ id: row.track.id, direction: 'down' })),
@@ -501,7 +517,7 @@ const tracksView = (model: Model, h: HtmlBuilder<Message>) =>
               ),
               h.button(
                 [
-                  h.Disabled(model.busy),
+                  h.Disabled(busy(model)),
                   h.AriaLabel(`Remove ${row.track.title}`),
                   h.OnClick(Message.RemoveTrack({ id: row.track.id })),
                 ],
@@ -517,11 +533,11 @@ const tracksView = (model: Model, h: HtmlBuilder<Message>) =>
       [h.Class('admin-pager')],
       [
         h.button(
-          [h.Class('admin-button-small'), h.Disabled(model.busy), h.OnClick(Message.Sync())],
+          [h.Class('admin-button-small'), h.Disabled(busy(model)), h.OnClick(Message.Sync())],
           ['Sync track links'],
         ),
         h.button(
-          [h.Class('admin-button-small'), h.Disabled(model.busy), h.OnClick(Message.AskDelete())],
+          [h.Class('admin-button-small'), h.Disabled(busy(model)), h.OnClick(Message.AskDelete())],
           ['Delete playlist'],
         ),
       ],
@@ -532,11 +548,11 @@ const tracksView = (model: Model, h: HtmlBuilder<Message>) =>
           [
             h.p([], ['Permanently delete this playlist? Tracks remain in the music catalog.']),
             h.button(
-              [h.Disabled(model.busy), h.OnClick(Message.ConfirmDelete())],
+              [h.Disabled(busy(model)), h.OnClick(Message.ConfirmDelete())],
               ['Confirm delete playlist'],
             ),
             h.button(
-              [h.Disabled(model.busy), h.OnClick(Message.CancelDelete())],
+              [h.Disabled(busy(model)), h.OnClick(Message.CancelDelete())],
               ['Keep playlist'],
             ),
           ],
@@ -555,23 +571,23 @@ const detailView = (model: Model, h: HtmlBuilder<Message>) =>
             [
               h.Type('button'),
               h.Class('admin-button-small'),
-              h.Disabled(model.busy),
+              h.Disabled(busy(model)),
               h.OnClick(Message.Back()),
             ],
             ['Back to playlists'],
           ),
           h.h2(
             [h.Class('admin-detail-title')],
-            [model.selected ? model.form.title || 'Edit playlist' : 'New playlist'],
+            [selectedId(model) ? model.form.title || 'Edit playlist' : 'New playlist'],
           ),
         ],
       ),
       ...notices(model, h),
       playlistForm(model, h),
-      model.selected ? tracksView(model, h) : h.empty,
+      selectedId(model) ? tracksView(model, h) : h.empty,
     ],
   )
 
 export const view = defineView<Model, Message>((model, h) =>
-  model.selected || model.creating ? detailView(model, h) : listView(model, h),
+  !Editor.guards.Listing(model.editor) ? detailView(model, h) : listView(model, h),
 )

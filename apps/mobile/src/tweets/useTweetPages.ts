@@ -1,49 +1,39 @@
 import { Effect, Exit } from 'effect'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useReducer, useRef } from 'react'
 
-import { getTweetsPage, type Tweet } from '@/api/tweets'
+import { getTweetsPage } from '@/api/tweets'
 
-import { appendTweets } from './appendTweets'
+import {
+  reduceTweetPages,
+  tweetPagesView,
+  TweetPagesEvent,
+  TweetPagesState,
+  type TweetPage,
+} from './tweetPagesState'
 
-type Page = { readonly tweets: ReadonlyArray<Tweet>; readonly hasMore: boolean }
+const initial = TweetPagesState.Initial()
 
-type MoreState = Page & {
-  readonly source: Page
-  readonly status: 'idle' | 'loading' | 'failed'
-}
-
-export function useTweetPages(firstPage: Page | null) {
-  const [state, setState] = useState<MoreState | null>(null)
+export function useTweetPages(firstPage: TweetPage | null) {
+  const [state, dispatch] = useReducer(reduceTweetPages, initial)
   const loading = useRef(false)
-  const more = state && state.source === firstPage ? state : null
-
-  const tweets = firstPage ? appendTweets(firstPage.tweets, more?.tweets ?? []) : []
-  const hasMore = more ? more.hasMore : (firstPage?.hasMore ?? false)
+  const { tweets, loaded, hasMore, status } = tweetPagesView(state, firstPage)
 
   const loadMore = useCallback(() => {
     if (!firstPage || !hasMore || loading.current) return
     loading.current = true
-    const loaded = more?.tweets ?? []
-    setState({ source: firstPage, tweets: loaded, hasMore, status: 'loading' })
+    dispatch(TweetPagesEvent.Started({ source: firstPage, tweets: loaded, hasMore }))
 
     void Effect.runPromiseExit(getTweetsPage(firstPage.tweets.length + loaded.length)).then(
       (exit) => {
         loading.current = false
-        setState((current) => {
-          if (current?.source !== firstPage) return current
-
-          return Exit.isSuccess(exit)
-            ? {
-                source: firstPage,
-                tweets: [...current.tweets, ...exit.value.tweets],
-                hasMore: exit.value.hasMore,
-                status: 'idle',
-              }
-            : { ...current, status: 'failed' }
-        })
+        dispatch(
+          Exit.isSuccess(exit)
+            ? TweetPagesEvent.Loaded({ source: firstPage, page: exit.value })
+            : TweetPagesEvent.Failed({ source: firstPage }),
+        )
       },
     )
-  }, [firstPage, hasMore, more])
+  }, [firstPage, hasMore, loaded])
 
-  return { tweets, hasMore, status: more?.status ?? 'idle', loadMore }
+  return { tweets, hasMore, status, loadMore }
 }

@@ -6,7 +6,12 @@ import { expect, test } from 'vitest'
 
 import { emptyTweetDraft } from '@/tweets/draft'
 
-import { saveTweet, type AuthoringConnection } from './tweetAuthoring'
+import {
+  loadTweetForEdit,
+  publishReply,
+  saveTweet,
+  type AuthoringConnection,
+} from './tweetAuthoring'
 
 const post = PostResponse.make({
   id: 'saved-id',
@@ -136,4 +141,38 @@ test('malformed success payloads and transport failures remain typed failures', 
   expect(
     await Effect.runPromise(saveTweet(unavailable.connection, draft, true).pipe(Effect.isFailure)),
   ).toBe(true)
+})
+
+test('reply retries are independent creates, not slug-conflict recovery', async () => {
+  const server = fixture(() => Response.json(compiled))
+  await Effect.runPromise(publishReply(server.connection, 'parent', draft))
+  await Effect.runPromise(publishReply(server.connection, 'parent', draft))
+  expect(server.requests.map(({ method, path }) => [method, path])).toEqual([
+    ['POST', '/api/content/posts/micro/parent/replies'],
+    ['POST', '/api/content/posts/micro/parent/replies'],
+  ])
+})
+
+test('reply conflict is a failure without an automatic retry', async () => {
+  const server = fixture(() => Response.json(new HttpApiError.Conflict(), { status: 409 }))
+  expect(
+    await Effect.runPromise(
+      publishReply(server.connection, 'parent', draft).pipe(Effect.isFailure),
+    ),
+  ).toBe(true)
+  expect(server.requests).toHaveLength(1)
+})
+
+test('edit restore retains the slug, account-draft status and tags in composer text', async () => {
+  const server = fixture(() =>
+    Response.json({ ...compiled, draft: true, tags: ['jazz'], content: 'Notes' }),
+  )
+
+  const loaded = await Effect.runPromise(loadTweetForEdit(server.connection, draft.slug))
+  expect(loaded.draft).toEqual({ ...draft, text: 'A record\n\nNotes\n\n#jazz', remote: true })
+  expect(loaded.published).toBe(false)
+  expect(loaded.tags).toEqual(['jazz'])
+  expect(server.requests.map(({ method, path }) => [method, path])).toEqual([
+    ['GET', `/api/content/posts/${draft.slug}/edit`],
+  ])
 })

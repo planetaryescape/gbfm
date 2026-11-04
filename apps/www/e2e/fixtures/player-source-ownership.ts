@@ -25,10 +25,17 @@ export const inspect = () => ({
 
 export const deliverOldEvents = () => {
   const old = instances[0]
+  const current = instances[1]
 
-  if (!old) throw new Error('Missing old source')
+  if (!old || !current) throw new Error('Missing source instances')
+  const after = events.length
 
   for (const type of ['loadedmetadata', 'timeupdate', 'ended']) old.dispatchEvent(new Event(type))
+  current.currentTime = 3.25
+  const position = current.currentTime
+  current.dispatchEvent(new Event('timeupdate'))
+
+  return { after, position }
 }
 
 export const mountPlayerSourceFixture = () => {
@@ -63,6 +70,10 @@ export const mountPlayerSourceFixture = () => {
     const button = document.createElement('button')
     button.textContent = action
     button.addEventListener('click', async () => {
+      button.dataset.completed = 'false'
+      button.dataset.outcome = 'pending'
+      delete button.dataset.failed
+
       try {
         if (action === 'dispose') await dispose()
         else
@@ -87,8 +98,10 @@ export const mountPlayerSourceFixture = () => {
             }),
           )
         button.dataset.completed = 'true'
+        button.dataset.outcome = 'completed'
       } catch {
-        button.dataset.failed = 'true'
+        button.dataset.failed = `player-fixture:${action}:failed`
+        button.dataset.outcome = 'failed'
       }
     })
     document.body.append(button)

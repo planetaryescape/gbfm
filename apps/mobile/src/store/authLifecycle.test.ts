@@ -1,4 +1,4 @@
-import { Deferred, Effect, Fiber, Match, Predicate, Redacted } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Match, Predicate, Redacted } from 'effect'
 import { HttpClient, HttpClientResponse } from 'effect/http'
 import { expect, test } from 'vitest'
 
@@ -11,8 +11,10 @@ import {
   AuthSessionValidation,
   AuthStorageFailed,
   clearAuthSession,
+  currentAuthIdentity,
   currentAuthSession,
   emptyAuthSession,
+  makeAuthSessionStorage,
   restoreAuthSession,
   type AuthSession,
   type SetAuthLifecycle,
@@ -45,12 +47,20 @@ const cached: AuthSession = {
   sessionToken: 'fixture-token',
 }
 
-const fixture = (stored: string | null, response = Response.json({ user: wireUser })) => {
+const fixture = (
+  stored: string | null,
+  response = Response.json({ user: wireUser }),
+  gates: {
+    readonly write?: (session: AuthSession) => Effect.Effect<void>
+    readonly remove?: Effect.Effect<void>
+  } = {},
+) => {
   const persisted = new Map<string, string>()
 
   if (stored !== null) persisted.set('session', stored)
   const failures = new Set<string>()
   const phases: Array<AuthLifecycle['_tag']> = []
+  const mutations: Array<string> = []
   let state: AuthLifecycle = AuthLifecycle.Bootstrapping()
 
   const setState: SetAuthLifecycle = (update) => {
@@ -60,25 +70,29 @@ const fixture = (stored: string | null, response = Response.json({ user: wireUse
     state = next
   }
 
-  const storage = AuthSessionStorage.of({
+  const storage = makeAuthSessionStorage({
     read: Effect.suspend(() =>
       failures.has('read')
         ? Effect.fail(new AuthStorageFailed({ message: 'Read failed' }))
         : Effect.succeed(persisted.get('session') ?? null),
     ),
     write: (session) =>
-      failures.has('write')
-        ? Effect.fail(new AuthStorageFailed({ message: 'Write failed' }))
-        : Effect.sync(() => {
-            persisted.set('session', JSON.stringify(session))
-          }),
-    remove: Effect.suspend(() =>
-      failures.has('remove')
-        ? Effect.fail(new AuthStorageFailed({ message: 'Remove failed' }))
-        : Effect.sync(() => {
-            persisted.delete('session')
-          }),
-    ),
+      Effect.gen(function* () {
+        mutations.push(`write:${session.sessionToken}:start`)
+        yield* gates.write?.(session) ?? Effect.void
+
+        if (failures.has('write')) yield* new AuthStorageFailed({ message: 'Write failed' })
+        persisted.set('session', JSON.stringify(session))
+        mutations.push(`write:${session.sessionToken}:committed`)
+      }),
+    remove: Effect.gen(function* () {
+      mutations.push('remove:start')
+      yield* gates.remove ?? Effect.void
+
+      if (failures.has('remove')) yield* new AuthStorageFailed({ message: 'Remove failed' })
+      persisted.delete('session')
+      mutations.push('remove:committed')
+    }),
   })
 
   const httpClient = HttpClient.make((request) =>
@@ -103,6 +117,7 @@ const fixture = (stored: string | null, response = Response.json({ user: wireUse
     persisted,
     failures,
     phases,
+    mutations,
     storage,
     validation,
     restore,
@@ -124,6 +139,20 @@ test.each([
   expect(auth.phases).toEqual([])
 
   expect(auth.persisted.get('session') ?? null).toBe(stored === '' ? '' : null)
+})
+
+test('feed identity waits for the initial read but is available during cached-session validation', () => {
+  expect(currentAuthIdentity(AuthLifecycle.Bootstrapping())).toBeNull()
+  expect(currentAuthIdentity(AuthLifecycle.ValidatingSession({ session: cached }))).toBe(
+    cached.user?.id,
+  )
+  expect(currentAuthIdentity(AuthLifecycle.CachedSession({ session: cached }))).toBe(
+    cached.user?.id,
+  )
+  expect(currentAuthIdentity(AuthLifecycle.Authenticated({ session: cached }))).toBe(
+    cached.user?.id,
+  )
+  expect(currentAuthIdentity(AuthLifecycle.SignedOut())).toBe('anonymous')
 })
 
 test('unreadable storage and failed invalid-session cleanup remain nonfatal', async () => {
@@ -253,14 +282,287 @@ test.each([
         ).pipe(Effect.provideService(AuthSessionStorage, auth.storage))
         const newer = auth.state()
         const persisted = auth.persisted.get('session')
+        const mutations = [...auth.mutations]
         yield* Deferred.succeed(finish, undefined)
         yield* Fiber.join(fiber)
         expect(auth.state()).toBe(newer)
         expect(auth.persisted.get('session')).toBe(persisted)
+        expect(auth.mutations).toEqual(mutations)
       }).pipe(Effect.scoped),
     )
   },
 )
+
+test.each([
+  { restoreResult: 'invalid-cache', newerOperation: 'sign-in' },
+  { restoreResult: 'invalid-cache', newerOperation: 'sign-out' },
+  { restoreResult: 'expired', newerOperation: 'sign-in' },
+  { restoreResult: 'expired', newerOperation: 'sign-out' },
+  { restoreResult: 'refreshed', newerOperation: 'sign-in' },
+  { restoreResult: 'refreshed', newerOperation: 'sign-out' },
+])(
+  'a pending $restoreResult storage mutation commits before a newer $newerOperation',
+  async ({ restoreResult, newerOperation }) => {
+    const release = Deferred.makeUnsafe<void>()
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>()
+
+        const gate = Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+        )
+
+        const auth = fixture(
+          restoreResult === 'invalid-cache' ? '{invalid' : JSON.stringify(cached),
+          restoreResult === 'expired' ? new Response(null, { status: 401 }) : undefined,
+          restoreResult === 'refreshed' ? { write: () => gate } : { remove: gate },
+        )
+
+        const restore = yield* auth.restore.pipe(Effect.forkScoped)
+        yield* Deferred.await(started)
+        const newer = { ...cached, sessionToken: 'new-login' }
+
+        const newerWork =
+          newerOperation === 'sign-in'
+            ? acceptAuthSession(newer, auth.setState)
+            : clearAuthSession(auth.setState)
+
+        const next = yield* newerWork.pipe(
+          Effect.provideService(AuthSessionStorage, auth.storage),
+          Effect.forkScoped({ startImmediately: true }),
+        )
+
+        if (newerOperation === 'sign-in') expect(auth.session()).toEqual(newer)
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(restore)
+        yield* Fiber.join(next)
+        expect(auth.session()).toEqual(newerOperation === 'sign-in' ? newer : emptyAuthSession)
+        expect(auth.persisted.get('session')).toBe(
+          newerOperation === 'sign-in' ? JSON.stringify(newer) : undefined,
+        )
+        const olderMutation = restoreResult === 'refreshed' ? 'write:fixture-token' : 'remove'
+        const newerMutation = newerOperation === 'sign-in' ? 'write:new-login' : 'remove'
+        expect(auth.mutations).toEqual([
+          `${olderMutation}:start`,
+          `${olderMutation}:committed`,
+          `${newerMutation}:start`,
+          `${newerMutation}:committed`,
+        ])
+      }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)), Effect.scoped),
+    )
+  },
+)
+
+test.each(['sign-in', 'sign-out'])(
+  'a queued stale %s cannot mutate a replacement account',
+  async (queuedOperation) => {
+    const release = Deferred.makeUnsafe<void>()
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>()
+
+        const auth = fixture(null, undefined, {
+          write: () =>
+            Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release))),
+        })
+
+        const first = yield* acceptAuthSession(cached, auth.setState).pipe(
+          Effect.provideService(AuthSessionStorage, auth.storage),
+          Effect.forkScoped({ startImmediately: true }),
+        )
+
+        yield* Deferred.await(started)
+
+        const queued = yield* (
+          queuedOperation === 'sign-in'
+            ? acceptAuthSession({ ...cached, sessionToken: 'superseded-login' }, auth.setState)
+            : clearAuthSession(auth.setState)
+        ).pipe(
+          Effect.provideService(AuthSessionStorage, auth.storage),
+          Effect.forkScoped({ startImmediately: true }),
+        )
+
+        const newer = { ...cached, sessionToken: 'replacement-account' }
+
+        const last = yield* acceptAuthSession(newer, auth.setState).pipe(
+          Effect.provideService(AuthSessionStorage, auth.storage),
+          Effect.forkScoped({ startImmediately: true }),
+        )
+
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(first)
+        yield* Fiber.join(queued)
+        yield* Fiber.join(last)
+        expect(auth.session()).toEqual(newer)
+        expect(auth.persisted.get('session')).toBe(JSON.stringify(newer))
+        expect(auth.mutations).toEqual([
+          'write:fixture-token:start',
+          'write:fixture-token:committed',
+          'write:replacement-account:start',
+          'write:replacement-account:committed',
+        ])
+      }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)), Effect.scoped),
+    )
+  },
+)
+
+test('a pending sign-out removal cannot clear a newer login from memory or storage', async () => {
+  const release = Deferred.makeUnsafe<void>()
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>()
+
+      const auth = fixture(JSON.stringify(cached), undefined, {
+        remove: Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release))),
+      })
+
+      auth.setState(AuthLifecycle.Authenticated({ session: cached }))
+
+      const signOut = yield* clearAuthSession(auth.setState).pipe(
+        Effect.provideService(AuthSessionStorage, auth.storage),
+        Effect.forkScoped({ startImmediately: true }),
+      )
+
+      yield* Deferred.await(started)
+      const newer = { ...cached, sessionToken: 'new-login' }
+
+      const signIn = yield* acceptAuthSession(newer, auth.setState).pipe(
+        Effect.provideService(AuthSessionStorage, auth.storage),
+        Effect.forkScoped({ startImmediately: true }),
+      )
+
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(signOut)
+      yield* Fiber.join(signIn)
+      expect(auth.session()).toEqual(newer)
+      expect(auth.persisted.get('session')).toBe(JSON.stringify(newer))
+      expect(auth.mutations).toEqual([
+        'remove:start',
+        'remove:committed',
+        'write:new-login:start',
+        'write:new-login:committed',
+      ])
+    }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)), Effect.scoped),
+  )
+})
+
+test('an invalid cached read cannot queue a redundant cleanup behind a newer pending sign-out', async () => {
+  const release = Deferred.makeUnsafe<void>()
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const readStarted = yield* Deferred.make<void>()
+      const releaseRead = yield* Deferred.make<void>()
+      const removeStarted = yield* Deferred.make<void>()
+      const cleanupRequested = yield* Deferred.make<void>()
+
+      const auth = fixture('{invalid', undefined, {
+        remove: Deferred.succeed(removeStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+        ),
+      })
+
+      const restore = yield* restoreAuthSession(auth.setState).pipe(
+        Effect.provideService(AuthSessionStorage, {
+          ...auth.storage,
+          persist: (session, options) =>
+            Deferred.succeed(cleanupRequested, undefined).pipe(
+              Effect.andThen(auth.storage.persist(session, options)),
+            ),
+          read: Deferred.succeed(readStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseRead)),
+            Effect.as('{invalid'),
+          ),
+        }),
+        Effect.provideService(AuthSessionValidation, auth.validation),
+        Effect.forkScoped({ startImmediately: true }),
+      )
+
+      yield* Deferred.await(readStarted)
+
+      const signOut = yield* clearAuthSession(auth.setState).pipe(
+        Effect.provideService(AuthSessionStorage, auth.storage),
+        Effect.forkScoped({ startImmediately: true }),
+      )
+
+      yield* Deferred.await(removeStarted)
+      yield* Deferred.succeed(releaseRead, undefined)
+
+      const restored = yield* Effect.raceFirst(
+        Fiber.await(restore).pipe(Effect.as('restored')),
+        Deferred.await(cleanupRequested).pipe(Effect.as('cleanup-requested')),
+      )
+
+      expect(restored).toBe('restored')
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(signOut)
+      yield* Fiber.join(restore)
+      expect(auth.session()).toEqual(emptyAuthSession)
+      expect(auth.mutations).toEqual(['remove:start', 'remove:committed'])
+    }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)), Effect.scoped),
+  )
+})
+
+test('cancelling an uncancellable storage write does not release its mutation slot early', async () => {
+  const release = Promise.withResolvers<void>()
+  const started = Promise.withResolvers<void>()
+  const mutations: Array<string> = []
+  const auth = fixture(null)
+  let persisted: AuthSession | null = null
+
+  const storage = makeAuthSessionStorage({
+    read: Effect.succeed(null),
+    write: (session) =>
+      Effect.promise(async () => {
+        mutations.push(`write:${session.sessionToken}:start`)
+
+        if (session.sessionToken === cached.sessionToken) {
+          started.resolve()
+          await release.promise
+        }
+
+        persisted = session
+        mutations.push(`write:${session.sessionToken}:committed`)
+      }),
+    remove: Effect.void,
+  })
+
+  const controller = new AbortController()
+
+  const first = Effect.runPromiseExit(
+    acceptAuthSession(cached, auth.setState).pipe(
+      Effect.provideService(AuthSessionStorage, storage),
+    ),
+    { signal: controller.signal },
+  )
+
+  let second: Promise<Exit.Exit<boolean, AuthStorageFailed>> | undefined
+
+  try {
+    await started.promise
+    controller.abort()
+    const newer = { ...cached, sessionToken: 'new-login' }
+    second = Effect.runPromiseExit(
+      acceptAuthSession(newer, auth.setState).pipe(
+        Effect.provideService(AuthSessionStorage, storage),
+      ),
+    )
+    expect(mutations).toEqual(['write:fixture-token:start'])
+    release.resolve()
+    expect(Exit.isFailure(await first)).toBe(true)
+    expect(Exit.isSuccess(await second)).toBe(true)
+    expect(auth.session()).toEqual(newer)
+    expect(persisted).toEqual(newer)
+    expect(mutations).toEqual([
+      'write:fixture-token:start',
+      'write:fixture-token:committed',
+      'write:new-login:start',
+      'write:new-login:committed',
+    ])
+  } finally {
+    release.resolve()
+    await Promise.allSettled(second ? [first, second] : [first])
+  }
+})
 
 test.each([
   ['sign-out', 'success'],

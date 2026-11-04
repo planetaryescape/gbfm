@@ -32,6 +32,17 @@ const inspect = (page: Page) =>
     return fixture.inspect()
   })
 
+const command = async (
+  page: Page,
+  action: 'start' | 'replace' | 'continue' | 'clear' | 'dispose',
+) => {
+  const button = page.getByRole('button', { name: action, exact: true })
+  await button.click()
+  await expect(button).toHaveAttribute('data-outcome', /^(completed|failed)$/)
+  expect(await button.getAttribute('data-failed'), `${action} command failure`).toBeNull()
+  await expect(button).toHaveAttribute('data-completed', 'true')
+}
+
 const start = async (page: Page, duration = 8) => {
   await page.route('**/fixture-one.wav', (route) =>
     route.fulfill({ contentType: 'audio/wav', body: wave(duration) }),
@@ -59,37 +70,45 @@ test('real media instances play independently and stale old DOM events cannot co
   page,
 }) => {
   await start(page)
-  await page.getByRole('button', { name: 'start', exact: true }).click()
+  await command(page, 'start')
   await expect.poll(async () => (await inspect(page)).instances[0]?.position).toBeGreaterThan(0)
-  await page.getByRole('button', { name: 'replace', exact: true }).click()
+  await command(page, 'replace')
   await expect.poll(async () => (await inspect(page)).instances[1]?.position).toBeGreaterThan(0)
   const before = await inspect(page)
   expect(before.instances[0]).toMatchObject({ src: null, playing: false })
   expect(before.instances[1]).toMatchObject({ playing: true, volume: 0.35, muted: false })
-  await page.evaluate(async () => {
+
+  const barrier = await page.evaluate(async () => {
     const path = '/e2e/fixtures/player-source-ownership.ts'
     const fixture: typeof Fixture = await import(path)
-    fixture.deliverOldEvents()
+
+    return fixture.deliverOldEvents()
   })
+
+  await expect
+    .poll(async () => (await inspect(page)).events.slice(barrier.after))
+    .toContainEqual(
+      expect.objectContaining({
+        sourceGeneration: 2,
+        currentTime: barrier.position,
+        didJustFinish: false,
+      }),
+    )
   expect((await inspect(page)).events.filter((status) => status.didJustFinish)).toEqual([])
-  await page.getByRole('button', { name: 'clear', exact: true }).click()
+  await command(page, 'clear')
   await expect
     .poll(async () =>
       (await inspect(page)).instances.every((audio) => audio.src === null && !audio.playing),
     )
     .toBe(true)
-  await page.getByRole('button', { name: 'dispose', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'dispose', exact: true })).toHaveAttribute(
-    'data-completed',
-    'true',
-  )
+  await command(page, 'dispose')
 })
 
 test('a fresh source instance can autoplay queue continuation after real media ends', async ({
   page,
 }) => {
   await start(page, 0.5)
-  await page.getByRole('button', { name: 'continue', exact: true }).click()
+  await command(page, 'continue')
   await expect.poll(async () => (await inspect(page)).instances[1]?.position).toBeGreaterThan(0)
   const current = await inspect(page)
   expect(current.events).toContainEqual(
@@ -97,7 +116,7 @@ test('a fresh source instance can autoplay queue continuation after real media e
   )
   expect(current.instances[1]?.playing).toBe(true)
   expect(current.instances[0]).toMatchObject({ src: null, playing: false })
-  await page.getByRole('button', { name: 'dispose', exact: true }).click()
+  await command(page, 'dispose')
   await expect
     .poll(async () =>
       (await inspect(page)).instances.every((audio) => audio.src === null && !audio.playing),

@@ -262,7 +262,7 @@ test('reply cleanup retries preserve the draft and never publish another reply',
   expect(storage.drafts.has('account/reply/thread')).toBe(false)
 })
 
-test('failed publication requests preserve device storage and report conservative uncertainty', async () => {
+test('definitively rejected publication preserves its failure and permits a safe retry', async () => {
   const storage = storageFixture([['account', draft]])
 
   const outcome = await Effect.runPromise(
@@ -278,7 +278,7 @@ test('failed publication requests preserve device storage and report conservativ
     ),
   )
 
-  expect(outcome).toHaveProperty('_tag', 'PublicationOutcomeUncertain')
+  expect(outcome).toEqual(ComposerSubmission.RequestFailed({ message: 'Denied' }))
   expect(storage.drafts.get('account')).toEqual(draft)
 })
 

@@ -11,6 +11,7 @@ import {
   submitComposerDraft,
 } from './composerSubmission'
 import type { TweetDraft } from './draft'
+import { TweetDraftStorage } from './draftRestore'
 
 export type ComposerPublication =
   | { readonly _tag: 'Writable' }
@@ -108,6 +109,33 @@ export const createComposerOwner = (principal: string) => {
     ComposerPublication.$is('Writable')(state(storageKey)) &&
     update()
 
+  const recover = (storageKey: string) =>
+    Effect.gen(function* () {
+      const publication = state(storageKey)
+
+      if (
+        submitting.has(storageKey) ||
+        !(
+          ComposerPublication.$is('PublicationUncertain')(publication) ||
+          ComposerPublication.$is('RecoveryBlocked')(publication)
+        )
+      )
+        return false
+      const receipts = yield* ComposerReceiptStorage
+
+      if (ComposerPublication.$is('PublicationUncertain')(publication)) {
+        const drafts = yield* TweetDraftStorage
+        const saved = yield* drafts.read(storageKey)
+
+        if (!saved) yield* drafts.save(storageKey, publication.draft)
+      }
+
+      yield* receipts.remove({ principal, storageKey })
+      current.delete(storageKey)
+
+      return true
+    })
+
   const submit = <E, R>(
     storageKey: string,
     draft: TweetDraft,
@@ -176,5 +204,5 @@ export const createComposerOwner = (principal: string) => {
       )
     })
 
-  return { state, change, submit, restore }
+  return { state, change, submit, restore, recover }
 }

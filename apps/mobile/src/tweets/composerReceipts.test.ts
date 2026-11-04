@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { Deferred, Effect, Fiber, Predicate, Schema } from 'effect'
 import { afterEach, expect, test } from 'vitest'
 
+import { TweetAuthoringFailed } from '@/api/tweetAuthoring'
+
 import { createComposerOwner } from './composerOwner'
 import {
   ComposerReceiptStorage,
@@ -12,6 +14,7 @@ import {
   receiptStorageFromLocal,
   PendingPublication,
 } from './composerReceipts'
+import { requestComposerRecovery } from './composerRecovery'
 import { ComposerSubmission } from './composerSubmission'
 import { emptyTweetDraft, normalizeStoredDraft, StoredTweetDraft } from './draft'
 import { TweetDraftStorage } from './draftRestore'
@@ -157,6 +160,98 @@ test('intent write failure does not dispatch or destroy the saved draft', async 
     message: expect.stringContaining('Nothing was sent'),
   })
   expect(requests).toBe(0)
+  expect(await f.run(f.storage.read(scope.storageKey))).toEqual(draft)
+})
+
+test('definitive rejection clears pending intent and another explicit submission can succeed', async () => {
+  const f = fixture()
+  const owner = createComposerOwner(scope.principal)
+  expect(
+    await f.run(
+      owner.submit(
+        scope.storageKey,
+        draft,
+        true,
+        true,
+        Effect.fail(new TweetAuthoringFailed({ message: 'Session expired' })),
+      ),
+    ),
+  ).toEqual(ComposerSubmission.RequestFailed({ message: 'Session expired' }))
+  expect(await f.run(f.receipts().read(scope))).toBeNull()
+  expect(await f.run(f.storage.read(scope.storageKey))).toEqual(draft)
+  expect(
+    await f.run(
+      owner.submit(scope.storageKey, draft, true, true, Effect.succeed({ slug: 'retried-reply' })),
+    ),
+  ).toEqual(ComposerSubmission.Published({ slug: 'retried-reply' }))
+})
+
+test('rejected request with failed receipt cleanup stays blocked with an accurate explanation', async () => {
+  const f = fixture()
+  f.failures.add('receipt-remove')
+  const owner = createComposerOwner(scope.principal)
+
+  const outcome = await f.run(
+    owner.submit(
+      scope.storageKey,
+      draft,
+      true,
+      true,
+      Effect.fail(new TweetAuthoringFailed({ message: 'Forbidden' })),
+    ),
+  )
+
+  expect(outcome).toMatchObject({ message: expect.stringContaining('request was rejected') })
+  expect(owner.state(scope.storageKey)).toHaveProperty('_tag', 'PublicationUncertain')
+  expect((await f.run(f.receipts().read(scope)))?._tag).toBe('Pending')
+  expect(
+    await f.run(owner.submit(scope.storageKey, draft, true, true, Effect.die('Must not retry'))),
+  ).toBeNull()
+  expect(await f.run(f.storage.read(scope.storageKey))).toEqual(draft)
+})
+
+test('corrupt recovery is cleared only by explicit confirmation and keeps draft bytes intact', async () => {
+  const f = fixture()
+  const receiptKey = composerReceiptKey(scope)
+  await Effect.runPromise(f.raw.write(receiptKey, '{torn'))
+  const owner = createComposerOwner(scope.principal)
+  await f.run(owner.restore(scope.storageKey).pipe(Effect.result))
+  const before = await Effect.runPromise(f.raw.read(f.draftFile(scope.storageKey)))
+  const confirmations: Array<() => void> = []
+  const clearing: Array<Promise<unknown>> = []
+  requestComposerRecovery(
+    owner.state(scope.storageKey),
+    (prompt, confirm) => {
+      expect(prompt.message).toContain('duplicate')
+      confirmations.push(confirm)
+    },
+    () => clearing.push(f.run(owner.recover(scope.storageKey))),
+  )
+  expect(await Effect.runPromise(f.raw.read(receiptKey))).toBe('{torn')
+  expect(clearing).toHaveLength(0)
+  confirmations[0]?.()
+  confirmations[0]?.()
+  await Promise.all(clearing)
+  expect(clearing).toHaveLength(1)
+  expect(await Effect.runPromise(f.raw.read(receiptKey))).toBeNull()
+  expect(await Effect.runPromise(f.raw.read(f.draftFile(scope.storageKey)))).toBe(before)
+  expect(await f.run(owner.restore(scope.storageKey))).toHaveProperty('_tag', 'Writable')
+})
+
+test('explicit uncertain recovery preserves its only remaining draft snapshot and stays blocked on cleanup failure', async () => {
+  const f = fixture()
+  await f.run(
+    f.receipts().write(PendingPublication.make({ ...scope, version: 1, draft, replying: true })),
+  )
+  await f.run(f.storage.remove(scope.storageKey))
+  const owner = createComposerOwner(scope.principal)
+  await f.run(owner.restore(scope.storageKey))
+  f.failures.add('receipt-remove')
+  expect(await f.run(owner.recover(scope.storageKey).pipe(Effect.isFailure))).toBe(true)
+  expect(owner.state(scope.storageKey)).toHaveProperty('_tag', 'PublicationUncertain')
+  expect(await f.run(f.storage.read(scope.storageKey))).toEqual(draft)
+  f.failures.clear()
+  expect(await f.run(owner.recover(scope.storageKey))).toBe(true)
   expect(await f.run(f.storage.read(scope.storageKey))).toEqual(draft)
 })
 

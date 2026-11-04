@@ -1,4 +1,4 @@
-import { Context, Data, Effect, Schema } from 'effect'
+import { Context, Data, Effect, Layer, Schema, Semaphore } from 'effect'
 
 import { SessionExpired, type SessionUnavailable, type SessionUser } from '@/api/auth'
 
@@ -33,6 +33,11 @@ export const currentAuthSession = (state: AuthLifecycle): AuthSession =>
     Authenticated: ({ session }) => session,
   })
 
+export const currentAuthIdentity = (state: AuthLifecycle): string | null =>
+  AuthLifecycle.$is('Bootstrapping')(state)
+    ? null
+    : (currentAuthSession(state).user?.id ?? 'anonymous')
+
 export class AuthStorageFailed extends Schema.TaggedError<AuthStorageFailed>()(
   'AuthStorageFailed',
   {
@@ -40,14 +45,52 @@ export class AuthStorageFailed extends Schema.TaggedError<AuthStorageFailed>()(
   },
 ) {}
 
+type AuthSessionPersistence = {
+  readonly read: Effect.Effect<string | null, AuthStorageFailed>
+  readonly write: (session: AuthSession) => Effect.Effect<void, AuthStorageFailed>
+  readonly remove: Effect.Effect<void, AuthStorageFailed>
+}
+
 export class AuthSessionStorage extends Context.Service<
   AuthSessionStorage,
   {
-    readonly read: Effect.Effect<string | null, AuthStorageFailed>
-    readonly write: (session: AuthSession) => Effect.Effect<void, AuthStorageFailed>
-    readonly remove: Effect.Effect<void, AuthStorageFailed>
+    readonly read: AuthSessionPersistence['read']
+    readonly persist: (
+      session: AuthSession,
+      options: { readonly owns: () => boolean },
+    ) => Effect.Effect<boolean, AuthStorageFailed>
   }
 >()('mobile/AuthSessionStorage') {}
+
+export const makeAuthSessionStorage = (persistence: AuthSessionPersistence) => {
+  const mutations = Semaphore.makeUnsafe(1)
+
+  return AuthSessionStorage.of({
+    read: persistence.read,
+    persist: (session, { owns }) =>
+      Effect.suspend(() => {
+        if (!owns()) return Effect.succeed(false)
+
+        return (
+          session.user && session.sessionToken ? persistence.write(session) : persistence.remove
+        ).pipe(Effect.as(true))
+      }).pipe(Effect.uninterruptible, (mutation) => mutations.withPermit(mutation)),
+  })
+}
+
+export const AuthSessionStorageLayer = (persistence: AuthSessionPersistence) =>
+  Layer.succeed(AuthSessionStorage, makeAuthSessionStorage(persistence))
+
+const ownsAuthLifecycle = (setState: SetAuthLifecycle, owner: AuthLifecycle | null) => {
+  let owned = false
+  setState((current) => {
+    owned = current === owner
+
+    return current
+  })
+
+  return owned
+}
 
 export class AuthSessionValidation extends Context.Service<
   AuthSessionValidation,
@@ -73,9 +116,13 @@ const PersistedAuthSession = Schema.Struct({
   sessionToken: Schema.String,
 })
 
-export const persistAuthSession = Effect.fn('persistAuthSession')(function* (session: AuthSession) {
+export const persistAuthSession = Effect.fn('persistAuthSession')(function* (
+  session: AuthSession,
+  owns: () => boolean,
+) {
   const storage = yield* AuthSessionStorage
-  yield* session.user && session.sessionToken ? storage.write(session) : storage.remove
+
+  return yield* storage.persist(session, { owns })
 })
 
 export const restoreAuthSession = Effect.fn('restoreAuthSession')(function* (
@@ -89,16 +136,7 @@ export const restoreAuthSession = Effect.fn('restoreAuthSession')(function* (
     return current
   })
 
-  const ownsRestore = () => {
-    let owned = false
-    setState((current) => {
-      owned = current === owner
-
-      return current
-    })
-
-    return owned
-  }
+  const ownsRestore = () => ownsAuthLifecycle(setState, owner)
 
   const stored = yield* storage.read.pipe(Effect.orElseSucceed(() => null))
 
@@ -111,7 +149,7 @@ export const restoreAuthSession = Effect.fn('restoreAuthSession')(function* (
   if (!ownsRestore()) return
 
   if (!cached) {
-    yield* storage.remove.pipe(Effect.ignore)
+    yield* storage.persist(emptyAuthSession, { owns: ownsRestore }).pipe(Effect.ignore)
 
     return
   }
@@ -138,14 +176,22 @@ export const restoreAuthSession = Effect.fn('restoreAuthSession')(function* (
       onSuccess: (user) =>
         Effect.gen(function* () {
           const refreshed = { user, sessionToken: cached.sessionToken }
+          const authenticated = AuthLifecycle.Authenticated({ session: refreshed })
 
-          if (transition(AuthLifecycle.Authenticated({ session: refreshed })))
-            yield* persistAuthSession(refreshed).pipe(Effect.ignore)
+          if (transition(authenticated))
+            yield* persistAuthSession(refreshed, () =>
+              ownsAuthLifecycle(setState, authenticated),
+            ).pipe(Effect.ignore)
         }),
       onFailure: (error) =>
         error instanceof SessionExpired
           ? Effect.gen(function* () {
-              if (transition(AuthLifecycle.SignedOut())) yield* persistAuthSession(emptyAuthSession)
+              const signedOut = AuthLifecycle.SignedOut()
+
+              if (transition(signedOut))
+                yield* persistAuthSession(emptyAuthSession, () =>
+                  ownsAuthLifecycle(setState, signedOut),
+                )
             })
           : Effect.sync(() => transition(AuthLifecycle.CachedSession({ session: cached }))),
     }),
@@ -153,16 +199,29 @@ export const restoreAuthSession = Effect.fn('restoreAuthSession')(function* (
 })
 
 export const acceptAuthSession = (session: AuthSession, setState: SetAuthLifecycle) => {
-  setState(
+  const authenticated =
     session.user !== null || session.sessionToken !== null
       ? AuthLifecycle.Authenticated({ session })
-      : AuthLifecycle.SignedOut(),
-  )
+      : AuthLifecycle.SignedOut()
 
-  return persistAuthSession(session)
+  setState(authenticated)
+
+  return persistAuthSession(session, () => ownsAuthLifecycle(setState, authenticated))
 }
 
 export const clearAuthSession = (setState: SetAuthLifecycle) =>
-  persistAuthSession(emptyAuthSession).pipe(
-    Effect.tap(() => Effect.sync(() => setState(AuthLifecycle.SignedOut()))),
-  )
+  Effect.gen(function* () {
+    let signOutOwner: AuthLifecycle | null = null
+    setState((current) => {
+      signOutOwner = { ...current }
+
+      return signOutOwner
+    })
+
+    const removed = yield* persistAuthSession(emptyAuthSession, () =>
+      ownsAuthLifecycle(setState, signOutOwner),
+    )
+
+    if (removed)
+      setState((current) => (current === signOutOwner ? AuthLifecycle.SignedOut() : current))
+  })

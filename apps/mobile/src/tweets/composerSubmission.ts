@@ -77,10 +77,21 @@ export const submitComposerDraft = Effect.fn('submitComposerDraft')(function* <E
 
       const response = yield* request.pipe(Effect.timeout('30 seconds'), Effect.result)
 
-      if (Result.isFailure(response))
+      if (Result.isFailure(response)) {
+        if (response.failure instanceof TweetAuthoringFailed) {
+          const cleared = yield* receipts.remove(scope).pipe(Effect.isSuccess)
+
+          return cleared
+            ? ComposerSubmission.RequestFailed({ message: response.failure.message })
+            : ComposerSubmission.PublicationOutcomeUncertain({
+                message: `${response.failure.message} The request was rejected, but its local recovery record could not be cleared. Sending stays blocked until you clear that record through recovery options. Your draft is preserved.`,
+              })
+        }
+
         return ComposerSubmission.PublicationOutcomeUncertain({
           message: publicationUncertainty(replying),
         })
+      }
 
       receipt = ConfirmedPublication.make({
         ...scope,

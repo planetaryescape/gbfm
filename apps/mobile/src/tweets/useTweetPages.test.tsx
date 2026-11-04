@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
-import { createElement, useEffect, useEffectEvent } from 'react'
-import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { act, createElement, useEffect, useEffectEvent } from 'react'
+import { createRoot } from 'test-renderer'
 import { expect, test } from 'vitest'
 
 import type { TweetPage } from './tweetPagesState'
@@ -38,33 +38,32 @@ test('pagination replacement aborts the old request without releasing the new re
     return null
   }
 
-  let view: ReactTestRenderer | undefined
-  await act(() => {
-    view = create(createElement(Pager, { page: first }))
+  const mounted = createRoot()
+  await act(async () => {
+    mounted.render(createElement(Pager, { page: first }))
   })
 
-  if (!current || !view) throw new Error('pager not mounted')
-  const mounted = view
+  if (!current) throw new Error('pager not mounted')
   const staleLoad = current.loadMore
-  await act(() => {
+  await act(async () => {
     current?.loadMore()
     current?.loadMore()
   })
   expect(requests).toHaveLength(1)
-  await act(() => mounted.update(createElement(Pager, { page: replacement })))
+  await act(async () => mounted.render(createElement(Pager, { page: replacement })))
   expect(requests[0]?.signal.aborted).toBe(true)
-  await act(() => {
+  await act(async () => {
     staleLoad()
     current?.loadMore()
   })
   expect(requests).toHaveLength(2)
-  await act(() => requests[0]?.finish({ tweets: [], hasMore: false }))
-  await act(() => current?.loadMore())
+  await act(async () => requests[0]?.finish({ tweets: [], hasMore: false }))
+  await act(async () => current?.loadMore())
   expect(requests).toHaveLength(2)
   expect(current.hasMore).toBe(true)
   expect(current.status).toBe('loading')
-  await act(() => mounted.unmount())
+  await act(async () => mounted.unmount())
   expect(requests[1]?.signal.aborted).toBe(true)
-  await act(() => staleLoad())
+  await act(async () => staleLoad())
   expect(requests).toHaveLength(2)
 })

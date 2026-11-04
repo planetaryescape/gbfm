@@ -37,7 +37,7 @@ export const Message = defineMessageUnion({
   Refresh: { offset: Schema.Number },
   Loaded: { page: KeyPage },
   Failed: { message: Schema.String },
-  Issued: {},
+  Issued: { disclosure: Schema.Literals(['Shown', 'Discarded']) },
   PasswordRequested: {},
   PasswordCancelled: {},
   PasswordVerificationStarted: {},

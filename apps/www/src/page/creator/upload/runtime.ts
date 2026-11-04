@@ -114,7 +114,8 @@ export const CreatorUploadLayer = Layer.effect(
             message: 'Pause the upload before cancelling.',
           })
 
-        const file = retainedFile(ownership)
+        const cancelledOwnership = ownership
+        const file = retainedFile(cancelledOwnership)
 
         if (file) {
           const checkpoint = yield* storage.read(computeFileFingerprint(file))
@@ -126,7 +127,7 @@ export const CreatorUploadLayer = Layer.effect(
             )
         }
 
-        ownership = clearFile(ownership)
+        if (ownership === cancelledOwnership) ownership = clearFile(ownership)
 
         return undefined
       }).pipe(Effect.withSpan('CreatorUpload.cancel')),

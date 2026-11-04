@@ -13,30 +13,50 @@ export function ObservabilityProvider({
 }>) {
   const [current, setCurrent] = useState<{
     readonly layer: Layer.Layer<Observability>
+    readonly lifetime: { active: boolean }
     readonly observer: JourneyObserver
   } | null>(null)
 
   useEffect(() => {
     const runtime = ManagedRuntime.make(layer)
-    let active = true
+    const lifetime = { active: true }
     void runtime.runPromise(Observability).then(
       (service) => {
-        if (active) setCurrent({ layer, observer: journeyObserver(service) })
+        if (!lifetime.active) return
+        const callbacks = journeyObserver(service)
+
+        const observer: JourneyObserver = {
+          start: (name) => {
+            if (!lifetime.active) return () => {}
+
+            const finish = callbacks.start(name)
+
+            return (outcome) => {
+              if (lifetime.active) finish(outcome)
+            }
+          },
+        }
+
+        setCurrent({ layer, lifetime, observer })
       },
       () => {
+        if (!lifetime.active) return
         Effect.runSync(Effect.logWarning({ operation: 'observability.startup', outcome: 'failed' }))
-
-        if (active) setCurrent({ layer, observer: noJourneys })
+        setCurrent({ layer, lifetime, observer: noJourneys })
       },
     )
 
     return () => {
-      active = false
-      void runtime.dispose()
+      lifetime.active = false
+      void runtime.dispose().catch(() => {
+        Effect.runSync(
+          Effect.logWarning({ operation: 'observability.shutdown', outcome: 'failed' }),
+        )
+      })
     }
   }, [layer])
 
-  if (!current || current.layer !== layer) return null
+  if (!current || current.layer !== layer || !current.lifetime.active) return null
 
   return <ObservabilityContext value={current.observer}>{children}</ObservabilityContext>
 }

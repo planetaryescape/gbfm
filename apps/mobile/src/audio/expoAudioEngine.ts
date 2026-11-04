@@ -34,24 +34,83 @@ export type ExpoAudioEnginePlayer = Pick<
   | 'addListener'
   | 'clearLockScreenControls'
   | 'setActiveForLockScreen'
+  | 'remove'
 >
 
 const makeExpoAudioEngine = (
-  player: ExpoAudioEnginePlayer,
+  createPlayer: () => ExpoAudioEnginePlayer,
   platform: 'native' | 'web',
   journeys: JourneyObserver,
 ) =>
-  Effect.sync(() => {
-    let sourceGeneration: number | null = null
+  Effect.gen(function* () {
+    let active: {
+      readonly player: ExpoAudioEnginePlayer
+      readonly generation: number
+      readonly remove: () => void
+    } | null = null
+
+    let volume = 1
+    let muted = false
+    let disposed = false
+    const listeners = new Set<(status: EngineStatus) => void>()
     let playRequestedGeneration: number | null = null
     const journey = playbackJourney(journeys)
+
+    const clear = () => {
+      const previous = active
+      active = null
+      playRequestedGeneration = null
+      journey.cancel()
+      previous?.remove()
+    }
+
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        disposed = true
+        clear()
+      }),
+    )
 
     return {
       replace: (url: string, generation: number, intent: 'play' | 'paused' = 'play') =>
         Effect.sync(() => {
+          clear()
+
+          if (disposed) return
           journey.replace(intent)
-          sourceGeneration = generation
-          playRequestedGeneration = null
+          const player = createPlayer()
+          player.volume = volume
+          player.muted = muted
+
+          const owned = {
+            player,
+            generation,
+            remove: () => {
+              subscription.remove()
+              player.pause()
+              player.clearLockScreenControls()
+              player.remove()
+            },
+          }
+
+          active = owned
+
+          const subscription = subscribeToPlaybackStatus(player, platform, (status) => {
+            if (active !== owned) return
+            const current = player.currentStatus
+
+            if (status.error && current.error === status.error) journey.fail()
+            else if (
+              status.playing &&
+              current.playing &&
+              current.isLoaded &&
+              playRequestedGeneration === generation
+            )
+              journey.status({ playing: true, error: null })
+            const value = toEngineStatus(status, generation)
+
+            for (const listener of listeners) listener(value)
+          })
 
           try {
             player.replace(url)
@@ -60,17 +119,12 @@ const makeExpoAudioEngine = (
             throw error
           }
         }),
-      clearSource: Effect.sync(() => {
-        journey.cancel()
-        sourceGeneration = null
-        playRequestedGeneration = null
-        player.replace(null)
-      }),
+      clearSource: Effect.sync(clear),
       play: Effect.try({
         try: () => {
-          playRequestedGeneration = sourceGeneration
+          playRequestedGeneration = active?.generation ?? null
           journey.play()
-          player.play()
+          active?.player.play()
         },
         catch: (cause: unknown) => {
           journey.fail()
@@ -81,39 +135,50 @@ const makeExpoAudioEngine = (
       pause: Effect.sync(() => {
         journey.cancel()
         playRequestedGeneration = null
-        player.pause()
+        active?.player.pause()
       }),
-      setVolume: (volume: number) =>
+      setVolume: (value: number) =>
         Effect.sync(() => {
-          player.volume = Math.max(0, Math.min(1, volume))
+          volume = Math.max(0, Math.min(1, value))
+
+          if (active) active.player.volume = volume
         }),
-      setMuted: (muted: boolean) =>
+      setMuted: (value: boolean) =>
         Effect.sync(() => {
-          player.muted = muted
+          muted = value
+
+          if (active) active.player.muted = muted
         }),
-      seekTo: (seconds: number) => Effect.promise(() => player.seekTo(seconds)),
-      currentStatus: Effect.sync(() => toEngineStatus(player.currentStatus, sourceGeneration)),
+      seekTo: (seconds: number) =>
+        Effect.promise(async () => {
+          await active?.player.seekTo(seconds)
+        }),
+      currentStatus: Effect.sync(() =>
+        active
+          ? toEngineStatus(active.player.currentStatus, active.generation)
+          : {
+              sourceGeneration: null,
+              isLoaded: false,
+              playing: false,
+              didJustFinish: false,
+              currentTime: 0,
+              duration: 0,
+              isBuffering: false,
+            },
+      ),
 
       changes: Stream.callback<EngineStatus>((queue) =>
         Effect.gen(function* () {
-          const subscription = subscribeToPlaybackStatus(player, platform, (status) => {
-            const current = player.currentStatus
+          const listener = (status: EngineStatus) => {
+            Queue.offerUnsafe(queue, status)
+          }
 
-            if (status.error && current.error === status.error) journey.fail()
-            else if (
-              status.playing &&
-              current.playing &&
-              current.isLoaded &&
-              playRequestedGeneration === sourceGeneration
-            )
-              journey.status({ playing: true, error: null })
-            Queue.offerUnsafe(queue, toEngineStatus(status, sourceGeneration))
-          })
-
+          listeners.add(listener)
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
-              journey.cancel()
-              subscription.remove()
+              listeners.delete(listener)
+
+              if (listeners.size === 0) journey.cancel()
             }),
           )
         }),
@@ -121,6 +186,10 @@ const makeExpoAudioEngine = (
 
       setNowPlaying: (metadata: NowPlayingMetadata | null) =>
         Effect.sync(() => {
+          const player = active?.player
+
+          if (!player) return
+
           if (!metadata) {
             player.clearLockScreenControls()
 
@@ -148,7 +217,7 @@ const makeExpoAudioEngine = (
   })
 
 export const ExpoAudioEngineLayer = (
-  player: ExpoAudioEnginePlayer,
+  createPlayer: () => ExpoAudioEnginePlayer,
   platform: 'native' | 'web',
   journeys: JourneyObserver = noJourneys,
-) => Layer.effect(AudioEngine, makeExpoAudioEngine(player, platform, journeys))
+) => Layer.effect(AudioEngine, makeExpoAudioEngine(createPlayer, platform, journeys))

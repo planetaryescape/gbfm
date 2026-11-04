@@ -1,4 +1,4 @@
-import { Data, Effect, Predicate, Redacted } from 'effect'
+import { Effect, Predicate, Redacted } from 'effect'
 import { randomUUID } from 'expo-crypto'
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 
@@ -13,18 +13,19 @@ import { env } from '@/env'
 import { haptics } from '@/feedback/haptics'
 
 import { createComposerLoadOwner, type ComposerLoadAttempt } from './composerLoad'
-import { createComposerOwner } from './composerOwner'
+import { ComposerReceiptStorage } from './composerReceipts'
 import { ComposerSubmission } from './composerSubmission'
 import { emptyTweetDraft, musicCandidate, type TweetDraft, withText } from './draft'
 import { TweetDraftStorage } from './draftRestore'
-import { readTweetDraft, removeTweetDraft, restoreTweetDraft, saveTweetDraft } from './draftStorage'
+import {
+  composerReceiptStorage,
+  readTweetDraft,
+  removeTweetDraft,
+  restoreTweetDraft,
+  saveTweetDraft,
+} from './draftStorage'
+import { useComposerSession } from './useComposerSession'
 import { useMusicLookup } from './useMusicLookup'
-
-type SubmissionState = { readonly _tag: 'Idle' } | { readonly _tag: 'Submitting' }
-
-const SubmissionState = Data.taggedEnum<SubmissionState>()
-
-const idleSubmission = SubmissionState.Idle()
 
 const connection = (sessionToken: string | null) =>
   Effect.gen(function* () {
@@ -62,22 +63,25 @@ export function useTweetComposer({
       ? `${identity}/reply/${replyTo}`
       : identity
 
-  const [draft, setDraft] = useState<TweetDraft | null>(null)
-  const latest = useRef<TweetDraft | null>(null)
+  const [snapshot, setSnapshot] = useState<{
+    readonly storageKey: string
+    readonly draft: TweetDraft
+  } | null>(null)
+
+  const draft = snapshot?.storageKey === storageKey ? snapshot.draft : null
+  const setDraft = (value: TweetDraft) => setSnapshot({ storageKey, draft: value })
+  const latest = useRef<{ readonly storageKey: string; readonly draft: TweetDraft } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [submission, setSubmission] = useState<SubmissionState>(idleSubmission)
-  const submissionRef = useRef(submission)
-  const controller = useRef<AbortController | null>(null)
-  const [owner] = useState(createComposerOwner)
+  const session = useComposerSession(identity, storageKey)
+  const { owner, publication } = session
   const [loads] = useState(createComposerLoadOwner)
-  const publication = owner.state(storageKey)
   const editable = Predicate.isTagged(publication, 'Writable')
   const cleanupPending = Predicate.isTagged(publication, 'CleanupPending')
 
   const accept = (restored: TweetDraft) => {
     owner.change(storageKey, () => {
-      latest.current = restored
+      latest.current = { storageKey, draft: restored }
       setDraft(restored)
       setError(null)
 
@@ -104,14 +108,37 @@ export function useTweetComposer({
   }
 
   const load = () => {
-    if (!Predicate.isTagged(owner.state(storageKey), 'Writable')) return
+    if (!session.available()) return
     const attempt = loads.start()
 
     return Effect.runSync(
-      (editSlug || replyTo ? readTweetDraft(storageKey) : restoreTweetDraft(identity)).pipe(
+      owner.restore(storageKey).pipe(
+        Effect.provideService(ComposerReceiptStorage, composerReceiptStorage),
+        Effect.flatMap((restoredPublication) => {
+          if (
+            Predicate.isTagged(restoredPublication, 'CleanupPending') ||
+            Predicate.isTagged(restoredPublication, 'PublicationUncertain')
+          ) {
+            attempt.commit(() => {
+              latest.current = { storageKey, draft: restoredPublication.draft }
+              setDraft(restoredPublication.draft)
+              setError(
+                Predicate.isTagged(restoredPublication, 'PublicationUncertain')
+                  ? restoredPublication.message
+                  : 'Already published. Retry local cleanup without publishing again.',
+              )
+            })
+
+            return Effect.succeed(null)
+          }
+
+          return editSlug || replyTo ? readTweetDraft(storageKey) : restoreTweetDraft(identity)
+        }),
         Effect.match({
           onSuccess: (stored) => {
             attempt.commit(() => {
+              if (!Predicate.isTagged(owner.state(storageKey), 'Writable')) return
+
               if (stored) accept(stored)
               else if (editSlug) loadRemote(editSlug, attempt)
               else accept(emptyTweetDraft(randomUUID()))
@@ -123,20 +150,23 @@ export function useTweetComposer({
     )
   }
 
-  const restore = useEffectEvent(load)
+  const restore = useEffectEvent((principal: string, key: string) => {
+    if (identity === principal && storageKey === key) load()
+  })
 
   useEffect(() => {
-    restore()
+    restore(identity, storageKey)
 
     return () => {
       loads.cancel()
-      controller.current?.abort()
     }
-  }, [loads])
+  }, [loads, identity, storageKey])
 
-  const change = (next: TweetDraft) =>
-    owner.change(storageKey, () => {
-      latest.current = next
+  const change = (next: TweetDraft) => {
+    if (!session.available()) return false
+
+    return owner.change(storageKey, () => {
+      latest.current = { storageKey, draft: next }
       setDraft(next)
       setNotice(null)
 
@@ -159,9 +189,10 @@ export function useTweetComposer({
         ),
       )
     })
+  }
 
   const discard = (onDone: () => void) => {
-    if (SubmissionState.$is('Submitting')(submissionRef.current)) return
+    if (!session.available() || !Predicate.isTagged(owner.state(storageKey), 'Writable')) return
     Effect.runSync(
       removeTweetDraft(storageKey).pipe(
         Effect.match({
@@ -172,17 +203,38 @@ export function useTweetComposer({
     )
   }
 
+  const recover = () => {
+    if (!session.available()) return
+    Effect.runSync(
+      owner.recover(storageKey).pipe(
+        Effect.provideService(ComposerReceiptStorage, composerReceiptStorage),
+        Effect.provideService(TweetDraftStorage, {
+          read: readTweetDraft,
+          save: saveTweetDraft,
+          remove: removeTweetDraft,
+        }),
+        Effect.match({
+          onFailure: ({ message }) => setError(message),
+          onSuccess: (cleared) => {
+            if (cleared) {
+              load()
+              setNotice(
+                'Recovery record cleared. Your draft was kept. Nothing was sent. Check publication before choosing to send again.',
+              )
+            }
+          },
+        }),
+      ),
+    )
+  }
+
   const save = (publish: boolean, onPublished: (slug: string) => void) => {
-    if (!draft || SubmissionState.$is('Submitting')(submissionRef.current)) return
+    if (!draft || !session.available()) return
 
     if (!publish && !editable) return
 
     if (!cleanupPending && !change(draft)) return
     loads.cancel()
-    submissionRef.current = SubmissionState.Submitting()
-    setSubmission(submissionRef.current)
-    const abort = new AbortController()
-    controller.current = abort
 
     const request = connection(sessionToken).pipe(
       Effect.flatMap((connected) =>
@@ -198,65 +250,57 @@ export function useTweetComposer({
         save: saveTweetDraft,
         remove: removeTweetDraft,
       }),
-      Effect.tap((outcome) =>
-        Effect.sync(() => {
-          if (!outcome) return
-          ComposerSubmission.$match(outcome, {
-            Published: ({ slug }) => onPublished(slug),
-            PublishedNotCleared: ({ draft: remote }) => {
-              latest.current = remote
-              setDraft(remote)
-              setError(
-                'Published, but the local draft could not be cleared. Retry cleanup without publishing again. Keep this screen open until cleanup succeeds.',
-              )
-            },
-            RemoteDraftSaved: ({ draft: remote, localSaved }) => {
-              latest.current = remote
-              setDraft(remote)
-              setNotice('Draft saved to your account. It is not public.')
-              setError(
-                localSaved
-                  ? null
-                  : 'Could not save your draft on this device. Keep this screen open and try again.',
-              )
-            },
-            RequestFailed: ({ message }) => {
-              void haptics.failure()
-              setError(message)
-            },
-            ReplyOutcomeUncertain: ({ message }) => {
-              void haptics.failure()
-              setError(message)
-            },
-          })
-        }),
-      ),
-      Effect.ensuring(
-        Effect.sync(() => {
-          submissionRef.current = SubmissionState.Idle()
-          setSubmission(submissionRef.current)
-        }),
-      ),
+      Effect.provideService(ComposerReceiptStorage, composerReceiptStorage),
     )
 
-    void Effect.runPromiseExit(work, { signal: abort.signal })
+    void session.run(work, (outcome) => {
+      if (!outcome) return
+      ComposerSubmission.$match(outcome, {
+        Published: ({ slug }) => onPublished(slug),
+        PublishedNotCleared: ({ draft: remote }) => {
+          latest.current = { storageKey, draft: remote }
+          setDraft(remote)
+          setError(
+            'Published, but local recovery or cleanup could not finish. Retry cleanup without publishing again. If you close now, this device may ask you to check publication.',
+          )
+        },
+        RemoteDraftSaved: ({ draft: remote, localSaved }) => {
+          latest.current = { storageKey, draft: remote }
+          setDraft(remote)
+          setNotice('Draft saved to your account. It is not public.')
+          setError(
+            localSaved
+              ? null
+              : 'Could not save your draft on this device. Keep this screen open and try again.',
+          )
+        },
+        RequestFailed: ({ message }) => {
+          void haptics.failure()
+          setError(message)
+        },
+        PublicationOutcomeUncertain: ({ message }) => {
+          void haptics.failure()
+          setError(message)
+        },
+      })
+    })
   }
 
   const candidate =
     editable && draft && resolvesMusic && sessionToken ? musicCandidate(draft) : null
 
   const musicLoading = useMusicLookup(candidate, sessionToken, (music) => {
-    const current = latest.current
+    const current = latest.current?.storageKey === storageKey ? latest.current.draft : null
 
     if (current && musicCandidate(current) === candidate) change({ ...current, music })
   })
 
   const setText = (text: string) => {
-    if (latest.current) change(withText(latest.current, text))
+    if (latest.current?.storageKey === storageKey) change(withText(latest.current.draft, text))
   }
 
   const dismissMusic = () => {
-    const current = latest.current
+    const current = latest.current?.storageKey === storageKey ? latest.current.draft : null
 
     if (current?.music)
       change({ ...current, music: null, dismissedMusicUrl: current.music.url ?? null })
@@ -266,13 +310,14 @@ export function useTweetComposer({
     draft,
     error,
     notice,
-    busy: SubmissionState.$is('Submitting')(submission),
+    busy: session.busy,
     publication,
     musicLoading,
     change,
     setText,
     dismissMusic,
     discard,
+    recover,
     save,
     retry: load,
     editing: editSlug !== null,

@@ -4,14 +4,43 @@ import {
   PlayerStorageInMemory,
   PlayReporterNoop,
   type QueueTrackType,
+  type EngineStatus,
 } from '@gbfm/player'
-import { Context, Effect, Fiber, Layer } from 'effect'
+import {
+  Context,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  Predicate,
+  Scope,
+  Stream,
+} from 'effect'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createPreviewSession } from '../media-preview/session'
 import { makeHtmlAudioEngineLayer, type AudioPort } from './runtime'
 
 class TestAudio extends EventTarget implements AudioPort {
+  readonly retained: Array<{ type: string; listener: EventListenerOrEventListenerObject }> = []
+  readonly attached = new Set<EventListenerOrEventListenerObject>()
+  pauses = 0
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    this.retained.push({ type, listener })
+    this.attached.add(listener)
+    super.addEventListener(type, listener)
+  }
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    this.attached.delete(listener)
+    super.removeEventListener(type, listener)
+  }
+  deliverRetained() {
+    for (const { type, listener } of this.retained) {
+      if (Predicate.isFunction(listener)) listener.call(this, new Event(type))
+      else listener.handleEvent(new Event(type))
+    }
+  }
   private source = ''
   sourceWrites: Array<{ url: string; crossOrigin: string | null }> = []
   get src() {
@@ -29,12 +58,18 @@ class TestAudio extends EventTarget implements AudioPort {
   readyState = 4
   volume = 1
   muted = false
+  playCompletion: Promise<void> | null = null
   load() {}
+  removeAttribute() {
+    this.src = ''
+  }
   async play() {
     this.paused = false
     this.dispatchEvent(new Event('play'))
+    await this.playCompletion
   }
   pause() {
+    this.pauses++
     this.paused = true
     this.dispatchEvent(new Event('pause'))
   }
@@ -42,12 +77,285 @@ class TestAudio extends EventTarget implements AudioPort {
 
 afterEach(() => vi.useRealTimers())
 
+const recordingJourneys = () => {
+  const records: Array<{ name: JourneyName; outcome: JourneyOutcome }> = []
+
+  const runtime = ManagedRuntime.make(
+    observabilityLayer.pipe(
+      Layer.provide(
+        Layer.succeed(JourneyExporter, {
+          open: (name) =>
+            Effect.succeed({
+              finish: (outcome) =>
+                Effect.sync(() => {
+                  records.push({ name, outcome })
+                }),
+            }),
+        }),
+      ),
+    ),
+  )
+
+  return {
+    records,
+    observer: journeyObserver(runtime.runSync(Observability)),
+    dispose: () => runtime.dispose(),
+  }
+}
+
 describe('HTML audio engine', () => {
-  it('controls and observes the supplied runtime-lived audio element', async () => {
-    const audio = new TestAudio()
+  it.each(['replace', 'clear', 'dispose'] as const)(
+    'preserves telemetry ownership when old callbacks arrive after %s',
+    async (action) => {
+      const journeys = recordingJourneys()
+      const instances: Array<TestAudio> = []
+
+      try {
+        await Effect.runPromise(
+          Effect.gen(function* () {
+            const scope = yield* Scope.make()
+
+            const engine = Context.get(
+              yield* Layer.buildWithScope(
+                makeHtmlAudioEngineLayer(
+                  () => {
+                    const audio = new TestAudio()
+                    instances.push(audio)
+
+                    return audio
+                  },
+                  undefined,
+                  journeys.observer,
+                ),
+                scope,
+              ),
+              AudioEngine,
+            )
+
+            yield* engine.replace('/first-private-identity.mp3', 1)
+            yield* engine.play
+            expect(journeys.records).toEqual([])
+            const old = instances[0]
+
+            if (!old) throw new Error('Expected first source')
+
+            if (action === 'replace') {
+              yield* engine.replace('/second-private-identity.mp3', 2)
+              yield* engine.play
+            } else if (action === 'clear') yield* engine.clearSource
+            else yield* Scope.close(scope, Exit.void)
+            old.paused = false
+            old.deliverRetained()
+            expect(journeys.records).toEqual([{ name: 'playback.start', outcome: 'canceled' }])
+            const current = instances.at(-1)
+
+            if (action === 'replace' && current) {
+              current.dispatchEvent(new Event('error'))
+              expect(journeys.records.map(({ outcome }) => outcome)).toEqual(['canceled', 'failed'])
+              yield* engine.replace('/third-private-identity.mp3', 3, 'paused')
+              const third = instances.at(-1)
+
+              if (!third) throw new Error('Expected third source')
+              third.paused = false
+              third.dispatchEvent(new Event('playing'))
+              expect(journeys.records).toHaveLength(2)
+              yield* engine.play
+              third.dispatchEvent(new Event('playing'))
+              expect(journeys.records.map(({ outcome }) => outcome)).toEqual([
+                'canceled',
+                'failed',
+                'succeeded',
+              ])
+            }
+
+            yield* Scope.close(scope, Exit.void)
+
+            for (const audio of instances) {
+              expect(audio.attached.size).toBe(0)
+              audio.deliverRetained()
+            }
+
+            expect(JSON.stringify(journeys.records)).not.toContain('private-identity')
+          }).pipe(Effect.scoped),
+        )
+      } finally {
+        await journeys.dispose()
+      }
+    },
+  )
+
+  it('does not let an old play promise disturb a playing replacement', async () => {
+    const completion = Promise.withResolvers<void>()
+    const instances: Array<TestAudio> = []
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const engine = Context.get(
+          yield* Layer.build(
+            makeHtmlAudioEngineLayer(() => {
+              const audio = new TestAudio()
+
+              if (instances.length === 0) audio.playCompletion = completion.promise
+              instances.push(audio)
+
+              return audio
+            }),
+          ),
+          AudioEngine,
+        )
+
+        yield* engine.replace('/one.mp3', 1)
+        const playing = yield* engine.play.pipe(Effect.result, Effect.forkScoped)
+        yield* Effect.yieldNow
+        yield* engine.replace('/two.mp3', 2)
+        yield* engine.play
+        completion.resolve()
+        expect((yield* Fiber.join(playing))._tag).toBe('Failure')
+        expect(instances[1]?.pauses).toBe(0)
+        expect(instances[1]?.paused).toBe(false)
+        expect(yield* engine.currentStatus).toMatchObject({ sourceGeneration: 2, playing: true })
+      }).pipe(Effect.scoped),
+    )
+  })
+
+  it.each(['replace', 'clear', 'dispose'] as const)(
+    'rejects retained old-instance callbacks after %s and releases only its resources',
+    async (action) => {
+      const instances: Array<TestAudio> = []
+      const seen: Array<EngineStatus> = []
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const scope = yield* Scope.make()
+
+          const context = yield* Layer.buildWithScope(
+            makeHtmlAudioEngineLayer(() => {
+              const audio = new TestAudio()
+              instances.push(audio)
+
+              return audio
+            }),
+            scope,
+          )
+
+          const engine = Context.get(context, AudioEngine)
+          yield* Stream.runForEach(engine.changes, (value) =>
+            Effect.sync(() => {
+              seen.push(value)
+            }),
+          ).pipe(Effect.forkScoped)
+          yield* Effect.yieldNow
+          yield* engine.setVolume(0.3)
+          yield* engine.setMuted(true)
+          yield* engine.replace('/one.mp3', 1)
+          const old = instances[0]
+
+          if (!old) throw new Error('Expected first audio')
+
+          if (action === 'replace') {
+            yield* engine.replace('/two.mp3', 2)
+            yield* engine.play
+          } else if (action === 'clear') yield* engine.clearSource
+          else yield* Scope.close(scope, Exit.void)
+          yield* Effect.yieldNow
+          seen.length = 0
+          old.readyState = 4
+          old.duration = 999
+          old.ended = true
+          old.deliverRetained()
+          yield* Effect.yieldNow
+          expect(seen).toEqual([])
+          expect(old.attached.size).toBe(0)
+          expect(old.src).toBe('')
+          expect(old.paused).toBe(true)
+          const current = instances.at(-1)
+
+          if (action === 'replace' && current) {
+            expect(current).not.toBe(old)
+            expect(current.pauses).toBe(0)
+            expect(current.volume).toBe(0.3)
+            expect(current.muted).toBe(true)
+            current.dispatchEvent(new Event('loadedmetadata'))
+            yield* Effect.yieldNow
+            expect(seen).toEqual([
+              expect.objectContaining({ sourceGeneration: 2, duration: 120, didJustFinish: false }),
+            ])
+          } else
+            expect(yield* engine.currentStatus).toMatchObject({
+              sourceGeneration: null,
+              isLoaded: false,
+            })
+          yield* Scope.close(scope, Exit.void)
+
+          for (const audio of instances) expect(audio.attached.size).toBe(0)
+        }).pipe(Effect.scoped),
+      )
+    },
+  )
+
+  it.each(['replace', 'clear', 'dispose'] as const)(
+    'fences a retained private preview denial callback after %s',
+    async (action) => {
+      const instances: Array<TestAudio> = []
+      let denied = () => {}
+
+      let disposals = 0
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const scope = yield* Scope.make()
+
+          const engine = Context.get(
+            yield* Layer.buildWithScope(
+              makeHtmlAudioEngineLayer(
+                () => {
+                  const audio = new TestAudio()
+                  instances.push(audio)
+
+                  return audio
+                },
+                (_url, onDenied) => {
+                  denied = onDenied
+
+                  return {
+                    ensure: async () => ({ ok: true }),
+                    dispose: () => {
+                      disposals++
+                    },
+                  }
+                },
+              ),
+              scope,
+            ),
+            AudioEngine,
+          )
+
+          yield* engine.replace(
+            'https://cdn.goosebumps.fm/user-content/private/owner/id/song.mp3',
+            1,
+          )
+
+          yield* engine.play
+          denied()
+          expect(instances[0]?.paused).toBe(true)
+
+          if (action === 'replace') {
+            yield* engine.replace('/two.mp3', 2)
+            yield* engine.play
+          } else if (action === 'clear') yield* engine.clearSource
+          else yield* Scope.close(scope, Exit.void)
+          const pauses = instances.map((audio) => audio.pauses)
+          denied()
+          expect(instances.map((audio) => audio.pauses)).toEqual(pauses)
+          expect(disposals).toBe(1)
+          yield* Scope.close(scope, Exit.void)
+        }).pipe(Effect.scoped),
+      )
+    },
+  )
+
+  it('controls and observes the source-owned audio element', async () => {
+    let audio = new TestAudio()
 
     const program = Effect.gen(function* () {
-      const context = yield* Layer.build(makeHtmlAudioEngineLayer(audio))
+      const context = yield* Layer.build(makeHtmlAudioEngineLayer(() => (audio = new TestAudio())))
       const engine = Context.get(context, AudioEngine)
       yield* engine.replace('/mix.mp3', 7)
       yield* engine.setVolume(0.4)
@@ -65,36 +373,38 @@ describe('HTML audio engine', () => {
   })
 
   it('does not require browser globals to construct the layer', () => {
-    expect(Layer.isLayer(makeHtmlAudioEngineLayer(new TestAudio()))).toBe(true)
+    expect(Layer.isLayer(makeHtmlAudioEngineLayer(() => new TestAudio()))).toBe(true)
   })
 
   it('authorizes before setting a private source and leaves that source untouched on replay', async () => {
     vi.useFakeTimers()
-    const audio = new TestAudio()
+    let audio = new TestAudio()
     const url = 'https://cdn.goosebumps.fm/user-content/private/owner/id/song.mp3'
     const requests: Array<string> = []
     const sourcesAtRequest: Array<string> = []
 
-    const layer = makeHtmlAudioEngineLayer(audio, (source, onDenied) =>
-      createPreviewSession(source, {
-        now: Date.now,
-        onDenied,
-        fetch: async (input) => {
-          const path =
-            input instanceof Request ? input.url : input instanceof URL ? input.href : input
+    const layer = makeHtmlAudioEngineLayer(
+      () => (audio = new TestAudio()),
+      (source, onDenied) =>
+        createPreviewSession(source, {
+          now: Date.now,
+          onDenied,
+          fetch: async (input) => {
+            const path =
+              input instanceof Request ? input.url : input instanceof URL ? input.href : input
 
-          requests.push(path)
-          sourcesAtRequest.push(audio.src)
+            requests.push(path)
+            sourcesAtRequest.push(audio.src)
 
-          return path.startsWith('/api/')
-            ? Response.json({
-                sessionUrl: 'https://cdn.goosebumps.fm/preview-session',
-                grant: 'test',
-                expiresAt: Date.now() + 300_000,
-              })
-            : new Response(null, { status: 204 })
-        },
-      }),
+            return path.startsWith('/api/')
+              ? Response.json({
+                  sessionUrl: 'https://cdn.goosebumps.fm/preview-session',
+                  grant: 'test',
+                  expiresAt: Date.now() + 300_000,
+                })
+              : new Response(null, { status: 204 })
+          },
+        }),
     )
 
     await Effect.runPromise(
@@ -125,7 +435,7 @@ describe('HTML audio engine', () => {
   it.each(['pause', 'clear', 'replace', 'play-again'] as const)(
     'does not let a pending renewal override a newer %s command',
     async (command) => {
-      const audio = new TestAudio()
+      let audio = new TestAudio()
       const url = 'https://cdn.goosebumps.fm/user-content/private/owner/id/song.mp3'
       const window = new EventTarget()
       let now = 0
@@ -144,31 +454,33 @@ describe('HTML audio engine', () => {
 
       const errors: Array<string> = []
 
-      const layer = makeHtmlAudioEngineLayer(audio, (source, onDenied) =>
-        createPreviewSession(source, {
-          now: () => now,
-          onDenied,
-          window,
-          fetch: async (input) => {
-            const path =
-              input instanceof Request ? input.url : input instanceof URL ? input.href : input
+      const layer = makeHtmlAudioEngineLayer(
+        () => (audio = new TestAudio()),
+        (source, onDenied) =>
+          createPreviewSession(source, {
+            now: () => now,
+            onDenied,
+            window,
+            fetch: async (input) => {
+              const path =
+                input instanceof Request ? input.url : input instanceof URL ? input.href : input
 
-            if (path.startsWith('/api/')) {
-              if (++apiRequests === 2) {
-                started()
-                await gate
+              if (path.startsWith('/api/')) {
+                if (++apiRequests === 2) {
+                  started()
+                  await gate
+                }
+
+                return Response.json({
+                  sessionUrl: 'https://cdn.goosebumps.fm/preview-session',
+                  grant: 'disposable-test',
+                  expiresAt: now + 300_000,
+                })
               }
 
-              return Response.json({
-                sessionUrl: 'https://cdn.goosebumps.fm/preview-session',
-                grant: 'disposable-test',
-                expiresAt: now + 300_000,
-              })
-            }
-
-            return new Response(null, { status: 204 })
-          },
-        }),
+              return new Response(null, { status: 204 })
+            },
+          }),
       )
 
       await Effect.runPromise(
@@ -226,17 +538,19 @@ describe('HTML audio engine', () => {
   )
 
   it('does not load or play private media after permission is denied', async () => {
-    const audio = new TestAudio()
+    let audio = new TestAudio()
     let denied = 0
 
-    const layer = makeHtmlAudioEngineLayer(audio, (url) =>
-      createPreviewSession(url, {
-        now: Date.now,
-        onDenied: () => {
-          denied++
-        },
-        fetch: async () => new Response(null, { status: 403 }),
-      }),
+    const layer = makeHtmlAudioEngineLayer(
+      () => (audio = new TestAudio()),
+      (url) =>
+        createPreviewSession(url, {
+          now: Date.now,
+          onDenied: () => {
+            denied++
+          },
+          fetch: async () => new Response(null, { status: 403 }),
+        }),
     )
 
     await Effect.runPromise(
@@ -252,30 +566,33 @@ describe('HTML audio engine', () => {
     )
   })
 
-  it.each(['replace', 'clear'])(
+  it.each(['replace', 'clear', 'dispose'])(
     'does not install a private source after a newer %s while its first grant is pending',
     async (command) => {
-      const audio = new TestAudio()
+      let audio = new TestAudio()
       const grant = Promise.withResolvers<Response>()
       const requested = Promise.withResolvers<void>()
       let requests = 0
 
-      const layer = makeHtmlAudioEngineLayer(audio, (source, onDenied) =>
-        createPreviewSession(source, {
-          now: Date.now,
-          onDenied,
-          fetch: async () => {
-            requests++
-            requested.resolve()
+      const layer = makeHtmlAudioEngineLayer(
+        () => (audio = new TestAudio()),
+        (source, onDenied) =>
+          createPreviewSession(source, {
+            now: Date.now,
+            onDenied,
+            fetch: async () => {
+              requests++
+              requested.resolve()
 
-            return requests === 1 ? grant.promise : new Response(null, { status: 204 })
-          },
-        }),
+              return requests === 1 ? grant.promise : new Response(null, { status: 204 })
+            },
+          }),
       )
 
       await Effect.runPromise(
         Effect.gen(function* () {
-          const engine = Context.get(yield* Layer.build(layer), AudioEngine)
+          const scope = yield* Scope.make()
+          const engine = Context.get(yield* Layer.buildWithScope(layer, scope), AudioEngine)
 
           const pending = yield* Effect.forkScoped(
             engine.replace('https://cdn.goosebumps.fm/user-content/private/owner/id/song.mp3', 1),
@@ -284,6 +601,7 @@ describe('HTML audio engine', () => {
           yield* Effect.promise(() => requested.promise)
 
           if (command === 'replace') yield* engine.replace('/public.mp3', 2)
+          else if (command === 'dispose') yield* Scope.close(scope, Exit.void)
           else yield* engine.clearSource
 
           grant.resolve(
@@ -303,35 +621,38 @@ describe('HTML audio engine', () => {
             sourceGeneration: command === 'replace' ? 2 : null,
             playing: false,
           })
+          yield* Scope.close(scope, Exit.void)
         }).pipe(Effect.scoped),
       )
     },
   )
 
   it('installs a previously denied private source once when a later play is authorized', async () => {
-    const audio = new TestAudio()
+    let audio = new TestAudio()
     const url = 'https://cdn.goosebumps.fm/user-content/private/owner/id/song.mp3'
     let now = 0
     let requests = 0
 
-    const layer = makeHtmlAudioEngineLayer(audio, (source, onDenied) =>
-      createPreviewSession(source, {
-        now: () => now,
-        onDenied,
-        fetch: async () => {
-          requests++
+    const layer = makeHtmlAudioEngineLayer(
+      () => (audio = new TestAudio()),
+      (source, onDenied) =>
+        createPreviewSession(source, {
+          now: () => now,
+          onDenied,
+          fetch: async () => {
+            requests++
 
-          if (requests === 1) return new Response(null, { status: 403 })
+            if (requests === 1) return new Response(null, { status: 403 })
 
-          return requests === 2
-            ? Response.json({
-                sessionUrl: 'https://cdn.goosebumps.fm/preview-session',
-                grant: 'disposable',
-                expiresAt: now + 300_000,
-              })
-            : new Response(null, { status: 204 })
-        },
-      }),
+            return requests === 2
+              ? Response.json({
+                  sessionUrl: 'https://cdn.goosebumps.fm/preview-session',
+                  grant: 'disposable',
+                  expiresAt: now + 300_000,
+                })
+              : new Response(null, { status: 204 })
+          },
+        }),
     )
 
     await Effect.runPromise(
@@ -352,3 +673,12 @@ describe('HTML audio engine', () => {
     )
   })
 })
+
+import {
+  JourneyExporter,
+  Observability,
+  observabilityLayer,
+  type JourneyName,
+  type JourneyOutcome,
+} from '@gbfm/observability'
+import { journeyObserver } from '@gbfm/observability/callbacks'

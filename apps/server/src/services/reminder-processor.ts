@@ -1,7 +1,7 @@
 import { REMINDER_STATUS } from '@gbfm/core/status'
 import { buildMusicReminderEmail } from '@gbfm/email/index'
-import { and, asc, eq, lte, or } from 'drizzle-orm'
-import { Chunk, Effect } from 'effect'
+import { and, asc, eq, lte, or, sql } from 'drizzle-orm'
+import { Clock, Effect } from 'effect'
 
 import { user } from '@/db/auth.schema'
 import { EMAIL_NOTIFICATION_TYPES } from '@/db/email.schema'
@@ -62,6 +62,25 @@ const deliverReminderEmail = (reminder: typeof musicReminder.$inferSelect) =>
       ),
     )
 
+    const now = yield* Clock.currentTimeMillis
+
+    const eligible = yield* Effect.tryPromise({
+      try: () =>
+        db
+          .select({ id: musicReminder.id })
+          .from(musicReminder)
+          .where(and(ownsClaim(reminder), lte(musicReminder.reminderDate, new Date(now))))
+          .limit(1),
+      catch: (cause) =>
+        new ReminderProcessingError({
+          message: `Failed to revalidate reminder delivery: ${getErrorMessage(cause)}`,
+          reminderId: reminder.id,
+          stage: 'query',
+        }),
+    })
+
+    if (eligible.length === 0) return false
+
     yield* delivery
       .deliver(
         omitUndefined({
@@ -83,59 +102,16 @@ const deliverReminderEmail = (reminder: typeof musicReminder.$inferSelect) =>
         ),
       )
 
-    return undefined
+    return true
   })
 
 // Process all pending music reminders
 export const processPendingReminders = Effect.gen(function* () {
-  const db = yield* Database
-  const now = new Date()
-  const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000)
-
-  // Atomically claim pending reminders (or stalled ones)
-  const claimedReminders = yield* Effect.tryPromise({
-    try: () =>
-      db
-        .update(musicReminder)
-        .set({
-          status: REMINDER_STATUS.PROCESSING,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            lte(musicReminder.reminderDate, now),
-            or(
-              eq(musicReminder.status, REMINDER_STATUS.PENDING),
-              and(
-                eq(musicReminder.status, REMINDER_STATUS.PROCESSING),
-                lte(musicReminder.updatedAt, fiveMinutesAgo),
-              ),
-              eq(musicReminder.status, REMINDER_STATUS.FAILED),
-            ),
-          ),
-        )
-        .returning(),
-    catch: (error) =>
-      new ReminderProcessingError({
-        message: `Failed to claim pending reminders: ${getErrorMessage(error)}`,
-        reminderId: 'batch',
-        stage: 'query',
-      }),
-  })
-
-  if (claimedReminders.length === 0) {
-    yield* Effect.logInfo('No pending reminders to process')
-
-    return
-  }
-
-  yield* Effect.logInfo(`Processing ${claimedReminders.length} claimed reminders`)
-
-  // Process reminders in batches with concurrency control
+  const reminders = yield* queryDueReminders
   yield* Effect.forEach(
-    Chunk.fromIterable(claimedReminders),
+    reminders,
     (reminder) =>
-      processSingleReminder(reminder).pipe(
+      processReminderJob(reminder.id).pipe(
         Effect.catchTag('ReminderProcessingError', (error) =>
           Effect.logError('Failed to process reminder email', { stage: error.stage }),
         ),
@@ -143,64 +119,6 @@ export const processPendingReminders = Effect.gen(function* () {
     { concurrency: 3 },
   )
 })
-
-const processSingleReminder = (reminder: typeof musicReminder.$inferSelect) =>
-  Effect.gen(function* () {
-    const db = yield* Database
-    yield* deliverReminderEmail(reminder)
-
-    // Mark reminder as sent
-    yield* Effect.tryPromise({
-      try: () =>
-        db
-          .update(musicReminder)
-          .set({
-            status: REMINDER_STATUS.SENT,
-            isSent: true,
-            updatedAt: new Date(),
-          })
-          .where(eq(musicReminder.id, reminder.id)),
-      catch: (error) =>
-        new ReminderProcessingError({
-          message: `Failed to update reminder status to sent: ${getErrorMessage(error)}`,
-          reminderId: reminder.id,
-          stage: 'update',
-        }),
-    })
-
-    yield* Effect.logInfo(`Successfully processed reminder`, {
-      reminderId: reminder.id,
-      musicTitle: reminder.musicTitle,
-      artistName: reminder.artistName,
-    })
-  }).pipe(
-    Effect.catch((error) =>
-      Effect.gen(function* () {
-        const db = yield* Database
-        // Log the failure
-        yield* Effect.logError(`Failed to send reminder ${reminder.id}`, {
-          error: error instanceof Error ? error.message : 'Unknown error',
-          reminderId: reminder.id,
-          musicTitle: reminder.musicTitle,
-        })
-
-        // Mark as failed so it can be picked up later
-        yield* Effect.tryPromise({
-          try: () =>
-            db
-              .update(musicReminder)
-              .set({
-                status: REMINDER_STATUS.FAILED,
-                updatedAt: new Date(),
-              })
-              .where(eq(musicReminder.id, reminder.id)),
-          catch: () => undefined, // ignore update failure in error handler
-        }).pipe(Effect.ignore)
-
-        return yield* error
-      }),
-    ),
-  )
 
 // Returns the soonest reminderDate among pending/failed reminders (past or future)
 export const queryNextDueReminder = Effect.gen(function* () {
@@ -280,26 +198,45 @@ export const getReminderStats = Effect.gen(function* () {
 
 const DUE_REMINDERS_LIMIT = 100
 
-// Bounded read for the Cron Trigger: reminders due now, still pending. The
-// scheduled handler enqueues one job per row rather than claiming here --
-// claiming happens in the queue consumer, guarded against the same reminder
-// being enqueued twice by an overlapping cron run.
+const REMINDER_STALE_MS = 5 * 60 * 1000
+
+const eligibleReminder = (now: number) =>
+  and(
+    lte(musicReminder.reminderDate, new Date(now)),
+    eq(musicReminder.isSent, false),
+    or(
+      eq(musicReminder.status, REMINDER_STATUS.PENDING),
+      and(
+        or(
+          eq(musicReminder.status, REMINDER_STATUS.FAILED),
+          eq(musicReminder.status, REMINDER_STATUS.PROCESSING),
+        ),
+        lte(musicReminder.updatedAt, new Date(now - REMINDER_STALE_MS)),
+      ),
+    ),
+  )
+
+const ownsClaim = (reminder: typeof musicReminder.$inferSelect) =>
+  and(
+    eq(musicReminder.id, reminder.id),
+    eq(musicReminder.status, REMINDER_STATUS.PROCESSING),
+    eq(musicReminder.isSent, false),
+    eq(musicReminder.updatedAt, reminder.updatedAt),
+  )
+
+const nextGeneration = (now: number) => sql`max(${musicReminder.updatedAt} + 1, ${now})`
+
 export const queryDueReminders = Effect.gen(function* () {
   const db = yield* Database
-  const now = new Date()
+  const now = yield* Clock.currentTimeMillis
 
   return yield* Effect.tryPromise({
     try: () =>
       db
         .select({ id: musicReminder.id, reminderDate: musicReminder.reminderDate })
         .from(musicReminder)
-        .where(
-          and(
-            lte(musicReminder.reminderDate, now),
-            eq(musicReminder.status, REMINDER_STATUS.PENDING),
-          ),
-        )
-        .orderBy(asc(musicReminder.reminderDate))
+        .where(eligibleReminder(now))
+        .orderBy(asc(musicReminder.reminderDate), asc(musicReminder.id))
         .limit(DUE_REMINDERS_LIMIT),
     catch: (error) =>
       new ReminderProcessingError({
@@ -312,27 +249,17 @@ export const queryDueReminders = Effect.gen(function* () {
 
 export type ReminderClaimResult = { readonly claimed: true } | { readonly claimed: false }
 
-// Guarded UPDATE ... WHERE status is PENDING or FAILED. A queue redelivery
-// reclaims the FAILED state written after a delivery failure, while zero rows
-// still means another invocation already owns this reminder and can be acked.
 const claimReminderRow = (reminderId: string) =>
   Effect.gen(function* () {
     const db = yield* Database
+    const now = yield* Clock.currentTimeMillis
 
     const claimed = yield* Effect.tryPromise({
       try: () =>
         db
           .update(musicReminder)
-          .set({ status: REMINDER_STATUS.PROCESSING, updatedAt: new Date() })
-          .where(
-            and(
-              eq(musicReminder.id, reminderId),
-              or(
-                eq(musicReminder.status, REMINDER_STATUS.PENDING),
-                eq(musicReminder.status, REMINDER_STATUS.FAILED),
-              ),
-            ),
-          )
+          .set({ status: REMINDER_STATUS.PROCESSING, updatedAt: nextGeneration(now) })
+          .where(and(eq(musicReminder.id, reminderId), eligibleReminder(now)))
           .returning(),
       catch: (error) =>
         new ReminderProcessingError({
@@ -358,18 +285,31 @@ export const sendClaimedReminder = (reminder: typeof musicReminder.$inferSelect)
   Effect.gen(function* () {
     const db = yield* Database
 
-    const currentReminder = yield* findReminderById(reminder.id)
+    if (reminder.status !== REMINDER_STATUS.PROCESSING || reminder.isSent) return
+
+    const currentReminder = yield* Effect.tryPromise({
+      try: () => db.select().from(musicReminder).where(ownsClaim(reminder)).limit(1),
+      catch: (error) =>
+        new ReminderProcessingError({
+          message: `Failed to load reminder: ${getErrorMessage(error)}`,
+          reminderId: reminder.id,
+          stage: 'query',
+        }),
+    }).pipe(Effect.map((rows) => rows[0]))
 
     if (!currentReminder) return
 
-    yield* deliverReminderEmail(currentReminder)
+    const delivered = yield* deliverReminderEmail(currentReminder)
+
+    if (!delivered) return
+    const now = yield* Clock.currentTimeMillis
 
     yield* Effect.tryPromise({
       try: () =>
         db
           .update(musicReminder)
-          .set({ status: REMINDER_STATUS.SENT, isSent: true, updatedAt: new Date() })
-          .where(eq(musicReminder.id, reminder.id)),
+          .set({ status: REMINDER_STATUS.SENT, isSent: true, updatedAt: nextGeneration(now) })
+          .where(ownsClaim(reminder)),
       catch: (error) =>
         new ReminderProcessingError({
           message: `Failed to update reminder status to sent: ${getErrorMessage(error)}`,
@@ -387,12 +327,13 @@ export const sendClaimedReminder = (reminder: typeof musicReminder.$inferSelect)
         })
 
         const db = yield* Database
+        const now = yield* Clock.currentTimeMillis
         yield* Effect.tryPromise({
           try: () =>
             db
               .update(musicReminder)
-              .set({ status: REMINDER_STATUS.FAILED, updatedAt: new Date() })
-              .where(eq(musicReminder.id, reminder.id)),
+              .set({ status: REMINDER_STATUS.FAILED, updatedAt: nextGeneration(now) })
+              .where(ownsClaim(reminder)),
           catch: () => undefined,
         }).pipe(Effect.ignore)
 

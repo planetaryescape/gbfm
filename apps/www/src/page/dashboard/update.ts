@@ -184,12 +184,30 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
         ),
       }
     },
-    SpotifyRequested: ({ action }) => ({
-      model: { ...model, phase: 'loading', error: null },
-      commands: [SpotifyRequest({ action })],
+    SpotifyRequested: ({ action }) =>
+      model.spotifyPending && (action !== 'disconnect' || model.spotifyPending === 'disconnect')
+        ? { model }
+        : {
+            model: {
+              ...model,
+              phase: 'loading',
+              error: null,
+              spotifyRequestId: model.spotifyRequestId + 1,
+              spotifyPending: action,
+            },
+            commands: [SpotifyRequest({ action, requestId: model.spotifyRequestId + 1 })],
+          },
+    SpotifyLoaded: ({ requestId, status }) => ({
+      model:
+        model.spotifyPending && model.spotifyRequestId === requestId
+          ? { ...model, phase: 'ready', spotify: status, error: null, spotifyPending: null }
+          : model,
     }),
-    SpotifyLoaded: ({ status }) => ({
-      model: { ...model, phase: 'ready', spotify: status, error: null },
+    SpotifyFailed: ({ requestId, message }) => ({
+      model:
+        model.spotifyPending && model.spotifyRequestId === requestId
+          ? { ...model, phase: 'error', error: message, spotifyPending: null }
+          : model,
     }),
     ThemeSelected: ({ theme }) => ({ model, commands: [ApplyTheme({ theme })] }),
     ThemeRestored: ({ theme }) => ({ model: { ...model, fields: { ...model.fields, theme } } }),
@@ -198,10 +216,7 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
     }),
     LoadRequested: () => {
       if (model.section === 'integrations')
-        return {
-          model: { ...model, phase: 'loading', error: null },
-          commands: [SpotifyRequest({ action: 'status' })],
-        }
+        return update(model, Message.SpotifyRequested({ action: 'status' }))
       const path = endpointFor(model.section, new URLSearchParams(model.fields))
 
       return path

@@ -3,6 +3,7 @@ import { SpotifyConfigurationError } from '@spotify-effect/core'
 import { Deferred, Effect } from 'effect'
 import { expect, test } from 'vitest'
 
+import { spotifyConnectionLifecycle } from './connectionLifecycle'
 import { connectSpotify } from './connectionLogin'
 import { SpotifyConnectionState, type SetConnectionState } from './connectionState'
 import { spotifyFixture } from './operationFixture'
@@ -38,7 +39,7 @@ test.each(['cancel', 'dismiss', 'locked', 'opened'] as const)(
         clientId: 'fixture',
         redirectUri: 'gbfm://spotify',
         setState: state.setState,
-        run: f.run,
+        lifecycle: spotifyConnectionLifecycle(f.run),
         openLogin: async () => ({ type }),
       })
       expect(state.current()).toEqual(SpotifyConnectionState.Disconnected({}))
@@ -66,7 +67,7 @@ test('exchange failure exposes the provider error and leaves no connected sessio
       clientId: 'fixture',
       redirectUri: 'gbfm://spotify',
       setState: state.setState,
-      run: f.run,
+      lifecycle: spotifyConnectionLifecycle(f.run),
       openLogin: async () => ({ type: 'success', url: 'gbfm://spotify?code=fixture' }),
     })
     expect(state.current()).toEqual(
@@ -96,7 +97,7 @@ test.each([
       clientId: 'fixture',
       redirectUri: 'gbfm://spotify',
       setState: state.setState,
-      run: f.run,
+      lifecycle: spotifyConnectionLifecycle(f.run),
       openLogin: async () => ({ type: 'success', url }),
     })
     expect(state.current()).toEqual(expected)
@@ -105,7 +106,7 @@ test.each([
   }
 })
 
-test('characterizes late exchange after disconnect: it restores Connected instead of rejecting stale work', async () => {
+test('a late exchange after disconnect cannot restore Connected', async () => {
   const state = connection()
   const entered = Deferred.makeUnsafe<void>()
   const release = Deferred.makeUnsafe<void>()
@@ -131,21 +132,23 @@ test('characterizes late exchange after disconnect: it restores Connected instea
   }))
 
   try {
+    const lifecycle = spotifyConnectionLifecycle(f.run)
+
     const pending = connectSpotify({
       clientId: 'fixture',
       redirectUri: 'gbfm://spotify',
       setState: state.setState,
-      run: f.run,
+      lifecycle,
       openLogin: async () => ({ type: 'success', url: 'gbfm://spotify?code=fixture' }),
     })
 
     await Effect.runPromise(Deferred.await(entered))
     state.setState(() => SpotifyConnectionState.Disconnected({}))
+    const disconnect = lifecycle.disconnect()
     await Effect.runPromise(Deferred.succeed(release, undefined))
     await pending
-    expect(state.current()).toEqual(
-      SpotifyConnectionState.Connected({ session, error: 'profile failed' }),
-    )
+    await disconnect
+    expect(state.current()).toEqual(SpotifyConnectionState.Disconnected({}))
   } finally {
     await f.dispose()
   }

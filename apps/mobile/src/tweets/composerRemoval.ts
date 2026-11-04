@@ -17,12 +17,12 @@ export const composerRemovalWarning = (publication: ComposerPublication) =>
     Match.tag('CleanupPending', () => ({
       title: 'Already published',
       message:
-        'Retry cleanup before closing. If you close now, check your published post before posting again.',
+        'Already published. Retry cleanup without publishing again. Your recovery record stays on this device after closing. If confirmation could not be saved, you will need to check publication.',
     })),
-    Match.tag('ReplyUncertain', () => ({
-      title: 'Check the thread first',
+    Match.tag('PublicationUncertain', ({ replying }) => ({
+      title: replying ? 'Check the thread first' : 'Check the post first',
       message:
-        'Your reply may already be published. Closing keeps your local draft but loses this warning. Check the thread before trying to reply again.',
+        'Publication may already have succeeded. Your local draft and recovery warning remain on this device after closing. Automatic resubmission stays blocked.',
     })),
     Match.orElse(() => null),
   )

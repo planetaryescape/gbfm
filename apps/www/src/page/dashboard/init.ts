@@ -26,6 +26,8 @@ export const initialModel = (section: string, principal: Principal): Model => ({
   toggles: {},
   error: null,
   spotify: disconnected,
+  spotifyRequestId: 0,
+  spotifyPending: null,
   emails: Emails.initialModel,
   sessions: Sessions.initialModel,
   shows: Shows.initialModel,
@@ -65,11 +67,20 @@ export const init =
         ),
       }
 
+    if (section === 'integrations' && !principal.id) return { model: { ...model, phase: 'ready' } }
+
     if (section === 'integrations' || section === 'spotify-callback')
       return {
-        model,
+        model: {
+          ...model,
+          spotifyRequestId: 1,
+          spotifyPending: section === 'integrations' ? 'status' : 'completeCallback',
+        },
         commands: [
-          SpotifyRequest({ action: section === 'integrations' ? 'status' : 'completeCallback' }),
+          SpotifyRequest({
+            action: section === 'integrations' ? 'status' : 'completeCallback',
+            requestId: 1,
+          }),
         ],
       }
 

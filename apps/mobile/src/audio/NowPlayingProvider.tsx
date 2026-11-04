@@ -11,7 +11,7 @@ import {
   type QueueTrackType,
 } from '@gbfm/player'
 import { Effect, Layer, ManagedRuntime } from 'effect'
-import { useAudioPlayer } from 'expo-audio'
+import { createAudioPlayer } from 'expo-audio'
 import {
   createContext,
   type PropsWithChildren,
@@ -89,7 +89,6 @@ export function NowPlayingProvider({ children }: PropsWithChildren) {
   const journeys = useJourneys()
   useAtomValue(audioModeAtom)
 
-  const player = useAudioPlayer(null, { updateInterval: 500, keepAudioSessionActive: true })
   const [snapshot, setSnapshot] = useState<PlaybackSnapshot>(initialSnapshot)
   const [queueNotice, setQueueNotice] = useState<QueueNotice | null>(null)
 
@@ -115,7 +114,7 @@ export function NowPlayingProvider({ children }: PropsWithChildren) {
     const runtime = ManagedRuntime.make(
       Layer.mergeAll(
         ExpoAudioEngineLayer(
-          player,
+          () => createAudioPlayer(null, { updateInterval: 500, keepAudioSessionActive: true }),
           Platform.OS === 'web' ? 'web' : 'native',
           Platform.OS === 'web' ? noJourneys : journeys,
         ),
@@ -141,7 +140,7 @@ export function NowPlayingProvider({ children }: PropsWithChildren) {
       runtimeRef.current = null
       void runtime.dispose()
     }
-  }, [player, journeys])
+  }, [journeys])
 
   const loadAndPlay = useCallback(
     (nextTrack: Track) => {

@@ -29,7 +29,14 @@ export type Services =
   | Dashboard.KeyService
   | SpotifyConnection
 
-export const init: Runtime.ApplicationInit<Model, Message, Flags, Services> = (flags) => {
+export const initWithPlayback = (
+  flags: Flags,
+  retainedPlayback: SpotifyPlayback.Model,
+): ReturnType<Runtime.ApplicationInit<Model, Message, Flags, Services>> => {
+  const spotifyPlayback = flags.tweet
+    ? { ...retainedPlayback, statusRequestId: retainedPlayback.statusRequestId + 1 }
+    : retainedPlayback
+
   const url = new URL(flags.url)
   const route = parseRoute(url.pathname)
   const role = flags.principal?.role ?? null
@@ -103,7 +110,7 @@ export const init: Runtime.ApplicationInit<Model, Message, Flags, Services> = (f
         },
       },
       publicAction: PublicActions.init(flags.publicAction, flags.principal?.id ?? null),
-      spotifyPlayback: SpotifyPlayback.initialModel,
+      spotifyPlayback,
       creator: creator.model,
       dashboard: preparedDashboard.model,
       listeningDraft: null,
@@ -112,8 +119,9 @@ export const init: Runtime.ApplicationInit<Model, Message, Flags, Services> = (f
       StartClient(),
       ...(flags.tweet
         ? [
-            Command.mapMessage(SpotifyPlayback.Load(), (message) =>
-              Message.GotSpotifyPlaybackMessage({ message }),
+            Command.mapMessage(
+              SpotifyPlayback.Load({ requestId: spotifyPlayback.statusRequestId }),
+              (message) => Message.GotSpotifyPlaybackMessage({ message }),
             ),
           ]
         : []),
@@ -130,3 +138,6 @@ export const init: Runtime.ApplicationInit<Model, Message, Flags, Services> = (f
     ],
   }
 }
+
+export const init: Runtime.ApplicationInit<Model, Message, Flags, Services> = (flags) =>
+  initWithPlayback(flags, SpotifyPlayback.initialModel)

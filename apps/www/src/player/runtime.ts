@@ -39,6 +39,7 @@ export type AudioPort = {
   load(): void
   play(): Promise<void>
   pause(): void
+  removeAttribute(name: string): void
   addEventListener(
     type: string,
     listener: EventListenerOrEventListenerObject,
@@ -81,14 +82,23 @@ type BrowserSource =
 const BrowserSource = Data.taggedEnum<BrowserSource>()
 
 export const makeHtmlAudioEngineLayer = (
-  audio: AudioPort,
+  createAudio: () => AudioPort,
   createPreview: (url: string, onDenied: () => void) => PreviewSession = browserPreviewSession,
   observer: JourneyObserver = noJourneys,
 ) =>
   Layer.effect(
     AudioEngine,
     Effect.gen(function* () {
-      let finished = false
+      let active: {
+        readonly audio: AudioPort
+        readonly generation: number
+        readonly dispose: () => void
+      } | null = null
+
+      let volume = 1
+      let muted = false
+      let disposed = false
+      const listeners = new Set<(status: EngineStatus) => void>()
       let source: BrowserSource = BrowserSource.Empty({ generation: null })
       let playVersion = 0
       let playRequestedVersion: number | null = null
@@ -98,14 +108,21 @@ export const makeHtmlAudioEngineLayer = (
         playRequestedVersion = null
         journey.cancel()
         playVersion++
-
-        if ('preview' in source) source.preview.dispose()
+        const previous = active
+        const previousSource = source
+        active = null
         source = BrowserSource.Empty({ generation: null })
+
+        if ('preview' in previousSource) previousSource.preview.dispose()
+        previous?.dispose()
       }
 
       const installPrivateSource = (
         pending: Extract<BrowserSource, { readonly _tag: 'PrivatePending' }>,
       ) => {
+        const audio = active?.audio
+
+        if (!audio) return
         audio.crossOrigin = 'use-credentials'
         audio.src = pending.url
         source = BrowserSource.PrivateReady({
@@ -115,55 +132,88 @@ export const makeHtmlAudioEngineLayer = (
         audio.load()
       }
 
-      yield* Effect.addFinalizer(() => Effect.sync(resetSource))
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          disposed = true
+          resetSource()
+        }),
+      )
+
+      const createSource = (generation: number) => {
+        const audio = createAudio()
+        audio.volume = volume
+        audio.muted = muted
+
+        const emit = (finished = false) => {
+          if (active !== owned) return
+          const value = status(audio, finished, generation)
+
+          for (const listener of listeners) listener(value)
+        }
+
+        const changed = () => emit()
+        const ended = () => emit(true)
+
+        const playing = () => {
+          if (active !== owned) return
+
+          if (!audio.paused && audio.readyState >= 3 && playRequestedVersion === playVersion)
+            journey.status({ playing: true, error: null })
+          emit()
+        }
+
+        const failed = () => {
+          if (active !== owned) return
+          journey.fail()
+          emit()
+        }
+
+        const events = [
+          'timeupdate',
+          'loadedmetadata',
+          'durationchange',
+          'canplay',
+          'waiting',
+          'play',
+          'pause',
+        ]
+
+        const owned = {
+          audio,
+          generation,
+          dispose: () => {
+            for (const event of events) audio.removeEventListener(event, changed)
+            audio.removeEventListener('ended', ended)
+            audio.removeEventListener('playing', playing)
+            audio.removeEventListener('error', failed)
+            audio.pause()
+            audio.removeAttribute('src')
+            audio.load()
+          },
+        }
+
+        active = owned
+
+        for (const event of events) audio.addEventListener(event, changed)
+        audio.addEventListener('ended', ended)
+        audio.addEventListener('playing', playing)
+        audio.addEventListener('error', failed)
+
+        return owned
+      }
 
       const changes = Stream.callback<EngineStatus>((queue) =>
         Effect.gen(function* () {
-          const emit = () => Queue.offerUnsafe(queue, status(audio, finished, source.generation))
-
-          const playing = () => {
-            if (
-              !audio.paused &&
-              audio.readyState >= 3 &&
-              source.generation !== null &&
-              playRequestedVersion === playVersion
-            )
-              journey.status({ playing: true, error: null })
-            emit()
+          const emit = (value: EngineStatus) => {
+            Queue.offerUnsafe(queue, value)
           }
 
-          const failed = () => {
-            journey.fail()
-            emit()
-          }
-
-          const ended = () => {
-            finished = true
-            emit()
-            finished = false
-          }
-
-          const events = [
-            'timeupdate',
-            'loadedmetadata',
-            'durationchange',
-            'canplay',
-            'waiting',
-            'play',
-            'pause',
-          ]
-
-          for (const event of events) audio.addEventListener(event, emit)
-          audio.addEventListener('ended', ended)
-          audio.addEventListener('playing', playing)
-          audio.addEventListener('error', failed)
+          listeners.add(emit)
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
-              for (const event of events) audio.removeEventListener(event, emit)
-              audio.removeEventListener('ended', ended)
-              audio.removeEventListener('playing', playing)
-              audio.removeEventListener('error', failed)
-              journey.cancel()
+              listeners.delete(emit)
+
+              if (listeners.size === 0) journey.cancel()
             }),
           )
         }),
@@ -214,23 +264,29 @@ export const makeHtmlAudioEngineLayer = (
         replace: (url: string, nextGeneration: number, intent: 'play' | 'paused' = 'play') =>
           Effect.promise(async () => {
             resetSource()
+
+            if (disposed) return
             journey.replace(intent)
-            finished = false
             const version = playVersion
 
             try {
+              const owned = createSource(nextGeneration)
+              const audio = owned.audio
+
               if (isPrivateMedia(url)) {
-                const active = BrowserSource.PrivatePending({
+                const pending = BrowserSource.PrivatePending({
                   generation: nextGeneration,
                   url,
-                  preview: createPreview(url, () => audio.pause()),
+                  preview: createPreview(url, () => {
+                    if (active === owned) audio.pause()
+                  }),
                 })
 
-                source = active
+                source = pending
                 audio.pause()
-                const result = await active.preview.ensure()
+                const result = await pending.preview.ensure()
 
-                if (source !== active) return
+                if (source !== pending) return
 
                 if (!result.ok) {
                   journey.fail()
@@ -238,7 +294,7 @@ export const makeHtmlAudioEngineLayer = (
                   return
                 }
 
-                installPrivateSource(active)
+                installPrivateSource(pending)
 
                 return
               }
@@ -255,9 +311,6 @@ export const makeHtmlAudioEngineLayer = (
           }),
         clearSource: Effect.sync(() => {
           resetSource()
-          finished = false
-          audio.src = ''
-          audio.load()
         }),
         play: Effect.gen(function* () {
           const version = playVersion
@@ -265,12 +318,16 @@ export const makeHtmlAudioEngineLayer = (
           playRequestedVersion = version
 
           return yield* Effect.gen(function* () {
-            const active = 'preview' in source ? source.preview : undefined
+            const owned = active
 
-            if (active) {
-              const result = yield* Effect.promise(() => active.ensure())
+            if (!owned) return yield* new PlaybackRejected({})
+            const audio = owned.audio
+            const preview = 'preview' in source ? source.preview : undefined
 
-              if (version !== playVersion || !('preview' in source) || source.preview !== active)
+            if (preview) {
+              const result = yield* Effect.promise(() => preview.ensure())
+
+              if (version !== playVersion || !('preview' in source) || source.preview !== preview)
                 return yield* new PlaybackRejected({ reason: 'superseded' })
 
               if (!result.ok) return yield* new PlaybackRejected({})
@@ -304,21 +361,37 @@ export const makeHtmlAudioEngineLayer = (
           journey.cancel()
           playRequestedVersion = null
           playVersion++
-          audio.pause()
+          active?.audio.pause()
         }),
         seekTo: (seconds: number) =>
           Effect.sync(() => {
-            audio.currentTime = Math.max(0, seconds)
+            if (active) active.audio.currentTime = Math.max(0, seconds)
           }),
-        setVolume: (volume: number) =>
+        setVolume: (value: number) =>
           Effect.sync(() => {
-            audio.volume = Math.max(0, Math.min(1, volume))
+            volume = Math.max(0, Math.min(1, value))
+
+            if (active) active.audio.volume = volume
           }),
-        setMuted: (muted: boolean) =>
+        setMuted: (value: boolean) =>
           Effect.sync(() => {
-            audio.muted = muted
+            muted = value
+
+            if (active) active.audio.muted = muted
           }),
-        currentStatus: Effect.sync(() => status(audio, finished, source.generation)),
+        currentStatus: Effect.sync(() =>
+          active
+            ? status(active.audio, false, active.generation)
+            : {
+                sourceGeneration: null,
+                isLoaded: false,
+                playing: false,
+                didJustFinish: false,
+                currentTime: 0,
+                duration: 0,
+                isBuffering: false,
+              },
+        ),
         changes,
         setNowPlaying: (metadata: NowPlayingMetadata | null) =>
           Effect.sync(() => {
@@ -375,11 +448,14 @@ export const makePlayerClientLayer = (dependencies: BrowserDependencies) =>
     Effect.flatMap(Observability, (observability) =>
       Effect.acquireRelease(
         Effect.promise(async () => {
-          const audio = dependencies.createAudio()
           const storage = layerFromAdapter(createWebAudioStorageAdapter(dependencies.storage))
 
           const services = Layer.mergeAll(
-            makeHtmlAudioEngineLayer(audio, browserPreviewSession, journeyObserver(observability)),
+            makeHtmlAudioEngineLayer(
+              dependencies.createAudio,
+              browserPreviewSession,
+              journeyObserver(observability),
+            ),
             storage,
             makePlayReporterLayer(dependencies.deliverPlay).pipe(Layer.provide(storage)),
           )
@@ -409,11 +485,10 @@ export const makePlayerClientLayer = (dependencies: BrowserDependencies) =>
             ),
           )
 
-          return { audio, runtime, controller: await controllerPromise }
+          return { runtime, controller: await controllerPromise }
         }),
-        ({ audio, runtime }) =>
+        ({ runtime }) =>
           Effect.promise(async () => {
-            audio.pause()
             await runtime.dispose()
           }),
       ).pipe(Effect.map(({ controller }) => ({ controller }))),

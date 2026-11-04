@@ -9,19 +9,25 @@ import { update } from './update'
 
 const member = { id: 'member', role: 'user' as const }
 
-describe('dashboard Spotify ownership characterization', () => {
-  it('currently accepts repeated connection commands and disconnects while connect is pending', () => {
+describe('dashboard Spotify ownership', () => {
+  it('blocks duplicate commands but permits disconnect to supersede pending work', () => {
     const model = initialModel('integrations', member)
     const pending = update(model, Message.SpotifyRequested({ action: 'connect' })).model
 
-    for (const action of ['connect', 'disconnect', 'status', 'completeCallback'] as const) {
+    for (const action of ['connect', 'status', 'completeCallback'] as const) {
       const result = update(pending, Message.SpotifyRequested({ action }))
-      expect(result.model.phase).toBe('loading')
-      expect(result.commands?.[0]).toMatchObject({ name: 'Spotify.Connection', args: { action } })
+      expect(result.model).toBe(pending)
+      expect(result.commands).toBeUndefined()
     }
+
+    const result = update(pending, Message.SpotifyRequested({ action: 'disconnect' }))
+    expect(result.commands?.[0]).toMatchObject({
+      name: 'Spotify.Connection',
+      args: { action: 'disconnect', requestId: 2 },
+    })
   })
 
-  it('currently accepts a stale status result after a later disconnect', async () => {
+  it('rejects a stale status result after a later disconnect', async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const result = yield* Deferred.make<typeof disconnected>()
@@ -40,7 +46,7 @@ describe('dashboard Spotify ownership characterization', () => {
           Message.SpotifyRequested({ action: 'status' }),
         ).model
 
-        const old = yield* SpotifyRequest({ action: 'status' }).effect.pipe(
+        const old = yield* SpotifyRequest({ action: 'status', requestId: 1 }).effect.pipe(
           Effect.provideService(SpotifyConnection, service),
           Effect.forkChild,
         )
@@ -50,42 +56,59 @@ describe('dashboard Spotify ownership characterization', () => {
 
         const completed = update(
           disconnect,
-          yield* SpotifyRequest({ action: 'disconnect' }).effect.pipe(
+          yield* SpotifyRequest({ action: 'disconnect', requestId: 2 }).effect.pipe(
             Effect.provideService(SpotifyConnection, service),
           ),
         ).model
 
         yield* Deferred.succeed(result, { connected: true, name: 'Stale account' })
         const stale = update(completed, yield* Fiber.join(old)).model
-        expect(stale.spotify).toEqual({ connected: true, name: 'Stale account' })
+        expect(stale).toBe(completed)
+        expect(stale.spotify).toEqual(disconnected)
       }).pipe(Effect.scoped),
     )
   })
 
-  it('maps a cancelled or completed void login to disconnected and errors to the common dashboard failure', async () => {
+  it('reads status after callback/connect and correlates failures', async () => {
+    let connected = false
+    const connectedStatus = { connected: true, name: 'Fixture account' }
+
     const service = SpotifyConnection.of({
-      status: Effect.succeed(disconnected),
-      connect: Effect.void,
-      completeCallback: Effect.void,
+      status: Effect.sync(() => (connected ? connectedStatus : disconnected)),
+      connect: Effect.sync(() => {
+        connected = true
+      }),
+      completeCallback: Effect.sync(() => {
+        connected = true
+      }),
       disconnect: Effect.fail(new SpotifyConnectionError({ message: 'Disconnect failed' })),
       playback: () => Effect.succeed('unused'),
     })
 
     for (const action of ['connect', 'completeCallback'] as const) {
+      connected = false
+
       const result = await Effect.runPromise(
-        SpotifyRequest({ action }).effect.pipe(Effect.provideService(SpotifyConnection, service)),
+        SpotifyRequest({ action, requestId: 1 }).effect.pipe(
+          Effect.provideService(SpotifyConnection, service),
+        ),
       )
 
-      expect(result).toEqual(Message.SpotifyLoaded({ status: disconnected }))
+      expect(result).toEqual(Message.SpotifyLoaded({ requestId: 1, status: connectedStatus }))
     }
 
     const failed = await Effect.runPromise(
-      SpotifyRequest({ action: 'disconnect' }).effect.pipe(
+      SpotifyRequest({ action: 'disconnect', requestId: 1 }).effect.pipe(
         Effect.provideService(SpotifyConnection, service),
       ),
     )
 
-    const model = update(initialModel('integrations', member), failed).model
+    const pending = update(
+      initialModel('integrations', member),
+      Message.SpotifyRequested({ action: 'disconnect' }),
+    ).model
+
+    const model = update(pending, failed).model
     expect(model).toMatchObject({ phase: 'error', error: 'Disconnect failed' })
   })
 })

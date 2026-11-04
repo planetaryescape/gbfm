@@ -99,17 +99,24 @@ document.getElementById('playback')?.addEventListener('click', async () => {
   if (!result) return
   const signals = ManagedRuntime.make(webObservabilityLayer)
   const service = await signals.runPromise(Observability)
-  const audio = new Audio()
-  audio.muted = true
+  const playing = Promise.withResolvers<void>()
   const source = silentWave()
 
   const runtime = ManagedRuntime.make(
-    makeHtmlAudioEngineLayer(audio, undefined, journeyObserver(service)),
+    makeHtmlAudioEngineLayer(
+      () => {
+        const audio = new Audio()
+        audio.muted = true
+        audio.addEventListener('playing', () => playing.resolve(), { once: true })
+
+        return audio
+      },
+      undefined,
+      journeyObserver(service),
+    ),
   )
 
   try {
-    const playing = Promise.withResolvers<void>()
-    audio.addEventListener('playing', () => playing.resolve(), { once: true })
     await runtime.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
@@ -134,7 +141,6 @@ document.getElementById('playback')?.addEventListener('click', async () => {
     await signals.dispose()
     result.textContent = 'Playback fixture failed'
   } finally {
-    audio.pause()
     URL.revokeObjectURL(source)
   }
 })

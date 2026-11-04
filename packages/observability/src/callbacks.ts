@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Exit } from 'effect'
 
 import type { JourneyName, JourneyOutcome, Observability } from './observability'
 
@@ -10,8 +10,12 @@ export const noJourneys: JourneyObserver = { start: () => () => {} }
 
 export const journeyObserver = (service: Observability['Service']): JourneyObserver => ({
   start: (name) => {
-    const journey = Effect.runSync(service.start(name))
+    const result = Effect.runSyncExit(service.start(name))
 
-    return (outcome) => Effect.runSync(journey.finish(outcome))
+    if (Exit.isFailure(result)) return () => {}
+
+    return (outcome) => {
+      Effect.runSyncExit(result.value.finish(outcome))
+    }
   },
 })

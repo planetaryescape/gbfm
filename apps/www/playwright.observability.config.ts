@@ -8,7 +8,13 @@ export default defineConfig({
   workers: 1,
   use: { baseURL: 'http://127.0.0.1:5191', trace: 'retain-on-failure' },
   projects: [
-    { name: 'Chromium', use: { ...devices['Pixel 5'] } },
+    {
+      name: 'Chromium',
+      use: {
+        ...devices['Pixel 5'],
+        launchOptions: { executablePath: process.env.CHROMIUM_PATH || undefined },
+      },
+    },
     { name: 'WebKit', use: { ...devices['iPhone 14 Pro'] } },
   ],
   webServer: {

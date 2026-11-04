@@ -1,4 +1,4 @@
-import { Deferred, Effect, Exit, Fiber, Layer, ManagedRuntime } from 'effect'
+import { Context, Deferred, Effect, Exit, Fiber, Layer, ManagedRuntime, Scope } from 'effect'
 import { TestClock } from 'effect/testing'
 import { expect, test } from 'vitest'
 
@@ -12,26 +12,34 @@ import {
   type JourneyOutcome,
 } from './observability'
 
-const fixture = (failure?: 'open' | 'finish') => {
+type FailureMode = 'open' | 'finish' | 'open-defect' | 'finish-defect'
+
+const fixture = (failure?: FailureMode) => {
   const records: Array<{ name: JourneyName; outcome: JourneyOutcome; durationMs: number }> = []
   const starts: Array<JourneyName> = []
 
   const exporter = Layer.succeed(JourneyExporter, {
-    open: (name) =>
-      failure === 'open'
-        ? Effect.fail(new ExportUnavailable())
-        : Effect.sync(() => {
-            starts.push(name)
+    open: (name) => {
+      if (failure === 'open') return Effect.fail(new ExportUnavailable())
 
-            return {
-              finish: (outcome, durationMs) =>
-                failure === 'finish'
-                  ? Effect.fail(new ExportUnavailable())
-                  : Effect.sync(() => {
-                      records.push({ name, outcome, durationMs })
-                    }),
-            }
-          }),
+      if (failure === 'open-defect') return Effect.die(new Error('Exporter defect'))
+
+      return Effect.sync(() => {
+        starts.push(name)
+
+        return {
+          finish: (outcome, durationMs) => {
+            if (failure === 'finish') return Effect.fail(new ExportUnavailable())
+
+            if (failure === 'finish-defect') return Effect.die(new Error('Exporter defect'))
+
+            return Effect.sync(() => {
+              records.push({ name, outcome, durationMs })
+            })
+          },
+        }
+      })
+    },
   })
 
   const runtime = ManagedRuntime.make(
@@ -82,7 +90,7 @@ test('scope closure cancels outstanding attempts but does not rewrite settled ou
   ])
 })
 
-const exportFailures: Array<'open' | 'finish'> = ['open', 'finish']
+const exportFailures: Array<FailureMode> = ['open', 'finish', 'open-defect', 'finish-defect']
 
 test.each(exportFailures)(
   'an exporter %s failure cannot replace application results',
@@ -155,4 +163,62 @@ test('interruption settles a canceled operation, not an incident', async () => {
     }),
   )
   expect(f.records.map(({ outcome }) => outcome)).toEqual(['canceled'])
+})
+
+test('opening attempts reserve capacity and late acquisitions are canceled after scope closure', async () => {
+  const outcomes: Array<JourneyOutcome> = []
+  let openings = 0
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+
+        const exporter = Layer.succeed(JourneyExporter, {
+          open: () =>
+            Effect.gen(function* () {
+              openings++
+
+              if (openings === 30) yield* Deferred.succeed(entered, undefined)
+              yield* Deferred.await(release)
+
+              return {
+                finish: (outcome) =>
+                  Effect.sync(() => {
+                    outcomes.push(outcome)
+                  }),
+              }
+            }),
+        })
+
+        const scope = yield* Scope.make()
+        yield* Effect.addFinalizer(() => Scope.close(scope, Exit.succeed(undefined)))
+
+        const context = yield* Layer.buildWithScope(
+          observabilityLayer.pipe(Layer.provide(exporter)),
+          scope,
+        )
+
+        const service = Context.get(context, Observability)
+
+        const attempts = yield* Effect.forEach(Array.from({ length: 35 }), () =>
+          service.start('reader.open').pipe(Effect.forkChild),
+        )
+
+        yield* Deferred.await(entered)
+        expect(openings).toBe(30)
+        yield* Scope.close(scope, Exit.succeed(undefined))
+        yield* Deferred.succeed(release, undefined)
+
+        for (const attempt of attempts) {
+          const journey = yield* Fiber.join(attempt)
+          yield* journey.finish('succeeded')
+        }
+
+        yield* service.start('navigation')
+      }),
+    ),
+  )
+  expect(openings).toBe(30)
+  expect(outcomes).toEqual(Array.from({ length: 30 }, () => 'canceled'))
 })

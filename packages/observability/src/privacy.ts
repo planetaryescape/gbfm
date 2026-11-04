@@ -72,12 +72,67 @@ const routes = new Set([
   '/dashboard',
   '/dashboard/:section',
   '/profile/:username',
+  '/tweet',
+  '/tweets/:slug',
+  '/labels',
+  '/labels/:slug',
+  '/releases',
+  '/releases/:slug',
+  '/tags',
+  '/tags/:slug',
+  '/djs',
+  '/djs/:slug',
+  '/auth/:action',
+  '/new/:kind',
+  '/about',
+  '/privacy',
+  '/terms',
+  '/changelog',
+  '/subscribe',
+  '/unsubscribe',
+  '/reminders',
+  '/mix-upload',
+  '/api/:endpoint',
+  '/actions/:action',
+  '/:slug',
+  '/unknown',
 ])
 
-const safeSpanName = (value: string | undefined) => {
-  const route = value?.replace(/\/\([^/]+\)/g, '')
+const routePrefixes = new Map(
+  Object.entries({
+    shows: '/shows/:slug',
+    mixes: '/mixes/:slug',
+    tracks: '/tracks/:slug',
+    editorial: '/editorial/:slug',
+    tweets: '/tweets/:slug',
+    tweet: '/tweet/:slug',
+    labels: '/labels/:slug',
+    releases: '/releases/:slug',
+    tags: '/tags/:slug',
+    djs: '/djs/:slug',
+    profile: '/profile/:username',
+    dashboard: '/dashboard/:section',
+    auth: '/auth/:action',
+    new: '/new/:kind',
+    api: '/api/:endpoint',
+    actions: '/actions/:action',
+  }),
+)
 
-  return route && routes.has(route) ? route : safeJourneyName(value)
+const safeSpanName = (value: string | undefined) => {
+  const route = value?.split(/[?#]/)[0]?.replace(/\/\([^/]+\)/g, '')
+
+  if (route && routes.has(route)) return route
+
+  if (route?.startsWith('/')) {
+    const [prefix, ...rest] = route.split('/').filter(Boolean)
+
+    if (prefix && rest.length > 0) return routePrefixes.get(prefix) ?? '/unknown'
+
+    return '/:slug'
+  }
+
+  return safeJourneyName(value)
 }
 
 const safeFrame = (frame: StackFrame): StackFrame => {

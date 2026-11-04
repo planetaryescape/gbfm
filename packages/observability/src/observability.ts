@@ -17,18 +17,17 @@ export type Journey = {
   readonly finish: (outcome: JourneyOutcome) => Effect.Effect<void>
 }
 
+type ExportedJourney = {
+  readonly finish: (
+    outcome: JourneyOutcome,
+    durationMs: number,
+  ) => Effect.Effect<void, ExportUnavailable>
+}
+
 export class JourneyExporter extends Context.Service<
   JourneyExporter,
   {
-    readonly open: (name: JourneyName) => Effect.Effect<
-      {
-        readonly finish: (
-          outcome: JourneyOutcome,
-          durationMs: number,
-        ) => Effect.Effect<void, ExportUnavailable>
-      },
-      ExportUnavailable
-    >
+    readonly open: (name: JourneyName) => Effect.Effect<ExportedJourney, ExportUnavailable>
   }
 >()('@gbfm/observability/JourneyExporter') {}
 
@@ -61,32 +60,61 @@ export const observabilityLayer = Layer.effect(
     const start = Effect.fn('Observability.start')(function* (name: JourneyName) {
       if (closed || pending.size >= 30) return inactive
 
-      const startedAt = yield* clock.monotonicTimeNanos
+      const startedAt = clock.monotonicTimeNanosUnsafe()
+      let exported: ExportedJourney | undefined
+      let completion: { readonly outcome: JourneyOutcome; readonly durationMs: number } | undefined
 
-      const exported = yield* exporter
-        .open(name)
-        .pipe(Effect.catchTag('Observability.ExportUnavailable', () => Effect.succeed(undefined)))
+      const deliver = Effect.suspend(() => {
+        const current = exported
+        const settled = completion
 
-      if (!exported) return inactive
+        if (!current || !settled) return Effect.void
 
-      let finished = false
+        return Effect.suspend(() => current.finish(settled.outcome, settled.durationMs)).pipe(
+          Effect.catchTag('Observability.ExportUnavailable', () => Effect.void),
+          Effect.catchDefect(() => Effect.void),
+        )
+      })
 
       const journey: Journey = {
         finish: Effect.fn('Observability.finish')(function* (outcome: JourneyOutcome) {
-          if (finished) return
-          finished = true
+          if (completion) return
+          completion = {
+            outcome,
+            durationMs: Math.max(
+              0,
+              Number(clock.monotonicTimeNanosUnsafe() - startedAt) / 1_000_000,
+            ),
+          }
           pending.delete(journey)
-          const endedAt = yield* clock.monotonicTimeNanos
-          const durationMs = Math.max(0, Number(endedAt - startedAt) / 1_000_000)
-          yield* exported
-            .finish(outcome, durationMs)
-            .pipe(Effect.catchTag('Observability.ExportUnavailable', () => Effect.void))
+          yield* deliver
         }),
       }
 
       pending.add(journey)
 
-      return journey
+      return yield* Effect.gen(function* () {
+        exported = yield* Effect.suspend(() => exporter.open(name)).pipe(
+          Effect.catchTag('Observability.ExportUnavailable', () => Effect.succeed(undefined)),
+          Effect.catchDefect(() => Effect.succeed(undefined)),
+        )
+
+        if (!exported) {
+          pending.delete(journey)
+
+          return inactive
+        }
+
+        if (completion) {
+          yield* deliver
+
+          return inactive
+        }
+
+        return journey
+      }).pipe(
+        Effect.onExit((exit) => (Exit.isFailure(exit) ? journey.finish('canceled') : Effect.void)),
+      )
     })
 
     return Observability.of({ start })

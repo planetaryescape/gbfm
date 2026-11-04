@@ -4,7 +4,7 @@ Refs #478. The Foldkit browser app uses the existing `gbfm-frontend` project in 
 
 ## Composition and signals
 
-`@gbfm/observability` owns the Effect service, bounded journey contract, timing, terminal-outcome policy, privacy projections and Sentry translation shared with mobile. Only `apps/www/src/observability/sentry.ts` imports the browser SDK. Foldkit's client Resources provide the selected Layer; commands require the service rather than importing an SDK or singleton.
+`@gbfm/observability` owns the Effect service, bounded journey contract, timing, terminal-outcome policy, privacy projections and Sentry translation shared with mobile. Only the WWW production adapter, `apps/www/src/observability/sentry.ts`, imports the browser SDK; shared adapter tests also import it to exercise the real transport. Foldkit's client Resources provide the selected Layer; commands require the service rather than importing an SDK or singleton.
 
 `Navigation.Load` observes `navigation` from the start of the page-data request to its final success/failure/interruption, before conversion into Foldkit Messages. This is **request completion**, not committed content, final paint or a completed reader visit. The original value, typed error and interruption are preserved. Cancellations do not create incidents. Failed operations create `NavigationFailed` with a reviewed safe message. Duration and completion metrics use the same instruments as mobile, in the separate web project.
 

@@ -23,5 +23,7 @@ test('the browser adapter delivers bounded signals without changing success or f
   const payload = envelopes.join('\n')
   expect(payload).toContain('gbfm.journey.completed')
   expect(payload).toContain('gbfm.journey.duration')
+  expect(payload).toContain('"gbfm.outcome":"succeeded"')
+  expect(payload).toContain('"gbfm.outcome":"failed"')
   expect(payload).not.toContain('synthetic-secret-do-not-export')
 })

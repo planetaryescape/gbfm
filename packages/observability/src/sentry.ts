@@ -1,5 +1,5 @@
 import type * as Sentry from '@sentry/core'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Result } from 'effect'
 
 import { ExportUnavailable, JourneyExporter } from './observability'
 
@@ -28,30 +28,46 @@ export const sentryExporterLayer = (client: SentryClient) =>
 
           return {
             finish: (outcome, durationMs) =>
-              Effect.try({
-                try: () => {
-                  span.setAttribute('gbfm.outcome', outcome)
-                  span.setStatus({ code: outcome === 'failed' ? 2 : 1 })
-                  span.end()
-                  client.addBreadcrumb({
-                    category: 'gbfm.journey',
-                    message: name,
-                    data: { outcome },
-                  })
-                  const attributes = { operation: name, outcome }
-                  client.metrics.count('gbfm.journey.completed', 1, { attributes })
-                  client.metrics.distribution('gbfm.journey.duration', durationMs, {
-                    unit: 'millisecond',
-                    attributes,
-                  })
+              Effect.gen(function* () {
+                const attributes = { operation: name, outcome }
 
-                  if (outcome === 'failed') {
-                    const error = new Error('Application operation failed')
-                    error.name = failureNames[name]
-                    client.captureException(error)
-                  }
-                },
-                catch: () => new ExportUnavailable(),
+                const signals = [
+                  () => span.setAttribute('gbfm.outcome', outcome),
+                  () => span.setStatus({ code: outcome === 'failed' ? 2 : 1 }),
+                  () => span.end(),
+                  () =>
+                    client.addBreadcrumb({
+                      category: 'gbfm.journey',
+                      message: name,
+                      data: { outcome },
+                    }),
+                  () => client.metrics.count('gbfm.journey.completed', 1, { attributes }),
+                  () =>
+                    client.metrics.distribution('gbfm.journey.duration', durationMs, {
+                      unit: 'millisecond',
+                      attributes,
+                    }),
+                  () => {
+                    if (outcome === 'failed') {
+                      const error = new Error('Application operation failed')
+                      error.name = failureNames[name]
+                      client.captureException(error)
+                    }
+                  },
+                ]
+
+                const results = yield* Effect.forEach(signals, (signal) =>
+                  Effect.try({
+                    try: signal,
+                    catch: () => new ExportUnavailable(),
+                  }).pipe(Effect.result),
+                )
+
+                for (const result of results) {
+                  if (Result.isFailure(result)) return yield* result.failure
+                }
+
+                return undefined
               }),
           }
         },

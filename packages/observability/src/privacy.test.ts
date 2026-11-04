@@ -98,3 +98,20 @@ test('behavior metrics keep bounded dimensions and drop ambient identity and oth
   expect(JSON.stringify(metric)).not.toContain(secret)
   expect(safeMetric({ name: secret, value: 1, type: 'counter' })).toBeNull()
 })
+
+test('browser and native route spans preserve bounded templates without concrete paths or queries', () => {
+  const cases: Array<readonly [string, string]> = [
+    [`/labels/${secret}?token=${secret}`, '/labels/:slug'],
+    [`/auth/${secret}`, '/auth/:action'],
+    [`/new/${secret}`, '/new/:kind'],
+    ['/privacy', '/privacy'],
+    ['/subscribe', '/subscribe'],
+    ['/(tabs)/tweet/[slug]', '/tweet/[slug]'],
+  ]
+
+  for (const [transaction, expected] of cases) {
+    const event = sanitizeTransaction({ type: 'transaction', transaction })
+    expect(event.transaction).toBe(expected)
+    expect(JSON.stringify(event)).not.toContain(secret)
+  }
+})

@@ -96,7 +96,7 @@ export const Message = defineMessageUnion({
   LocalSaveFailed: { editorId: Schema.String, revision: Schema.Number, message: Schema.String },
   LocalSaveReconciled: { owner: SaveOwner },
   LocalSaveReconcileFailed: { owner: SaveOwner, message: Schema.String },
-  Failed: { operation: Schema.String, message: Schema.String },
+  Failed: { operation: Schema.String, editorId: Schema.String, message: Schema.String },
   Hydrated: {
     draft: Schema.NullOr(Draft),
     creators: Schema.Array(CreatorIdentity),

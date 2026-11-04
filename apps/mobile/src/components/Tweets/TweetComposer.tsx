@@ -93,7 +93,7 @@ export function TweetComposer({
   })
 
   const cancel = () => {
-    if (controls.cleanupPending || controls.requiresThreadCheck) {
+    if (!controls.editable) {
       requestRemoval(close)
 
       return
@@ -146,11 +146,13 @@ export function TweetComposer({
         disabled={!controls.canSubmit}
         onCancel={cancel}
         onSubmit={() => {
-          if (controls.requiresThreadCheck && replyTo) {
+          const recoveryTarget = replyTo ?? draft?.slug
+
+          if (controls.requiresThreadCheck && recoveryTarget) {
             leave(() =>
               router.replace({
                 pathname: '/(tabs)/(tweets)/tweet/[slug]',
-                params: { slug: replyTo },
+                params: { slug: recoveryTarget },
               }),
             )
 

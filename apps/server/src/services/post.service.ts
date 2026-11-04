@@ -2662,15 +2662,16 @@ const updateEffect = (
 
     if (creatorIds && creatorIds.length > 0) {
       yield* Effect.tryPromise({
-        try: async () => {
-          await db.delete(postCreators).where(eq(postCreators.postId, updatedPost.id))
-          await db.insert(postCreators).values(
-            creatorIds.map((creatorId) => ({
-              postId: updatedPost.id,
-              creatorId,
-            })),
-          )
-        },
+        try: () =>
+          db.batch([
+            db.delete(postCreators).where(eq(postCreators.postId, updatedPost.id)),
+            db.insert(postCreators).values(
+              creatorIds.map((creatorId) => ({
+                postId: updatedPost.id,
+                creatorId,
+              })),
+            ),
+          ]),
         catch: (error) =>
           new DatabaseError({
             message: `Failed to update creators: ${getErrorMessage(error)}`,

@@ -1,4 +1,5 @@
 import type { SpotifyEntityRef } from '@gbfm/spotify'
+import { Effect } from 'effect'
 
 import type { SpotifyConnectionLifecycle } from './connectionLifecycle'
 import { spotifyEntityOperation } from './entityOperation'
@@ -56,15 +57,19 @@ export const runSpotifyEntityAction = async (input: {
   try {
     await input.lifecycle.run(
       session,
-      spotifyEntityOperation(
-        input.entity,
-        input.action,
-        (message) => {
-          if (owns()) input.notice(message)
-        },
-        () => {
-          if (owns()) input.open()
-        },
+      Effect.suspend(() =>
+        owns()
+          ? spotifyEntityOperation(
+              input.entity,
+              input.action,
+              (message) => {
+                if (owns()) input.notice(message)
+              },
+              () => {
+                if (owns()) input.open()
+              },
+            )
+          : Effect.void,
       ),
     )
   } catch {

@@ -10,6 +10,7 @@ import {
   AuthSessionStorage,
   AuthStorageFailed,
   currentAuthSession,
+  makeAuthSessionStorage,
   type AuthSession,
   type SetAuthLifecycle,
 } from './authLifecycle'
@@ -45,7 +46,7 @@ const fixture = (response: Response, writeGate: Effect.Effect<void> = Effect.voi
   const navigation: Array<string> = []
   const events: Array<string> = []
 
-  const storage = AuthSessionStorage.of({
+  const storage = makeAuthSessionStorage({
     read: Effect.succeed(null),
     write: (session) =>
       Effect.gen(function* () {

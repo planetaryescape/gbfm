@@ -70,22 +70,31 @@ describe('dashboard Spotify ownership', () => {
   })
 
   it('reads status after callback/connect and correlates failures', async () => {
+    let connected = false
+    const connectedStatus = { connected: true, name: 'Fixture account' }
+
     const service = SpotifyConnection.of({
-      status: Effect.succeed(disconnected),
-      connect: Effect.void,
-      completeCallback: Effect.void,
+      status: Effect.sync(() => (connected ? connectedStatus : disconnected)),
+      connect: Effect.sync(() => {
+        connected = true
+      }),
+      completeCallback: Effect.sync(() => {
+        connected = true
+      }),
       disconnect: Effect.fail(new SpotifyConnectionError({ message: 'Disconnect failed' })),
       playback: () => Effect.succeed('unused'),
     })
 
     for (const action of ['connect', 'completeCallback'] as const) {
+      connected = false
+
       const result = await Effect.runPromise(
         SpotifyRequest({ action, requestId: 1 }).effect.pipe(
           Effect.provideService(SpotifyConnection, service),
         ),
       )
 
-      expect(result).toEqual(Message.SpotifyLoaded({ requestId: 1, status: disconnected }))
+      expect(result).toEqual(Message.SpotifyLoaded({ requestId: 1, status: connectedStatus }))
     }
 
     const failed = await Effect.runPromise(

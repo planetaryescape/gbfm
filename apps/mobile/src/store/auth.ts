@@ -1,3 +1,4 @@
+/* oxlint-disable effecttsgo/strict-effect-provide -- Auth hooks compose the shared SecureStore value layer, which has no scoped resources. */
 import { useAtomMount, useAtomSet, useAtomValue } from '@effect/atom-react'
 import { Effect } from 'effect'
 import * as Atom from 'effect/reactivity/Atom'
@@ -9,10 +10,11 @@ import { getSession, SessionExpired, SessionUnavailable } from '@/api/auth'
 import {
   acceptAuthSession,
   AuthLifecycle,
-  AuthSessionStorage,
+  AuthSessionStorageLayer,
   AuthSessionValidation,
   AuthStorageFailed,
   clearAuthSession,
+  currentAuthIdentity,
   currentAuthSession,
   restoreAuthSession,
   type AuthSession,
@@ -22,7 +24,7 @@ export type { AuthSession } from './authLifecycle'
 
 const storageKey = 'gbfm.auth-session'
 
-const storage = AuthSessionStorage.of({
+const storage = AuthSessionStorageLayer({
   read: Effect.tryPromise({
     try: () => SecureStore.getItemAsync(storageKey),
     catch: () => new AuthStorageFailed({ message: 'Could not read the saved session.' }),
@@ -46,13 +48,15 @@ const authReady = Atom.make(false).pipe(Atom.keepAlive)
 
 export const useAuthReady = () => useAtomValue(authReady)
 
+export const useAuthIdentity = () => useAtomValue(lifecycle, currentAuthIdentity)
+
 const makeRestoreAuthAtom = (
   setState: (state: AuthLifecycle | ((current: AuthLifecycle) => AuthLifecycle)) => void,
   setReady: (ready: boolean) => void,
 ) =>
   Atom.make(
     restoreAuthSession(setState).pipe(
-      Effect.provideService(AuthSessionStorage, storage),
+      Effect.provide(storage),
       Effect.provideService(AuthSessionValidation, {
         validate: (token) =>
           getSession(token).pipe(
@@ -90,11 +94,11 @@ export const useSetAuth = () => {
   const setState = useAtomSet(lifecycle)
 
   return (session: AuthSession) =>
-    acceptAuthSession(session, setState).pipe(Effect.provideService(AuthSessionStorage, storage))
+    acceptAuthSession(session, setState).pipe(Effect.provide(storage))
 }
 
 export const useClearAuth = () => {
   const setState = useAtomSet(lifecycle)
 
-  return () => clearAuthSession(setState).pipe(Effect.provideService(AuthSessionStorage, storage))
+  return () => clearAuthSession(setState).pipe(Effect.provide(storage))
 }

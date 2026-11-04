@@ -1,4 +1,5 @@
 import { MicroPostScreenRepliesResponse } from '@gbfm/api/post'
+import { observeJourney } from '@gbfm/observability'
 import { SiteMetadata } from '@gbfm/site-metadata'
 import { Effect, Schema } from 'effect'
 import { Command, Dom, Navigation } from 'foldkit'
@@ -172,7 +173,7 @@ export const LoadPage = Command.define('Navigation.Load', {
   messages: [Message.LoadedPage, Message.FailedPage],
   execute: ({ href, navigationId }) =>
     Effect.sync(() => window.dispatchEvent(new Event('gbfm:navigation-start'))).pipe(
-      Effect.andThen(fetchPage(href)),
+      Effect.andThen(observeJourney('navigation', fetchPage(href))),
       Effect.ensuring(
         Effect.sync(() => {
           requestAnimationFrame(() =>

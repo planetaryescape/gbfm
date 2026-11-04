@@ -1,0 +1,29 @@
+{
+  "name": "@gbfm/observability",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/observability.ts",
+    "./callbacks": "./src/callbacks.ts",
+    "./reader": "./src/reader.ts",
+    "./playback": "./src/playback.ts",
+    "./sentry": "./src/sentry.ts",
+    "./privacy": "./src/privacy.ts",
+    "./config": "./src/config.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "effect": "4.0.6",
+    "@sentry/core": "10.77.1"
+  },
+  "devDependencies": {
+    "@sentry/browser": "10.77.1",
+    "@types/bun": "1.4.4",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}

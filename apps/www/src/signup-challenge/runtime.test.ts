@@ -272,18 +272,27 @@ describe('signup challenge runtime', () => {
     expect(f.requests).toHaveLength(1)
   })
 
-  it('preserves retry and token replacement while a request is pending', async () => {
-    const f = fixture()
-    f.widgets[0]?.callback('first')
-    const pending = f.runtime.submit()
-    f.runtime.retry()
-    f.widgets[0]?.callback('replacement')
-    await f.runtime.submit()
-    expect(f.requests).toHaveLength(1)
-    f.requests[0]?.reject(new Error('fixture network failure'))
-    await pending
-    await f.runtime.submit()
-    expect(f.requests).toHaveLength(1)
-    expect(f.statuses.at(-1)).toBe('failed')
-  })
+  it.each(['rejection', 'response'])(
+    'retains a replacement token when the old submission fails by %s',
+    async (failure) => {
+      const f = fixture()
+      f.widgets[0]?.callback('first')
+      const pending = f.runtime.submit()
+      f.runtime.retry()
+      f.widgets[0]?.callback('replacement')
+      await f.runtime.submit()
+      expect(f.requests).toHaveLength(1)
+
+      if (failure === 'rejection') f.requests[0]?.reject(new Error('fixture network failure'))
+      else f.requests[0]?.resolve(new Response('', { status: 400 }))
+      await pending
+      expect(f.statuses.at(-1)).toBe('ready')
+      const replacement = f.runtime.submit()
+      expect(f.requests.map(({ token }) => token)).toEqual(['first', 'replacement'])
+      f.requests[1]?.resolve(new Response('', { status: 400 }))
+      await replacement
+      expect(f.statuses.at(-1)).toBe('failed')
+      f.runtime.dispose()
+    },
+  )
 })

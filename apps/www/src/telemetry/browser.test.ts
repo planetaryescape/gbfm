@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { Metric } from 'web-vitals'
 
-import { createTelemetryBatcher } from './browser'
+import { createTelemetryBatcher, startBrowserTelemetry } from './browser'
 import {
   decodeBrowserTelemetryBatch,
   MAX_BATCH_EVENTS,
@@ -54,7 +55,7 @@ describe('telemetry batch scheduling', () => {
     expect(timers).toHaveLength(2)
   })
 
-  it('flushes at the size limit and retains the existing old-timer behavior', () => {
+  it('does not let the size-flushed batch timer flush its replacement', () => {
     const { batcher, bodies, timers } = fixture()
 
     for (let index = 0; index < MAX_BATCH_EVENTS; index += 1) batcher.add(event)
@@ -65,7 +66,7 @@ describe('telemetry batch scheduling', () => {
     batcher.add(event)
     expect(timers).toHaveLength(2)
     timers[0]?.run()
-    expect(bodies).toHaveLength(2)
+    expect(bodies).toHaveLength(1)
     timers[1]?.run()
     expect(bodies).toHaveLength(2)
   })
@@ -79,9 +80,84 @@ describe('telemetry batch scheduling', () => {
     batcher.add(event)
     timers[0]?.run()
     await Promise.resolve()
+    expect(bodies).toHaveLength(1)
+    timers[1]?.run()
     expect(bodies).toHaveLength(2)
     expect(fetches).toEqual(bodies)
     batcher.flush()
     expect(bodies).toHaveLength(2)
   })
+})
+
+it('flushes once on disposal and ignores later vital and navigation callbacks', async () => {
+  const bodies: Array<Blob> = []
+
+  let reportVital: (metric: Metric) => void = () => {
+    throw new Error('Expected vital registration')
+  }
+
+  let afterNavigation: (route: { readonly pathname: string }) => void = () => {
+    throw new Error('Expected navigation subscription')
+  }
+
+  let stopped = 0
+  vi.useFakeTimers()
+  vi.stubGlobal('window', new EventTarget())
+  vi.stubGlobal('document', new EventTarget())
+  vi.stubGlobal('navigator', {
+    sendBeacon: (_endpoint: string, body: Blob) => {
+      bodies.push(body)
+
+      return true
+    },
+  })
+  vi.stubGlobal('localStorage', {
+    getItem: () =>
+      JSON.stringify({ id: '0123456789abcdef0123456789abcdef', createdAt: Date.now() }),
+    setItem: () => undefined,
+  })
+
+  try {
+    const dispose = startBrowserTelemetry({
+      release: 'fixture',
+      sampleRate: 1,
+      navigation: {
+        current: () => ({ pathname: '/' }),
+        subscribe: ({ after }) => {
+          afterNavigation = after
+
+          return () => {
+            stopped += 1
+          }
+        },
+      },
+      observeVitals: (report) => {
+        reportVital = report
+      },
+    })
+
+    const metric: Metric = {
+      name: 'LCP',
+      value: 125,
+    }
+
+    reportVital(metric)
+    dispose()
+    dispose()
+    expect(stopped).toBe(1)
+    expect(bodies).toHaveLength(1)
+    const body = bodies[0]
+
+    if (!body) throw new Error('Expected the disposal batch')
+    expect(decodeBrowserTelemetryBatch(JSON.parse(await body.text())).events).toHaveLength(2)
+    reportVital(metric)
+    await vi.runAllTimersAsync()
+    expect(bodies).toHaveLength(1)
+    afterNavigation({ pathname: '/mixes' })
+    await vi.runAllTimersAsync()
+    expect(bodies).toHaveLength(1)
+  } finally {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  }
 })

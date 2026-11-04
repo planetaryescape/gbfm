@@ -80,7 +80,7 @@ export function SettingsRow({
           {value}
         </Text>
       ) : null}
-      {onPress ? (
+      {onPress && !destructive ? (
         <Text
           accessibilityElementsHidden
           importantForAccessibility='no'

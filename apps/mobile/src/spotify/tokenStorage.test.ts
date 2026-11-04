@@ -2,6 +2,44 @@ import { expect, test } from 'vitest'
 
 import { spotifyTokenStorage } from './tokenStorage'
 
+test('hydrates stored tokens on the ordinary success path', async () => {
+  const tokens = spotifyTokenStorage({
+    read: async () => 'old tokens',
+    write: async () => {},
+    remove: async () => {},
+  })
+
+  await tokens.hydrate()
+  expect(tokens.storage.getItem('spotify-effect:tokens')).toBe('old tokens')
+})
+
+test('stale SDK deletion is fenced while explicit invalidation remains unconditional', async () => {
+  let persisted: string | null = null
+
+  const tokens = spotifyTokenStorage({
+    read: async () => persisted,
+    write: async (value) => {
+      persisted = value
+    },
+    remove: async () => {
+      persisted = null
+    },
+  })
+
+  tokens.storage.setItem('spotify-effect:tokens', 'replacement tokens')
+  await tokens.settled()
+  tokens.guardWrites(() => false)
+  tokens.storage.removeItem('spotify-effect:tokens')
+  tokens.storage.clear()
+  await tokens.settled()
+  expect(tokens.storage.getItem('spotify-effect:tokens')).toBe('replacement tokens')
+  expect(persisted).toBe('replacement tokens')
+  tokens.invalidate()
+  await tokens.settled()
+  expect(tokens.storage.getItem('spotify-effect:tokens')).toBeNull()
+  expect(persisted).toBeNull()
+})
+
 test('token persistence orders a pending write before disconnect deletion and rejects stale SDK writes', async () => {
   const started = Promise.withResolvers<void>()
   const release = Promise.withResolvers<void>()

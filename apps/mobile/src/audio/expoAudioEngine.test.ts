@@ -67,6 +67,7 @@ const makePlayer = (play: () => void): ExpoAudioEnginePlayer => {
     clearLockScreenControls: () => undefined,
     setActiveForLockScreen: () => undefined,
     addListener: () => ({ remove: () => undefined }),
+    remove: () => undefined,
   }
 }
 
@@ -77,11 +78,12 @@ test('translates a platform play failure into PlaybackRejected without hiding it
     throw failure
   })
 
-  const runtime = ManagedRuntime.make(ExpoAudioEngineLayer(player, 'native'))
+  const runtime = ManagedRuntime.make(ExpoAudioEngineLayer(() => player, 'native'))
 
   const error = await runtime.runPromise(
     Effect.gen(function* () {
       const engine = yield* AudioEngine
+      yield* engine.replace('https://cdn.example/track.mp3', 1)
 
       return yield* Effect.flip(engine.play)
     }),
@@ -96,7 +98,7 @@ test('translates a platform play failure into PlaybackRejected without hiding it
 test('drives player settings and source state through a complete replace-and-reset workflow', async () => {
   const player = makePlayer(() => undefined)
 
-  const runtime = ManagedRuntime.make(ExpoAudioEngineLayer(player, 'native'))
+  const runtime = ManagedRuntime.make(ExpoAudioEngineLayer(() => player, 'native'))
 
   const statuses = await runtime.runPromise(
     Effect.gen(function* () {

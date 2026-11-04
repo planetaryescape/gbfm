@@ -7,6 +7,8 @@ import { CreatorDraftSchema as Draft, CreatorIdentity, MusicReference } from './
 
 export const Kind = Schema.Literals(['micro', 'post', 'mix'])
 
+export const SaveOwner = Schema.Struct({ editorId: Schema.String, requestId: Schema.Number })
+
 export const MosaicState = Schema.TaggedUnion({
   Idle: {},
   Generating: { content: Schema.String },
@@ -15,6 +17,15 @@ export const MosaicState = Schema.TaggedUnion({
 })
 
 export const Model = Schema.Struct({
+  editorId: Schema.String,
+  localDraftKey: Schema.String,
+  revision: Schema.Number,
+  saveRequestId: Schema.Number,
+  remoteSave: Schema.NullOr(
+    Schema.Struct({ owner: SaveOwner, revision: Schema.Number, draft: Draft }),
+  ),
+  localError: Schema.NullOr(Schema.String),
+  postMusicRequestId: Schema.Number,
   draft: Draft,
   reviewDialog: Dialog.Model,
   creatorId: Schema.String,

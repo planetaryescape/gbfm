@@ -1,4 +1,5 @@
 import { useAtomSet, useAtomValue } from '@effect/atom-react'
+import { readerJourney } from '@gbfm/observability/reader'
 import { Effect, Redacted } from 'effect'
 import * as Atom from 'effect/reactivity/Atom'
 import { useFocusEffect } from 'expo-router'
@@ -13,6 +14,7 @@ import {
   TweetReaderUnavailable,
 } from '@/api/tweetReader'
 import { env } from '@/env'
+import { useJourneys } from '@/observability/context'
 
 import { readerAction } from './readerAction'
 import { readerCache, type ReaderCache } from './readerCache'
@@ -150,6 +152,18 @@ export function useTweetReader(
 
   const [state, dispatch] = useReducer(reduceReader, initialReaderState)
   const [ownership] = useState(readerOwnership)
+  const journeys = useJourneys()
+  const [journey] = useState(() => readerJourney(journeys))
+
+  useEffect(
+    () =>
+      journey.committed({
+        request: state.request,
+        status: state.status,
+        hasContent: Boolean(state.screen),
+      }),
+    [journey, state.request, state.status, state.screen],
+  )
 
   useFocusEffect(
     useCallback(() => {
@@ -166,6 +180,7 @@ export function useTweetReader(
       }
 
       const { controller, request } = ownership.focus()
+      const cancelJourney = journey.start(request)
       dispatch(ReaderEvent.Started({ request }))
 
       const load = loadVisit({
@@ -186,9 +201,10 @@ export function useTweetReader(
       })
 
       return () => {
+        cancelJourney()
         ownership.blur(controller)
       }
-    }, [identity, sessionToken, initialSlug, target, remember, ownership]),
+    }, [identity, sessionToken, initialSlug, target, remember, ownership, journey]),
   )
 
   const go = (target: string | null) => {

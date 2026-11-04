@@ -28,6 +28,7 @@ import { ComposerFooter } from './ComposerFooter'
 import { ComposerHeader } from './ComposerHeader'
 import { ComposerInput } from './ComposerInput'
 import { ComposerMusicPreview } from './ComposerMusicPreview'
+import { ComposerRecovery } from './ComposerRecovery'
 import { ComposerTagSuggestions } from './ComposerTagSuggestions'
 
 export function TweetComposer({
@@ -93,7 +94,7 @@ export function TweetComposer({
   })
 
   const cancel = () => {
-    if (controls.cleanupPending || controls.requiresThreadCheck) {
+    if (!controls.editable) {
       requestRemoval(close)
 
       return
@@ -146,11 +147,13 @@ export function TweetComposer({
         disabled={!controls.canSubmit}
         onCancel={cancel}
         onSubmit={() => {
-          if (controls.requiresThreadCheck && replyTo) {
+          const recoveryTarget = replyTo ?? draft?.slug
+
+          if (controls.requiresThreadCheck && recoveryTarget) {
             leave(() =>
               router.replace({
                 pathname: '/(tabs)/(tweets)/tweet/[slug]',
-                params: { slug: replyTo },
+                params: { slug: recoveryTarget },
               }),
             )
 
@@ -186,6 +189,11 @@ export function TweetComposer({
                 loading={controls.editable && composer.musicLoading}
                 onDismiss={controls.editable ? composer.dismissMusic : undefined}
               />
+              <ComposerRecovery
+                publication={composer.publication}
+                busy={busy}
+                onRecover={composer.recover}
+              />
             </ScrollView>
             <ComposerFooter
               length={tweetLength(draft.text)}
@@ -200,6 +208,11 @@ export function TweetComposer({
               <>
                 <ComposerFooter length={0} status={status} saveLabel={null} onSave={close} />
                 <ComposerButton label='Retry' onPress={composer.retry} />
+                <ComposerRecovery
+                  publication={composer.publication}
+                  busy={busy}
+                  onRecover={composer.recover}
+                />
               </>
             ) : (
               <ActivityIndicator color={colors.accent} />

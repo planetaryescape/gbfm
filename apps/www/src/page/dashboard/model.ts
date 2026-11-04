@@ -28,6 +28,10 @@ export const Model = Schema.Struct({
   toggles: Schema.Record(Schema.String, Schema.Boolean),
   error: Schema.NullOr(Schema.String),
   spotify: SpotifyStatus,
+  spotifyRequestId: Schema.Number,
+  spotifyPending: Schema.NullOr(
+    Schema.Literals(['status', 'connect', 'disconnect', 'completeCallback']),
+  ),
   telemetry: DashboardDocument.fields.telemetry,
   users: DashboardDocument.fields.users,
   subscribers: DashboardDocument.fields.subscribers,

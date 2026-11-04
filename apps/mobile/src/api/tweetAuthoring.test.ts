@@ -1,6 +1,6 @@
 import { PostResponse } from '@gbfm/api/post'
 import { Effect, Redacted } from 'effect'
-import { HttpClient, HttpClientResponse } from 'effect/http'
+import { HttpClient, HttpClientResponse, HttpClientError } from 'effect/http'
 import { HttpApiError } from 'effect/http-api'
 import { expect, test } from 'vitest'
 
@@ -11,6 +11,8 @@ import {
   publishReply,
   saveTweet,
   type AuthoringConnection,
+  TweetAuthoringFailed,
+  TweetAuthoringUncertain,
 } from './tweetAuthoring'
 
 const post = PostResponse.make({
@@ -141,6 +143,62 @@ test('malformed success payloads and transport failures remain typed failures', 
   expect(
     await Effect.runPromise(saveTweet(unavailable.connection, draft, true).pipe(Effect.isFailure)),
   ).toBe(true)
+})
+
+test('typed refusals remain definitive while transport and malformed success remain uncertain', async () => {
+  for (const refused of [
+    new HttpApiError.Unauthorized(),
+    new HttpApiError.Forbidden(),
+    new HttpApiError.BadRequest(),
+    new HttpApiError.NotFound(),
+  ]) {
+    const status =
+      refused instanceof HttpApiError.Unauthorized
+        ? 401
+        : refused instanceof HttpApiError.Forbidden
+          ? 403
+          : refused instanceof HttpApiError.NotFound
+            ? 404
+            : 400
+
+    const server = fixture(() => Response.json(refused, { status }))
+
+    const error = await Effect.runPromise(
+      publishReply(server.connection, 'parent', draft).pipe(Effect.flip),
+    )
+
+    expect(error).toBeInstanceOf(TweetAuthoringFailed)
+  }
+
+  const malformed = fixture(() => Response.json({ slug: 'already-created' }))
+  expect(
+    await Effect.runPromise(publishReply(malformed.connection, 'parent', draft).pipe(Effect.flip)),
+  ).toBeInstanceOf(TweetAuthoringUncertain)
+
+  const connection = {
+    ...malformed.connection,
+    httpClient: HttpClient.make((request) =>
+      Effect.fail(
+        new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({ request }),
+        }),
+      ),
+    ),
+  }
+
+  expect(
+    await Effect.runPromise(publishReply(connection, 'parent', draft).pipe(Effect.flip)),
+  ).toBeInstanceOf(TweetAuthoringUncertain)
+
+  const failedServer = fixture(() =>
+    Response.json(new HttpApiError.InternalServerError(), { status: 500 }),
+  )
+
+  expect(
+    await Effect.runPromise(
+      publishReply(failedServer.connection, 'parent', draft).pipe(Effect.flip),
+    ),
+  ).toBeInstanceOf(TweetAuthoringUncertain)
 })
 
 test('reply retries are independent creates, not slug-conflict recovery', async () => {

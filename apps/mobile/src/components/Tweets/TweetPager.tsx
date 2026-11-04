@@ -5,7 +5,7 @@ import { FlatList, View } from 'react-native'
 
 import type { Tweet } from '@/api/tweets'
 import { haptics } from '@/feedback/haptics'
-import { useAuthStore } from '@/store/auth'
+import { useAuthIdentity, useAuthStore } from '@/store/auth'
 import { readReaderPosition } from '@/tweets/readerPosition'
 import { useReadingProgress } from '@/tweets/useReadingProgress'
 import { useTweetFeed } from '@/tweets/useTweetFeed'
@@ -115,14 +115,22 @@ function Pages({
 
 export function TweetPager() {
   const [attempt, setAttempt] = useState(0)
+  const identity = useAuthIdentity()
 
-  return <Feed key={attempt} onRetry={() => setAttempt((value) => value + 1)} />
+  if (identity === null) return <TweetsStatus kind='loading' />
+
+  return (
+    <Feed
+      key={`${identity}:${attempt}`}
+      identity={identity}
+      onRetry={() => setAttempt((value) => value + 1)}
+    />
+  )
 }
 
 const RESUME_LIMIT = 300
 
-function Feed({ onRetry }: { readonly onRetry: () => void }) {
-  const identity = useAuthStore((auth) => auth.user?.id ?? 'anonymous')
+function Feed({ identity, onRetry }: { readonly identity: string; readonly onRetry: () => void }) {
   const sessionToken = useAuthStore((auth) => auth.sessionToken)
   const saved = useAtomValue(checkpoints)
   const [startSlug] = useState(() => saved[identity] ?? readReaderPosition(identity))

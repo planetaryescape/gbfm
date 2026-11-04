@@ -18,13 +18,22 @@ export type Services =
   | ApiKeys.KeyService
 
 export const SpotifyRequest = Command.define('Spotify.Connection', {
-  args: { action: Schema.Literals(['status', 'connect', 'disconnect', 'completeCallback']) },
-  messages: [Message.SpotifyLoaded, Message.Failed],
-  execute: ({ action }) =>
+  args: {
+    action: Schema.Literals(['status', 'connect', 'disconnect', 'completeCallback']),
+    requestId: Schema.Number,
+  },
+  messages: [Message.SpotifyLoaded, Message.SpotifyFailed],
+  execute: ({ action, requestId }) =>
     SpotifyConnection.pipe(
-      Effect.flatMap((service) => service[action]),
-      Effect.map((status) => Message.SpotifyLoaded({ status: status ?? disconnected })),
-      Effect.catch((error) => Effect.succeed(Message.Failed({ message: error.message }))),
+      Effect.flatMap((service) =>
+        action === 'connect' || action === 'completeCallback'
+          ? service[action].pipe(Effect.andThen(service.status))
+          : service[action],
+      ),
+      Effect.map((status) => Message.SpotifyLoaded({ requestId, status: status ?? disconnected })),
+      Effect.catch((error) =>
+        Effect.succeed(Message.SpotifyFailed({ requestId, message: error.message })),
+      ),
     ),
 })
 

@@ -2,8 +2,15 @@ import { Effect, Schema } from 'effect'
 
 import { LocalStorageFailed, readLocal, removeLocal, writeLocal } from '@/store/localStorage'
 
+import { receiptStorageFromLocal } from './composerReceipts'
 import { StoredTweetDraft, type TweetDraft, normalizeStoredDraft } from './draft'
 import { restoreDraft, TweetDraftStorage } from './draftRestore'
+
+export const composerReceiptStorage = receiptStorageFromLocal({
+  read: readLocal,
+  write: writeLocal,
+  remove: removeLocal,
+})
 
 const draftKey = (identity: string) => `gbfm-tweet-draft-${encodeURIComponent(identity)}.json`
 

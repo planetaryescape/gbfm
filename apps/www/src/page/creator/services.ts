@@ -27,6 +27,79 @@ export const CreatorDraftSchema = Schema.Struct({
 
 export type CreatorDraft = typeof CreatorDraftSchema.Type
 
+const sameDraft = Schema.toEquivalence(CreatorDraftSchema)
+
+export const reconcileStoredDraft = (
+  storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>,
+  key: string,
+  saved: CreatorDraft,
+  remote: { readonly id: string; readonly slug: string },
+  retained: CreatorDraft | null = null,
+) =>
+  Effect.gen(function* () {
+    const failure = () =>
+      new CreatorStorageError({
+        operation: 'reconcile',
+        message: 'Remote save succeeded, but the local draft could not be reconciled.',
+      })
+
+    const value = yield* Effect.try({ try: () => storage.getItem(key), catch: failure })
+
+    if (value === null) {
+      if (retained)
+        yield* Effect.try({
+          try: () => {
+            if (storage.getItem(key) === null)
+              storage.setItem(
+                key,
+                JSON.stringify({
+                  ...retained,
+                  slug: retained.slug === saved.slug ? remote.slug : retained.slug,
+                  editSlug: remote.slug,
+                  postId: retained.kind === 'mix' ? undefined : remote.id,
+                }),
+              )
+          },
+          catch: failure,
+        })
+
+      return
+    }
+
+    const current = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(CreatorDraftSchema))(
+      value,
+    ).pipe(Effect.mapError(failure))
+
+    yield* Effect.try({
+      try: () => {
+        if (storage.getItem(key) !== value) return
+
+        if (
+          current.kind !== saved.kind ||
+          current.editSlug !== saved.editSlug ||
+          current.postId !== saved.postId
+        )
+          return
+        const matches = sameDraft(current, saved)
+
+        if (matches && !retained) storage.removeItem(key)
+        else {
+          const latest = retained ?? current
+          storage.setItem(
+            key,
+            JSON.stringify({
+              ...latest,
+              slug: latest.slug === saved.slug ? remote.slug : latest.slug,
+              editSlug: remote.slug,
+              postId: latest.kind === 'mix' ? undefined : remote.id,
+            }),
+          )
+        }
+      },
+      catch: failure,
+    })
+  })
+
 export class CreatorRequestError extends Data.TaggedError('CreatorRequestError')<{
   readonly operation: string
   readonly status: number | null
@@ -34,7 +107,7 @@ export class CreatorRequestError extends Data.TaggedError('CreatorRequestError')
 }> {}
 
 export class CreatorStorageError extends Data.TaggedError('CreatorStorageError')<{
-  readonly operation: 'read' | 'write' | 'clear'
+  readonly operation: 'read' | 'write' | 'clear' | 'reconcile'
   readonly message: string
 }> {}
 
@@ -90,7 +163,12 @@ export interface CreatorOperations {
     key: string,
     draft: CreatorDraft,
   ) => Effect.Effect<void, CreatorStorageError>
-  readonly clearLocalDraft: (key: string) => Effect.Effect<void, CreatorStorageError>
+  readonly reconcileLocalDraft: (
+    key: string,
+    saved: CreatorDraft,
+    remote: { readonly id: string; readonly slug: string },
+    retained: CreatorDraft | null,
+  ) => Effect.Effect<void, CreatorStorageError>
   readonly loadEditable: (
     kind: CreatorKind,
     slug: string,
@@ -337,11 +415,8 @@ export const CreatorServiceLive = Layer.succeed(CreatorService, {
       try: () => localStorage.setItem(draftKey(key), JSON.stringify(draft)),
       catch: (cause) => new CreatorStorageError({ operation: 'write', message: String(cause) }),
     }),
-  clearLocalDraft: (key) =>
-    Effect.try({
-      try: () => localStorage.removeItem(draftKey(key)),
-      catch: (cause) => new CreatorStorageError({ operation: 'clear', message: String(cause) }),
-    }),
+  reconcileLocalDraft: (key, saved, remote, retained) =>
+    reconcileStoredDraft(localStorage, draftKey(key), saved, remote, retained),
   loadEditable: (kind, slug) =>
     requestJson(
       'load editable content',

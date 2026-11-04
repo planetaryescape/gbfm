@@ -2,13 +2,13 @@ import { Effect, Schema } from 'effect'
 import { Command } from 'foldkit'
 
 import { Message } from './message'
-import { keyOf, Kind } from './model'
+import { Kind, SaveOwner } from './model'
 import type { CreatorDraft, CreatorError } from './services'
 import { CreatorDraftSchema as Draft, CreatorService } from './services'
 import { CreatorUpload } from './upload/runtime'
 
-const failure = (operation: string) => (error: CreatorError) =>
-  Message.Failed({ operation, message: error.message })
+const failure = (operation: string, editorId: string) => (error: CreatorError) =>
+  Message.Failed({ operation, editorId, message: error.message })
 
 export const FindMusicReferences = Command.define('Creator.FindMusicReferences', {
   args: {
@@ -64,33 +64,44 @@ export const Diagnose = Command.define('Creator.Diagnose', {
 })
 
 export const PersistDraft = Command.define('Creator.PersistDraft', {
-  args: { key: Schema.String, draft: Draft },
-  messages: [Message.LocallySaved, Message.Failed],
-  execute: ({ key, draft }) =>
+  args: { key: Schema.String, draft: Draft, editorId: Schema.String, revision: Schema.Number },
+  messages: [Message.LocallySaved, Message.LocalSaveFailed],
+  execute: ({ key, draft, editorId, revision }) =>
     Effect.flatMap(CreatorService, (service) => service.writeLocalDraft(key, draft)).pipe(
-      Effect.as(Message.LocallySaved()),
-      Effect.catch((error) => Effect.succeed(failure('autosave')(error))),
+      Effect.as(Message.LocallySaved({ editorId, revision })),
+      Effect.catch((error) =>
+        Effect.succeed(Message.LocalSaveFailed({ editorId, revision, message: error.message })),
+      ),
     ),
 })
 
 export const Hydrate = Command.define('Creator.Hydrate', {
-  args: { key: Schema.String, kind: Kind, editSlug: Schema.NullOr(Schema.String) },
+  args: {
+    key: Schema.String,
+    kind: Kind,
+    editSlug: Schema.NullOr(Schema.String),
+    editorId: Schema.String,
+  },
   messages: [Message.Hydrated, Message.Failed],
-  execute: ({ key, kind, editSlug }) =>
+  execute: ({ key, kind, editSlug, editorId }) =>
     Effect.gen(function* () {
       const service = yield* CreatorService
 
       const editable = editSlug ? yield* service.loadEditable(kind, editSlug) : null
       const draft: CreatorDraft | null = editable ?? (yield* service.readLocalDraft(key))
 
-      return Message.Hydrated({ draft, creators: editable?.creators ?? [] })
-    }).pipe(Effect.catch((error) => Effect.succeed(failure('load')(error)))),
+      return Message.Hydrated({
+        draft,
+        creators: editable?.creators ?? [],
+        source: editable ? 'remote' : draft ? 'local' : 'empty',
+      })
+    }).pipe(Effect.catch((error) => Effect.succeed(failure('load', editorId)(error)))),
 })
 
 export const ResolveMusic = Command.define('Creator.ResolveMusic', {
-  args: { url: Schema.String, kind: Kind },
+  args: { url: Schema.String, kind: Kind, editorId: Schema.String },
   messages: [Message.MusicResolved, Message.Failed],
-  execute: ({ url, kind }) =>
+  execute: ({ url, kind, editorId }) =>
     Effect.flatMap(CreatorService, (service) => service.resolveMusic(url, kind)).pipe(
       Effect.map(({ entityType, entityId, title, artistNames, coverImageUrl }) =>
         Message.MusicResolved({
@@ -102,29 +113,31 @@ export const ResolveMusic = Command.define('Creator.ResolveMusic', {
           coverImageUrl,
         }),
       ),
-      Effect.catch((error) => Effect.succeed(failure('resolve music')(error))),
+      Effect.catch((error) => Effect.succeed(failure('resolve music', editorId)(error))),
     ),
 })
 
 export const ResolvePostMusic = Command.define('Creator.ResolvePostMusic', {
-  args: { postId: Schema.String, url: Schema.String },
+  args: { postId: Schema.String, url: Schema.String, owner: SaveOwner },
   messages: [Message.PostMusicResolved, Message.PostMusicFailed],
-  execute: ({ postId, url }) =>
+  execute: ({ postId, url, owner }) =>
     Effect.flatMap(CreatorService, (service) => service.resolvePostMusic(postId, url)).pipe(
-      Effect.map(Message.PostMusicResolved),
+      Effect.map((result) => Message.PostMusicResolved({ ...result, owner, requestedUrl: url })),
       Effect.catch((error) =>
-        Effect.succeed(Message.PostMusicFailed({ postId, message: error.message })),
+        Effect.succeed(
+          Message.PostMusicFailed({ postId, owner, requestedUrl: url, message: error.message }),
+        ),
       ),
     ),
 })
 
 export const ResolveQuote = Command.define('Creator.ResolveQuote', {
-  args: { slug: Schema.String },
+  args: { slug: Schema.String, editorId: Schema.String },
   messages: [Message.QuoteResolved, Message.Failed],
-  execute: ({ slug }) =>
+  execute: ({ slug, editorId }) =>
     Effect.flatMap(CreatorService, (service) => service.resolveQuote(slug)).pipe(
       Effect.map(({ id, title, content }) => Message.QuoteResolved({ id, slug, title, content })),
-      Effect.catch((error) => Effect.succeed(failure('resolve quote')(error))),
+      Effect.catch((error) => Effect.succeed(failure('resolve quote', editorId)(error))),
     ),
 })
 
@@ -139,26 +152,49 @@ export const RenderPreview = Command.define('Creator.RenderPreview', {
 })
 
 export const Save = Command.define('Creator.Save', {
-  args: { draft: Draft, creatorId: Schema.String, publish: Schema.Boolean },
-  messages: [Message.Saved, Message.Failed],
-  execute: ({ draft, creatorId, publish }) =>
+  args: { draft: Draft, creatorId: Schema.String, publish: Schema.Boolean, owner: SaveOwner },
+  messages: [Message.Saved, Message.SaveFailed],
+  execute: ({ draft, creatorId, publish, owner }) =>
     Effect.gen(function* () {
       const service = yield* CreatorService
       const { id, slug } = yield* service.save({ draft, creatorId, publish })
 
-      yield* service.clearLocalDraft(keyOf(draft))
+      return Message.Saved({ owner, id, slug, published: publish })
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(Message.SaveFailed({ owner, message: error.message })),
+      ),
+    ),
+})
 
-      return Message.Saved({ id, slug, published: publish })
-    }).pipe(Effect.catch((error) => Effect.succeed(failure('save')(error)))),
+export const ReconcileLocalDraft = Command.define('Creator.ReconcileLocalDraft', {
+  args: {
+    key: Schema.String,
+    draft: Draft,
+    retained: Schema.NullOr(Draft),
+    owner: SaveOwner,
+    id: Schema.String,
+    slug: Schema.String,
+  },
+  messages: [Message.LocalSaveReconciled, Message.LocalSaveReconcileFailed],
+  execute: ({ key, draft, retained, owner, id, slug }) =>
+    Effect.flatMap(CreatorService, (service) =>
+      service.reconcileLocalDraft(key, draft, { id, slug }, retained),
+    ).pipe(
+      Effect.as(Message.LocalSaveReconciled({ owner })),
+      Effect.catch((error) =>
+        Effect.succeed(Message.LocalSaveReconcileFailed({ owner, message: error.message })),
+      ),
+    ),
 })
 
 export const UploadArtwork = Command.define('Creator.UploadArtwork', {
-  args: { file: Schema.instanceOf(File) },
+  args: { file: Schema.instanceOf(File), editorId: Schema.String },
   messages: [Message.ArtworkUploaded, Message.Failed],
-  execute: ({ file }) =>
+  execute: ({ file, editorId }) =>
     Effect.flatMap(CreatorService, (service) => service.uploadImage(file)).pipe(
       Effect.map((url) => Message.ArtworkUploaded({ url })),
-      Effect.catch((error) => Effect.succeed(failure('artwork upload')(error))),
+      Effect.catch((error) => Effect.succeed(failure('artwork upload', editorId)(error))),
     ),
 })
 

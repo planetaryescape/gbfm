@@ -1,6 +1,6 @@
 {
   "name": "gbfm",
-  "version": "2.121.1",
+  "version": "2.122.2",
   "sideEffects": false,
   "private": true,
   "type": "module",
@@ -19,8 +19,9 @@
     "otel": "docker compose up jaeger -d",
     "release": "semantic-release",
     "typecheck": "tsgo --noEmit && bun --filter='*' typecheck",
-    "test": "bun run test:alchemy && bun --filter @gbfm/social-card test && cd packages/core && bun run test && cd ../theme && bun run test && cd ../player && bun run test && cd ../../apps/mobile && bun run test && cd ../pdf-generator && bun run test && cd ../server && bun run test && cd ../social-image && bun run test && cd ../cdn-router && bun run test",
+    "test": "bun run test:alchemy && bun --filter @gbfm/observability test && bun --filter @gbfm/social-card test && cd packages/core && bun run test && cd ../theme && bun run test && cd ../player && bun run test && cd ../../apps/mobile && bun run test && cd ../pdf-generator && bun run test && cd ../server && bun run test && cd ../social-image && bun run test && cd ../cdn-router && bun run test",
     "test:alchemy": "vitest run alchemy",
+    "test:www": "bun --filter @gbfm/www unit",
     "lint": "bun ./node_modules/oxlint/dist/cli.js alchemy alchemy.run.ts apps/*/src apps/cdn-router packages '*.{js,ts,tsx,jsx}' --no-error-on-unmatched-pattern",
     "lint:fix": "bun ./node_modules/oxlint/dist/cli.js alchemy alchemy.run.ts apps/*/src apps/cdn-router packages '*.{js,ts,tsx,jsx}' --fix --no-error-on-unmatched-pattern",
     "format": "node ./node_modules/oxfmt/dist/cli.js apps/*/src apps/cdn-router packages '*.{js,ts,tsx,jsx,json,css}' --write --no-error-on-unmatched-pattern",

@@ -22,7 +22,7 @@ const service = (
 describe('Spotify playback ownership', () => {
   it('releases connect ownership on error without changing loaded status', async () => {
     const status = { connected: false, name: '' }
-    const model = update(initialModel, Message.Loaded({ status })).model
+    const model = update(initialModel, Message.Loaded({ requestId: 0, status })).model
     const request = update(model, Message.Requested({ action: 'connect', url: track }))
     const command = request.commands?.[0]
     expect(command).toBeDefined()
@@ -51,13 +51,13 @@ describe('Spotify playback ownership', () => {
   })
   it('loads status and preserves the disconnected fallback on failure', async () => {
     const loaded = await Effect.runPromise(
-      Load().effect.pipe(Effect.provideService(SpotifyConnection, service())),
+      Load({ requestId: 0 }).effect.pipe(Effect.provideService(SpotifyConnection, service())),
     )
 
     expect(update(initialModel, loaded).model.status).toEqual({ connected: true, name: 'Fixture' })
 
     const failed = await Effect.runPromise(
-      Load().effect.pipe(
+      Load({ requestId: 0 }).effect.pipe(
         Effect.provideService(
           SpotifyConnection,
           service({
@@ -75,7 +75,9 @@ describe('Spotify playback ownership', () => {
     async (action) => {
       const calls: Array<string> = []
       const request = update(initialModel, Message.Requested({ action, url: track }))
-      expect(request.model.operation).toEqual(Operation.cases.Running.make({ action, url: track }))
+      expect(request.model.operation).toEqual(
+        Operation.cases.Running.make({ action, url: track, requestId: 1 }),
+      )
 
       const repeated = update(
         request.model,
@@ -166,7 +168,7 @@ describe('Spotify playback ownership', () => {
 
         const disconnectedModel = update(
           request.model,
-          Message.Loaded({ status: disconnected }),
+          Message.Loaded({ requestId: 0, status: disconnected }),
         ).model
 
         expect(disconnectedModel.operation).toEqual(request.model.operation)
@@ -184,23 +186,74 @@ describe('Spotify playback ownership', () => {
     )
   })
 
-  it('preserves uncorrelated stale status and completion delivery', () => {
+  it('rejects obsolete status generations and stale or unsolicited operation completions', () => {
     const first = update(initialModel, Message.Requested({ action: 'queue', url: track })).model
-    const completed = update(first, Message.Completed({ notice: 'first' })).model
+    const completed = update(first, Message.Completed({ requestId: 1, notice: 'first' })).model
     const second = update(completed, Message.Requested({ action: 'play', url: 'second' })).model
-    const stale = update(second, Message.Completed({ notice: 'late first' })).model
-    expect(stale.operation).toEqual(
-      Operation.cases.Idle.make({ target: 'second', notice: 'late first' }),
-    )
-    const disconnectedModel = update(stale, Message.Loaded({ status: disconnected })).model
+    const stale = update(second, Message.Completed({ requestId: 1, notice: 'late first' })).model
+    expect(stale).toBe(second)
+
+    const disconnectedModel = update(
+      stale,
+      Message.ConnectionChanged({ status: disconnected }),
+    ).model
+
     expect(
       update(
         disconnectedModel,
-        Message.Loaded({ status: { connected: true, name: 'stale status' } }),
+        Message.Loaded({ requestId: 0, status: { connected: true, name: 'stale status' } }),
       ).model.status?.connected,
-    ).toBe(true)
+    ).toBe(false)
     expect(
-      update(initialModel, Message.Completed({ notice: 'unsolicited' })).model.operation,
-    ).toEqual(Operation.cases.Idle.make({ target: null, notice: 'unsolicited' }))
+      update(initialModel, Message.Completed({ requestId: 0, notice: 'unsolicited' })).model,
+    ).toBe(initialModel)
+  })
+
+  it('lets accepted provider work finish but rejects its completion after a connection change', async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const gate = yield* Deferred.make<string>()
+        const entered = yield* Deferred.make<void>()
+        const pending = update(initialModel, Message.Requested({ action: 'play', url: track }))
+        const command = pending.commands?.[0]
+
+        if (!command) throw new Error('Expected playback command')
+
+        const work = yield* command.effect.pipe(
+          Effect.provideService(
+            SpotifyConnection,
+            service({
+              playback: () =>
+                Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(gate))),
+            }),
+          ),
+          Effect.forkChild,
+        )
+
+        yield* Deferred.await(entered)
+
+        const replaced = update(
+          pending.model,
+          Message.ConnectionChanged({ status: { connected: true, name: 'New session' } }),
+        ).model
+
+        const current = update(
+          replaced,
+          Message.Requested({ action: 'queue', url: 'new track' }),
+        ).model
+
+        yield* Deferred.succeed(gate, 'old provider accepted')
+        expect(update(current, yield* Fiber.join(work)).model).toBe(current)
+      }).pipe(Effect.scoped),
+    )
+  })
+
+  it('does not release running provider ownership for an unchanged status refresh', () => {
+    const running = update(initialModel, Message.Requested({ action: 'play', url: track })).model
+    const refreshed = update(running, Message.StatusRefreshed({ status: disconnected })).model
+    expect(refreshed.operation).toBe(running.operation)
+    expect(
+      update(refreshed, Message.Requested({ action: 'queue', url: track })).commands,
+    ).toBeUndefined()
   })
 })

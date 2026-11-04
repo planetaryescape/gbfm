@@ -105,8 +105,11 @@ export function createTelemetryBatcher(input: {
 
         if (state.events.length >= MAX_BATCH_EVENTS) flush()
       } else {
-        state = BatchQueue.Scheduled({ events: [event] })
-        schedule(flush, FLUSH_DELAY_MS)
+        const batch = BatchQueue.Scheduled({ events: [event] })
+        state = batch
+        schedule(() => {
+          if (state === batch) flush()
+        }, FLUSH_DELAY_MS)
       }
     },
     flush,
@@ -125,6 +128,7 @@ export function startBrowserTelemetry(input: {
   readonly navigation: TelemetryNavigation
   readonly endpoint?: string
   readonly sampleRate?: number
+  readonly observeVitals?: (report: (metric: Metric) => void) => void
 }): () => void {
   const release = boundedName(input.release, 'unknown')
   const sampleRate = input.sampleRate ?? (release === 'local' ? 1 : TELEMETRY_SAMPLE_RATE)
@@ -157,6 +161,7 @@ export function startBrowserTelemetry(input: {
   )
 
   const vitalRoute = currentRoute
+  let disposed = false
   let navigationStartedAt: number | undefined
   batcher.add({
     kind: 'navigation',
@@ -167,9 +172,11 @@ export function startBrowserTelemetry(input: {
 
   const stopNavigation = input.navigation.subscribe({
     before: () => {
+      if (disposed) return
       navigationStartedAt = performance.now()
     },
     after: (route) => {
+      if (disposed) return
       currentRoute = routeTemplate(route.routeId, route.pathname)
       const startedAt = navigationStartedAt
       navigationStartedAt = undefined
@@ -183,6 +190,7 @@ export function startBrowserTelemetry(input: {
   })
 
   const reportVital = (metric: Metric) => {
+    if (disposed) return
     let name: 'cls' | 'inp' | 'lcp'
 
     switch (metric.name) {
@@ -206,9 +214,12 @@ export function startBrowserTelemetry(input: {
     })
   }
 
-  onCLS(reportVital)
-  onINP(reportVital)
-  onLCP(reportVital)
+  if (input.observeVitals) input.observeVitals(reportVital)
+  else {
+    onCLS(reportVital)
+    onINP(reportVital)
+    onLCP(reportVital)
+  }
 
   const reportError = (event: ErrorEvent) =>
     batcher.add({
@@ -244,8 +255,6 @@ export function startBrowserTelemetry(input: {
   window.addEventListener(PLAYER_EVENT, reportPlayer)
   window.addEventListener('pagehide', batcher.flush)
   document.addEventListener('visibilitychange', flushWhenHidden)
-
-  let disposed = false
 
   return () => {
     if (disposed) return

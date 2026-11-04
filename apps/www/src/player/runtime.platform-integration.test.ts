@@ -22,6 +22,9 @@ class PlatformAudio extends EventTarget implements AudioPort {
   muted = false
   rejectPlay = false
   readonly calls: Array<string> = []
+  removeAttribute() {
+    this.src = ''
+  }
 
   load() {
     this.currentTime = 0
@@ -70,7 +73,8 @@ const track = (id: string): QueueTrackType => ({
 })
 
 const fixture = () => {
-  const audio = new PlatformAudio()
+  let audio = new PlatformAudio()
+  const instances: Array<PlatformAudio> = []
   const values = new Map<string, string>()
   const reads: Array<string> = []
   const cleared: Array<string> = []
@@ -78,7 +82,15 @@ const fixture = () => {
   const errors: Array<string> = []
   let completions = 0
   let pending: { key: string; promise: Promise<string | null> } | null = null
-  const engine = makeHtmlAudioEngineLayer(audio)
+
+  const engine = makeHtmlAudioEngineLayer(() => {
+    const next = new PlatformAudio()
+    next.rejectPlay = audio.rejectPlay
+    audio = next
+    instances.push(next)
+
+    return next
+  })
 
   const storage = layerFromAdapter({
     read: async (key) => {
@@ -112,7 +124,10 @@ const fixture = () => {
   const checkpoint = (position: number) => JSON.stringify({ position, updatedAt: 0 })
 
   return {
-    audio,
+    get audio() {
+      return audio
+    },
+    instances,
     runtime,
     reads,
     cleared,
@@ -429,7 +444,7 @@ describe('browser adapter with shared playback orchestration', () => {
     }
   })
 
-  it('cannot recover old-source identity from an unlabelled platform ended event', async () => {
+  it('drops old-instance ended events after replacement rather than stamping current ownership', async () => {
     const f = fixture()
 
     try {
@@ -437,12 +452,14 @@ describe('browser adapter with shared playback orchestration', () => {
         Effect.gen(function* () {
           const engine = yield* AudioEngine
           yield* engine.replace(track('one').url, 1)
+          const old = f.audio
           yield* engine.replace(track('two').url, 2)
           const event = yield* Effect.forkScoped(Stream.runHead(engine.changes))
           yield* Effect.yieldNow
-          f.audio.finish()
+          old.finish()
+          f.audio.ready(87)
           expect(yield* Fiber.join(event)).toMatchObject({
-            value: { sourceGeneration: 2, didJustFinish: true },
+            value: { sourceGeneration: 2, didJustFinish: false, duration: 87 },
           })
         }).pipe(Effect.scoped),
       )

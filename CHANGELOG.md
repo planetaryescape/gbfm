@@ -1,3 +1,78 @@
+## [2.122.2](https://github.com/planetaryescape/gbfm/compare/v2.122.1...v2.122.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* **accounts:** preserve preferences across competing creation ([f53567a](https://github.com/planetaryescape/gbfm/commit/f53567ac0fab8c3ca9f94dd8f9c7b0ba20c96500))
+* **accounts:** preserve preferences across competing creation ([cc55e27](https://github.com/planetaryescape/gbfm/commit/cc55e272feea820d187f4655ae7f11db47098a71))
+* **accounts:** preserve unsubscribe consent across repeats ([4558515](https://github.com/planetaryescape/gbfm/commit/45585152c77f06f424725cbd7fdba30308d5c7b5))
+* **accounts:** preserve unsubscribe consent across repeats ([4ff6d4f](https://github.com/planetaryescape/gbfm/commit/4ff6d4f679f884be2832446c16ebd9e9d56ad484))
+* **composer:** distinguish refusals and allow explicit receipt recovery ([ee64504](https://github.com/planetaryescape/gbfm/commit/ee6450462011344c1e16c543f5349fa4c73fdc4a))
+* **creator:** fence remote saves and preserve newer local drafts ([d2b9bc8](https://github.com/planetaryescape/gbfm/commit/d2b9bc896ad209b3a3a607e4ea9d9bbb902ad55e))
+* **creator:** fence remote saves and preserve newer local drafts ([43c95d9](https://github.com/planetaryescape/gbfm/commit/43c95d9772da6d28d1beff44b76bbc2f78ce4404))
+* **creator:** reconcile latest edits and fence stale failures ([599479a](https://github.com/planetaryescape/gbfm/commit/599479a392a6d0117173a30e12b6b6585901720c))
+* **creator:** reconcile latest edits and fence stale failures ([c1901d8](https://github.com/planetaryescape/gbfm/commit/c1901d8d8bba860d35c078c95f8b4ef75f5cdbbd))
+* **mobile:** own login and reader request lifetimes ([0082262](https://github.com/planetaryescape/gbfm/commit/0082262475f3a23fd04af1e368f04a6242b51543))
+* **mobile:** own login and reader request lifetimes ([0a2aef1](https://github.com/planetaryescape/gbfm/commit/0a2aef11b2f4c8dd514b4d824e3f3fe123863dd3))
+* **mobile:** persist composer publication recovery receipts ([d353d34](https://github.com/planetaryescape/gbfm/commit/d353d34a521d4867f16294eea0bc1c9ef36101f8))
+* **mobile:** serialize owned auth storage commits ([51548e7](https://github.com/planetaryescape/gbfm/commit/51548e7240d109ec9fb55bda4ee6f2dee297efb4))
+* **player:** bound hydration recovery during shutdown ([ca01c35](https://github.com/planetaryescape/gbfm/commit/ca01c35391acbdb32fa6b2189ace5aa836eb7d81))
+* **player:** own audio instances and subscriptions per source ([6b14918](https://github.com/planetaryescape/gbfm/commit/6b149184b1676e839e080e208fa73a0264b5bf43))
+* **player:** preserve unread volume after hydration failure ([78ca8a5](https://github.com/planetaryescape/gbfm/commit/78ca8a5a2d808cbdabc65dc6115bdf5b6302b90c))
+* **publication:** preserve creators when replacement fails ([bf4e40f](https://github.com/planetaryescape/gbfm/commit/bf4e40fb383ce47db3cc27b8c2c1ea6d0c2ea44f))
+* **publication:** preserve creators when replacement fails ([c66be95](https://github.com/planetaryescape/gbfm/commit/c66be95b5a6e87b324ad8e04ec687b527e8b8243))
+* **reminders:** invalidate claims when schedules change ([2c6b186](https://github.com/planetaryescape/gbfm/commit/2c6b18643fe55c3cac4700ee47841b84c4038678))
+* **reminders:** recover stale queue work with fenced claims ([9b65bb8](https://github.com/planetaryescape/gbfm/commit/9b65bb86224e4775160f7a78fc972bc996009ed5))
+* **runtimes:** fence stale telemetry, signup and toast callbacks ([5407d71](https://github.com/planetaryescape/gbfm/commit/5407d711953389feb2a15c3cb1db4f0b83769e7e))
+* **runtimes:** fence stale telemetry, signup and toast callbacks ([7b39cab](https://github.com/planetaryescape/gbfm/commit/7b39cab4bac2344b3db49ce61195bdfca037bab5))
+* **spotify:** fence connection and entity operation lifetimes ([14a8127](https://github.com/planetaryescape/gbfm/commit/14a8127391eee7ba41a2e4c233789334062a6c03))
+* **spotify:** fence connection and entity operation lifetimes ([6561c59](https://github.com/planetaryescape/gbfm/commit/6561c59551d58c7e04af57d2487d9fdf98963c40))
+* **spotify:** recheck queued owners and fence refreshed sessions ([cd905b5](https://github.com/planetaryescape/gbfm/commit/cd905b518335993a18f8c76ee4ec237776003ae7))
+* **www:** preserve Foldkit initialization contract for Spotify SSR ([706ae9a](https://github.com/planetaryescape/gbfm/commit/706ae9ad58e177a641b36fa27bb150c6b6e59361))
+* **www:** preserve Foldkit initialization for Spotify SSR ([#500](https://github.com/planetaryescape/gbfm/issues/500)) ([0b5a4bb](https://github.com/planetaryescape/gbfm/commit/0b5a4bb86bf9d51637beaacee364bf161b84b429))
+
+## [2.122.1](https://github.com/planetaryescape/gbfm/compare/v2.122.0...v2.122.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **www:** attach reader telemetry to the real document host ([a781336](https://github.com/planetaryescape/gbfm/commit/a781336db4c0f7466f5ecc047095c30555f95088))
+
+# [2.122.0](https://github.com/planetaryescape/gbfm/compare/v2.121.3...v2.122.0) (2026-11-04)
+
+
+### Bug Fixes
+
+* **build:** refuse public source maps after authenticated upload ([5cb05a4](https://github.com/planetaryescape/gbfm/commit/5cb05a4be7cedb393de99560b998558b4fea9506))
+* **mobile:** bind observability consumers to the active provider lifetime ([0fe2e3d](https://github.com/planetaryescape/gbfm/commit/0fe2e3d189bc1e6020c5c660be08a9ba92206034))
+* **mobile:** initialize observability before Router evaluation ([083d248](https://github.com/planetaryescape/gbfm/commit/083d248a48a67a28f2c2b82c31c2ccbbca1290db))
+* **observability:** isolate signals and own in-flight journey admission ([c628d66](https://github.com/planetaryescape/gbfm/commit/c628d6624b715f40c6ba36b3371f002e905a0173))
+
+
+### Features
+
+* **mobile:** establish privacy-bounded Sentry observability ([85de466](https://github.com/planetaryescape/gbfm/commit/85de466bd1940732091d8a84dc332e85216caed4))
+* **mobile:** observe reading and native playback outcomes ([e74c334](https://github.com/planetaryescape/gbfm/commit/e74c334591d236a810ddb1fdf1ff83ddc3d14049))
+* **observability:** align web journeys and gate capture on source-map uploads ([c8d825f](https://github.com/planetaryescape/gbfm/commit/c8d825fffdb2b99f47db459a66dfa909a8dab061))
+* **www:** observe browser navigation through shared Effect services ([290a57f](https://github.com/planetaryescape/gbfm/commit/290a57f4df1a3b9901a7ddd8420ad1408c2507e6))
+
+## [2.121.3](https://github.com/planetaryescape/gbfm/compare/v2.121.2...v2.121.3) (2026-11-04)
+
+
+### Bug Fixes
+
+* **uploads:** preserve replacement ownership and confirmed completion ([ffaadec](https://github.com/planetaryescape/gbfm/commit/ffaadec8fe3841b4d6b5e2ac542a09e98cd73481))
+* **uploads:** preserve replacement ownership and confirmed completion ([#485](https://github.com/planetaryescape/gbfm/issues/485)) ([ce56be7](https://github.com/planetaryescape/gbfm/commit/ce56be7522bf0b6f6e64386e717c78ef859527c5))
+
+## [2.121.2](https://github.com/planetaryescape/gbfm/compare/v2.121.1...v2.121.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* **api-keys:** discard issuance secrets after pagehide ([d6d6ff4](https://github.com/planetaryescape/gbfm/commit/d6d6ff4e49c7af85a4510de21a0d6f454efa692c))
+* **api-keys:** recover cleared confirmation failures ([6693ba5](https://github.com/planetaryescape/gbfm/commit/6693ba52ce9903bca3b43e541009aba41800adcb))
+* **server:** fence playlist and navigation writes by attempt ownership ([eccaf03](https://github.com/planetaryescape/gbfm/commit/eccaf0324fd8a9c4f1d311ca088e9c4bcb3a6ac7))
+
 ## [2.121.1](https://github.com/planetaryescape/gbfm/compare/v2.121.0...v2.121.1) (2026-11-04)
 
 

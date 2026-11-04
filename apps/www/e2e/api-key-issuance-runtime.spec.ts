@@ -1,7 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
-import type * as Effects from 'effect'
 
-import type * as Issuance from '../src/page/dashboard/page/api-keys/issuance'
+import type * as Fixture from './fixtures/api-key-issuance'
 
 const metadata = {
   id: 'c63400ba-984d-4d4e-91ce-3b1722cc28f2',
@@ -45,48 +44,21 @@ const start = async (page: Page) => {
     </form></dialog>
   </section>`)
   await page.evaluate(async () => {
-    const effectPath = '/@id/effect'
-    const issuancePath = '/src/page/dashboard/page/api-keys/issuance.ts'
-    const { Effect, Fiber, Predicate, Queue, Stream }: typeof Effects = await import(effectPath)
-    const { IssueKey }: typeof Issuance = await import(issuancePath)
-    const element = document.getElementById('fixture')
-    const dialog = document.querySelector('dialog')
-
-    if (!element || !(dialog instanceof HTMLDialogElement)) throw new Error('Missing fixture')
-    const changes = Effect.runSync(Queue.unbounded<'Live' | 'Paused'>())
-    Queue.offerUnsafe(changes, 'Live')
-
-    const fiber = Effect.runFork(
-      IssueKey({ userId: 'owner' })
-        .f(element, Stream.fromQueue(changes))
-        .pipe(
-          Stream.runForEach((message) =>
-            Effect.sync(() => {
-              element.dataset.message = message._tag
-
-              if (Predicate.isTagged(message, 'PasswordRequested')) dialog.showModal()
-
-              if (Predicate.isTagged(message, 'PasswordVerificationFailed')) {
-                element.dataset.failure = message.message
-              }
-
-              if (Predicate.isTagged(message, 'Issued')) dialog.close()
-            }),
-          ),
-        ),
-    )
-
-    window.addEventListener('fixture:pause', () => {
-      Queue.offerUnsafe(changes, 'Paused')
-    })
-    window.addEventListener('fixture:live', () => {
-      Queue.offerUnsafe(changes, 'Live')
-    })
-    window.addEventListener('fixture:dispose', () => {
-      Effect.runFork(Fiber.interrupt(fiber))
-    })
+    const fixturePath = '/e2e/fixtures/api-key-issuance.ts'
+    const { mountIssuanceFixture }: typeof Fixture = await import(fixturePath)
+    mountIssuanceFixture()
   })
   await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeEnabled()
+}
+
+const setViewState = async (page: Page, state: 'Live' | 'Paused') => {
+  const fixture = page.locator('#fixture')
+  const version = Number(await fixture.getAttribute('data-view-version'))
+  await page.evaluate((state) => {
+    window.dispatchEvent(new Event(state === 'Live' ? 'fixture:live' : 'fixture:pause'))
+  }, state)
+  await expect(fixture).toHaveAttribute('data-view-version', String(version + 1))
+  await expect(fixture).toHaveAttribute('data-view-state', state)
 }
 
 const confirm = async (page: Page) => {
@@ -176,10 +148,12 @@ test('reports issuance during suspension without exposing the one-time secret', 
   await start(page)
   await confirm(page)
   await requested.promise
-  await page.evaluate(() => window.dispatchEvent(new Event('fixture:pause')))
+  await setViewState(page, 'Paused')
   await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeDisabled()
   release.resolve()
-  await expect(page.locator('[data-key-status]')).toContainText('issued while the view was paused')
+  await expect(page.locator('[data-key-status]')).toContainText(
+    'issued after this confirmation was cleared',
+  )
   await expect(page.getByRole('textbox', { name: 'New API key secret', exact: true })).toHaveCount(
     0,
   )
@@ -205,7 +179,9 @@ for (const event of ['pagehide', 'fixture:pause']) {
     await start(page)
     await confirm(page)
     await requested.promise
-    await page.evaluate((event) => window.dispatchEvent(new Event(event)), event)
+
+    if (event === 'fixture:pause') await setViewState(page, 'Paused')
+    else await page.evaluate((event) => window.dispatchEvent(new Event(event)), event)
     await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeDisabled()
     release.resolve()
     await expect(page.locator('#fixture')).toHaveAttribute(
@@ -219,25 +195,100 @@ for (const event of ['pagehide', 'fixture:pause']) {
   })
 }
 
-test('characterizes late issuance after pagehide without silently changing its policy', async ({
-  page,
-}) => {
-  const requested = Promise.withResolvers<void>()
-  const release = Promise.withResolvers<void>()
-  await page.route('**/auth/sign-in/email', (route) => route.fulfill({ json: {} }))
-  await page.route('**/api/user/api-keys', async (route) => {
-    requested.resolve()
-    await release.promise
-    await route.fulfill({ json: issued })
+for (const { clear, restore } of [
+  { clear: 'pagehide', restore: 'none' },
+  { clear: 'pagehide', restore: 'pageshow' },
+  { clear: 'pagehide', restore: 'fixture:live' },
+  { clear: 'fixture:pause', restore: 'fixture:live' },
+]) {
+  test(`discards late issuance after ${clear} with ${restore} restoration and allows a fresh request`, async ({
+    page,
+  }) => {
+    const requested = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    let creations = 0
+    await page.route('**/auth/sign-in/email', (route) => route.fulfill({ json: {} }))
+    await page.route('**/api/user/api-keys', async (route) => {
+      creations += 1
+      requested.resolve()
+      await release.promise
+      await route.fulfill({ json: issued })
+    })
+    await start(page)
+    await confirm(page)
+    await requested.promise
+
+    if (clear === 'fixture:pause') await setViewState(page, 'Paused')
+    else await page.evaluate((event) => window.dispatchEvent(new Event(event)), clear)
+
+    if (restore === 'fixture:live') await setViewState(page, 'Live')
+    else if (restore !== 'none')
+      await page.evaluate((event) => window.dispatchEvent(new Event(event)), restore)
+    await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeDisabled()
+    release.resolve()
+    await expect(page.locator('[data-key-status]')).toContainText('Revoke it from the list')
+    await expect(
+      page.getByRole('textbox', { name: 'New API key secret', exact: true }),
+    ).toHaveCount(0)
+    expect(creations).toBe(1)
+    await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeEnabled()
+    await confirm(page)
+    await expect(
+      page.getByRole('textbox', { name: 'New API key secret', exact: true }),
+    ).toBeVisible()
+    expect(creations).toBe(2)
   })
-  await start(page)
-  await confirm(page)
-  await requested.promise
-  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')))
-  release.resolve()
-  await expect(page.getByRole('textbox', { name: 'New API key secret', exact: true })).toBeVisible()
-  await page.evaluate(() => window.dispatchEvent(new Event('fixture:dispose')))
-  await expect(page.getByRole('textbox', { name: 'New API key secret', exact: true })).toHaveCount(
-    0,
-  )
-})
+}
+
+for (const failure of ['password', 'issuance']) {
+  test(`allows a fresh request after ${failure} fails following pagehide`, async ({ page }) => {
+    const requested = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    let confirmations = 0
+    let creations = 0
+    await page.route('**/auth/sign-in/email', async (route) => {
+      confirmations += 1
+
+      if (failure === 'password' && confirmations === 1) {
+        requested.resolve()
+        await release.promise
+
+        return route.fulfill({ status: 401, json: {} })
+      }
+
+      return route.fulfill({ json: {} })
+    })
+    await page.route('**/api/user/api-keys', async (route) => {
+      creations += 1
+
+      if (failure === 'issuance' && creations === 1) {
+        requested.resolve()
+        await release.promise
+
+        return route.fulfill({ status: 500, json: {} })
+      }
+
+      return route.fulfill({ json: issued })
+    })
+    await start(page)
+    await confirm(page)
+    await requested.promise
+    await page.evaluate(() => window.dispatchEvent(new Event('pagehide')))
+    release.resolve()
+    await expect(page.locator('#fixture')).toHaveAttribute(
+      'data-message',
+      'PasswordVerificationFailed',
+    )
+    await page.evaluate(() => document.querySelector('dialog')?.close())
+    await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeEnabled()
+    await expect(
+      page.getByRole('textbox', { name: 'New API key secret', exact: true }),
+    ).toHaveCount(0)
+    await confirm(page)
+    await expect(
+      page.getByRole('textbox', { name: 'New API key secret', exact: true }),
+    ).toBeVisible()
+    expect(confirmations).toBe(2)
+    expect(creations).toBe(failure === 'password' ? 1 : 2)
+  })
+}

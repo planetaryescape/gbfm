@@ -142,7 +142,7 @@ describe('creator model', () => {
 
     const hydrated = update(
       initialModel(input),
-      Message.Hydrated({ draft: attached.model.draft, creators: [] }),
+      Message.Hydrated({ draft: attached.model.draft, creators: [], source: 'local' }),
     )
 
     expect(hydrated.model.musicReferenceState).toBe('loading')
@@ -208,6 +208,7 @@ describe('creator model', () => {
     const restored = update(
       initial,
       Message.Hydrated({
+        source: 'local',
         draft: { ...initial.draft, creatorIds: ['user-1', 'unknown-restored'] },
         creators: [],
       }),
@@ -283,18 +284,30 @@ describe('creator model', () => {
   })
 
   it('an autosave completion cannot dismiss review or roll back publication', () => {
-    const model = initialModel(input)
+    const model = update(
+      initialModel(input),
+      Message.Changed({ field: 'title', value: 'Draft' }),
+    ).model
+
     const reviewed = update(model, Message.ReviewRequested()).model
-    const saved = update(reviewed, Message.LocallySaved()).model
+    const local = { editorId: model.editorId, revision: model.revision }
+    const saved = update(reviewed, Message.LocallySaved(local)).model
     expect(saved.phase).toBe('reviewing')
     expect(saved.saveState).toBe('saved-locally')
 
+    const pending = update(saved, Message.PublishRequested()).model
+
     const published = update(
-      saved,
-      Message.Saved({ id: 'published-id', slug: 'published', published: true }),
+      pending,
+      Message.Saved({
+        owner: { editorId: model.editorId, requestId: 1 },
+        id: 'published-id',
+        slug: 'published',
+        published: true,
+      }),
     ).model
 
-    expect(update(published, Message.LocallySaved()).model).toEqual(published)
+    expect(update(published, Message.LocallySaved(local)).model).toEqual(published)
   })
 
   it('editing cannot switch between post and audio endpoints', () => {
@@ -347,9 +360,21 @@ describe('creator model', () => {
 
   it('resolves saved music after saving or publishing without discarding other edits', () => {
     for (const published of [false, true]) {
-      const model = update(
+      const initial = update(
         initialModel(input),
-        Message.Saved({ id: 'saved-post', slug: 'saved', published }),
+        Message.Changed({ field: 'title', value: 'Draft' }),
+      ).model
+
+      const saving = update(initial, Message.DraftSaveRequested()).model
+
+      const model = update(
+        saving,
+        Message.Saved({
+          owner: { editorId: saving.editorId, requestId: 1 },
+          id: 'saved-post',
+          slug: 'saved',
+          published,
+        }),
       ).model
 
       const edited = update(
@@ -364,6 +389,8 @@ describe('creator model', () => {
       const resolved = update(
         pending,
         Message.PostMusicResolved({
+          owner: { editorId: pending.editorId, requestId: pending.postMusicRequestId },
+          requestedUrl: pending.draft.musicUrl,
           postId: 'saved-post',
           entityType: 'track',
           entityId: 'track-1',

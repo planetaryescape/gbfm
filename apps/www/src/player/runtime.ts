@@ -1,3 +1,6 @@
+import { Observability } from '@gbfm/observability'
+import { journeyObserver, noJourneys, type JourneyObserver } from '@gbfm/observability/callbacks'
+import { playbackJourney } from '@gbfm/observability/playback'
 import {
   AudioEngine,
   createWebAudioStorageAdapter,
@@ -11,7 +14,7 @@ import {
   type NowPlayingMetadata,
   type PlaybackCommandHandlers,
 } from '@gbfm/player'
-import { Context, Data, Effect, Layer, ManagedRuntime, Queue, Stream } from 'effect'
+import { Cause, Context, Data, Effect, Exit, Layer, ManagedRuntime, Queue, Stream } from 'effect'
 
 import {
   browserPreviewSession,
@@ -80,6 +83,7 @@ const BrowserSource = Data.taggedEnum<BrowserSource>()
 export const makeHtmlAudioEngineLayer = (
   audio: AudioPort,
   createPreview: (url: string, onDenied: () => void) => PreviewSession = browserPreviewSession,
+  observer: JourneyObserver = noJourneys,
 ) =>
   Layer.effect(
     AudioEngine,
@@ -87,8 +91,12 @@ export const makeHtmlAudioEngineLayer = (
       let finished = false
       let source: BrowserSource = BrowserSource.Empty({ generation: null })
       let playVersion = 0
+      let playRequestedVersion: number | null = null
+      const journey = playbackJourney(observer)
 
       const resetSource = () => {
+        playRequestedVersion = null
+        journey.cancel()
         playVersion++
 
         if ('preview' in source) source.preview.dispose()
@@ -113,6 +121,22 @@ export const makeHtmlAudioEngineLayer = (
         Effect.gen(function* () {
           const emit = () => Queue.offerUnsafe(queue, status(audio, finished, source.generation))
 
+          const playing = () => {
+            if (
+              !audio.paused &&
+              audio.readyState >= 3 &&
+              source.generation !== null &&
+              playRequestedVersion === playVersion
+            )
+              journey.status({ playing: true, error: null })
+            emit()
+          }
+
+          const failed = () => {
+            journey.fail()
+            emit()
+          }
+
           const ended = () => {
             finished = true
             emit()
@@ -131,10 +155,15 @@ export const makeHtmlAudioEngineLayer = (
 
           for (const event of events) audio.addEventListener(event, emit)
           audio.addEventListener('ended', ended)
+          audio.addEventListener('playing', playing)
+          audio.addEventListener('error', failed)
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
               for (const event of events) audio.removeEventListener(event, emit)
               audio.removeEventListener('ended', ended)
+              audio.removeEventListener('playing', playing)
+              audio.removeEventListener('error', failed)
+              journey.cancel()
             }),
           )
         }),
@@ -182,33 +211,47 @@ export const makeHtmlAudioEngineLayer = (
         })
 
       return {
-        replace: (url: string, nextGeneration: number) =>
+        replace: (url: string, nextGeneration: number, intent: 'play' | 'paused' = 'play') =>
           Effect.promise(async () => {
             resetSource()
+            journey.replace(intent)
             finished = false
+            const version = playVersion
 
-            if (isPrivateMedia(url)) {
-              const active = BrowserSource.PrivatePending({
-                generation: nextGeneration,
-                url,
-                preview: createPreview(url, () => audio.pause()),
-              })
+            try {
+              if (isPrivateMedia(url)) {
+                const active = BrowserSource.PrivatePending({
+                  generation: nextGeneration,
+                  url,
+                  preview: createPreview(url, () => audio.pause()),
+                })
 
-              source = active
-              audio.pause()
-              const result = await active.preview.ensure()
+                source = active
+                audio.pause()
+                const result = await active.preview.ensure()
 
-              if (source !== active || !result.ok) return
-              installPrivateSource(active)
+                if (source !== active) return
 
-              return
+                if (!result.ok) {
+                  journey.fail()
+
+                  return
+                }
+
+                installPrivateSource(active)
+
+                return
+              }
+
+              source = BrowserSource.Public({ generation: nextGeneration })
+
+              if (audio.crossOrigin === 'use-credentials') audio.crossOrigin = null
+              audio.src = url
+              audio.load()
+            } catch (error) {
+              if (version === playVersion) journey.fail()
+              throw error
             }
-
-            source = BrowserSource.Public({ generation: nextGeneration })
-
-            if (audio.crossOrigin === 'use-credentials') audio.crossOrigin = null
-            audio.src = url
-            audio.load()
           }),
         clearSource: Effect.sync(() => {
           resetSource()
@@ -218,30 +261,48 @@ export const makeHtmlAudioEngineLayer = (
         }),
         play: Effect.gen(function* () {
           const version = playVersion
-          const active = 'preview' in source ? source.preview : undefined
+          journey.play()
+          playRequestedVersion = version
 
-          if (active) {
-            const result = yield* Effect.promise(() => active.ensure())
+          return yield* Effect.gen(function* () {
+            const active = 'preview' in source ? source.preview : undefined
 
-            if (version !== playVersion || !('preview' in source) || source.preview !== active)
+            if (active) {
+              const result = yield* Effect.promise(() => active.ensure())
+
+              if (version !== playVersion || !('preview' in source) || source.preview !== active)
+                return yield* new PlaybackRejected({ reason: 'superseded' })
+
+              if (!result.ok) return yield* new PlaybackRejected({})
+
+              if (BrowserSource.$is('PrivatePending')(source)) installPrivateSource(source)
+            }
+
+            yield* Effect.tryPromise({
+              try: () => audio.play(),
+              catch: (cause) =>
+                new PlaybackRejected(
+                  version !== playVersion ? { reason: 'superseded' } : { cause },
+                ),
+            })
+
+            if (version !== playVersion)
               return yield* new PlaybackRejected({ reason: 'superseded' })
 
-            if (!result.ok) return yield* new PlaybackRejected({})
+            return undefined
+          }).pipe(
+            Effect.onExit((exit) => {
+              if (version !== playVersion || Exit.isSuccess(exit)) return Effect.void
 
-            if (BrowserSource.$is('PrivatePending')(source)) installPrivateSource(source)
-          }
-
-          yield* Effect.tryPromise({
-            try: () => audio.play(),
-            catch: (cause) =>
-              new PlaybackRejected(version !== playVersion ? { reason: 'superseded' } : { cause }),
-          })
-
-          if (version !== playVersion) return yield* new PlaybackRejected({ reason: 'superseded' })
-
-          return undefined
+              return Effect.sync(() =>
+                Cause.hasInterruptsOnly(exit.cause) ? journey.cancel() : journey.fail(),
+              )
+            }),
+          )
         }),
         pause: Effect.sync(() => {
+          journey.cancel()
+          playRequestedVersion = null
           playVersion++
           audio.pause()
         }),
@@ -311,50 +372,52 @@ export type BrowserDependencies = {
 export const makePlayerClientLayer = (dependencies: BrowserDependencies) =>
   Layer.effect(
     PlayerClient,
-    Effect.acquireRelease(
-      Effect.promise(async () => {
-        const audio = dependencies.createAudio()
-        const storage = layerFromAdapter(createWebAudioStorageAdapter(dependencies.storage))
-
-        const services = Layer.mergeAll(
-          makeHtmlAudioEngineLayer(audio),
-          storage,
-          makePlayReporterLayer(dependencies.deliverPlay).pipe(Layer.provide(storage)),
-        )
-
-        const runtime = ManagedRuntime.make(services)
-        let resolveController: (controller: AudioPlaybackController) => void = () => undefined
-
-        const controllerPromise = new Promise<AudioPlaybackController>((resolve) => {
-          resolveController = resolve
-        })
-
-        runtime.runFork(
-          Effect.scoped(
-            makeAudioPlayback(runtime, dependencies.reporter, () =>
-              readPlayerPreferences(dependencies.storage),
-            ).pipe(
-              Effect.tap((controller) =>
-                Effect.gen(function* () {
-                  resolveController(controller)
-
-                  if (dependencies.lookupCreators)
-                    yield* recoverPlayerCreators(controller, dependencies.lookupCreators)
-                }),
-              ),
-              Effect.andThen(Effect.never),
-            ),
-          ),
-        )
-
-        return { audio, runtime, controller: await controllerPromise }
-      }),
-      ({ audio, runtime }) =>
+    Effect.flatMap(Observability, (observability) =>
+      Effect.acquireRelease(
         Effect.promise(async () => {
-          audio.pause()
-          await runtime.dispose()
+          const audio = dependencies.createAudio()
+          const storage = layerFromAdapter(createWebAudioStorageAdapter(dependencies.storage))
+
+          const services = Layer.mergeAll(
+            makeHtmlAudioEngineLayer(audio, browserPreviewSession, journeyObserver(observability)),
+            storage,
+            makePlayReporterLayer(dependencies.deliverPlay).pipe(Layer.provide(storage)),
+          )
+
+          const runtime = ManagedRuntime.make(services)
+          let resolveController: (controller: AudioPlaybackController) => void = () => undefined
+
+          const controllerPromise = new Promise<AudioPlaybackController>((resolve) => {
+            resolveController = resolve
+          })
+
+          runtime.runFork(
+            Effect.scoped(
+              makeAudioPlayback(runtime, dependencies.reporter, () =>
+                readPlayerPreferences(dependencies.storage),
+              ).pipe(
+                Effect.tap((controller) =>
+                  Effect.gen(function* () {
+                    resolveController(controller)
+
+                    if (dependencies.lookupCreators)
+                      yield* recoverPlayerCreators(controller, dependencies.lookupCreators)
+                  }),
+                ),
+                Effect.andThen(Effect.never),
+              ),
+            ),
+          )
+
+          return { audio, runtime, controller: await controllerPromise }
         }),
-    ).pipe(Effect.map(({ controller }) => ({ controller }))),
+        ({ audio, runtime }) =>
+          Effect.promise(async () => {
+            audio.pause()
+            await runtime.dispose()
+          }),
+      ).pipe(Effect.map(({ controller }) => ({ controller }))),
+    ),
   )
 
 /** Whole-application browser resource. It is lazy: no browser global is read at module evaluation. */

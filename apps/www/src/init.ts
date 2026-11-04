@@ -1,6 +1,7 @@
 import * as Dialog from '@foldkit/ui/dialog'
 import * as Popover from '@foldkit/ui/popover'
 import { canCreatePosts, isRole } from '@gbfm/core/roles'
+import type { Observability } from '@gbfm/observability'
 import { Match } from 'effect'
 import { Command, type Runtime } from 'foldkit'
 
@@ -19,6 +20,7 @@ import type { SpotifyConnection } from './spotify/connection'
 import * as SpotifyPlayback from './spotify/playback'
 
 export type Services =
+  | Observability
   | Player.PlayerClient
   | Creator.CreatorService
   | Creator.CreatorUpload

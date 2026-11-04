@@ -422,7 +422,11 @@ export const playerCore = (
           // Pausing first stops engines that auto-resume on source replacement
           // from playing the new track before its checkpoint is restored.
           yield* engine.pause
-          yield* engine.replace(track.url, generation)
+          yield* engine.replace(
+            track.url,
+            generation,
+            active.intent.desiredPlaying ? 'play' : 'paused',
+          )
           yield* engine.setNowPlaying(buildMetadata(track))
           yield* observeStatus(yield* engine.currentStatus)
 

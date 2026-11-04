@@ -14,9 +14,9 @@ export default function AccountSettings() {
     <>
       <Stack.Screen options={{ title: 'Account' }} />
       <SettingsScreen>
-        <SettingsSection title='Account details'>
-          {user ? (
-            <>
+        {user ? (
+          <>
+            <SettingsSection title='Account details'>
               <SettingsRow
                 title={user.name}
                 detail={
@@ -39,16 +39,18 @@ export default function AccountSettings() {
                   }
                 />
               ) : null}
-            </>
-          ) : (
+            </SettingsSection>
+            <SignOutSection />
+          </>
+        ) : (
+          <SettingsSection title='Account details'>
             <SettingsRow
               title='Sign in'
               detail='Access your account and writing tools.'
               onPress={() => router.push('/sign-in')}
             />
-          )}
-        </SettingsSection>
-        {user ? <SignOutSection /> : null}
+          </SettingsSection>
+        )}
       </SettingsScreen>
     </>
   )

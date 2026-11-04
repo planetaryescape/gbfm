@@ -30,6 +30,7 @@ export default function Profile() {
       <View style={{ gap: 8 }}>
         <Text
           accessibilityRole='header'
+          maxFontSizeMultiplier={1.5}
           style={{ color: colors.accent, fontFamily: fonts.serif, fontSize: 34 }}>
           Settings
         </Text>

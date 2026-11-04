@@ -1,3 +1,10 @@
+## [2.122.1](https://github.com/planetaryescape/gbfm/compare/v2.122.0...v2.122.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **www:** attach reader telemetry to the real document host ([a781336](https://github.com/planetaryescape/gbfm/commit/a781336db4c0f7466f5ecc047095c30555f95088))
+
 # [2.122.0](https://github.com/planetaryescape/gbfm/compare/v2.121.3...v2.122.0) (2026-11-04)
 
 

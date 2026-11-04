@@ -35,10 +35,10 @@ document.getElementById('run')?.addEventListener('click', async () => {
 })
 
 document.getElementById('reader')?.addEventListener('click', async () => {
-  const root = document.getElementById('root')
+  const root = document.querySelector('[data-reader-active]')
   const result = document.getElementById('result')
 
-  if (!root || !result) return
+  if (!(root instanceof HTMLElement) || !result) return
 
   const commit = async (request: number, status: string) => {
     root.dataset.readerActive = 'true'

@@ -77,7 +77,13 @@ describe('bounded reminder recovery on local D1', () => {
       ...Array.from({ length: 105 }, (_, index) => reminder(`pending-${index}`)),
     ]
 
-    for (const fixture of fixtures) await database.insert(musicReminder).values(fixture)
+    const [firstFixture, ...remainingFixtures] = fixtures
+
+    if (!firstFixture) throw new Error('Missing reminder fixtures')
+    await database.batch([
+      database.insert(musicReminder).values(firstFixture),
+      ...remainingFixtures.map((fixture) => database.insert(musicReminder).values(fixture)),
+    ])
     queries.length = 0
     const due = await Effect.runPromise(withTestLayer(queryDueReminders, layer))
     expect(queries).toHaveLength(1)

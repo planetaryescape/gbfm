@@ -4,16 +4,16 @@
   "private": true,
   "main": "index.js",
   "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
-    "web": "expo start --web",
+    "start": "expo start --port 8091",
+    "android": "expo run:android --port 8091",
+    "ios": "expo run:ios --port 8091",
+    "web": "expo start --web --port 8091",
     "typecheck": "tsgo --noEmit",
     "test": "vitest run src",
     "device:build": "eas build --profile development --platform ios",
     "device:install": "eas build:run --platform ios --latest",
     "device": "bun run device:build && bun run device:install",
-    "device:local": "expo run:ios --device"
+    "device:local": "expo run:ios --device --port 8091"
   },
   "dependencies": {
     "@effect/atom-react": "4.0.6",

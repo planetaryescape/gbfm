@@ -2,7 +2,7 @@ import { Option, Schema } from 'effect'
 import type * as Server from 'foldkit/experimental/server'
 
 import { apiRequest } from '../../server/api'
-import { authErrorKey, authErrorMessage, readAuthErrorCode } from '../auth/errors'
+import { authErrorKey, authErrorMessages, readAuthErrorCode } from '../auth/errors'
 import { consentFormActionSource } from './callback'
 import { providerRedirect } from './continuation'
 import {
@@ -146,18 +146,18 @@ const connectionAction = async (
     })
 
     if (!response.ok) {
-      if (response.status >= 500 || response.status === 403)
-        return failure(response.status, continuation)
+      if (response.status >= 500) return failure(response.status, continuation)
+      const code = await readAuthErrorCode(response)
 
-      const error = authErrorMessage(
-        authErrorKey(response.status, await readAuthErrorCode(response)),
-      )
+      if (response.status === 403 && code === 'EDITORIAL_PERMISSION_REQUIRED')
+        return failure(403, continuation)
+      const error = authErrorMessages[authErrorKey(response.status, code)]
 
       return connectionResponse(
         connectionLoginDocument({
           ...state,
           email: credentials.email,
-          error: error ?? 'Sign-in failed. Please try again.',
+          error,
         }),
         continuation,
         response.status,

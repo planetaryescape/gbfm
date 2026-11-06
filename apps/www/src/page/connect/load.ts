@@ -21,7 +21,7 @@ export const loadConnection = async (
 
   if (!response.ok)
     return ConsentState.cases.Failed.make({
-      status: response.status === 401 ? 400 : response.status,
+      status: response.status >= 500 ? 502 : 400,
     })
 
   const client = Option.getOrNull(
@@ -33,7 +33,7 @@ export const loadConnection = async (
   const sessionResponse = await apiRequest(request, '/auth/get-session', { method: 'GET' })
 
   if (!sessionResponse.ok && sessionResponse.status !== 401)
-    return ConsentState.cases.Failed.make({ status: sessionResponse.status })
+    return ConsentState.cases.Failed.make({ status: 502 })
 
   const payload = await sessionResponse.json().catch(() => undefined)
 

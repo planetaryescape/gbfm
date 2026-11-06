@@ -36,7 +36,7 @@ export const website = ({
     })
 
     const worker = {
-      main: './apps/www/worker.ts',
+      main: './apps/www/dist/server/fetch.js',
       ...(config.isProduction
         ? { domain: { name: 'www.goosebumps.fm', aliases: ['goosebumps.fm'] } }
         : { url: true }),
@@ -76,7 +76,7 @@ export const website = ({
       outdir: 'dist/client',
       assets: {
         notFoundHandling: '404-page',
-        runWorkerFirst: ['/mcp.txt'],
+        runWorkerFirst: false,
       },
     })
   })

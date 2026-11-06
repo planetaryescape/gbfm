@@ -60,6 +60,14 @@ export const apiWorker = ({
     const api = yield* Cloudflare.Worker('Api', {
       main: './apps/server/src/worker.ts',
       ...hostname(config, 'api.goosebumps.fm'),
+      ...(config.isProduction && !config.isLocalDev
+        ? {
+            routes: [
+              { pattern: 'https://goosebumps.fm/mcp.txt', zoneName: 'goosebumps.fm' },
+              { pattern: 'https://www.goosebumps.fm/mcp.txt', zoneName: 'goosebumps.fm' },
+            ],
+          }
+        : undefined),
       ...(config.isLocalDev ? { dev: { port: localDevPorts.api, strictPort: true } } : undefined),
       compatibility: { date: '2026-07-04', flags: ['nodejs_compat'] },
       build: privateSourceMaps,

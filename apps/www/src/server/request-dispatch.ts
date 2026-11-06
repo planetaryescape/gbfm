@@ -113,7 +113,7 @@ export const renderResponse = async (request: Request): Promise<Server.EntryResu
     url.pathname.startsWith('/s/') ||
     (url.pathname === '/auth/verify-email' && url.searchParams.has('token')) ||
     (url.pathname.startsWith('/auth/') && !Route.guards.Auth(route)) ||
-    ['/rss.xml', '/sitemap.xml'].includes(url.pathname)
+    ['/rss.xml', '/sitemap.xml', '/mcp.txt'].includes(url.pathname)
   )
     return Server.Responded(
       await apiRequest(

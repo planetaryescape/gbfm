@@ -14,6 +14,11 @@ Use the pinned `@foldkit/ui` 0.169.0 primitives for dialogs and popovers. Mobile
 
 ## Server document
 
+`apps/www/worker.ts` wraps the generated Foldkit fetch entry in production. It
+forwards the exact `/mcp.txt` path to the API before Foldkit classifies static
+misses, since Foldkit 0.169.0 rejects `.txt` paths without calling `renderPage`.
+All other requests retain the generated handler and its missing-asset behavior.
+
 `src/server/document.ts`, re-exported by `src/entry.server.ts`, owns the whole HTML document. The Vite plugin supplies browser asset URLs from `ssr.clientEntry`; styles are imported by `src/entry.client.ts`. There is no `index.html` template or production `transformIndexHtml` hook. Page responses stay `Server.Rendered` until the host renders the document; data, actions, and redirects use `Server.Responded`. Request-specific escaped head markup follows its application object through a WeakMap, so concurrent pages cannot overwrite each other's metadata.
 
 Production uses Foldkit's compiled, coordinated build identity. Do not generate a random ID at Vite config evaluation time: separate environment evaluations can give the client and server different IDs. Explicit `FOLDKIT_BUILD_ID` or `APP_RELEASE` values still identify deployments; dev passes an explicit ID because it uses separate plugins. The document links the source stylesheet in dev so pages remain styled with JavaScript disabled.

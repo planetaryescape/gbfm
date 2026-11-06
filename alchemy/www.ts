@@ -36,7 +36,7 @@ export const website = ({
     })
 
     const worker = {
-      main: './apps/www/dist/server/fetch.js',
+      main: './apps/www/worker.ts',
       ...(config.isProduction
         ? { domain: { name: 'www.goosebumps.fm', aliases: ['goosebumps.fm'] } }
         : { url: true }),

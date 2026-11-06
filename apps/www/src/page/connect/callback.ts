@@ -27,7 +27,9 @@ const FormActionSource = Schema.NonEmptyString.check(
   Schema.isPattern(/^[^\s;,'"\\*\p{Cc}]+$/u),
 ).pipe(Schema.brand('CallbackFormActionSource'))
 
-export const consentFormActionSource = (state: typeof ConsentState.cases.Verified.Type) => {
+export const consentFormActionSource = (
+  state: Pick<typeof ConsentState.cases.Verified.Type, 'continuation'>,
+) => {
   const raw = new URLSearchParams(state.continuation.query).get('redirect_uri') ?? ''
   const callback = URL.parse(raw)
 

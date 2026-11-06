@@ -52,8 +52,14 @@ export const renderResponse = async (request: Request): Promise<Server.EntryResu
   const ownedRequest = new Request(url, request)
   ownedRequest.headers.set('x-request-id', requestId)
 
-  if (['/connect/gbfm', '/connect/gbfm/consent'].includes(url.pathname))
+  if (url.pathname === '/connect/gbfm' || url.pathname.startsWith('/connect/gbfm/'))
     return handleConnection(ownedRequest)
+
+  if (Route.guards.Auth(route) && isSignInOrUp(route.action) && request.method === 'GET') {
+    const continuation = loginOAuthQuery(url.searchParams.get('returnTo') ?? '', url.origin)
+
+    if (continuation) return redirect(`/connect/gbfm?${continuation}`)
+  }
 
   if (url.pathname === '/telemetry/browser') {
     if (!import.meta.env.PROD) return Server.Responded(new Response(null, { status: 204 }))

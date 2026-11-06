@@ -1,9 +1,8 @@
 import { Option, Schema } from 'effect'
-import * as Server from 'foldkit/experimental/server'
+import type * as Server from 'foldkit/experimental/server'
 
 import { apiRequest } from '../../server/api'
-import { redirect } from '../../server/form-actions'
-import { authHref } from '../auth/links'
+import { authErrorKey, authErrorMessage, readAuthErrorCode } from '../auth/errors'
 import { consentFormActionSource } from './callback'
 import { providerRedirect } from './continuation'
 import {
@@ -13,146 +12,202 @@ import {
   parseContinuation,
   ProviderOutcome,
 } from './domain'
+import { loadConnection } from './load'
+import { connectionLoginDocument } from './login'
+import {
+  connectionFailure as failure,
+  connectionRedirect as redirect,
+  connectionResponse,
+} from './response'
 import { consentDocument } from './view'
 
-const Client = Schema.Struct({ client_name: Schema.optional(Schema.String) })
-
-const Decision = Schema.Struct({
-  query: Schema.String,
-  decision: Schema.Literals(['allow', 'deny']),
-})
-
-const failure = (status: number) =>
-  Server.Responded(
-    new Response('This connection could not be completed. Start again from your app.', {
-      status,
-      headers: { 'cache-control': 'private, no-store', 'referrer-policy': 'no-referrer' },
-    }),
-  )
-
-const loadConsent = async (
+const providerResponse = async (
+  response: Response,
   request: Request,
   continuation: PendingContinuation,
-): Promise<typeof ConsentState.Type> => {
-  const origin = new URL(request.url).origin
-
-  const verified = await apiRequest(request, '/auth/oauth2/public-client-prelogin', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', origin },
-    body: JSON.stringify({ client_id: continuation.clientId, oauth_query: continuation.query }),
-  })
-
-  if (!verified.ok) return ConsentState.cases.Failed.make({ status: verified.status })
-
-  const response = await apiRequest(
-    request,
-    `/auth/oauth2/public-client?${new URLSearchParams({ client_id: continuation.clientId })}`,
-    { method: 'GET' },
+) =>
+  ProviderOutcome.match(
+    await providerRedirect(response, new URL(request.url).origin, continuation.query),
+    {
+      Redirect: ({ location, cookies }) => redirect(location, cookies),
+      Rejected: ({ status }) => failure(status, continuation),
+    },
   )
 
-  if (response.status === 401) return ConsentState.cases.LoginRequired.make({ continuation })
+const connectionPage = async (request: Request, continuation: PendingContinuation) =>
+  ConsentState.match<Promise<Server.Responded>>(await loadConnection(request, continuation), {
+    Failed: async ({ status }) => failure(status),
+    LoginRequired: async (state) =>
+      connectionResponse(connectionLoginDocument(state), continuation),
+    Verified: async (state) => {
+      if (!consentFormActionSource(state)) return failure(502)
 
-  if (!response.ok) return ConsentState.cases.Failed.make({ status: response.status })
+      if (new URL(request.url).pathname === '/connect/gbfm/consent')
+        return connectionResponse(consentDocument(state), continuation)
 
-  const client = Option.getOrNull(
-    Schema.decodeUnknownOption(Client)(await response.json().catch(() => null)),
-  )
-
-  return client
-    ? ConsentState.cases.Verified.make({
-        continuation,
-        clientName: client.client_name || 'This app',
+      const response = await apiRequest(request, '/auth/oauth2/continue', {
+        method: 'POST',
+        redirect: 'manual',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          origin: new URL(request.url).origin,
+        },
+        body: JSON.stringify({ postLogin: true, oauth_query: continuation.query }),
       })
-    : ConsentState.cases.Failed.make({ status: 502 })
-}
 
-const consentPage = async (request: Request, continuation: PendingContinuation) =>
-  ConsentState.match(await loadConsent(request, continuation), {
-    Failed: ({ status }) => failure(status),
-    LoginRequired: ({ continuation }) => redirect(`/connect/gbfm?${continuation.query}`),
-    Verified: (state) => {
-      const callbackSource = consentFormActionSource(state)
-
-      if (!callbackSource) return failure(502)
-
-      return Server.Responded(
-        new Response(consentDocument(state), {
-          headers: {
-            'content-type': 'text/html; charset=utf-8',
-            'cache-control': 'private, no-store',
-            'referrer-policy': 'strict-origin',
-            'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${callbackSource}; base-uri 'none'; frame-ancestors 'none'`,
-          },
-        }),
+      return ProviderOutcome.match(
+        await providerRedirect(response, new URL(request.url).origin, continuation.query),
+        {
+          Rejected: ({ status }) => failure(status, continuation),
+          Redirect: ({ location, cookies }) =>
+            URL.parse(location, request.url)?.pathname === '/connect/gbfm'
+              ? connectionResponse(
+                  connectionLoginDocument({
+                    ...state,
+                    email: state.account.email,
+                    error: 'For this connection, the app requires you to sign in again.',
+                  }),
+                  continuation,
+                )
+              : redirect(location, cookies),
+        },
       )
     },
   })
 
-const consentDecision = async (request: Request) => {
+const connectionAction = async (
+  request: Request,
+  continuation: PendingContinuation,
+  form: FormData,
+) => {
   const url = new URL(request.url)
+  const state = await loadConnection(request, continuation)
 
-  if (request.headers.get('origin') !== url.origin) return failure(403)
-  const form = await request.formData().catch(() => null)
+  if (ConsentState.guards.Failed(state)) return failure(state.status)
 
-  if (!form) return failure(400)
+  const headers = {
+    'content-type': 'application/json',
+    accept: 'application/json',
+    origin: url.origin,
+  }
 
-  const input = Option.getOrNull(
-    Schema.decodeUnknownOption(Decision)({
-      query: form.get('oauth_query'),
-      decision: form.get('decision'),
-    }),
-  )
+  if (url.pathname === '/connect/gbfm/cancel') {
+    const response = await apiRequest(request, '/.well-known/oauth-authorization-server/auth', {
+      method: 'GET',
+    })
 
-  if (!input) return failure(400)
+    const metadata = Option.getOrNull(
+      Schema.decodeUnknownOption(Schema.Struct({ issuer: Schema.String }))(
+        await response.json().catch(() => null),
+      ),
+    )
 
-  return Continuation.match<Promise<Server.Responded>>(
-    parseContinuation(new URLSearchParams(input.query)),
-    {
-      Missing: async () => failure(400),
-      Rejected: async () => failure(400),
-      PendingVerification: async (continuation) => {
-        const response = await apiRequest(request, '/auth/oauth2/consent', {
-          method: 'POST',
-          redirect: 'manual',
-          headers: {
-            'content-type': 'application/json',
-            accept: 'application/json',
-            origin: url.origin,
-          },
-          body: JSON.stringify({
-            accept: input.decision === 'allow',
-            oauth_query: continuation.query,
-          }),
-        })
+    if (!response.ok || !metadata || !consentFormActionSource({ continuation })) return failure(502)
+    const query = new URLSearchParams(continuation.query)
+    const callback = new URL(query.get('redirect_uri') ?? '')
+    callback.searchParams.set('error', 'access_denied')
+    callback.searchParams.set('error_description', 'The user cancelled the connection')
+    callback.searchParams.set('iss', metadata.issuer)
+    const clientState = query.get('state')
 
-        return ProviderOutcome.match(
-          await providerRedirect(response, url.origin, continuation.query),
-          {
-            Redirect: ({ location, cookies }) => redirect(location, cookies),
-            Rejected: ({ status }) => failure(status),
-          },
-        )
-      },
-    },
-  )
+    if (clientState) callback.searchParams.set('state', clientState)
+
+    return redirect(callback.href)
+  }
+
+  if (url.pathname === '/connect/gbfm/account') {
+    const response = await apiRequest(request, '/auth/sign-out', {
+      method: 'POST',
+      headers,
+      body: '{}',
+    })
+
+    return response.ok
+      ? redirect(`/connect/gbfm?${continuation.query}`, response.headers.getSetCookie())
+      : failure(response.status)
+  }
+
+  if (url.pathname === '/connect/gbfm/sign-in') {
+    const credentials = Option.getOrNull(
+      Schema.decodeUnknownOption(Schema.Struct({ email: Schema.String, password: Schema.String }))({
+        email: form.get('email'),
+        password: form.get('password'),
+      }),
+    )
+
+    if (!credentials) return failure(400)
+
+    const response = await apiRequest(request, '/auth/sign-in/email', {
+      method: 'POST',
+      redirect: 'manual',
+      headers,
+      body: JSON.stringify({ ...credentials, oauth_query: continuation.query }),
+    })
+
+    if (!response.ok) {
+      if (response.status >= 500 || response.status === 403)
+        return failure(response.status, continuation)
+
+      const error = authErrorMessage(
+        authErrorKey(response.status, await readAuthErrorCode(response)),
+      )
+
+      return connectionResponse(
+        connectionLoginDocument({
+          ...state,
+          email: credentials.email,
+          error: error ?? 'Sign-in failed. Please try again.',
+        }),
+        continuation,
+        response.status,
+      )
+    }
+
+    return providerResponse(response, request, continuation)
+  }
+
+  if (url.pathname !== '/connect/gbfm/consent') return failure(404)
+  const decision = form.get('decision')
+
+  if (decision !== 'allow' && decision !== 'deny') return failure(400)
+
+  const response = await apiRequest(request, '/auth/oauth2/consent', {
+    method: 'POST',
+    redirect: 'manual',
+    headers,
+    body: JSON.stringify({ accept: decision === 'allow', oauth_query: continuation.query }),
+  })
+
+  return providerResponse(response, request, continuation)
 }
 
 export const handleConnection = async (request: Request): Promise<Server.Responded> => {
   const url = new URL(request.url)
 
-  if (url.pathname === '/connect/gbfm/consent' && request.method === 'POST')
-    return consentDecision(request)
+  if (!['GET', 'POST'].includes(request.method)) return failure(405)
 
-  if (!['/connect/gbfm', '/connect/gbfm/consent'].includes(url.pathname)) return failure(404)
+  if (request.method === 'POST' && request.headers.get('origin') !== url.origin) return failure(403)
+  const form = request.method === 'POST' ? await request.formData().catch(() => null) : null
 
-  if (request.method !== 'GET') return failure(405)
+  const query = Option.getOrNull(
+    Schema.decodeUnknownOption(Schema.String)(form?.get('oauth_query')),
+  )
 
-  return Continuation.match<Promise<Server.Responded>>(parseContinuation(url.searchParams), {
-    Missing: async () => failure(400),
-    Rejected: async () => failure(400),
-    PendingVerification: async (continuation) =>
-      url.pathname === '/connect/gbfm'
-        ? redirect(authHref('/auth/sign-in', { returnTo: `/connect/gbfm?${continuation.query}` }))
-        : consentPage(request, continuation),
-  })
+  if (request.method === 'POST' && query === null) return failure(400)
+
+  return Continuation.match<Promise<Server.Responded>>(
+    parseContinuation(query === null ? url.searchParams : new URLSearchParams(query)),
+    {
+      Missing: async () => failure(400),
+      Rejected: async () => failure(400),
+      PendingVerification: async (continuation) => {
+        if (form) return connectionAction(request, continuation, form)
+
+        if (!['/connect/gbfm', '/connect/gbfm/consent'].includes(url.pathname)) return failure(404)
+
+        return connectionPage(request, continuation)
+      },
+    },
+  )
 }

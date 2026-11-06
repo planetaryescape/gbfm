@@ -20,8 +20,15 @@ export const Continuation = Schema.TaggedUnion({
 export type PendingContinuation = typeof Continuation.cases.PendingVerification.Type
 
 export const ConsentState = Schema.TaggedUnion({
-  Verified: { continuation: Continuation.cases.PendingVerification, clientName: Schema.String },
-  LoginRequired: { continuation: Continuation.cases.PendingVerification },
+  Verified: {
+    continuation: Continuation.cases.PendingVerification,
+    clientName: Schema.String,
+    account: Schema.Struct({ name: Schema.String, email: Schema.String }),
+  },
+  LoginRequired: {
+    continuation: Continuation.cases.PendingVerification,
+    clientName: Schema.String,
+  },
   Failed: { status: Schema.Number },
 })
 

@@ -25,6 +25,7 @@ const verified = (callback: string) => {
       ConsentState.cases.Verified.make({
         continuation,
         clientName: 'Disposable app',
+        account: { name: 'Disposable editor', email: 'editor@example.test' },
       }),
   })
 }

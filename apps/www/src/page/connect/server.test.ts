@@ -19,12 +19,7 @@ const query = new URLSearchParams({
 
 for (const key of [...query.keys(), 'ba_param']) query.append('ba_param', key)
 
-it('continues only through the dedicated browser login route, without weakening auth return paths', async () => {
-  const result = await handleConnection(new Request(`https://www.test/connect/gbfm?${query}`))
-  const location = new URL(result.response.headers.get('location') ?? '', 'https://www.test')
-
-  expect(location.pathname).toBe('/auth/sign-in')
-  expect(location.searchParams.get('returnTo')).toBe(`/connect/gbfm?${query}`)
+it('rejects unsigned continuations without weakening auth return paths', async () => {
   expect(
     safeReturnPath('/auth/oauth2/authorize?redirect_uri=https://evil.test', 'https://www.test'),
   ).toBe('/dashboard')
@@ -59,6 +54,10 @@ it('keeps consent server-only, preserves provider state, and forwards login and 
 
     if (request.url?.startsWith('/auth/oauth2/public-client'))
       response.end(JSON.stringify({ client_name: '<Disposable app>' }))
+    else if (request.url === '/auth/get-session')
+      response.end(
+        JSON.stringify({ user: { name: 'Disposable Editor', email: 'editor@example.test' } }),
+      )
     else if (request.url === '/auth/sign-in/email') {
       response.setHeader('set-cookie', 'session_token=disposable; HttpOnly')
       response.end(
@@ -89,15 +88,18 @@ it('keeps consent server-only, preserves provider state, and forwards login and 
 
     const html = await page.response.text()
 
-    expect(html).toContain('Connect &#60;Disposable app&#62; to gbfm')
-    expect(html).toContain('including drafts and private posts')
+    expect(html).toContain('Connect &#60;Disposable app&#62;?')
+    expect(html).toContain('including your own editorial drafts and private posts')
+    expect(html).toContain('editor@example.test')
+    expect(html).toContain('client.example.test')
+    expect(html).toContain('not verified by Goosebumps FM')
     expect(html).toContain('value="deny"')
     expect(html).not.toContain('<script')
     expect(page.response.headers.get('cache-control')).toBe('private, no-store')
     expect(page.response.headers.get('referrer-policy')).toBe('strict-origin')
     expect(html).toContain('<meta name="referrer" content="strict-origin">')
     expect(page.response.headers.get('content-security-policy')).toBe(
-      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://client.example.test/callback; base-uri 'none'; frame-ancestors 'none'",
+      "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; form-action 'self' https://client.example.test/callback; base-uri 'none'; frame-ancestors 'none'",
     )
 
     const login = await handleFormAction(
@@ -115,7 +117,9 @@ it('keeps consent server-only, preserves provider state, and forwards login and 
     expect(login.response.status).toBe(303)
     expect(login.response.headers.get('location')).toBe(`/connect/gbfm/consent?${query}`)
     expect(login.response.headers.getSetCookie()).toEqual(['session_token=disposable; HttpOnly'])
-    expect(JSON.parse(received[2]?.body ?? '{}')).toMatchObject({ oauth_query: query.toString() })
+    expect(
+      JSON.parse(received.find(({ path }) => path === '/auth/sign-in/email')?.body ?? '{}'),
+    ).toMatchObject({ oauth_query: query.toString() })
 
     for (const decision of ['allow', 'deny']) {
       const result = await handleConnection(
@@ -133,7 +137,11 @@ it('keeps consent server-only, preserves provider state, and forwards login and 
     }
 
     expect(
-      received.slice(3).map((request) => ({ ...request, body: JSON.parse(request.body) })),
+      received
+        .values()
+        .filter(({ path }) => path === '/auth/oauth2/consent')
+        .map((request) => ({ ...request, body: JSON.parse(request.body) }))
+        .toArray(),
     ).toEqual([
       {
         path: '/auth/oauth2/consent',

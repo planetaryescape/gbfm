@@ -12,6 +12,8 @@ import { createMigratedD1Database } from '@/test/migrate-d1'
 
 const frontend = new URL(process.env.FRONTEND_URL ?? 'https://mcp-479.localhost').origin
 
+const issuer = process.env.MCP_E2E_ISSUER ?? `${frontend}/auth`
+
 const resource = await createMigratedD1Database()
 
 const db = makeDatabaseClient(resource.database)
@@ -21,8 +23,8 @@ await seedLocalUsers(db)
 const owner = await db.select({ id: user.id }).from(user).where(eq(user.username, 'local-editor'))
 
 const settings = Schema.decodeUnknownSync(EditorialOAuthSettings)({
-  resourceUrl: `${frontend}/mcp`,
-  issuer: `${frontend}/auth`,
+  resourceUrl: `${new URL(issuer).origin}/mcp`,
+  issuer,
 })
 
 await db.insert(postsTable).values({
@@ -60,13 +62,15 @@ const app = createTestWebHandler(
 
 const authorization = new Map<string, { clientId: typeof OAuthClientId.Type; verifier: string }>()
 
+let fixtureRequest = 0
+
 const request = (path: string, values: Record<string, Schema.Json>, form = false) =>
   app.handler(
-    new Request(`${frontend}${path}`, {
+    new Request(`${new URL(issuer).origin}${path}`, {
       method: 'POST',
       headers: {
         'content-type': form ? 'application/x-www-form-urlencoded' : 'application/json',
-        'cf-connecting-ip': '192.0.2.79',
+        'cf-connecting-ip': `192.0.2.${(fixtureRequest++ % 254) + 1}`,
       },
       body: form
         ? new URLSearchParams(
@@ -116,6 +120,12 @@ const server = Bun.serve({
         code_challenge_method: 'S256',
         state,
       })
+
+      for (const key of ['prompt', 'max_age']) {
+        const value = url.searchParams.get(key)
+
+        if (value !== null) query.set(key, value)
+      }
 
       return Response.redirect(`${settings.issuer}/oauth2/authorize?${query}`, 303)
     }

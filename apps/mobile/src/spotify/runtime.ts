@@ -5,7 +5,7 @@ import { type Context, Effect, Layer, Scope } from 'effect'
 import { env } from '@/env'
 
 import { spotifyConnectionLifecycle } from './connectionLifecycle'
-import { SPOTIFY_REDIRECT_URI } from './constants'
+import { SPOTIFY_CONFIGURATION_MESSAGE, SPOTIFY_REDIRECT_URI } from './constants'
 import { installSpotifyCryptoPolyfill } from './cryptoPolyfill'
 import {
   hydrateSpotifyTokensFromSecureStore,
@@ -23,10 +23,8 @@ const buildSpotifyContext = () => {
 
   const clientId = env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID
 
-  if (!clientId) {
-    return Promise.reject(
-      new SpotifyConfigurationError({ message: 'Missing EXPO_PUBLIC_SPOTIFY_CLIENT_ID.' }),
-    )
+  if (!clientId?.trim()) {
+    return Promise.reject(new SpotifyConfigurationError({ message: SPOTIFY_CONFIGURATION_MESSAGE }))
   }
 
   const spotifyLayer = SpotifyBrowser.layer({

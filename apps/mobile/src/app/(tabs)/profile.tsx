@@ -31,10 +31,10 @@ export default function Profile() {
         <Text
           accessibilityRole='header'
           maxFontSizeMultiplier={1.5}
-          style={{ color: colors.accent, fontFamily: fonts.serif, fontSize: 34 }}>
+          style={{ color: colors.accent, fontFamily: fonts.monoSemiBold, fontSize: 26 }}>
           Settings
         </Text>
-        <Text style={{ color: colors.muted, fontSize: 14, lineHeight: 20 }}>
+        <Text style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 13, lineHeight: 20 }}>
           Your account, preferences and connected apps.
         </Text>
       </View>
@@ -67,11 +67,7 @@ export default function Profile() {
           onPress={() => router.push('/settings/spotify')}
         />
       </SettingsSection>
-      <SettingsSection title='More'>
-        <SettingsRow title='Writing & drafts' onPress={() => router.push('/settings/writing')} />
-        {user ? (
-          <SettingsRow title='Music reminders' onPress={() => router.push('/music-reminders')} />
-        ) : null}
+      <SettingsSection title='App'>
         <SettingsRow title='About & help' onPress={() => router.push('/settings/about')} />
       </SettingsSection>
     </SettingsScreen>

@@ -6,6 +6,7 @@ import { expect, test } from 'vitest'
 import { spotifyConnectionLifecycle } from './connectionLifecycle'
 import { connectSpotify } from './connectionLogin'
 import { SpotifyConnectionState, type SetConnectionState } from './connectionState'
+import { SPOTIFY_CONFIGURATION_MESSAGE } from './constants'
 import { spotifyFixture } from './operationFixture'
 
 const session: SpotifyAuthSession = {
@@ -23,6 +24,36 @@ const connection = () => {
 
   return { setState, current: () => state }
 }
+
+test.each([undefined, '', '   '])(
+  'missing client ID %j shows a useful error without opening login',
+  async (clientId) => {
+    const state = connection()
+    const f = await spotifyFixture((service) => service)
+    let opened = false
+
+    try {
+      await connectSpotify({
+        clientId,
+        redirectUri: 'gbfm://spotify/callback',
+        setState: state.setState,
+        lifecycle: spotifyConnectionLifecycle(f.run),
+        openLogin: async () => {
+          opened = true
+
+          return { type: 'cancel' }
+        },
+      })
+
+      expect(opened).toBe(false)
+      expect(state.current()).toEqual(
+        SpotifyConnectionState.Disconnected({ error: SPOTIFY_CONFIGURATION_MESSAGE }),
+      )
+    } finally {
+      await f.dispose()
+    }
+  },
+)
 
 test.each(['cancel', 'dismiss', 'locked', 'opened'] as const)(
   '%s login returns to disconnected',

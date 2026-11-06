@@ -76,7 +76,7 @@ export const website = ({
       outdir: 'dist/client',
       assets: {
         notFoundHandling: '404-page',
-        runWorkerFirst: false,
+        runWorkerFirst: ['/mcp.txt'],
       },
     })
   })

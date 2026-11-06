@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from 'react'
+import { Children, type PropsWithChildren } from 'react'
 import { Pressable, Text, View } from 'react-native'
 
 import { useThemeColors, withAlpha } from '@/theme/colors'
@@ -11,12 +11,13 @@ export function SettingsSection({
   const colors = useThemeColors()
 
   return (
-    <View style={{ gap: 12 }}>
+    <View style={{ gap: 10 }}>
       <Text
+        accessibilityRole='header'
         style={{
           color: colors.muted,
           fontFamily: fonts.monoSemiBold,
-          fontSize: 12,
+          fontSize: 11,
           textTransform: 'uppercase',
           letterSpacing: 1,
         }}>
@@ -25,12 +26,20 @@ export function SettingsSection({
       <View
         style={{
           backgroundColor: colors.surface,
-          borderRadius: 6,
+          borderRadius: 12,
           borderWidth: 1,
           borderColor: withAlpha(colors.muted, 0.2),
           overflow: 'hidden',
         }}>
-        {children}
+        {Children.map(Children.toArray(children), (child, index) => (
+          <View
+            style={{
+              borderTopWidth: index === 0 ? 0 : 0.5,
+              borderTopColor: withAlpha(colors.muted, 0.18),
+            }}>
+            {child}
+          </View>
+        ))}
       </View>
     </View>
   )
@@ -39,11 +48,13 @@ export function SettingsSection({
 export function SettingsRow({
   title,
   detail,
+  value,
   onPress,
   destructive = false,
 }: {
   readonly title: string
   readonly detail?: string
+  readonly value?: string
   readonly onPress?: () => void
   readonly destructive?: boolean
 }) {
@@ -56,7 +67,7 @@ export function SettingsRow({
           style={{
             color: destructive ? colors.error : colors.strong,
             fontSize: 16,
-            fontWeight: '600',
+            fontWeight: '500',
           }}>
           {title}
         </Text>
@@ -64,8 +75,16 @@ export function SettingsRow({
           <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 19 }}>{detail}</Text>
         ) : null}
       </View>
+      {value ? (
+        <Text style={{ color: colors.muted, fontSize: 14, flexShrink: 1, textAlign: 'right' }}>
+          {value}
+        </Text>
+      ) : null}
       {onPress ? (
-        <Text accessibilityElementsHidden style={{ color: colors.muted, fontSize: 20 }}>
+        <Text
+          accessibilityElementsHidden
+          importantForAccessibility='no'
+          style={{ color: colors.muted, fontSize: 20 }}>
           ›
         </Text>
       ) : null}
@@ -73,13 +92,12 @@ export function SettingsRow({
   )
 
   const style = {
-    padding: 16,
-    minHeight: 64,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    minHeight: 54,
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     gap: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: withAlpha(colors.muted, 0.12),
   }
 
   return onPress ? (

@@ -16,17 +16,26 @@ const key = 'gbfm-appearance'
 
 const preferencesReady = Atom.make(false).pipe(Atom.keepAlive)
 
+const applyPreference = (
+  value: ColorSchemePreference,
+  setPreference: (value: ColorSchemePreference) => void,
+) => {
+  Appearance.setColorScheme(value === 'system' ? 'auto' : value)
+  setPreference(value)
+}
+
 export const useColorSchemePreference = () => useAtomValue(colorSchemePreference)
 
 export const useSetColorSchemePreference = () => {
   const setPreference = useAtomSet(colorSchemePreference)
 
   return (value: ColorSchemePreference) =>
-    writeLocal(key, value).pipe(Effect.tap(() => Effect.sync(() => setPreference(value))))
+    writeLocal(key, value).pipe(
+      Effect.tap(() => Effect.sync(() => applyPreference(value, setPreference))),
+    )
 }
 
 export function PreferencesProvider({ children }: PropsWithChildren) {
-  const preference = useColorSchemePreference()
   const setPreference = useAtomSet(colorSchemePreference)
   const ready = useAtomValue(preferencesReady)
   const setReady = useAtomSet(preferencesReady)
@@ -38,15 +47,14 @@ export function PreferencesProvider({ children }: PropsWithChildren) {
             ? Effect.succeed('system' as const)
             : Schema.decodeUnknownEffect(Preference)(value),
         ),
-        Effect.match({ onSuccess: setPreference, onFailure: () => setPreference('system') }),
+        Effect.match({
+          onSuccess: (value) => applyPreference(value, setPreference),
+          onFailure: () => applyPreference('system', setPreference),
+        }),
       ),
     )
     setReady(true)
   }, [setPreference, setReady])
-
-  useEffect(() => {
-    if (ready) Appearance.setColorScheme(preference === 'system' ? 'auto' : preference)
-  }, [preference, ready])
 
   return ready ? children : null
 }

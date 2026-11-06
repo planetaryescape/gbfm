@@ -79,7 +79,7 @@ jobs:
           VITE_PUBLIC_SENTRY_DSN: ${{ secrets.VITE_PUBLIC_SENTRY_DSN }}
           VITE_SENTRY_ENABLED: 'true'
           VITE_SENTRY_ENVIRONMENT: 'production'
-          SENTRY_UPLOAD_SOURCEMAPS: 'true'
+          SENTRY_UPLOAD_SOURCEMAPS: ${{ !inputs.plan_only }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           StorageRegion: ${{ secrets.STORAGE_REGION }}

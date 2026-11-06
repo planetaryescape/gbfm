@@ -24,19 +24,21 @@ import { consentDocument } from './view'
 
 const providerResponse = async (
   response: Response,
-  request: Request,
+  url: URL,
   continuation: PendingContinuation,
+  onLoginRedirect?: () => Server.Responded,
 ) =>
-  ProviderOutcome.match(
-    await providerRedirect(response, new URL(request.url).origin, continuation.query),
-    {
-      Redirect: ({ location, cookies }) => redirect(location, cookies),
-      Rejected: ({ status }) =>
-        withConnectionCookies(failure(status, continuation), response.headers.getSetCookie()),
-    },
-  )
+  ProviderOutcome.match(await providerRedirect(response, url.origin, continuation.query), {
+    Redirect: ({ location, cookies }) =>
+      onLoginRedirect && URL.parse(location, url.origin)?.pathname === '/connect/gbfm'
+        ? withConnectionCookies(onLoginRedirect(), cookies)
+        : redirect(location, cookies),
+    Rejected: ({ status }) =>
+      withConnectionCookies(failure(status, continuation), response.headers.getSetCookie()),
+  })
 
 const connectionPage = async (request: Request, continuation: PendingContinuation) => {
+  const url = new URL(request.url)
   const { state, cookies } = await loadConnection(request, continuation)
 
   const result = await ConsentState.match<Promise<Server.Responded>>(state, {
@@ -46,7 +48,7 @@ const connectionPage = async (request: Request, continuation: PendingContinuatio
     Verified: async (state) => {
       if (!consentFormActionSource(state)) return failure(502)
 
-      if (new URL(request.url).pathname === '/connect/gbfm/consent')
+      if (url.pathname === '/connect/gbfm/consent')
         return connectionResponse(consentDocument(state), continuation)
 
       const response = await apiRequest(request, '/auth/oauth2/continue', {
@@ -55,31 +57,20 @@ const connectionPage = async (request: Request, continuation: PendingContinuatio
         headers: {
           'content-type': 'application/json',
           accept: 'application/json',
-          origin: new URL(request.url).origin,
+          origin: url.origin,
         },
         body: JSON.stringify({ postLogin: true, oauth_query: continuation.query }),
       })
 
-      return ProviderOutcome.match(
-        await providerRedirect(response, new URL(request.url).origin, continuation.query),
-        {
-          Rejected: ({ status }) =>
-            withConnectionCookies(failure(status, continuation), response.headers.getSetCookie()),
-          Redirect: ({ location, cookies }) =>
-            URL.parse(location, request.url)?.pathname === '/connect/gbfm'
-              ? withConnectionCookies(
-                  connectionResponse(
-                    connectionLoginDocument({
-                      ...state,
-                      email: state.account.email,
-                      error: 'For this connection, the app requires you to sign in again.',
-                    }),
-                    continuation,
-                  ),
-                  cookies,
-                )
-              : redirect(location, cookies),
-        },
+      return providerResponse(response, url, continuation, () =>
+        connectionResponse(
+          connectionLoginDocument({
+            ...state,
+            email: state.account.email,
+            error: 'For this connection, the app requires you to sign in again.',
+          }),
+          continuation,
+        ),
       )
     },
   })
@@ -110,7 +101,7 @@ const connectionAction = async (
       body: JSON.stringify({ accept: decision === 'allow', oauth_query: continuation.query }),
     })
 
-    return providerResponse(response, request, continuation)
+    return providerResponse(response, url, continuation)
   }
 
   if (url.pathname === '/connect/gbfm/sign-in') return signIn(request, continuation, form)
@@ -214,7 +205,7 @@ const signIn = async (request: Request, continuation: PendingContinuation, form:
     return withConnectionCookies(result, [...cookies, ...response.headers.getSetCookie()])
   }
 
-  return providerResponse(response, request, continuation)
+  return providerResponse(response, url, continuation)
 }
 
 export const handleConnection = async (request: Request): Promise<Server.Responded> => {

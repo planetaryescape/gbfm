@@ -30,7 +30,7 @@ test('an author signs in, denies, allows and disconnects a disposable read-only 
   if (!ownerEmail || !ownerPassword)
     throw new Error('Explicit disposable MCP owner credentials are required')
 
-  const name = `Disposable MCP app ${crypto.randomUUID()}`
+  const name = 'OpenCode'
 
   const callbackServer = createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' })

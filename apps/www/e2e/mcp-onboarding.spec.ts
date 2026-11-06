@@ -20,15 +20,13 @@ const signIn = async (page: Page, email = 'editor@gbfm.local') => {
 }
 
 const consent = (page: Page) =>
-  page.getByRole('heading', { name: 'Connect Disposable editorial client?', exact: true })
+  page.getByRole('heading', { name: 'Connect OpenCode?', exact: true })
 
 test('signed-out users see connection context, recover from a bad password and approve read-only tools', async ({
   page,
 }, info) => {
   await page.goto('/api/e2e/mcp-start')
-  await expect(
-    page.getByRole('heading', { name: 'Connect Disposable editorial client', exact: true }),
-  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Connect OpenCode', exact: true })).toBeVisible()
   await expect(page.getByText('You will review access next', { exact: false })).toBeVisible()
   await expect(page.getByRole('navigation')).toHaveCount(0)
   await page.getByRole('textbox', { name: 'Email', exact: true }).focus()

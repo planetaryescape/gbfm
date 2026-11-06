@@ -89,7 +89,7 @@ const server = Bun.serve({
 
     if (url.pathname === '/api/e2e/mcp-start') {
       const registered = await request('/auth/oauth2/register', {
-        client_name: 'Disposable editorial client',
+        client_name: 'OpenCode',
         token_endpoint_auth_method: 'none',
         application_type: 'native',
         redirect_uris: [callback],
@@ -204,7 +204,7 @@ const server = Bun.serve({
   },
 })
 
-process.stdout.write(`Disposable editorial MCP API: ${server.url}\n`)
+process.stdout.write(`Local MCP test API: ${server.url}\n`)
 
 const stop = async () => {
   await server.stop(true)

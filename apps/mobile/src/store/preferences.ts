@@ -2,6 +2,7 @@ import { useAtomSet, useAtomValue } from '@effect/atom-react'
 import { Effect, Schema } from 'effect'
 import * as Atom from 'effect/reactivity/Atom'
 import { type PropsWithChildren, useEffect } from 'react'
+import { Appearance } from 'react-native'
 
 import { readLocal, writeLocal } from './localStorage'
 
@@ -15,13 +16,23 @@ const key = 'gbfm-appearance'
 
 const preferencesReady = Atom.make(false).pipe(Atom.keepAlive)
 
+const applyPreference = (
+  value: ColorSchemePreference,
+  setPreference: (value: ColorSchemePreference) => void,
+) => {
+  Appearance.setColorScheme(value === 'system' ? 'auto' : value)
+  setPreference(value)
+}
+
 export const useColorSchemePreference = () => useAtomValue(colorSchemePreference)
 
 export const useSetColorSchemePreference = () => {
   const setPreference = useAtomSet(colorSchemePreference)
 
   return (value: ColorSchemePreference) =>
-    writeLocal(key, value).pipe(Effect.tap(() => Effect.sync(() => setPreference(value))))
+    writeLocal(key, value).pipe(
+      Effect.tap(() => Effect.sync(() => applyPreference(value, setPreference))),
+    )
 }
 
 export function PreferencesProvider({ children }: PropsWithChildren) {
@@ -36,7 +47,10 @@ export function PreferencesProvider({ children }: PropsWithChildren) {
             ? Effect.succeed('system' as const)
             : Schema.decodeUnknownEffect(Preference)(value),
         ),
-        Effect.match({ onSuccess: setPreference, onFailure: () => setPreference('system') }),
+        Effect.match({
+          onSuccess: (value) => applyPreference(value, setPreference),
+          onFailure: () => applyPreference('system', setPreference),
+        }),
       ),
     )
     setReady(true)

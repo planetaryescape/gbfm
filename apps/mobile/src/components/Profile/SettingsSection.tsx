@@ -1,5 +1,5 @@
 import { Children, type PropsWithChildren } from 'react'
-import { Pressable, Text, View } from 'react-native'
+import { Pressable, Text, useWindowDimensions, View } from 'react-native'
 
 import { useThemeColors, withAlpha } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
@@ -59,6 +59,8 @@ export function SettingsRow({
   readonly destructive?: boolean
 }) {
   const colors = useThemeColors()
+  const { fontScale } = useWindowDimensions()
+  const stackValue = fontScale >= 1.5
 
   const content = (
     <>
@@ -74,16 +76,20 @@ export function SettingsRow({
         {detail ? (
           <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 19 }}>{detail}</Text>
         ) : null}
+        {value && stackValue ? (
+          <Text style={{ color: colors.muted, fontSize: 14 }}>{value}</Text>
+        ) : null}
       </View>
-      {value ? (
+      {value && !stackValue ? (
         <Text style={{ color: colors.muted, fontSize: 14, flexShrink: 1, textAlign: 'right' }}>
           {value}
         </Text>
       ) : null}
-      {onPress ? (
+      {onPress && !destructive ? (
         <Text
           accessibilityElementsHidden
           importantForAccessibility='no'
+          maxFontSizeMultiplier={1.5}
           style={{ color: colors.muted, fontSize: 20 }}>
           ›
         </Text>

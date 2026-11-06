@@ -1,3 +1,20 @@
+# [2.125.0](https://github.com/planetaryescape/gbfm/compare/v2.124.1...v2.125.0) (2026-11-06)
+
+
+### Bug Fixes
+
+* **mcp:** route website guide directly to API Worker ([16da61e](https://github.com/planetaryescape/gbfm/commit/16da61ebf44e86a01f407ce683d17d2ea39d5e32))
+* **mobile:** align task navigation and typography ([558535a](https://github.com/planetaryescape/gbfm/commit/558535af1fa48bc138601ead90c622182b820e0f))
+* **mobile:** explain unavailable Spotify configuration ([f9c5223](https://github.com/planetaryescape/gbfm/commit/f9c5223e7de5ea3b05c707dbdd8ddbe14b2779e3))
+* **mobile:** keep Settings readable at accessibility text sizes ([7bb4b7c](https://github.com/planetaryescape/gbfm/commit/7bb4b7cd74b7e0ea61cadc0b28b7fbaecb236d6c))
+* **mobile:** synchronize native chrome with appearance preference ([891c48d](https://github.com/planetaryescape/gbfm/commit/891c48dd24dbf6fe33b54705c9a2e2c5e163c0a4))
+* **www:** bypass asset classification for MCP guide ([9f8404d](https://github.com/planetaryescape/gbfm/commit/9f8404d665c405350c8d3122c6485e929fa832f1))
+
+
+### Features
+
+* **mobile:** organize settings into focused subpages ([bf60582](https://github.com/planetaryescape/gbfm/commit/bf60582655498401115f77af9cfc6230d538fe4f))
+
 ## [2.124.1](https://github.com/planetaryescape/gbfm/compare/v2.124.0...v2.124.1) (2026-11-06)
 
 

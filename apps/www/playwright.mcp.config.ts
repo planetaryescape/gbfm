@@ -28,7 +28,7 @@ export default defineConfig({
       command:
         'bunx portless gbfm-oauth-onboarding --app-port 5194 bunx vite --host 127.0.0.1 --strictPort',
       url: `${frontend}/@vite/client`,
-      env: { VPS_PROXY_TARGET: 'http://127.0.0.1:3194' },
+      env: { VPS_PROXY_TARGET: 'http://127.0.0.1:3194', EDITORIAL_OAUTH_ISSUER: `${api}/auth` },
       gracefulShutdown: { signal: 'SIGTERM', timeout: 3000 },
     },
   ],

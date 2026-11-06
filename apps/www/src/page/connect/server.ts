@@ -4,6 +4,7 @@ import type * as Server from 'foldkit/experimental/server'
 import { apiRequest } from '../../server/api'
 import { authErrorKey, authErrorMessages, readAuthErrorCode } from '../auth/errors'
 import { consentFormActionSource } from './callback'
+import { connectionIssuer } from './configuration'
 import { providerRedirect } from './continuation'
 import {
   ConsentState,
@@ -78,6 +79,23 @@ const connectionPage = async (request: Request, continuation: PendingContinuatio
   return withConnectionCookies(result, cookies)
 }
 
+const consentDecision = async (
+  request: Request,
+  continuation: PendingContinuation,
+  decision: 'allow' | 'deny',
+) => {
+  const url = new URL(request.url)
+
+  const response = await apiRequest(request, '/auth/oauth2/consent', {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { 'content-type': 'application/json', accept: 'application/json', origin: url.origin },
+    body: JSON.stringify({ accept: decision === 'allow', oauth_query: continuation.query }),
+  })
+
+  return providerResponse(response, url, continuation)
+}
+
 const connectionAction = async (
   request: Request,
   continuation: PendingContinuation,
@@ -90,18 +108,7 @@ const connectionAction = async (
 
     if (decision !== 'allow' && decision !== 'deny') return failure(400)
 
-    const response = await apiRequest(request, '/auth/oauth2/consent', {
-      method: 'POST',
-      redirect: 'manual',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-        origin: url.origin,
-      },
-      body: JSON.stringify({ accept: decision === 'allow', oauth_query: continuation.query }),
-    })
-
-    return providerResponse(response, url, continuation)
+    return consentDecision(request, continuation, decision)
   }
 
   if (url.pathname === '/connect/gbfm/sign-in') return signIn(request, continuation, form)
@@ -128,22 +135,18 @@ const actOnConnection = async (
   }
 
   if (url.pathname === '/connect/gbfm/cancel') {
-    const response = await apiRequest(request, '/.well-known/oauth-authorization-server/auth', {
-      method: 'GET',
-    })
+    if (ConsentState.guards.Verified(state)) return consentDecision(request, continuation, 'deny')
+    const issuer = await connectionIssuer()
 
-    const metadata = Option.getOrNull(
-      Schema.decodeUnknownOption(Schema.Struct({ issuer: Schema.String }))(
-        await response.json().catch(() => null),
-      ),
-    )
-
-    if (!response.ok || !metadata || !consentFormActionSource({ continuation })) return failure(502)
+    if (!issuer || !consentFormActionSource({ continuation })) return failure(502)
     const query = new URLSearchParams(continuation.query)
+    const mode = query.get('response_mode')
+
+    if (mode !== null && mode !== 'query') return failure(400)
     const callback = new URL(query.get('redirect_uri') ?? '')
     callback.searchParams.set('error', 'access_denied')
     callback.searchParams.set('error_description', 'The user cancelled the connection')
-    callback.searchParams.set('iss', metadata.issuer)
+    callback.searchParams.set('iss', issuer)
     const clientState = query.get('state')
 
     if (clientState) callback.searchParams.set('state', clientState)

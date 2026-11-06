@@ -14,6 +14,7 @@ const query = new URLSearchParams({
   redirect_uri: 'https://client.example.test/callback',
   exp: '9999999999',
   sig: 'provider-verified-test-signature',
+  state: 'original-review-state',
 })
 
 for (const key of [...query.keys(), 'ba_param']) query.append('ba_param', key)
@@ -93,6 +94,85 @@ const withCookies = (response: Response, cookies: ReadonlyArray<string>) => {
 
   return response
 }
+
+it('uses the provider denial path when cancellation has a session', async () => {
+  await withApi(
+    (path) => {
+      if (path === '/auth/oauth2/public-client-prelogin') return client()
+
+      if (path === '/auth/get-session') return signedIn()
+
+      return Response.json({
+        redirect: true,
+        url: 'https://client.example.test/callback?error=access_denied&state=original-review-state',
+      })
+    },
+    async (calls) => {
+      const result = await handleConnection(post('cancel'))
+
+      expect(result.response.status).toBe(303)
+      expect(calls.find(({ path }) => path === '/auth/oauth2/consent')?.body).toBe(
+        JSON.stringify({ accept: false, oauth_query: query.toString() }),
+      )
+      expect(calls.some(({ path }) => path.startsWith('/.well-known/'))).toBe(false)
+    },
+  )
+})
+
+it('uses the configured issuer for signed-out cancellation without a discovery request', async () => {
+  vi.stubEnv('EDITORIAL_OAUTH_ISSUER', 'https://configured-api.example.test/auth')
+  await withApi(
+    (path) => (path === '/auth/get-session' ? signedOut() : client()),
+    async (calls) => {
+      const result = await handleConnection(post('cancel'))
+      const target = new URL(result.response.headers.get('location') ?? '')
+
+      expect(result.response.status).toBe(303)
+      expect(target.origin).toBe('https://client.example.test')
+      expect(target.searchParams.get('iss')).toBe('https://configured-api.example.test/auth')
+      expect(target.searchParams.get('error')).toBe('access_denied')
+      expect(target.searchParams.get('state')).toBe('original-review-state')
+      expect(target.searchParams.has('code')).toBe(false)
+      expect(calls.map(({ path }) => path).toSorted()).toEqual([
+        '/auth/get-session',
+        '/auth/oauth2/public-client-prelogin',
+      ])
+    },
+  )
+})
+
+it('rejects unsupported signed-out response modes rather than treating them as query responses', async () => {
+  vi.stubEnv('EDITORIAL_OAUTH_ISSUER', 'https://configured-api.example.test/auth')
+  const unsupported = new URLSearchParams(query)
+  unsupported.set('response_mode', 'fragment')
+  unsupported.append('ba_param', 'response_mode')
+
+  await withApi(
+    (path) => (path === '/auth/get-session' ? signedOut() : client()),
+    async () => {
+      const result = await handleConnection(post('cancel', { oauth_query: unsupported.toString() }))
+
+      expect(result.response.status).toBe(400)
+      expect(result.response.headers.has('location')).toBe(false)
+    },
+  )
+})
+
+it.each(['', 'https://configured-api.example.test/wrong-path'])(
+  'fails closed when signed-out cancellation issuer configuration is invalid: %s',
+  async (issuer) => {
+    vi.stubEnv('EDITORIAL_OAUTH_ISSUER', issuer)
+    await withApi(
+      (path) => (path === '/auth/get-session' ? signedOut() : client()),
+      async () => {
+        const result = await handleConnection(post('cancel'))
+
+        expect(result.response.status).toBe(502)
+        expect(result.response.headers.has('location')).toBe(false)
+      },
+    )
+  },
+)
 
 it('rejects unknown actions and malformed form values before making API requests', async () => {
   await withApi(

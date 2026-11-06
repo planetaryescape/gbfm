@@ -43,6 +43,9 @@ export const website = ({
       observability: workerObservability(config.isProduction),
       env: {
         API: api,
+        EDITORIAL_OAUTH_ISSUER: config.isLocalDev
+          ? 'https://gbfm.localhost/auth'
+          : Output.map(apiUrl, (url) => new URL('/auth', requireApiUrl(url)).href),
         TURNSTILE_SITE_KEY: turnstileSitekey,
         SOCIAL_IMAGES: socialImages,
         BROWSER_TELEMETRY: browserTelemetry,

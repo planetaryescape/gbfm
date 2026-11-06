@@ -10,6 +10,8 @@ The suite uses the existing Portless HTTPS proxy and trusted local CA. It starts
 
 The website and authorization server have separate hostnames and host-only cookies. Tests deliberately authenticate on the website while leaving the API host signed out. Do not collapse those hosts into one origin or disable TLS verification to make the suite pass.
 
+Alchemy supplies the website's `EDITORIAL_OAUTH_ISSUER` binding from the configured API URL, or the shared local frontend issuer in Alchemy development. The dedicated browser configuration supplies the fixture issuer explicitly. Signed-out cancellation fails closed when it is missing or invalid; signed-in cancellation uses the provider's consent-denial endpoint. The pinned provider supports query responses only, and the signed-out fallback rejects other response modes.
+
 Desktop and tablet use Chromium. The phone viewport uses WebKit. Checks cover:
 
 - Contextual sign-in, wrong-password recovery and keyboard navigation.

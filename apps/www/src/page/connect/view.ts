@@ -1,16 +1,32 @@
+import { appIdentity, connectionDocument, escape } from './document'
 import type { ConsentState } from './domain'
+import { icons } from './icons'
 
-const escape = (value: string) =>
-  value.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`)
+const scopeLabel = (scope: string) =>
+  scope === 'posts:read'
+    ? `${icons.eye}<span>Read your posts, including drafts and private posts</span>`
+    : `${icons.refresh}<span>Stay connected until you disconnect it</span>`
 
 export const consentDocument = ({
   clientName: name,
   continuation: { query, scopes },
-}: typeof ConsentState.cases.Verified.Type) => `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="strict-origin"><title>Connect to gbfm</title>
-<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:0;padding:2rem}main{max-width:34rem;margin:8vh auto}a{color:inherit}h1{font-size:2rem}p,li{line-height:1.6}form{display:flex;gap:1rem;margin:2rem 0}button{padding:.8rem 1.2rem;font:inherit;cursor:pointer;border:1px solid #999;border-radius:.3rem}button[value=allow]{background:#eee;color:#111}button[value=deny]{background:transparent;color:inherit}</style></head>
-<body><main><a href="/">goosebumps.fm</a><h1>Connect ${escape(name)} to gbfm</h1>
-<p>This app is asking to access your gbfm account:</p><ul>${scopes.map((scope) => `<li>${scope === 'posts:read' ? 'Read your posts, including drafts and private posts' : 'Keep access until you disconnect, even when you are not signed in'}</li>`).join('')}</ul>
-<p>This connection cannot create, edit, publish or delete posts. Only connect apps you trust.</p>
-<form method="post" action="/connect/gbfm/consent"><input type="hidden" name="oauth_query" value="${escape(query)}"><button name="decision" value="allow" type="submit">Allow connection</button><button name="decision" value="deny" type="submit">Deny</button></form>
-<p>You can disconnect this app at any time in <a href="/dashboard/connections">Connections</a>.</p></main></body></html>`
+  account,
+}: typeof ConsentState.cases.Verified.Type) => {
+  const callback = new URL(new URLSearchParams(query).get('redirect_uri') ?? '')
+  const loopback = ['127.0.0.1', '[::1]', 'localhost'].includes(callback.hostname)
+
+  const destination = ['http:', 'https:'].includes(callback.protocol)
+    ? callback.host
+    : callback.protocol
+
+  return connectionDocument(
+    `Connect ${name}`,
+    `${appIdentity(name)}<h1>Connect ${escape(name)}?</h1>
+<div class="account"><p class="identity">${icons.user}<span><span class="muted">Signed in as</span> ${escape(account.name)} <span class="muted">(${escape(account.email)})</span></span></p><form method="post" action="/connect/gbfm/account"><input type="hidden" name="oauth_query" value="${escape(query)}"><button class="quiet" type="submit">Use another account <span class="muted">(signs you out)</span></button></form></div>
+<section aria-labelledby="permissions"><h2 id="permissions">Read-only access</h2><ul>${scopes.map((scope) => `<li>${scopeLabel(scope)}</li>`).join('')}</ul>
+<p class="muted row">${icons.lock}<span>Cannot create, edit, publish or delete.</span></p>
+<p class="destination row">${loopback ? icons.monitor : icons.globe}<span>Returns to <strong>${escape(destination)}</strong>${loopback ? ' <span class="muted">(app on this computer)</span>' : ''}</span></p></section>
+<form class="actions" method="post" action="/connect/gbfm/consent"><input type="hidden" name="oauth_query" value="${escape(query)}"><button class="primary" name="decision" value="allow" type="submit">Allow connection</button><button name="decision" value="deny" type="submit">Cancel</button></form>
+<small>App names are set by developers, not verified by Goosebumps FM. Revoke anytime in <a href="/dashboard/connections">Connections</a>.</small>`,
+  )
+}

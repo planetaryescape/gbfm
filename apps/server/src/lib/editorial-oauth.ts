@@ -32,7 +32,11 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
 
   if (!mcp) return []
 
-  const forbidden = () => new APIError('FORBIDDEN', { message: 'Editorial permission required' })
+  const forbidden = () =>
+    new APIError('FORBIDDEN', {
+      code: 'EDITORIAL_PERMISSION_REQUIRED',
+      message: 'Editorial permission required',
+    })
 
   const parseUserId = (value: string) =>
     Schema.decodeUnknownOption(UserId)(value).pipe(Option.getOrThrowWith(forbidden))

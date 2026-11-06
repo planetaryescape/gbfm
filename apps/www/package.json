@@ -12,6 +12,7 @@
     "typecheck": "tsgo --noEmit",
     "unit": "vitest run",
     "e2e": "playwright test",
+    "e2e:mcp": "playwright test --config playwright.mcp.config.ts",
     "e2e:observability": "playwright test --config playwright.observability.config.ts"
   },
   "dependencies": {

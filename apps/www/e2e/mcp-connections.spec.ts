@@ -12,9 +12,7 @@ test('malformed connection links cannot redirect the browser to a supplied callb
 
   expect(response?.status()).toBe(400)
   await expect(page).toHaveURL(/\/connect\/gbfm\?/)
-  await expect(
-    page.getByText('This connection could not be completed. Start again from your app.'),
-  ).toBeVisible()
+  await expect(page.getByText('This request expired. Start again from your app.')).toBeVisible()
 })
 
 test('an author signs in, denies, allows and disconnects a disposable read-only app', async ({
@@ -32,7 +30,7 @@ test('an author signs in, denies, allows and disconnects a disposable read-only 
   if (!ownerEmail || !ownerPassword)
     throw new Error('Explicit disposable MCP owner credentials are required')
 
-  const name = `Disposable MCP app ${crypto.randomUUID()}`
+  const name = 'OpenCode'
 
   const callbackServer = createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' })
@@ -89,24 +87,24 @@ test('an author signs in, denies, allows and disconnects a disposable read-only 
     try {
       const loginPage = await page.goto(authorize())
       expect(loginPage?.headers()['referrer-policy']).toBe('strict-origin')
-      await expect(page).toHaveURL(/\/auth\/sign-in\?/)
+      await expect(page).toHaveURL(/\/connect\/gbfm\?/)
       await page.getByRole('textbox', { name: 'Email', exact: true }).fill(ownerEmail)
       await page.getByRole('textbox', { name: 'Password', exact: true }).fill(ownerPassword)
-      await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await page.getByRole('button', { name: 'Sign in and continue', exact: true }).click()
       await expect(
-        page.getByRole('heading', { name: `Connect ${name} to gbfm`, exact: true }),
+        page.getByRole('heading', { name: `Connect ${name}?`, exact: true }),
       ).toBeVisible()
       await expect(
         page.getByText('Read your posts, including drafts and private posts'),
       ).toBeVisible()
-      await page.getByRole('button', { name: 'Deny', exact: true }).click()
+      await page.getByRole('button', { name: 'Cancel', exact: true }).click()
       await expect(page.getByRole('heading', { name: 'Disposable app callback' })).toBeVisible()
       expect(new URL(page.url()).searchParams.get('error')).toBe('access_denied')
       expect(new URL(page.url()).searchParams.has('code')).toBe(false)
 
       await page.goto(authorize())
       await expect(
-        page.getByRole('heading', { name: `Connect ${name} to gbfm`, exact: true }),
+        page.getByRole('heading', { name: `Connect ${name}?`, exact: true }),
       ).toBeVisible()
       await page.getByRole('button', { name: 'Allow connection', exact: true }).click()
       await expect(page.getByRole('heading', { name: 'Disposable app callback' })).toBeVisible()

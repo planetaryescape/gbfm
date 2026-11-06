@@ -4,6 +4,7 @@ import * as Server from 'foldkit/experimental/server'
 
 import { safeReturnPath } from '../page/auth/links'
 import { loginOAuthQuery } from '../page/connect/continuation'
+import { connectionRedirect } from '../page/connect/response'
 import { handleConnection } from '../page/connect/server'
 import { parseCheckpoint } from '../page/tweet/reader'
 import { parseRoute, Route } from '../route'
@@ -52,8 +53,14 @@ export const renderResponse = async (request: Request): Promise<Server.EntryResu
   const ownedRequest = new Request(url, request)
   ownedRequest.headers.set('x-request-id', requestId)
 
-  if (['/connect/gbfm', '/connect/gbfm/consent'].includes(url.pathname))
+  if (url.pathname === '/connect/gbfm' || url.pathname.startsWith('/connect/gbfm/'))
     return handleConnection(ownedRequest)
+
+  if (Route.guards.Auth(route) && isSignInOrUp(route.action) && request.method === 'GET') {
+    const continuation = loginOAuthQuery(url.searchParams.get('returnTo') ?? '', url.origin)
+
+    if (continuation) return connectionRedirect(`/connect/gbfm?${continuation}`)
+  }
 
   if (url.pathname === '/telemetry/browser') {
     if (!import.meta.env.PROD) return Server.Responded(new Response(null, { status: 204 }))

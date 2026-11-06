@@ -12,6 +12,7 @@ import { Effect } from 'effect'
 
 import type { SpotifyConnectionLifecycle } from './connectionLifecycle'
 import { SpotifyConnectionState, type SetConnectionState } from './connectionState'
+import { SPOTIFY_CONFIGURATION_MESSAGE } from './constants'
 
 const exchangeAndPersist = (code: string, setState: SetConnectionState) =>
   Effect.gen(function* () {
@@ -64,10 +65,8 @@ export const connectSpotify = async (input: {
   const setState: SetConnectionState = (update) =>
     input.setState((current) => (lifecycle.owns(owner) ? update(current) : current))
 
-  if (!input.clientId) {
-    setState(() =>
-      SpotifyConnectionState.Disconnected({ error: 'Missing EXPO_PUBLIC_SPOTIFY_CLIENT_ID.' }),
-    )
+  if (!input.clientId?.trim()) {
+    setState(() => SpotifyConnectionState.Disconnected({ error: SPOTIFY_CONFIGURATION_MESSAGE }))
     lifecycle.finishLogin(owner)
 
     return

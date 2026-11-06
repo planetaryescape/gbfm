@@ -21,6 +21,33 @@ const ReadResult = Schema.Struct({
   }),
 })
 
+test('composed API serves connection instructions without OAuth while MCP stays protected', async () => {
+  await using fixture = await createEditorialOAuthFixture()
+
+  const handler = createTestWebHandler(
+    fixture.db.$client,
+    undefined,
+    undefined,
+    undefined,
+    Layer.succeed(ConfigService, fixture.config),
+  )
+
+  try {
+    const guide = await handler.handler(new Request('https://editorial-test.localhost/mcp.txt'))
+
+    expect(guide.status).toBe(200)
+    expect(guide.headers.get('content-type')).toContain('text/plain')
+    expect(await guide.text()).toContain('Server URL: https://editorial-test.localhost/mcp')
+
+    const protocol = await handler.handler(new Request('https://editorial-test.localhost/mcp'))
+
+    expect(protocol.status).toBe(401)
+    expect(protocol.headers.get('www-authenticate')).toContain('Bearer')
+  } finally {
+    await handler.dispose()
+  }
+})
+
 test('invalid optional MCP settings isolate failure from health and existing authentication', async () => {
   await using fixture = await createEditorialOAuthFixture()
   const clientId = await fixture.register()

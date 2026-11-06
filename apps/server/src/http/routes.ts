@@ -19,6 +19,7 @@ import { InternalHandlersLive } from '@/http/internal.handlers'
 import { InviteHandlersLive } from '@/http/invite.handlers'
 import { ListeningHandlersLive } from '@/http/listening.handlers'
 import { McpConnectionsHandlersLive } from '@/http/mcp-connections.handlers'
+import { McpGuideRoutesLive } from '@/http/mcp-guide.routes'
 import { MusicRemindersHandlersLive } from '@/http/music-reminders.handlers'
 import { MusicHandlersLive } from '@/http/music.handlers'
 import { NavigationHandlersLive } from '@/http/navigation.handlers'
@@ -162,6 +163,7 @@ export const createWebHandler = (options: {
       DocsLive,
       CorsLive.pipe(Layer.provide(appServices)),
       EditorialMcpRoutesLive,
+      McpGuideRoutesLive,
       RequestLoggerLive,
       SentryDefectLive,
     ).pipe(

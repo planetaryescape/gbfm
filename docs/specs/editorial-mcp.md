@@ -83,6 +83,12 @@ Required checks include relevant server and WWW tests, the WWW production build,
 
 ## Configuration and connection
 
+Public, plain-text connection instructions are served at `/mcp.txt` on both the
+website and API origins. The guide uses the configured MCP resource and frontend
+URLs, includes an on-demand OpenCode V2 configuration, and describes the current
+read-only tools, OAuth requirements and protocol compatibility. It requires no
+authentication and advertises no connection URL when MCP is unavailable (HTTP 503).
+
 MCP derives its resource (`/mcp`) and issuer (`/auth`) from runtime configuration (`urls.share`) through the existing `SHARE_URL` binding. For deployed Workers, Alchemy's `Worker.URL` supplies the actual API endpoint: the existing canonical custom domain in production and the generated Workers endpoint in non-production. Deployed non-production APIs receive `FRONTEND_URL` from the website Worker's actual URL through an Alchemy binding. Production keeps its existing canonical frontend. No new custom-domain routes, MCP-specific deployment variables or account IDs are needed.
 
 Alchemy local development fixes both bindings to `https://gbfm.localhost`, whose proxy forwards MCP and OAuth endpoints to the local API. It does not automatically derive a worktree-prefixed origin. The isolated browser fixture supports a separately supplied Portless frontend address.

@@ -12,11 +12,7 @@ test('malformed connection links cannot redirect the browser to a supplied callb
 
   expect(response?.status()).toBe(400)
   await expect(page).toHaveURL(/\/connect\/gbfm\?/)
-  await expect(
-    page.getByText(
-      'This connection request has expired or is no longer valid. Return to your app and start a new connection.',
-    ),
-  ).toBeVisible()
+  await expect(page.getByText('This request expired. Start again from your app.')).toBeVisible()
 })
 
 test('an author signs in, denies, allows and disconnects a disposable read-only app', async ({
@@ -99,9 +95,7 @@ test('an author signs in, denies, allows and disconnects a disposable read-only 
         page.getByRole('heading', { name: `Connect ${name}?`, exact: true }),
       ).toBeVisible()
       await expect(
-        page.getByText(
-          'Read posts available to your account, including your own editorial drafts and private posts',
-        ),
+        page.getByText('Read your posts, including drafts and private posts'),
       ).toBeVisible()
       await page.getByRole('button', { name: 'Cancel', exact: true }).click()
       await expect(page.getByRole('heading', { name: 'Disposable app callback' })).toBeVisible()

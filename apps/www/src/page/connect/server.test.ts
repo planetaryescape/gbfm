@@ -89,7 +89,7 @@ it('keeps consent server-only, preserves provider state, and forwards login and 
     const html = await page.response.text()
 
     expect(html).toContain('Connect &#60;Disposable app&#62;?')
-    expect(html).toContain('including your own editorial drafts and private posts')
+    expect(html).toContain('including drafts and private posts')
     expect(html).toContain('editor@example.test')
     expect(html).toContain('client.example.test')
     expect(html).toContain('not verified by Goosebumps FM')

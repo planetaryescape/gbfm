@@ -1,6 +1,11 @@
 import { connectionDocument, escape } from './document'
 import type { ConsentState } from './domain'
 
+const scopeLabel = (scope: string) =>
+  scope === 'posts:read'
+    ? 'Read your posts, including drafts and private posts'
+    : 'Stay connected until you disconnect it'
+
 export const consentDocument = ({
   clientName: name,
   continuation: { query, scopes },
@@ -16,12 +21,11 @@ export const consentDocument = ({
   return connectionDocument(
     `Connect ${name}`,
     `<h1>Connect ${escape(name)}?</h1>
-<p>Review this app’s access to your Goosebumps FM account.</p>
-<div class="account"><p class="muted">Connecting as</p><p class="identity">${escape(account.name)}<br>${escape(account.email)}</p><form method="post" action="/connect/gbfm/account"><input type="hidden" name="oauth_query" value="${escape(query)}"><button class="quiet" type="submit">Use another account</button></form><small>Switching accounts signs you out of Goosebumps FM in this browser.</small></div>
-<section aria-labelledby="permissions"><h2 id="permissions">This app will be able to</h2><ul>${scopes.map((scope) => `<li>${scope === 'posts:read' ? 'Read posts available to your account, including your own editorial drafts and private posts' : 'Keep access until you disconnect, even when you are not signed in'}</li>`).join('')}</ul>
-<p>This connection cannot create, edit, publish or delete posts. Only connect apps you trust.</p>
-<p class="destination">Returns to: <strong>${escape(destination)}</strong></p><small>${loopback ? 'This is a local callback to an app on this computer.' : 'This is the callback destination registered by the app.'} The app name is supplied by its developer, not verified by Goosebumps FM.</small></section>
+<div class="account"><p class="identity"><span class="muted">Signed in as</span> ${escape(account.name)} <span class="muted">(${escape(account.email)})</span></p><form method="post" action="/connect/gbfm/account"><input type="hidden" name="oauth_query" value="${escape(query)}"><button class="quiet" type="submit">Use another account <span class="muted">(signs you out)</span></button></form></div>
+<section aria-labelledby="permissions"><h2 id="permissions">Read-only access</h2><ul>${scopes.map((scope) => `<li>${scopeLabel(scope)}</li>`).join('')}</ul>
+<p class="muted">Cannot create, edit, publish or delete.</p>
+<p class="destination">Returns to <strong>${escape(destination)}</strong>${loopback ? ' <span class="muted">(app on this computer)</span>' : ''}</p></section>
 <form class="actions" method="post" action="/connect/gbfm/consent"><input type="hidden" name="oauth_query" value="${escape(query)}"><button class="primary" name="decision" value="allow" type="submit">Allow connection</button><button name="decision" value="deny" type="submit">Cancel</button></form>
-<p class="muted">After approval, you will return to ${escape(name)}. You can revoke access at any time in <a href="/dashboard/connections">Connections</a>.</p>`,
+<small>App names are set by developers, not verified by Goosebumps FM. Revoke anytime in <a href="/dashboard/connections">Connections</a>.</small>`,
   )
 }

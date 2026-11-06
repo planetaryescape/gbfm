@@ -29,9 +29,7 @@ test('signed-out users see connection context, recover from a bad password and a
   await expect(
     page.getByRole('heading', { name: 'Connect Disposable editorial client', exact: true }),
   ).toBeVisible()
-  await expect(
-    page.getByText('You will review the requested access', { exact: false }),
-  ).toBeVisible()
+  await expect(page.getByText('You will review access next', { exact: false })).toBeVisible()
   await expect(page.getByRole('navigation')).toHaveCount(0)
   await page.getByRole('textbox', { name: 'Email', exact: true }).focus()
   await page.keyboard.press('Tab')
@@ -54,11 +52,9 @@ test('signed-out users see connection context, recover from a bad password and a
   await signIn(page)
   await expect(consent(page)).toBeVisible()
   await expect(page.getByText('editor@gbfm.local', { exact: false })).toBeVisible()
+  await expect(page.getByText('(app on this computer)', { exact: false })).toBeVisible()
   await expect(
-    page.getByText('This is a local callback to an app on this computer.', { exact: false }),
-  ).toBeVisible()
-  await expect(
-    page.getByText('The app name is supplied by its developer, not verified by Goosebumps FM.', {
+    page.getByText('not verified by Goosebumps FM', {
       exact: false,
     }),
   ).toBeVisible()
@@ -156,9 +152,7 @@ test('tampered requests show a branded recovery screen, never consent', async ({
   const response = await page.goto(url.href)
   expect(response?.status()).toBe(400)
   await expect(page.getByRole('heading', { name: 'Connection not completed' })).toBeVisible()
-  await expect(
-    page.getByText('This connection request has expired or is no longer valid.', { exact: false }),
-  ).toBeVisible()
+  await expect(page.getByText('This request expired.', { exact: false })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Allow connection' })).toHaveCount(0)
 })
 

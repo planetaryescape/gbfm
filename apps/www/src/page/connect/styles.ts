@@ -23,7 +23,7 @@ header { margin-bottom: 32px; }
 .brand { font-size: 16px; text-decoration: none; }
 .eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 h1 { font-size: clamp(22px, 5vw, 28px); line-height: 1.3; overflow-wrap: anywhere; }
-h2 { font-size: 15px; }
+h2 { font-size: 15px; margin-top: 0; }
 p { margin: 12px 0; }
 .muted, small { color: var(--muted); }
 a { color: var(--accent); text-underline-offset: 4px; }
@@ -32,13 +32,15 @@ ul { padding-left: 20px; }
 li { margin: 8px 0; }
 .destination, .identity { overflow-wrap: anywhere; }
 .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0; }
-button, .button { display: inline-flex; align-items: center; justify-content: center; min-height: ${controlMetrics.height}px; padding: 10px ${controlMetrics.paddingInline}px; border: 1px solid var(--border); border-radius: ${radii.control}px; background: transparent; color: var(--foreground); font: inherit; text-decoration: none; cursor: pointer; }
+button, .button { display: inline-flex; align-items: center; justify-content: center; gap: 1ch; min-height: ${controlMetrics.height}px; padding: 10px ${controlMetrics.paddingInline}px; border: 1px solid var(--border); border-radius: ${radii.control}px; background: transparent; color: var(--foreground); font: inherit; text-decoration: none; cursor: pointer; }
 button.primary { background: var(--accent); color: var(--background); border-color: var(--accent); }
 button.quiet { padding: 0; border: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 4px; }
 label { display: block; margin: 20px 0 8px; }
 input:not([type=hidden]) { width: 100%; min-height: 48px; padding: 12px; border: 1px solid var(--border); border-radius: ${radii.control}px; background: var(--background); color: var(--foreground); font: inherit; }
 a:focus-visible, button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .error { color: var(--error); }
-.divider { border-top: 1px solid var(--border); padding-top: 20px; margin-top: 28px; }
+.links { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.account { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 14px 20px; }
+.account p { margin: 0; }
 small { display: block; font-size: 12px; }
 `

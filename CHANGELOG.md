@@ -1,3 +1,25 @@
+# [2.126.0](https://github.com/planetaryescape/gbfm/compare/v2.125.0...v2.126.0) (2026-11-06)
+
+
+### Bug Fixes
+
+* **oauth:** distinguish eligibility failures from other auth denials ([923acb0](https://github.com/planetaryescape/gbfm/commit/923acb0ac2f45749a8e768c42ef3f941a1b80d55))
+* **oauth:** preserve session cookies throughout connection responses ([2ac8ae7](https://github.com/planetaryescape/gbfm/commit/2ac8ae73162f93e1e0cf783aeb5aaa46f2b11741))
+* **oauth:** protect legacy connection redirects with no-referrer ([d9071f2](https://github.com/planetaryescape/gbfm/commit/d9071f244366db7389f5d6f52af18db80e5edfc6))
+* **oauth:** reuse provider denial and configure signed-out cancellation ([015b9b2](https://github.com/planetaryescape/gbfm/commit/015b9b239ec2a1f0840880e1ffb6534d26eb0712))
+* **oauth:** reuse website sessions and explain app connections ([20d58d4](https://github.com/planetaryescape/gbfm/commit/20d58d4eed4dee03c4871184b188cbfd72d4de23))
+* **oauth:** tighten connection screen copy ([eaba2be](https://github.com/planetaryescape/gbfm/commit/eaba2be169d53972235dc5312995255e031c1a96))
+
+
+### Features
+
+* **oauth:** add brand wordmark and icons to connection screens ([a340ca2](https://github.com/planetaryescape/gbfm/commit/a340ca24a222e4342008d72cda00f8b8fbb3d938))
+
+
+### Performance Improvements
+
+* **oauth:** reject invalid actions before loading connection data ([166403a](https://github.com/planetaryescape/gbfm/commit/166403ac3ec96869a68eb8883b86ba2e05d67cf0))
+
 # [2.125.0](https://github.com/planetaryescape/gbfm/compare/v2.124.1...v2.125.0) (2026-11-06)
 
 

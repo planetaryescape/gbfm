@@ -1,8 +1,9 @@
 import { createServer } from 'node:http'
 
-import { Schema } from 'effect'
+import { Match, Schema } from 'effect'
 import { afterEach, expect, it, vi } from 'vitest'
 
+import { renderResponse } from '../../server/request-dispatch'
 import { handleConnection } from './server'
 
 afterEach(() => vi.unstubAllEnvs())
@@ -63,6 +64,26 @@ const withApi = async (
 const client = () => Response.json({ client_name: 'Review app' })
 
 const signedOut = () => Response.json(null)
+
+it('applies the connection referrer policy to legacy sign-in continuations', async () => {
+  const result = await renderResponse(
+    new Request(
+      `https://www.test/auth/sign-in?${new URLSearchParams({ returnTo: `/connect/gbfm?${query}` })}`,
+    ),
+  )
+
+  const response = Match.value(result).pipe(
+    Match.tag('Responded', (value) => value.response),
+    Match.orElse(() => {
+      throw new Error('Expected a connection redirect')
+    }),
+  )
+
+  expect(response.status).toBe(303)
+  expect(response.headers.get('location')).toBe(`/connect/gbfm?${query}`)
+  expect(response.headers.get('referrer-policy')).toBe('no-referrer')
+  expect(response.headers.get('cache-control')).toBe('private, no-store')
+})
 
 const signedIn = () =>
   Response.json({ user: { name: 'Review Editor', email: 'editor@example.test' } })

@@ -1,3 +1,10 @@
+## [2.124.1](https://github.com/planetaryescape/gbfm/compare/v2.124.0...v2.124.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **www:** route MCP guide before static assets ([75a89cf](https://github.com/planetaryescape/gbfm/commit/75a89cf99fa7d01aacfc6feea93285ea1c73b8e2))
+
 # [2.124.0](https://github.com/planetaryescape/gbfm/compare/v2.123.0...v2.124.0) (2026-11-06)
 
 

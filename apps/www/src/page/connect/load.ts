@@ -16,13 +16,16 @@ export const loadConnection = async (
   readonly state: typeof ConsentState.Type
   readonly cookies: ReadonlyArray<string>
 }> => {
-  const response = await apiRequest(request, '/auth/oauth2/public-client-prelogin', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', origin: new URL(request.url).origin },
-    body: JSON.stringify({ client_id: continuation.clientId, oauth_query: continuation.query }),
-  })
+  const [response, sessionResponse] = await Promise.all([
+    apiRequest(request, '/auth/oauth2/public-client-prelogin', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: new URL(request.url).origin },
+      body: JSON.stringify({ client_id: continuation.clientId, oauth_query: continuation.query }),
+    }),
+    apiRequest(request, '/auth/get-session', { method: 'GET' }),
+  ])
 
-  const cookies = response.headers.getSetCookie()
+  const cookies = [...response.headers.getSetCookie(), ...sessionResponse.headers.getSetCookie()]
 
   if (!response.ok)
     return {
@@ -36,8 +39,6 @@ export const loadConnection = async (
 
   if (!client) return { state: ConsentState.cases.Failed.make({ status: 502 }), cookies }
   const clientName = client.client_name || 'This app'
-  const sessionResponse = await apiRequest(request, '/auth/get-session', { method: 'GET' })
-  cookies.push(...sessionResponse.headers.getSetCookie())
 
   if (!sessionResponse.ok && sessionResponse.status !== 401)
     return { state: ConsentState.cases.Failed.make({ status: 502 }), cookies }

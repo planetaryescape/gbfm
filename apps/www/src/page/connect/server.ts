@@ -92,15 +92,38 @@ const connectionAction = async (
   continuation: PendingContinuation,
   form: FormData,
 ) => {
+  const url = new URL(request.url)
+
+  if (url.pathname === '/connect/gbfm/consent') {
+    const decision = form.get('decision')
+
+    if (decision !== 'allow' && decision !== 'deny') return failure(400)
+
+    const response = await apiRequest(request, '/auth/oauth2/consent', {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+        origin: url.origin,
+      },
+      body: JSON.stringify({ accept: decision === 'allow', oauth_query: continuation.query }),
+    })
+
+    return providerResponse(response, request, continuation)
+  }
+
+  if (url.pathname === '/connect/gbfm/sign-in') return signIn(request, continuation, form)
+
+  if (!['/connect/gbfm/account', '/connect/gbfm/cancel'].includes(url.pathname)) return failure(404)
   const { state, cookies } = await loadConnection(request, continuation)
 
-  return withConnectionCookies(await actOnConnection(request, continuation, form, state), cookies)
+  return withConnectionCookies(await actOnConnection(request, continuation, state), cookies)
 }
 
 const actOnConnection = async (
   request: Request,
   continuation: PendingContinuation,
-  form: FormData,
   state: typeof ConsentState.Type,
 ) => {
   const url = new URL(request.url)
@@ -149,56 +172,47 @@ const actOnConnection = async (
       : failure(response.status)
   }
 
-  if (url.pathname === '/connect/gbfm/sign-in') {
-    const credentials = Option.getOrNull(
-      Schema.decodeUnknownOption(Schema.Struct({ email: Schema.String, password: Schema.String }))({
-        email: form.get('email'),
-        password: form.get('password'),
-      }),
-    )
+  return failure(404)
+}
 
-    if (!credentials) return failure(400)
+const signIn = async (request: Request, continuation: PendingContinuation, form: FormData) => {
+  const url = new URL(request.url)
 
-    const response = await apiRequest(request, '/auth/sign-in/email', {
-      method: 'POST',
-      redirect: 'manual',
-      headers,
-      body: JSON.stringify({ ...credentials, oauth_query: continuation.query }),
-    })
+  const credentials = Option.getOrNull(
+    Schema.decodeUnknownOption(Schema.Struct({ email: Schema.String, password: Schema.String }))({
+      email: form.get('email'),
+      password: form.get('password'),
+    }),
+  )
 
-    if (!response.ok) {
-      if (response.status >= 500) return failure(response.status, continuation)
-      const code = await readAuthErrorCode(response)
+  if (!credentials) return failure(400)
 
-      if (response.status === 403 && code === 'EDITORIAL_PERMISSION_REQUIRED')
-        return failure(403, continuation)
-      const error = authErrorMessages[authErrorKey(response.status, code)]
-
-      return connectionResponse(
-        connectionLoginDocument({
-          ...state,
-          email: credentials.email,
-          error,
-        }),
-        continuation,
-        response.status,
-      )
-    }
-
-    return providerResponse(response, request, continuation)
-  }
-
-  if (url.pathname !== '/connect/gbfm/consent') return failure(404)
-  const decision = form.get('decision')
-
-  if (decision !== 'allow' && decision !== 'deny') return failure(400)
-
-  const response = await apiRequest(request, '/auth/oauth2/consent', {
+  const response = await apiRequest(request, '/auth/sign-in/email', {
     method: 'POST',
     redirect: 'manual',
-    headers,
-    body: JSON.stringify({ accept: decision === 'allow', oauth_query: continuation.query }),
+    headers: { 'content-type': 'application/json', accept: 'application/json', origin: url.origin },
+    body: JSON.stringify({ ...credentials, oauth_query: continuation.query }),
   })
+
+  if (!response.ok) {
+    if (response.status >= 500) return failure(response.status, continuation)
+    const code = await readAuthErrorCode(response)
+
+    if (response.status === 403 && code === 'EDITORIAL_PERMISSION_REQUIRED')
+      return failure(403, continuation)
+    const error = authErrorMessages[authErrorKey(response.status, code)]
+    const { state, cookies } = await loadConnection(request, continuation)
+
+    const result = ConsentState.guards.Failed(state)
+      ? failure(state.status)
+      : connectionResponse(
+          connectionLoginDocument({ ...state, email: credentials.email, error }),
+          continuation,
+          response.status,
+        )
+
+    return withConnectionCookies(result, [...cookies, ...response.headers.getSetCookie()])
+  }
 
   return providerResponse(response, request, continuation)
 }

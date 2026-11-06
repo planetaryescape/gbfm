@@ -73,6 +73,70 @@ const withCookies = (response: Response, cookies: ReadonlyArray<string>) => {
   return response
 }
 
+it('rejects unknown actions and malformed form values before making API requests', async () => {
+  await withApi(
+    () => Response.json(null, { status: 500 }),
+    async (calls) => {
+      for (const [request, status] of [
+        [post('unknown'), 404],
+        [post(''), 404],
+        [post('consent', { decision: 'perhaps' }), 400],
+        [post('sign-in', { email: 'editor@example.test' }), 400],
+      ] satisfies Array<[Request, number]>) {
+        expect((await handleConnection(request)).response.status).toBe(status)
+      }
+
+      expect(calls).toEqual([])
+    },
+  )
+})
+
+it.each(['sign-in', 'consent'])(
+  'forwards valid %s directly to the provider without loading page data',
+  async (action) => {
+    await withApi(
+      () => Response.json({ redirect: true, url: 'https://client.example.test/callback' }),
+      async (calls) => {
+        const request =
+          action === 'sign-in'
+            ? post(action, { email: 'editor@example.test', password: 'disposable' })
+            : post(action, { decision: 'deny' })
+
+        const result = await handleConnection(request)
+
+        expect(result.response.status).toBe(303)
+        expect(calls.map(({ path }) => path)).toEqual([
+          action === 'sign-in' ? '/auth/sign-in/email' : '/auth/oauth2/consent',
+        ])
+      },
+    )
+  },
+)
+
+it('starts session lookup while prelogin verification is still pending', async () => {
+  const sessionStarted = Promise.withResolvers<void>()
+
+  await withApi(
+    async (path) => {
+      if (path === '/auth/get-session') {
+        sessionStarted.resolve()
+
+        return signedOut()
+      }
+
+      await sessionStarted.promise
+
+      return client()
+    },
+    async () => {
+      const result = await handleConnection(new Request(`https://www.test/connect/gbfm?${query}`))
+
+      expect(result.response.status).toBe(200)
+      expect(await result.response.text()).toContain('Connect Review app')
+    },
+  )
+})
+
 it('preserves a successful sign-in session when the provider does not return a continuation', async () => {
   await withApi(
     (path) => {

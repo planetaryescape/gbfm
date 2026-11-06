@@ -221,7 +221,9 @@ it('does not render consent when the provider rejects tampered or expired state'
       expect(result.response.headers.has('location')).toBe(false)
     }
 
-    expect(paths).toEqual([
+    expect(paths.toSorted()).toEqual([
+      '/auth/get-session',
+      '/auth/get-session',
       '/auth/oauth2/public-client-prelogin',
       '/auth/oauth2/public-client-prelogin',
     ])

@@ -8,6 +8,11 @@ env:
 # push would race those checks and ship a commit they reject.
 on:
   workflow_dispatch:
+    inputs:
+      plan_only:
+        description: Preview production changes without deploying
+        type: boolean
+        default: false
 
 concurrency:
   group: alchemy-deploy
@@ -81,9 +86,15 @@ jobs:
           StorageAccessKeyId: ${{ secrets.STORAGE_ACCESS_KEY_ID }}
           StorageSecretAccessKey: ${{ secrets.STORAGE_SECRET_ACCESS_KEY }}
           ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
-        run: bunx alchemy deploy --stage prod --profile env-token --yes
+        run: |
+          if [ "${{ inputs.plan_only }}" = "true" ]; then
+            bunx alchemy plan --stage prod --profile env-token --no-input
+          else
+            bunx alchemy deploy --stage prod --profile env-token --yes
+          fi
 
       - name: Verify the deploy serves traffic
+        if: ${{ !inputs.plan_only }}
         run: |
           set -uo pipefail
           fail=0

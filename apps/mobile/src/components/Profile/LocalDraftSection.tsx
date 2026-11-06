@@ -4,6 +4,7 @@ import { Alert, Text, View } from 'react-native'
 
 import { useAuthStore } from '@/store/auth'
 import { useThemeColors } from '@/theme/colors'
+import { fonts } from '@/theme/fonts'
 import { removeTweetDraft } from '@/tweets/draftStorage'
 
 import { SettingsRow, SettingsSection } from './SettingsSection'
@@ -46,7 +47,9 @@ export function LocalDraftSection() {
         />
       </SettingsSection>
       {notice ? (
-        <Text accessibilityLiveRegion='polite' style={{ color: colors.text }}>
+        <Text
+          accessibilityLiveRegion='polite'
+          style={{ color: colors.text, fontFamily: fonts.mono }}>
           {notice}
         </Text>
       ) : null}

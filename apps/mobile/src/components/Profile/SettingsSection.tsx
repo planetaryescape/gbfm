@@ -1,3 +1,4 @@
+import { radii } from '@gbfm/theme'
 import { Children, type PropsWithChildren } from 'react'
 import { Pressable, Text, useWindowDimensions, View } from 'react-native'
 
@@ -26,7 +27,7 @@ export function SettingsSection({
       <View
         style={{
           backgroundColor: colors.surface,
-          borderRadius: 12,
+          borderRadius: radii.surface,
           borderWidth: 1,
           borderColor: withAlpha(colors.muted, 0.2),
           overflow: 'hidden',
@@ -68,20 +69,31 @@ export function SettingsRow({
         <Text
           style={{
             color: destructive ? colors.error : colors.strong,
-            fontSize: 16,
-            fontWeight: '500',
+            fontFamily: fonts.monoSemiBold,
+            fontSize: 14,
+            lineHeight: 21,
           }}>
           {title}
         </Text>
         {detail ? (
-          <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 19 }}>{detail}</Text>
+          <Text
+            style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 12, lineHeight: 18 }}>
+            {detail}
+          </Text>
         ) : null}
         {value && stackValue ? (
-          <Text style={{ color: colors.muted, fontSize: 14 }}>{value}</Text>
+          <Text style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 12 }}>{value}</Text>
         ) : null}
       </View>
       {value && !stackValue ? (
-        <Text style={{ color: colors.muted, fontSize: 14, flexShrink: 1, textAlign: 'right' }}>
+        <Text
+          style={{
+            color: colors.muted,
+            fontFamily: fonts.mono,
+            fontSize: 12,
+            flexShrink: 1,
+            textAlign: 'right',
+          }}>
           {value}
         </Text>
       ) : null}

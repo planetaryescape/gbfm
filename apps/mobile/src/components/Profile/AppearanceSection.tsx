@@ -8,6 +8,7 @@ import {
   useSetColorSchemePreference,
 } from '@/store/preferences'
 import { useThemeColors } from '@/theme/colors'
+import { fonts } from '@/theme/fonts'
 
 import { SettingsSection } from './SettingsSection'
 
@@ -57,10 +58,17 @@ export function AppearanceSection() {
                 opacity: pressed ? 0.8 : 1,
               })}>
               <View style={{ flex: 1, gap: 3 }}>
-                <Text style={{ color: colors.strong, fontSize: 16, fontWeight: '500' }}>
+                <Text
+                  style={{ color: colors.strong, fontFamily: fonts.monoSemiBold, fontSize: 14 }}>
                   {choice.label}
                 </Text>
-                <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 19 }}>
+                <Text
+                  style={{
+                    color: colors.muted,
+                    fontFamily: fonts.mono,
+                    fontSize: 12,
+                    lineHeight: 18,
+                  }}>
                   {choice.description}
                 </Text>
               </View>
@@ -75,7 +83,7 @@ export function AppearanceSection() {
         })}
       </SettingsSection>
       {error ? (
-        <Text accessibilityRole='alert' style={{ color: colors.error }}>
+        <Text accessibilityRole='alert' style={{ color: colors.error, fontFamily: fonts.mono }}>
           {error}
         </Text>
       ) : null}

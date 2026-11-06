@@ -1,4 +1,3 @@
-import { typography } from '@gbfm/theme'
 import { Effect } from 'effect'
 import { useRouter } from 'expo-router'
 import { useHeaderHeight } from 'expo-router/react-navigation'
@@ -20,6 +19,7 @@ import { useSetAuth } from '@/store/auth'
 import { LoginSubmission } from '@/store/loginSubmission'
 import { useLoginSubmission } from '@/store/useLoginSubmission'
 import { useThemeColors } from '@/theme/colors'
+import { fonts } from '@/theme/fonts'
 
 export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void }) {
   const [email, setEmail] = useState('')
@@ -64,7 +64,7 @@ export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void
               <Text
                 style={{
                   color: colors.muted,
-                  fontFamily: typography.fontJetbrains,
+                  fontFamily: fonts.mono,
                   fontSize: 12,
                   letterSpacing: 2.4,
                   textTransform: 'uppercase',
@@ -74,13 +74,19 @@ export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void
               <Text
                 style={{
                   color: colors.accent,
-                  fontFamily: typography.fontSansAlt,
-                  fontSize: 42,
-                  lineHeight: 44,
+                  fontFamily: fonts.monoSemiBold,
+                  fontSize: 28,
+                  lineHeight: 36,
                 }}>
                 Welcome back.
               </Text>
-              <Text style={{ color: colors.text, fontSize: 16, lineHeight: 24 }}>
+              <Text
+                style={{
+                  color: colors.text,
+                  fontFamily: fonts.mono,
+                  fontSize: 14,
+                  lineHeight: 22,
+                }}>
                 Sign in to save music, manage reminders, and pick up where you left off.
               </Text>
             </View>
@@ -95,7 +101,10 @@ export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void
                 borderRadius: 4,
               }}>
               <View style={{ gap: 8 }}>
-                <Text style={{ color: colors.accent, fontSize: 14, fontWeight: '600' }}>Email</Text>
+                <Text
+                  style={{ color: colors.accent, fontFamily: fonts.monoSemiBold, fontSize: 14 }}>
+                  Email
+                </Text>
                 <TextInput
                   accessibilityLabel='Email'
                   autoCapitalize='none'
@@ -118,12 +127,14 @@ export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void
                     borderWidth: 1,
                     borderRadius: 4,
                     fontSize: 16,
+                    fontFamily: fonts.mono,
                   }}
                 />
               </View>
 
               <View style={{ gap: 8 }}>
-                <Text style={{ color: colors.accent, fontSize: 14, fontWeight: '600' }}>
+                <Text
+                  style={{ color: colors.accent, fontFamily: fonts.monoSemiBold, fontSize: 14 }}>
                   Password
                 </Text>
                 <View>
@@ -149,6 +160,7 @@ export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void
                       borderWidth: 1,
                       borderRadius: 4,
                       fontSize: 16,
+                      fontFamily: fonts.mono,
                     }}
                   />
                   <Pressable
@@ -157,7 +169,7 @@ export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void
                     hitSlop={12}
                     onPress={() => setShowPassword((visible) => !visible)}
                     style={{ position: 'absolute', right: 16, top: 16 }}>
-                    <Text style={{ color: colors.muted, fontWeight: '600' }}>
+                    <Text style={{ color: colors.muted, fontFamily: fonts.monoSemiBold }}>
                       {showPassword ? 'Hide' : 'Show'}
                     </Text>
                   </Pressable>
@@ -165,7 +177,9 @@ export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void
               </View>
 
               {errorMessage ? (
-                <Text accessibilityRole='alert' style={{ color: colors.error, lineHeight: 20 }}>
+                <Text
+                  accessibilityRole='alert'
+                  style={{ color: colors.error, fontFamily: fonts.mono, lineHeight: 20 }}>
                   {errorMessage}
                 </Text>
               ) : null}
@@ -185,14 +199,21 @@ export default function Login({ onSignedIn }: { readonly onSignedIn?: () => void
                 {isSubmitting ? (
                   <ActivityIndicator color={colors.surface} />
                 ) : (
-                  <Text style={{ color: colors.surface, fontSize: 16, fontWeight: '700' }}>
+                  <Text
+                    style={{ color: colors.surface, fontFamily: fonts.monoSemiBold, fontSize: 14 }}>
                     Sign in
                   </Text>
                 )}
               </Pressable>
             </View>
 
-            <Text style={{ color: `${colors.text}CC`, textAlign: 'center', fontSize: 13 }}>
+            <Text
+              style={{
+                color: `${colors.text}CC`,
+                fontFamily: fonts.mono,
+                textAlign: 'center',
+                fontSize: 12,
+              }}>
               Magic links and password recovery are coming next.
             </Text>
           </View>

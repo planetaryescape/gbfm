@@ -12,37 +12,47 @@ const Session = Schema.Struct({
 export const loadConnection = async (
   request: Request,
   continuation: PendingContinuation,
-): Promise<typeof ConsentState.Type> => {
+): Promise<{
+  readonly state: typeof ConsentState.Type
+  readonly cookies: ReadonlyArray<string>
+}> => {
   const response = await apiRequest(request, '/auth/oauth2/public-client-prelogin', {
     method: 'POST',
     headers: { 'content-type': 'application/json', origin: new URL(request.url).origin },
     body: JSON.stringify({ client_id: continuation.clientId, oauth_query: continuation.query }),
   })
 
+  const cookies = response.headers.getSetCookie()
+
   if (!response.ok)
-    return ConsentState.cases.Failed.make({
-      status: response.status >= 500 ? 502 : 400,
-    })
+    return {
+      state: ConsentState.cases.Failed.make({ status: response.status >= 500 ? 502 : 400 }),
+      cookies,
+    }
 
   const client = Option.getOrNull(
     Schema.decodeUnknownOption(Client)(await response.json().catch(() => null)),
   )
 
-  if (!client) return ConsentState.cases.Failed.make({ status: 502 })
+  if (!client) return { state: ConsentState.cases.Failed.make({ status: 502 }), cookies }
   const clientName = client.client_name || 'This app'
   const sessionResponse = await apiRequest(request, '/auth/get-session', { method: 'GET' })
+  cookies.push(...sessionResponse.headers.getSetCookie())
 
   if (!sessionResponse.ok && sessionResponse.status !== 401)
-    return ConsentState.cases.Failed.make({ status: 502 })
+    return { state: ConsentState.cases.Failed.make({ status: 502 }), cookies }
 
   const payload = await sessionResponse.json().catch(() => undefined)
 
   if (payload === null || sessionResponse.status === 401)
-    return ConsentState.cases.LoginRequired.make({ continuation, clientName })
+    return { state: ConsentState.cases.LoginRequired.make({ continuation, clientName }), cookies }
 
   const session = Option.getOrNull(Schema.decodeUnknownOption(Session)(payload))
 
-  return session
-    ? ConsentState.cases.Verified.make({ continuation, clientName, account: session.user })
-    : ConsentState.cases.Failed.make({ status: 502 })
+  return {
+    state: session
+      ? ConsentState.cases.Verified.make({ continuation, clientName, account: session.user })
+      : ConsentState.cases.Failed.make({ status: 502 }),
+    cookies,
+  }
 }

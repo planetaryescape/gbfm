@@ -64,6 +64,90 @@ const client = () => Response.json({ client_name: 'Review app' })
 
 const signedOut = () => Response.json(null)
 
+const signedIn = () =>
+  Response.json({ user: { name: 'Review Editor', email: 'editor@example.test' } })
+
+const withCookies = (response: Response, cookies: ReadonlyArray<string>) => {
+  for (const cookie of cookies) response.headers.append('set-cookie', cookie)
+
+  return response
+}
+
+it('preserves a successful sign-in session when the provider does not return a continuation', async () => {
+  await withApi(
+    (path) => {
+      if (path === '/auth/oauth2/public-client-prelogin') return client()
+
+      if (path === '/auth/get-session') return signedOut()
+
+      return withCookies(Response.json({ token: 'disposable-session', user: { name: 'Editor' } }), [
+        'session_token=signed-in; HttpOnly; SameSite=Lax',
+      ])
+    },
+    async () => {
+      const result = await handleConnection(
+        post('sign-in', { email: 'editor@example.test', password: 'disposable' }),
+      )
+
+      expect(result.response.status).toBe(502)
+      expect(result.response.headers.getSetCookie()).toEqual([
+        'session_token=signed-in; HttpOnly; SameSite=Lax',
+      ])
+      expect(result.response.headers.get('cache-control')).toBe('private, no-store')
+    },
+  )
+})
+
+it.each(['login', 'consent', 'continue'])(
+  'forwards prelogin and session refresh cookies on the %s page',
+  async (screen) => {
+    await withApi(
+      (path) => {
+        if (path === '/auth/oauth2/public-client-prelogin')
+          return withCookies(client(), ['provider_check=refreshed; HttpOnly'])
+
+        if (path === '/auth/get-session')
+          return withCookies(screen === 'login' ? signedOut() : signedIn(), [
+            'session_token=refreshed; HttpOnly',
+          ])
+
+        return withCookies(Response.json({ redirect: true, url: `/connect/gbfm?${query}` }), [
+          'provider_flow=renewed; HttpOnly',
+        ])
+      },
+      async () => {
+        const path = screen === 'consent' ? '/connect/gbfm/consent' : '/connect/gbfm'
+        const result = await handleConnection(new Request(`https://www.test${path}?${query}`))
+        const expected = ['provider_check=refreshed; HttpOnly', 'session_token=refreshed; HttpOnly']
+
+        if (screen === 'continue') expected.push('provider_flow=renewed; HttpOnly')
+        expect(result.response.headers.getSetCookie()).toEqual(expected)
+      },
+    )
+  },
+)
+
+it('keeps sign-out deletion cookies after earlier session-refresh cookies', async () => {
+  await withApi(
+    (path) => {
+      if (path === '/auth/oauth2/public-client-prelogin') return client()
+
+      if (path === '/auth/get-session')
+        return withCookies(signedIn(), ['session_token=refreshed; HttpOnly'])
+
+      return withCookies(Response.json({ success: true }), ['session_token=; Max-Age=0; HttpOnly'])
+    },
+    async () => {
+      const result = await handleConnection(post('account'))
+
+      expect(result.response.headers.getSetCookie()).toEqual([
+        'session_token=refreshed; HttpOnly',
+        'session_token=; Max-Age=0; HttpOnly',
+      ])
+    },
+  )
+})
+
 it.each(['BANNED_USER', 'ORIGIN_NOT_ALLOWED'])(
   'does not describe sign-in denial %s as an editorial role failure',
   async (code) => {

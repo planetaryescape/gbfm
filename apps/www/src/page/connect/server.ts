@@ -18,6 +18,7 @@ import {
   connectionFailure as failure,
   connectionRedirect as redirect,
   connectionResponse,
+  withConnectionCookies,
 } from './response'
 import { consentDocument } from './view'
 
@@ -30,12 +31,15 @@ const providerResponse = async (
     await providerRedirect(response, new URL(request.url).origin, continuation.query),
     {
       Redirect: ({ location, cookies }) => redirect(location, cookies),
-      Rejected: ({ status }) => failure(status, continuation),
+      Rejected: ({ status }) =>
+        withConnectionCookies(failure(status, continuation), response.headers.getSetCookie()),
     },
   )
 
-const connectionPage = async (request: Request, continuation: PendingContinuation) =>
-  ConsentState.match<Promise<Server.Responded>>(await loadConnection(request, continuation), {
+const connectionPage = async (request: Request, continuation: PendingContinuation) => {
+  const { state, cookies } = await loadConnection(request, continuation)
+
+  const result = await ConsentState.match<Promise<Server.Responded>>(state, {
     Failed: async ({ status }) => failure(status),
     LoginRequired: async (state) =>
       connectionResponse(connectionLoginDocument(state), continuation),
@@ -59,16 +63,20 @@ const connectionPage = async (request: Request, continuation: PendingContinuatio
       return ProviderOutcome.match(
         await providerRedirect(response, new URL(request.url).origin, continuation.query),
         {
-          Rejected: ({ status }) => failure(status, continuation),
+          Rejected: ({ status }) =>
+            withConnectionCookies(failure(status, continuation), response.headers.getSetCookie()),
           Redirect: ({ location, cookies }) =>
             URL.parse(location, request.url)?.pathname === '/connect/gbfm'
-              ? connectionResponse(
-                  connectionLoginDocument({
-                    ...state,
-                    email: state.account.email,
-                    error: 'For this connection, the app requires you to sign in again.',
-                  }),
-                  continuation,
+              ? withConnectionCookies(
+                  connectionResponse(
+                    connectionLoginDocument({
+                      ...state,
+                      email: state.account.email,
+                      error: 'For this connection, the app requires you to sign in again.',
+                    }),
+                    continuation,
+                  ),
+                  cookies,
                 )
               : redirect(location, cookies),
         },
@@ -76,13 +84,26 @@ const connectionPage = async (request: Request, continuation: PendingContinuatio
     },
   })
 
+  return withConnectionCookies(result, cookies)
+}
+
 const connectionAction = async (
   request: Request,
   continuation: PendingContinuation,
   form: FormData,
 ) => {
+  const { state, cookies } = await loadConnection(request, continuation)
+
+  return withConnectionCookies(await actOnConnection(request, continuation, form, state), cookies)
+}
+
+const actOnConnection = async (
+  request: Request,
+  continuation: PendingContinuation,
+  form: FormData,
+  state: typeof ConsentState.Type,
+) => {
   const url = new URL(request.url)
-  const state = await loadConnection(request, continuation)
 
   if (ConsentState.guards.Failed(state)) return failure(state.status)
 

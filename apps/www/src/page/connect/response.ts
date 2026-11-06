@@ -38,3 +38,15 @@ export const connectionRedirect = (location: string, cookies: ReadonlyArray<stri
 
   return Server.Responded(new Response(null, { status: 303, headers }))
 }
+
+export const withConnectionCookies = (result: Server.Responded, cookies: ReadonlyArray<string>) => {
+  const headers = new Headers(result.response.headers)
+  const finalCookies = headers.getSetCookie()
+  headers.delete('set-cookie')
+
+  for (const cookie of [...cookies, ...finalCookies]) headers.append('set-cookie', cookie)
+
+  return Server.Responded(
+    new Response(result.response.body, { status: result.response.status, headers }),
+  )
+}

@@ -1,3 +1,10 @@
+# [2.124.0](https://github.com/planetaryescape/gbfm/compare/v2.123.0...v2.124.0) (2026-11-06)
+
+
+### Features
+
+* **mcp:** serve plain-text connection instructions ([61a7390](https://github.com/planetaryescape/gbfm/commit/61a739004b0f5ede29ab0479005e8b136318487e))
+
 # [2.123.0](https://github.com/planetaryescape/gbfm/compare/v2.122.2...v2.123.0) (2026-11-04)
 
 

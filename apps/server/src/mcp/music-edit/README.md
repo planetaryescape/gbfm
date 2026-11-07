@@ -1,5 +1,27 @@
 # M1 #523: music edits and shared guarded writer
 
+## Combined prerequisite adoption
+
+The runtime follow-up is rooted at P1 #575 exact
+`695bb12d2149bcbe123f0b6e7661909c4c3ea5ee`. Only the five M1 leaf commits are
+carried forward, once; #561 remains independently preserved. Tests now use real
+0016–0019 replay. The disposable candidate receipt/trigger probe is removed:
+runtime writes must use `mcp/operations/store.ts`, never that candidate ledger.
+The historical proposal below is not the current implementation contract.
+
+Safe revision capacity is checked inside the root CAS, including changed
+affiliation labels and all artist-rename parents. Canonical rename callers must
+include `artistNameFanoutCapacity(artistId)` in their eligibility predicate.
+No-op edits retain the revision but still mark their physical attempt. Fanout
+also aborts atomically rather than overflowing if a caller omits that predicate.
+Credit/label ordering uses UTF-8 bytes to match SQLite BINARY, not JS UTF-16.
+
+P1's pending `CommandAuthority.checkpoint(requiredScopes)` must supply fresh
+actor/client/resource identity and persisted `liveGuard: SQL`. Both that guard
+and the common receipt fence must protect every coupled DML and final assertion;
+checkpoint again before saved disclosure. This branch does not fabricate a
+provider or claim that captured principals establish physical-batch authority.
+
 ## Resumed implementation authority (2026-11-07)
 
 P1 relayed Guide Fari's blanket approval at 17:30:38.618Z, source coordinator

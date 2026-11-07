@@ -26,7 +26,7 @@ test('real domain statements keep exact credits, names, genres and both affiliat
 
   const requestId = '2f1078f5-239b-4fc9-9022-d1126bd194d3'
 
-  const apply = async (input: MusicEditCommand, token: string, artistNameChanged = false) => {
+  const apply = async (input: MusicEditCommand, _scenario: string, artistNameChanged = false) => {
     const plan = await Effect.runPromise(
       planMusicEdit(input.change).pipe(Effect.provideService(Database, db)),
     )
@@ -36,7 +36,7 @@ test('real domain statements keep exact credits, names, genres and both affiliat
       changed: plan.changed,
       artistNameChanged,
       now: 1000,
-      attemptId: token,
+      attemptId: crypto.randomUUID(),
       eligibility: sql`1`,
       fence: sql`1`,
       prepare,
@@ -48,17 +48,6 @@ test('real domain statements keep exact credits, names, genres and both affiliat
   }
 
   try {
-    for (const table of ['music_artists', 'music_albums', 'music_tracks', 'music_labels']) {
-      const columns = await d1.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>()
-
-      if (!columns.results.some((column) => column.name === 'revision')) {
-        await d1
-          .prepare(`ALTER TABLE ${table} ADD COLUMN revision INTEGER NOT NULL DEFAULT 0`)
-          .run()
-        await d1.prepare(`ALTER TABLE ${table} ADD COLUMN last_operation_id TEXT`).run()
-      }
-    }
-
     await d1.batch([
       d1.prepare(
         `INSERT INTO music_artists (id,name,slug,createdAt,updatedAt) VALUES ('a','Ada','a',1,1),('z','Zed','z',1,1)`,

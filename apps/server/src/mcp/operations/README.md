@@ -166,6 +166,23 @@ transactional authorization lock and does not replace these predicates.
    including claim and any already-executed coupled writes. A zero-row CAS never
    silently finalizes. Constraint failure and other SQL failures also roll back.
 
+For physical deletion, append `ctx.assert(winnerAndLiveAuthority)` after the CAS
+and coupled writes but **before** deleting the row holding the attempt marker.
+This synchronous builder returns a statement for `plan.statements`; it performs
+no SQL during build. The store checks this predicate only under the physical
+attempt/input/pending receipt fence. False uses the same winner CHECK to abort
+the batch; true leaves the receipt pending, so later `ctx.fence` predicates remain
+valid. Include current actor/grant/role/ownership/visibility in the caller's
+assertion, not just the marker. Every domain DML still needs its receipt fence
+and appropriate winning marker; this checkpoint does not replace those guards.
+Delete using both guards, then use final `assertApplied` to prove the expected
+absence. **Absence alone is never physical-winner proof**: it is valid here only
+after the intermediate assertion in the same atomic batch. Finalization remains
+required and rolls back the earlier checkpoint/writes if deletion did not occur.
+Saved deletion evidence must permit fresh owner-bound replay authorization
+without requiring the deleted row to exist; revocation must still deny replay.
+Domain code never writes the receipt table or uses `changes()` to infer a winner.
+
 One D1 batch owns claim, all statements, winner assertion and outcome. There is
 no in-memory replay. Duplicate concurrent claim loses `ctx.fence`, so its domain
 statements cannot run and it reads the original persisted result. Competing

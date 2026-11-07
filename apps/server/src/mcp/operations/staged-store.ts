@@ -103,8 +103,8 @@ export type ArtworkTransition =
   | { readonly phase: 'association_pending' }
   | { readonly phase: 'failed'; readonly failureCode: typeof failure.Type }
 
-/** Domain association statement builder receives the same physical lease fence. */
-export interface ArtworkAssociationContext extends OperationContext {
+/** Association uses its lease fence, not the atomic-only pending-receipt assertion. */
+export interface ArtworkAssociationContext extends Omit<OperationContext, 'assert'> {
   readonly stage: ArtworkStage
 }
 

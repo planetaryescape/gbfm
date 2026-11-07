@@ -36,12 +36,14 @@ export interface OperationContext {
   /** Every mutation includes this predicate; coupled DML ALSO checks the domain winning marker. */
   readonly fence: SQL
   readonly prepare: (statement: SQL) => D1PreparedStatement
+  /** Batch-only winner/authority checkpoint before removing its evidence; false aborts the entire batch. */
+  readonly assert: (predicate: SQL) => D1PreparedStatement
 }
 
 /** Domain services own live SQL authority, expected revisions and physical winning markers. */
 export interface AtomicOperationPlan {
   readonly statements: ReadonlyArray<D1PreparedStatement>
-  /** Must prove the domain CAS/lease marker equals this physical attempt, not just desired state. */
+  /** Prove this attempt's marker, or the final postcondition after ctx.assert proved the marker before deletion. */
   readonly assertApplied: SQL
   readonly outcome: OperationOutcome
 }
@@ -326,7 +328,18 @@ export const createMcpOperationStore = (
         let outcome: string
 
         try {
-          plan = prepared.build({ attemptId, operationId, fence, prepare })
+          plan = prepared.build({
+            attemptId,
+            operationId,
+            fence,
+            prepare,
+            // A pending claim has NULL outcome. False deliberately violates the
+            // same winner CHECK as finalization; true keeps every fence live.
+            assert: (predicate) =>
+              prepare(sql`UPDATE mcp_operations
+                SET state = CASE WHEN (${predicate}) THEN 'pending' ELSE 'complete' END
+                WHERE id = ${operationId} AND attempt_id = ${attemptId} AND state = 'pending' AND input_hash = ${inputHash}`),
+          })
           outcome = canonicalJson({
             result: plan.outcome.result,
             revision: plan.outcome.revision,

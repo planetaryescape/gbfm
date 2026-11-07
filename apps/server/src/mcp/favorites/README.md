@@ -1,223 +1,170 @@
-# L2 favorites and subscriptions — partial #537
+# L2 favorites and subscriptions — #537 / parent #512
 
-Base: P1 #548, `feat/514-mcp-foundation` at
-`2d1b5592826e66e3a198dc117c153e062264fc5c`. Merge order: P0 → P1 → L2.
-Reservation: issue #537 comment 6709187485. Integration owner: P1.
-The two reads are composed centrally in P1 #568. Production resource policy is
-not activated and #537 is not complete.
+The reviewed read-only leaf is preserved in [PR #562](https://github.com/planetaryescape/gbfm/pull/562)
+at `a6e5f4e256029bc834bc73d7323b3d4b81d03489`, based on P1 `2d1b559`.
+The command continuation is `feat/537-membership-commands`, based on the named
+[P1 prerequisite #575](https://github.com/planetaryescape/gbfm/pull/575), exact
+`6410b0958f920edeff317c860e8b167b970b6aca`. It includes normal receipt/domain
+migration replay, exports and live command authority. No sibling schema branches,
+new ledger or lane-owned migrations were added. Reservation: #537 comment
+6709187485. P1 owns central integration. Nothing is merged or activated.
 
-## All four selected capabilities
+## Authorization and delivery state
 
-| Capability | State | Scope | Contract / effects |
-| --- | --- | --- | --- |
-| `list_favorites` | Implemented, tested, centrally integrated in #568 | `favorites:read` | Actor-owned public mix/track/misc audio and show favorites; no private reference visibility |
-| `set_favorite` | **NOT delivered; gated** | `favorites:write`; show coupling additionally needs `subscriptions:write` | Must use desired state, durable receipt and shared revision; show favorites currently change subscriptions |
-| `list_show_subscriptions` | Implemented, tested, centrally integrated in #568 | `subscriptions:read` | Actor-owned subscriptions to public shows; no subscriber identities |
-| `set_show_subscription` | **NOT delivered; gated** | `subscriptions:write`; any favorite coupling additionally needs `favorites:write` | Must use desired state, durable receipt and shared revision; no delivery claim |
+The coordinator relayed Guide Fari's superseding 17:30 approval:
+“everything that needs my approval, you have my thumbs up; the claude threads
+that got stuck because of limits, you can take that wrok over as a medium sol
+thing instead”. Source: [coordinator thread](https://ampcode.com/threads/T-01a1b54f-7ac1-7503-9b0f-ffaf3fbc6c3e),
+recorded on [#537](https://github.com/planetaryescape/gbfm/issues/537#issuecomment-6710729236).
+This covers the consolidated receipt, owner revision/CAS and client cutover
+recommendations. There is no repeated schema-approval checkpoint. Technical
+atomicity, privacy, all-client proof and independent exact-head review still apply.
 
-Only the two real read operations are in `FavoritesToolkit`. Neither setter has
-a placeholder handler. Guessed set names receive the native unknown-tool error.
-No micro-post likes, notification sending, subscriber export or provider access.
+| Capability | State | Scope and effect |
+| --- | --- | --- |
+| `list_favorites` | Implemented; reviewed read leaf centrally composed in #568 | `favorites:read`; owner's public audio/show summaries and same-observation owner revision |
+| `set_favorite` | Real atomic implementation in this continuation; **NOT delivered end to end** until central integration, exact-head review and client verification close | `favorites:write`; show targets also require `subscriptions:write`, changing both memberships together |
+| `list_show_subscriptions` | Implemented; reviewed read leaf centrally composed in #568 | `subscriptions:read`; owner's public show summaries and same-observation owner revision |
+| `set_show_subscription` | Real atomic implementation in this continuation; **NOT delivered end to end** under the same remaining gates | `subscriptions:write`; true additionally requires `favorites:write` and adds a favorite; false retains the favorite |
 
-## Read contract
+`FavoritesToolkit` now contains four real handlers, not always-failing placeholders.
+Read-only grants discover only the reads. The isolated composed OAuth fixture
+exercises the real setters with migrated D1, not an in-memory receipt substitute.
+Production OAuth resource policy is unchanged. No micro-post likes, subscriber
+export, notification sending, provider jobs or production accounts are involved.
 
-Both accept `{ limit?: integer 1..50, offset?: integer 0..10000 }`, defaulting to
-20/0. No caller-selectable owner; the live authorized principal supplies it.
-Services check scope and current account on every call; persisted OAuth liveness,
-revocation, client/resource policy and discovery admission remain P1's boundary.
-Admins have no cross-owner bypass. No target identifiers are accepted as filters.
+## Reads and observed revisions
 
-Results contain endpoint identity, target ID/title/slug (plus audio kind for
-favorites), and `{ limit, offset, hasMore, omitted }`. They exclude raw content, artwork,
-media URLs, membership IDs, user IDs and subscriber data. IDs are bounded to 200
-characters, titles to 500, slugs to 500. Long display titles are truncated with an
-ellipsis without splitting a surrogate pair. A public item with an invalid ID or
-slug is omitted and counted in `pagination.omitted`, never allowed to fail the
-other items in the page. P1 enforces the encoded
-256 KiB response ceiling as well. No fabricated revision or receipt is returned.
-These are current-state projections, not mutation preconditions or snapshots.
-Canonical target IDs/slugs are supplied without inventing web routes for legacy
-track/misc audio; endpoint frontend URL is the review starting point.
+MCP lists accept `{ limit?: integer 1..50, offset?: integer 0..10000 }`, defaults
+20/0. No caller-selected owner or admin bypass. Public summaries contain only
+ID/title/slug and audio kind; private targets and malformed dual-target favorites
+are excluded before pagination. Titles are truncated to 500 UTF-16 units without
+splitting a surrogate pair. Invalid public IDs/slugs are omitted and counted in
+`pagination.omitted`, never poisoning the page. IDs are bounded to 200 and slugs
+to 500. No bodies, media/artwork URLs, user IDs or subscriber data are returned.
 
-Queries filter drafts before pagination, fetch at most 51 membership rows, and
-sort created time descending with membership ID descending as a deterministic
-tie-breaker. `hasMore` uses one lookahead, not hidden-reference totals. Offset
-pagination scans a fixed `limit`-sized source window: advance by `limit`, not by
-returned item count, even when all items were omitted. No refill query is made;
-an empty page can have `hasMore: true`. `omitted` counts only invalid public
-summaries in that window, not private references. Pagination can shift between
-calls when the library changes; no snapshot promise.
-Existing subscription service still counts matching memberships and loads show
-labels/content internally; MCP projects only summaries and starts no extra work.
-Malformed favorites referencing both audio and show are omitted. Public audio
-cannot inherit artwork from a private parent show, including for browser callers.
+`FavoriteService.getMembershipPage(owner, kind, limit, offset)` performs one SQL
+statement: bounded public rows plus owner revision. Its aggregate sentinel also
+returns that revision for empty/out-of-range pages. It does not append a revision
+from a later observation. The result has `{ endpoint, revision, favorites | subscriptions,
+pagination: { limit, offset, hasMore, omitted } }`. Ordering is created time then
+membership ID descending; one lookahead, at most 51 rows, no private totals/refill.
+Advance offset by limit, not returned item count. Pagination can shift between calls.
 
-## Exact P1 integration recipe
+The browser favorite array API is preserved. Each `FavoriteWithContent` now has
+`membershipRevision` from the same query as its membership row. Browser artwork
+cannot inherit a private parent show's thumbnail.
 
-Exports from this lane (direct leaf imports, no shared export edits):
+Session GET `/api/favorites/:targetKind/:targetId/state` returns
+`{ revision, favorited, subscribed }` from one observation with private/no-store
+headers. Audio uses `subscribed: null`. Absent/private targets return 404. Controls
+load this state before enabling Toggle, never fetch only a fresh revision at click.
 
-- `./favorites/toolkit`: `FavoritesToolkit`, `FavoritesToolHandlersLayer`
-- `./favorites/service`: `FavoritesMcpService`, `FavoritesMcpServiceLayer`
-- `./favorites/contracts`: `ListOwnedInput`, `ListFavoritesResult`,
-  `ListShowSubscriptionsResult`
+## Durable desired-state commands
 
-Compose alongside the existing editorial toolkit, not in place of it:
+Inputs require UUIDv4 `requestId`, a nonnegative safe-integer `expectedRevision`,
+bounded canonical target ID and boolean `desiredState`. Favorites use
+`targetKind: 'audio' | 'show'`; subscriptions use `showId`. Actor, client and
+audience are trusted context, never payload fields.
 
-```ts
-const toolkit = composeMcpToolkits(EditorialToolkit, FavoritesToolkit)
-const reads = FavoritesMcpServiceLayer.pipe(
-  Layer.provide(FavoriteServiceLayer),
-  Layer.provide(ShowSubscriptionServiceLayer),
-  Layer.provide(McpAuthorizationLive),
-)
-const handlers = FavoritesToolHandlersLayer.pipe(Layer.provide(reads))
-const routes = makeMcpRoutes(toolkit, handlers).pipe(
-  Layer.provide(applicationServices),
-  Layer.provide(databaseLayer),
-)
-```
+All six existing service writers require `MembershipWriteContext`; no legacy
+unguarded overload remains. `membership.ts` builds one shared-store atomic plan:
 
-`makeMcpRoutes` supplies its single private, validated `EditorialMcpConfig` to
-the supplied handlers internally; do not separately construct `endpointConfig`.
-`databaseLayer` supplies `Database`; `applicationServices` supplies the route's
-existing auth, OAuth, configuration and editorial dependencies. Existing service
-layers may be reused rather than constructed twice. The isolated test `setup`
-shows the full composition through `makeMcpRoutes`, persisted OAuth, existing
-draft handlers and migrated D1. Central composition also includes the other
-reviewed read toolkits; this example isolates the favorites integration seam.
+1. Claim the scoped receipt; lazily initialize the persistent owner revision.
+2. CAS expected revision to next revision and fresh physical attempt UUID.
+3. Guard every coupled mutation with receipt fence, winning owner/revision/attempt
+   triple, live credential/account/scopes and live public target.
+4. Assert the winner and desired coupled state before committing the receipt.
+   A lost CAS causes the shared CHECK to abort the entire batch, not a partial save.
 
-P1 owns registry composition and permitted OAuth/consent scope exposure. No new
-scope literals or central exports are required; the pinned P1 already defines all
-four read/write scope names. Do not enable writes or broaden production resource
-policy as part of read integration. Production policy activation remains a gate.
+One owner-wide `listener_membership_revisions` row guards all audio favorites,
+show favorites and subscriptions. It survives an empty library; only account
+deletion cascades. Revision starts at 0 and cannot reset, wrap or exceed the safe
+integer range. Every accepted new intent, including a no-op, increments once.
+Exact replay never increments. The cross-target conflicts are deliberate: coupled
+membership changes cannot evade the guard through another endpoint.
 
-## Observed write gap and actual notification effects
+The shared store scopes keys by actor, trusted client, canonical resource,
+operation and request UUID. Normalized input includes target, desired state and
+expected revision. Same key/different input conflicts. Identical concurrent
+retries apply once; replays return the original bounded committed projection,
+including its original revision, even after later changes. Results expire after
+24 hours; tombstones prevent expired keys from executing again. Current authority
+and public target are rechecked before lookup and receipt disclosure.
 
-A disposable migrated-D1 validation at the pinned base plus this lane's read
-changes exercised the existing services (no mocks or external providers):
+Session-only membership routes retain session-only authentication. Shared
+`makeSessionCommandAuthority` uses actor-stable `gbfm:session` and configured
+`new URL('/api', ConfigService.urls.share).href`, never Host/Origin, session ID or
+raw token. No PAT support is added. MCP uses verified OAuth client and configured
+MCP resource. `membershipWriteContext` maps `checkpoint.liveGuard` to the domain
+guard and reruns checkpoint in the receipt authorization callback. Provider work
+never runs inside the batch. Responses truthfully report `notifications: 'not_sent'`.
 
-1. `addShowFavorite(owner, public)` inserted a favorite and subscription.
-2. `removeShowFavorite(owner, public)` removed both.
-3. Retrying the original add inserted both again. It did **not** replay the first
-   result after the intervening removal: a lost-response retry would undo the
-   newer intent. No request ID or expected revision is accepted by these methods.
-4. `unsubscribe` removed the subscription but retained the favorite.
-5. Concurrent `subscribe` and `removeShowFavorite` both completed successfully:
-   there was no stale-state conflict. Final ordering is not a contract.
-6. Recording transport observed zero email sends. Source inspection found no
-   sender call in either service and no production caller of `getSubscribers`.
+HTTP writes return the decoded committed membership result. Conflict→409,
+expired→410, denied/private→403, invalid→400 and uncertain storage failure→503.
+No conflict is treated as success. Clients retain the exact UUID/input after
+uncertain failures; 409/410 reload state but require explicit new user intent.
 
-The focused validation passed (3/3 tests, 6.85 seconds including reads). The
-temporary gap assertions were removed rather than permanently requiring a known
-defect to remain. Kept tests cover delivered reads; existing favorite service D1
-tests cover duplicate concurrent inserts. Unique membership constraints prevent
-duplicate rows, but do not prove receipts, changed-payload conflicts, expired-key
-denial or concurrent opposing-intent safety.
+## Exact P1 integration seam
 
-The kept private-parent regression was also run with only its visibility guard
-removed: it failed with `expected 'https://private.example/secret' to be null`.
-Restoring the guard makes the same composed-service scenario pass. This verifies
-that the regression distinguishes the private-reference leak, not just execution.
+Direct leaf exports (no shared registry/export edits in this lane):
 
-Existing show favorite add/remove auto-subscribe/unsubscribe; subscribe attempts
-to add a favorite but swallows that secondary failure; unsubscribe leaves the
-favorite. These are non-atomic multi-statement effects. Future subscription
-consent must explain notification eligibility; no code here schedules, queues or
-sends email, and no subscription result may claim otherwise.
+- `favorites/toolkit`: `FavoritesToolkit`, `FavoritesToolHandlersLayer`.
+- `favorites/service`: `FavoritesMcpService`, `FavoritesMcpServiceLayer`.
+- `favorites/contracts`: list and set input/results.
+- `favorites/command`: `membershipWriteContext`, `membershipOutcome`.
+- `favorites/membership`: `MembershipWriteContext`, `MembershipAuthority`.
 
-## Consolidated persistence decision requested from P1
+Compose the toolkit alongside the other reviewed toolkits. Supply
+`FavoriteService`, `ShowSubscriptionService`, `McpAuthorization`,
+`EditorialMcpConfig` and **the same-D1** `McpOperationStore` when constructing
+`FavoritesMcpServiceLayer`. `makeMcpRoutes` supplies its validated endpoint config
+and request-scoped `CommandAuthority`; it is resolved only inside a command call,
+not captured at layer construction. Missing request authority fails closed.
+Provide `McpOperationStoreLayer(env.DB)` at the central HTTP/AppLayer/test fixture
+seam too; do not reach into Drizzle internals or construct a second database.
 
-No ledger, schema, migration or migration reservation is introduced here.
-P1 must coordinate one cross-lane decision before the setters can be delivered:
+The six service/API writers are:
 
-- Durable unique key: actor user ID + OAuth client ID + operation
-  (`set_favorite` / `set_show_subscription`) + UUIDv4 request ID. Different
-  owners/clients/operations must not consume each other's keys or results.
-- Canonical payload fingerprint: target kind and canonical ID, desired boolean,
-  expected revision and explicit null/omission semantics. Same key/different
-  payload conflicts; identical concurrent requests apply once and replay the
-  bounded saved original outcome, not a new read presented as the old outcome.
-- Receipt fields: key dimensions, input hash, applied revision, bounded outcome,
-  target/access evidence, committed time and expiry. Keep key/fingerprint expiry
-  evidence after 24-hour result retention so an expired key can never apply again.
-  Retention duration/storage is a schema-owner decision, not permission to prune.
-- One shared revision/transition guard for the relevant owner's membership state,
-  including coupled favorite/subscription rows. Every browser/API/PAT/MCP writer
-  participates. Opposing stale intents conflict rather than overwrite. Absence
-  must also have a version; row deletion cannot erase the guard.
-- One owning-service D1 transaction/batch: compare revision + verify target
-  visibility + change desired membership/coupled rows + persist receipt atomically.
-  A pre-read and later batch is not a CAS. No provider calls in the transaction.
-- Fresh persisted grant/account/role and matching receipt ownership before replay;
-  current public-target visibility still checked. No receipt authorizes private
-  reference access. Revoked/disabled/banned/deleted actors cannot replay results.
-- Resolve show coupling and permission policy explicitly. Preserve browser behavior
-  through its service seam; do not silently claim atomicity or remove side effects.
-
-Affected ownership paths for that decision: `db/favorites.schema.ts`,
-`db/show.schema.ts`, the two existing application services, their HTTP write
-callers (`http/favorites.handlers.ts`, `http/shows.handlers.ts`), one coordinated
-`drizzle-d1/NNNN_*.sql`, `test/migrate-d1.ts`, `db/exports.ts` as needed. Existing
-`editorial_operations` has post-specific storage and cannot be repurposed by this
-lane. Schema approval, migration coordination and final composed-head verification
-remain genuine gates, not reasons to implement weaker setters.
-
-### Concrete revision candidate for the approval package
-
-Recommend one **owner-wide** revision for all audio favorites, show favorites and
-show subscriptions. This deliberately causes conflicts between unrelated targets;
-it is simpler and safer than separate counters that miss the existing coupling.
-Candidate only, not a migration or approved schema:
-
-```sql
-CREATE TABLE listener_membership_revisions (
-  user_id TEXT PRIMARY KEY NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-  revision INTEGER NOT NULL DEFAULT 0
-    CHECK (typeof(revision) = 'integer' AND revision BETWEEN 0 AND 9007199254740991),
-  last_transition_id TEXT DEFAULT NULL,
-  CHECK (
-    (revision = 0 AND last_transition_id IS NULL) OR
-    (revision > 0 AND last_transition_id IS NOT NULL AND length(last_transition_id) = 36)
-  )
-);
-```
-
-The target schema export would be `listenerMembershipRevisions` with camelCase
-field names. No target FK: removing the last membership must not delete/reset the
-revision. Never prune this row with receipts; only account deletion cascades.
-Account IDs must not be reused as the same principal after deletion. A missing
-row represents revision 0; initialize lazily with `INSERT ... ON CONFLICT DO
-NOTHING` in the transaction. Existing memberships can start at revision 0 without
-rewriting them. Increment for each accepted *new intent*, even a desired-state
-no-op; exact receipt replay does not increment. Reject exhausted revisions rather
-than wrap. Thus add → remove → add cannot recreate an old observed version (ABA).
-
-`last_transition_id` is a fresh UUIDv4 per physical attempt, distinct from the
-client request ID. CAS updates it and increments revision only for the expected
-owner revision and currently visible target. All remaining statements changing
-memberships/coupled rows and finalizing the shared receipt must be conditional on
-that winning `(user_id, expectedRevision + 1, last_transition_id)` triple. A D1
-batch is transactional, but a zero-row UPDATE is **not** an exception: unconditional
-later statements would wrongly mutate after a lost CAS. P1's shared receipt store
-must adjudicate key ownership, hash and expiry and correlate the winning attempt
-in the same batch. The exact shared-store SQL depends on its approved schema;
-this proposal does not claim that a version counter alone supplies replay safety.
-
-All six existing service entry points must use this guard, not just MCP. Their
-actual callers/contracts at the pinned base are:
-
-| Handler | API contract and endpoint |
+| Service methods | HTTP handler and contract |
 | --- | --- |
-| `http/favorites.handlers.ts` `addFavorite` (audio/show branches) | `packages/api/src/favorites.ts`: POST `/api/favorites` |
-| Same file `removeFavorite` | DELETE `/api/favorites/:audioId` |
-| Same file `removeShowFavorite` | DELETE `/api/favorites/show/:showId` |
-| `http/shows.handlers.ts` `subscribeToShow` | `packages/api/src/shows.ts`: POST `/api/shows/:id/subscribe` |
-| Same file `unsubscribeFromShow` | DELETE `/api/shows/:id/unsubscribe` |
+| `addFavorite`, `addShowFavorite` | `http/favorites.handlers.ts`; `packages/api/src/favorites.ts`; POST `/api/favorites` |
+| `removeFavorite` | same; DELETE `/api/favorites/:audioId` |
+| `removeShowFavorite` | same; DELETE `/api/favorites/show/:showId` |
+| `subscribe`, `unsubscribe` | `http/shows.handlers.ts`; `packages/api/src/shows.ts`; POST `/api/shows/:id/subscribe`, DELETE `/api/shows/:id/unsubscribe` |
 
-These endpoints currently carry no expected revision. Their read/status results
-must supply it, and browser/PAT/API callers must pass it to the shared service
-transition. Do not silently fetch a new revision and retry a stale intent. Current
-web writers are `apps/www/src/public-actions/index.ts`, `player/favorite.ts`, and
-`page/dashboard/update.ts`; mobile writes in `apps/mobile/src/api/favorites.ts`.
-Preserving visible browser behavior while changing its concurrency contract is a
-cross-client gate outside this read-only slice. No mobile changes are made here.
+P1-only root/dashboard integration (do not weaken required fields):
+
+- `PublicActions.load(model)` returns `{ model, commands }`; use its model and
+  enqueue its `PublicActions.Load` command after page hydration/account changes.
+  `Loaded` carries target, owner, request generation, active state and revision.
+  `Saved` requires `revision`; propagate that exact committed revision.
+- `PlayerFavorite.reconcile(model, audioId, active, revision)` requires the fourth
+  argument. `Loaded.revision` is nullable; `Saved.revision` is required.
+  `SaveFailed` requires `conflicted` and `mutationId`.
+- Dashboard favorite rows carry same-observation `membershipRevision`; removal
+  must send that observed revision plus one UUIDv4 retained for uncertain retry.
+  Never fetch revision only at click, auto-retry 409, or make fields optional.
+
+WWW public controls/player and mobile favorite API/status hook own observed
+revision and retry identity plumbing. Shared root/dashboard assemblers and their
+fixtures are P1-only. `show.service.ts` is untouched.
+
+## Verification and remaining gates
+
+Kept migrated-D1 tests exercise owner/private exclusion, bounded pages including
+empty revision sentinels, oversize summary regression, all six service writers,
+coupled desired states, no-op revisions, empty-library ABA, competing cross-target
+intents, identical concurrent retries, stale/changed-key conflicts, expiration,
+revoked credentials and truthful zero sends. `http.d1.test.ts` exercises actual
+session HTTP state/writes, all six branches, renewal-stable replay, owner isolation
+and privacy. `favorites.d1.test.ts` exercises persisted OAuth→MCP→services→D1.
+The original gap reproduction showed add→remove→retry re-added state; that
+historical behavior is not a test expectation or a delivered replay guarantee.
+
+Final exact-head precommit, composed central runtime/client integration and the
+independent Sol PR review remain delivery requirements. Mobile API/state checks
+are not physical-device proof: no connected runner was available; latest verified
+build/install on the user's physical iPhone remains unverified. Component browser
+captures are not a claim of integrated-app/backend verification. MCP stays
+unmerged, auto-merge off, and production activation remains prohibited.

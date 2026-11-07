@@ -1,3 +1,10 @@
+import {
+  MembershipMutationInput,
+  MembershipMutationResult,
+  MembershipRevision,
+  MembershipTargetId,
+  MembershipTargetKind,
+} from '@gbfm/api/favorites'
 import { Schema } from 'effect'
 
 import { EndpointIdentity } from '../contracts'
@@ -13,6 +20,24 @@ export const SavedItemSummary = Schema.Struct({
   slug: Schema.NonEmptyString.check(Schema.isMaxLength(500)),
 })
 
+export const SetFavoriteInput = Schema.Struct({
+  ...MembershipMutationInput.fields,
+  targetKind: MembershipTargetKind,
+  targetId: MembershipTargetId,
+  desiredState: Schema.Boolean,
+})
+
+export const SetShowSubscriptionInput = Schema.Struct({
+  ...MembershipMutationInput.fields,
+  showId: MembershipTargetId,
+  desiredState: Schema.Boolean,
+})
+
+export const SetMembershipResult = Schema.Struct({
+  endpoint: EndpointIdentity,
+  ...MembershipMutationResult.fields,
+})
+
 const Pagination = Schema.Struct({
   limit: Schema.Int,
   offset: Schema.Int,
@@ -22,6 +47,7 @@ const Pagination = Schema.Struct({
 
 export const ListFavoritesResult = Schema.Struct({
   endpoint: EndpointIdentity,
+  revision: MembershipRevision,
   favorites: Schema.Array(
     Schema.Struct({
       kind: Schema.Literals(['mix', 'track', 'misc', 'show']),
@@ -33,6 +59,7 @@ export const ListFavoritesResult = Schema.Struct({
 
 export const ListShowSubscriptionsResult = Schema.Struct({
   endpoint: EndpointIdentity,
+  revision: MembershipRevision,
   subscriptions: Schema.Array(Schema.Struct({ show: SavedItemSummary })).check(
     Schema.isMaxLength(50),
   ),

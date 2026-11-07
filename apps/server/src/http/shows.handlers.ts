@@ -9,6 +9,9 @@ import {
   getOptionalActor,
 } from '@/http/handler-utils'
 import { omitUndefined } from '@/lib/omit-undefined'
+import { makeSessionCommandAuthority } from '@/mcp/command-authority'
+import { membershipOutcome, membershipWriteContext } from '@/mcp/favorites/command'
+import { membershipHttpError } from '@/mcp/favorites/http'
 import { QRCodeService } from '@/services/qrcode.service'
 import { loadShowPage } from '@/services/show-page'
 import { ShowService, ShowSubscriptionService } from '@/services/show.service'
@@ -206,33 +209,28 @@ export const ShowsHandlersLive = HttpApiBuilder.group(Api, 'shows', (handlers) =
         }
       }),
     )
-    .handle('subscribeToShow', ({ params }) =>
+    .handle('subscribeToShow', ({ params, payload }) =>
       Effect.gen(function* () {
-        const { user } = yield* AuthSession
         const svc = yield* ShowSubscriptionService
+        const authority = yield* makeSessionCommandAuthority
 
-        const subscription = yield* dieOnDatabaseError(
-          svc
-            .subscribe(user.id, params.id)
-            .pipe(Effect.catchTag('ConflictError', () => new HttpApiError.Conflict())),
+        const context = yield* membershipWriteContext(
+          authority,
+          ['subscriptions:write', 'favorites:write'],
+          payload,
         )
 
-        return {
-          ...subscription,
-          createdAt: subscription.createdAt.toISOString(),
-        }
-      }),
+        return yield* membershipOutcome(yield* svc.subscribe(context, params.id))
+      }).pipe(Effect.catchTag('McpToolError', membershipHttpError)),
     )
-    .handle('unsubscribeFromShow', ({ params }) =>
+    .handle('unsubscribeFromShow', ({ params, payload }) =>
       Effect.gen(function* () {
-        const { user } = yield* AuthSession
         const svc = yield* ShowSubscriptionService
-        yield* dieOnDatabaseError(
-          svc
-            .unsubscribe(user.id, params.id)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
-        )
-      }),
+        const authority = yield* makeSessionCommandAuthority
+        const context = yield* membershipWriteContext(authority, ['subscriptions:write'], payload)
+
+        return yield* membershipOutcome(yield* svc.unsubscribe(context, params.id))
+      }).pipe(Effect.catchTag('McpToolError', membershipHttpError)),
     )
     .handle('getShowSubscriptionStatus', ({ params }) =>
       Effect.gen(function* () {

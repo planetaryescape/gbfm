@@ -1,4 +1,9 @@
 import { AudioPageResponse } from '@gbfm/api/audio'
+import {
+  MembershipMutationResult,
+  MembershipRevision,
+  MembershipStateResponse,
+} from '@gbfm/api/favorites'
 import { QueueTrack, type QueueTrackType } from '@gbfm/player'
 import { Effect, Match, Schema } from 'effect'
 import { Command, type Update } from 'foldkit'
@@ -33,6 +38,8 @@ export const Model = Schema.Struct({
   saving: Schema.Boolean,
   notice: Schema.NullOr(Schema.String),
   noticeId: Schema.Number,
+  revision: Schema.NullOr(MembershipRevision),
+  mutationId: Schema.NullOr(Schema.String),
 })
 
 export type Model = typeof Model.Type
@@ -46,6 +53,8 @@ export const initialModel: Model = {
   saving: false,
   notice: null,
   noticeId: 0,
+  revision: null,
+  mutationId: null,
 }
 
 const LoadedState = Schema.Literals(['anonymous', 'active', 'inactive', 'unavailable'])
@@ -56,6 +65,7 @@ export const Message = defineMessageUnion({
     state: LoadedState,
     principalId: Schema.NullOr(Schema.String),
     principalKnown: Schema.Boolean,
+    revision: Schema.NullOr(MembershipRevision),
   },
   Toggled: {},
   Retried: {},
@@ -64,11 +74,14 @@ export const Message = defineMessageUnion({
     audioId: Schema.String,
     active: Schema.Boolean,
     principalId: Schema.String,
+    revision: MembershipRevision,
   },
   SaveFailed: {
     generation: Schema.Number,
     unauthorized: Schema.Boolean,
     principalId: Schema.String,
+    conflicted: Schema.Boolean,
+    mutationId: Schema.String,
   },
   NoticeDismissed: { generation: Schema.Number, noticeId: Schema.Number },
 })
@@ -106,15 +119,49 @@ const Load = Command.define('PlayerFavorite.Load', {
       return response.json()
     }).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(AudioPageResponse)),
-      Effect.map((page) =>
-        Message.Loaded({
-          generation,
-          principalId: page.principal?.id ?? null,
-          principalKnown: true,
-          state:
-            AudioPageResponse.guards.Ready(page) && page.audio.id === track.audioId
-              ? page.favorite
-              : 'unavailable',
+      Effect.flatMap((page) =>
+        Effect.gen(function* () {
+          const ready = AudioPageResponse.guards.Ready(page) && page.audio.id === track.audioId
+
+          if (ready && page.principal && ['active', 'inactive'].includes(page.favorite)) {
+            const response = yield* Effect.tryPromise((signal) =>
+              fetch(`/api/favorites/audio/${encodeURIComponent(track.audioId)}/state`, {
+                credentials: 'same-origin',
+                cache: 'no-store',
+                signal,
+              }),
+            )
+
+            if (!response.ok)
+              return Message.Loaded({
+                generation,
+                state: response.status === 401 ? 'anonymous' : 'unavailable',
+                principalId: page.principal.id,
+                principalKnown: true,
+                revision: null,
+              })
+            const body = yield* Effect.tryPromise(() => response.json())
+            const state = yield* Schema.decodeUnknownEffect(MembershipStateResponse)(body)
+
+            return Message.Loaded({
+              generation,
+              state: state.favorited ? 'active' : 'inactive',
+              principalId: page.principal.id,
+              principalKnown: true,
+              revision: state.revision,
+            })
+          }
+
+          return Message.Loaded({
+            generation,
+            principalId: page.principal?.id ?? null,
+            principalKnown: true,
+            revision: null,
+            state:
+              AudioPageResponse.guards.Ready(page) && page.audio.id === track.audioId
+                ? page.favorite
+                : 'unavailable',
+          })
         }),
       ),
       Effect.orElseSucceed(() =>
@@ -123,6 +170,7 @@ const Load = Command.define('PlayerFavorite.Load', {
           state: 'unavailable',
           principalId: null,
           principalKnown: false,
+          revision: null,
         }),
       ),
     ),
@@ -134,31 +182,56 @@ const Save = Command.define('PlayerFavorite.Save', {
     audioId: Schema.String,
     active: Schema.Boolean,
     principalId: Schema.String,
+    expectedRevision: MembershipRevision,
+    mutationId: Schema.NullOr(Schema.String),
   },
   messages: [Message.Saved, Message.SaveFailed],
-  execute: ({ generation, audioId, active, principalId }) =>
-    Effect.tryPromise(async (signal) => {
-      const response = await fetch(
-        active ? '/api/favorites' : `/api/favorites/${encodeURIComponent(audioId)}`,
-        {
-          method: active ? 'POST' : 'DELETE',
-          credentials: 'same-origin',
-          headers: { 'content-type': 'application/json' },
-          body: active ? JSON.stringify({ audioId }) : undefined,
-          signal,
-        },
-      )
+  execute: ({ generation, audioId, active, principalId, expectedRevision, mutationId }) =>
+    Effect.gen(function* () {
+      const id = mutationId ?? (yield* Effect.sync(() => crypto.randomUUID()))
 
-      const settled = response.ok || response.status === (active ? 409 : 404)
+      const fail = (unauthorized = false, conflicted = false) =>
+        Message.SaveFailed({ generation, unauthorized, conflicted, mutationId: id, principalId })
 
-      return settled
-        ? Message.Saved({ generation, audioId, active, principalId })
-        : Message.SaveFailed({ generation, unauthorized: response.status === 401, principalId })
-    }).pipe(
-      Effect.orElseSucceed(() =>
-        Message.SaveFailed({ generation, unauthorized: false, principalId }),
-      ),
-    ),
+      return yield* Effect.gen(function* () {
+        const mutation = { requestId: id, expectedRevision }
+
+        const response = yield* Effect.tryPromise((signal) =>
+          fetch(active ? '/api/favorites' : `/api/favorites/${encodeURIComponent(audioId)}`, {
+            method: active ? 'POST' : 'DELETE',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(active ? { ...mutation, audioId } : mutation),
+            signal,
+          }),
+        )
+
+        if (!response.ok)
+          return fail(
+            response.status === 401 || response.status === 403,
+            response.status === 409 || response.status === 410,
+          )
+        const body = yield* Effect.tryPromise(() => response.json())
+        const result = yield* Schema.decodeUnknownEffect(MembershipMutationResult)(body)
+
+        if (
+          result.requestId !== id ||
+          result.targetKind !== 'audio' ||
+          result.targetId !== audioId ||
+          result.desiredState !== active ||
+          result.revision !== expectedRevision + 1
+        )
+          return fail()
+
+        return Message.Saved({
+          generation,
+          audioId,
+          active,
+          principalId,
+          revision: result.revision,
+        })
+      }).pipe(Effect.orElseSucceed(() => fail()))
+    }),
 })
 
 const sameTrack = (left: Track | null, right: Track | null) =>
@@ -169,7 +242,15 @@ const trackOf = (current: QueueTrackType | null): Track | null =>
 
 const load = (model: Model): Update.Return<Model, Message> => {
   const generation = model.generation + 1
-  const reset = { ...model, generation, saving: false, notice: null }
+
+  const reset = {
+    ...model,
+    generation,
+    saving: false,
+    notice: null,
+    revision: null,
+    mutationId: null,
+  }
 
   if (!model.track) return { model: { ...reset, status: 'idle' } }
 
@@ -196,7 +277,12 @@ export const sync = (
 }
 
 /** Adopts a server-acknowledged favorite change made by another control for the same audio. */
-export const reconcile = (model: Model, audioId: string, active: boolean): Model =>
+export const reconcile = (
+  model: Model,
+  audioId: string,
+  active: boolean,
+  revision: number,
+): Model =>
   model.track?.audioId !== audioId ||
   model.saving ||
   !['loading', 'active', 'inactive'].includes(model.status)
@@ -205,18 +291,21 @@ export const reconcile = (model: Model, audioId: string, active: boolean): Model
         ...model,
         generation: model.generation + 1,
         status: active ? 'active' : 'inactive',
+        revision,
+        mutationId: null,
         notice: null,
       }
 
 export const update = (model: Model, message: Message): Update.Return<Model, Message> =>
   Message.match<Update.Return<Model, Message>>(message, {
-    Loaded: ({ generation, state, principalId, principalKnown }) => {
+    Loaded: ({ generation, state, principalId, principalKnown, revision }) => {
       if (generation !== model.generation || model.status !== 'loading') return { model }
 
       const identified = {
         ...model,
         principalId: principalKnown ? principalId : model.principalId,
         principalKnown: principalKnown || model.principalKnown,
+        revision,
       }
 
       return state === 'unavailable'
@@ -233,6 +322,7 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
         !model.track ||
         !model.principalId ||
         model.saving ||
+        model.revision === null ||
         !['active', 'inactive'].includes(model.status)
       )
         return { model }
@@ -245,32 +335,45 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
             audioId: model.track.audioId,
             active: model.status !== 'active',
             principalId: model.principalId,
+            expectedRevision: model.revision,
+            mutationId: model.mutationId,
           }),
         ],
       }
     },
-    Saved: ({ generation, active, principalId, audioId }) =>
+    Saved: ({ generation, active, principalId, audioId, revision }) =>
       generation !== model.generation ||
       principalId !== model.principalId ||
       audioId !== model.track?.audioId ||
       !model.saving
         ? { model }
-        : { model: { ...model, saving: false, status: active ? 'active' : 'inactive' } },
-    SaveFailed: ({ generation, unauthorized, principalId }) =>
-      generation !== model.generation || principalId !== model.principalId || !model.saving
-        ? { model }
-        : notify(
-            {
+        : {
+            model: {
               ...model,
               saving: false,
-              status: unauthorized ? 'anonymous' : model.status,
-              principalId: unauthorized ? null : model.principalId,
-              principalKnown: unauthorized || model.principalKnown,
+              revision,
+              mutationId: null,
+              status: active ? 'active' : 'inactive',
             },
-            unauthorized
-              ? 'Your session has ended. Sign in to favorite.'
-              : 'Favorite could not be saved. Try again.',
-          ),
+          },
+    SaveFailed: ({ generation, unauthorized, principalId, conflicted, mutationId }) =>
+      generation !== model.generation || principalId !== model.principalId || !model.saving
+        ? { model }
+        : conflicted
+          ? load({ ...model, saving: false })
+          : notify(
+              {
+                ...model,
+                saving: false,
+                status: unauthorized ? 'anonymous' : model.status,
+                principalId: unauthorized ? null : model.principalId,
+                principalKnown: unauthorized || model.principalKnown,
+                mutationId: unauthorized ? null : mutationId,
+              },
+              unauthorized
+                ? 'Your session has ended. Sign in to favorite.'
+                : 'Favorite could not be saved. Try again.',
+            ),
   })
 
 const heartButton =
@@ -332,7 +435,7 @@ export const button = <M>(
       return h.button(
         [
           h.Type('button'),
-          h.Disabled(model.saving),
+          h.Disabled(model.saving || model.revision === null),
           h.AriaBusy(model.saving),
           h.AriaPressed(String(active)),
           h.OnClick(toMessage(Message.Toggled())),

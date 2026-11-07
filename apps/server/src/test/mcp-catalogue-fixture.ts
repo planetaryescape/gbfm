@@ -99,8 +99,7 @@ export const createComposedMcpFixture = (
   )
 
   return HttpRouter.toWebHandler(
-    makeMcpRoutes(composeMcpToolkits(EditorialToolkit, CatalogueFixture)).pipe(
-      Layer.provide(handlers),
+    makeMcpRoutes(composeMcpToolkits(EditorialToolkit, CatalogueFixture), handlers).pipe(
       Layer.provide(services),
       Layer.provide(HttpServer.layerServices),
     ),

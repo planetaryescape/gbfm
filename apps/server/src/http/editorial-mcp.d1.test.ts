@@ -3,17 +3,29 @@ import { eq } from 'drizzle-orm'
 import { Effect, Layer, Match, Redacted, Schema } from 'effect'
 import { expect, test } from 'vitest'
 
-import { audioTable } from '@/db/audio.schema'
+import { audioArtists, audioTable } from '@/db/audio.schema'
 import { user } from '@/db/auth.schema'
+import {
+  listeningCollectionsTable,
+  listeningMembershipsTable,
+  savedMixesTable,
+} from '@/db/listening.schema'
 import { musicArtistsTable } from '@/db/music-entity.schema'
 import { oauthClient, oauthConsent, oauthResource } from '@/db/oauth.schema'
 import { postCreators, postsTable } from '@/db/post.schema'
 import { showsTable } from '@/db/show.schema'
+import { ExternalMediaFetcher } from '@/lib/external-media'
 import {
   PublishedPostsResult,
   PublicShowResult,
   ShowEpisodesResult,
 } from '@/mcp/content-read/contracts'
+import {
+  PublicCollectionResult,
+  PublicMixResult,
+  PublicProfileResult,
+  PublicSearchResult,
+} from '@/mcp/content-read/research-contracts'
 import { GetPostResult } from '@/mcp/contracts'
 import { ConfigService, createConfig } from '@/services/config.service'
 import { createEditorialOAuthFixture, OAuthTokens } from '@/test/editorial-oauth'
@@ -725,6 +737,66 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
     },
   ])
 
+  // User and canonical artist identifiers deliberately collide across namespaces.
+  await fixture.db.update(user).set({ username: 'r3-user' }).where(eq(user.id, 'reader'))
+  await fixture.db.insert(musicArtistsTable).values({
+    id: 'reader',
+    name: 'Artist fallback',
+    slug: 'r3-artist',
+    publishedAt: new Date(1000),
+  })
+  await fixture.db.insert(audioArtists).values({ audioId: 'r3-episode-a', artistId: 'reader' })
+  await fixture.db.insert(listeningCollectionsTable).values([
+    { id: 'r3-collection', userId: 'reader', title: 'Public collection', published: true },
+    { id: 'r3-private-collection', userId: 'reader', title: 'SECRET COLLECTION' },
+  ])
+  await fixture.db.insert(savedMixesTable).values([
+    {
+      id: 'r3-save',
+      userId: 'reader',
+      title: 'Public save',
+      platform: 'soundcloud',
+      url: 'https://soundcloud.com/disposable/mix',
+      notes: 'Public notes',
+      published: true,
+    },
+    {
+      id: 'r3-private-save',
+      userId: 'reader',
+      title: 'SECRET SAVE',
+      platform: 'soundcloud',
+      url: 'https://soundcloud.com/disposable/private',
+      notes: 'SECRET NOTES',
+    },
+    {
+      id: 'r3-foreign-save',
+      userId: 'other',
+      title: 'SECRET FOREIGN',
+      platform: 'soundcloud',
+      url: 'https://soundcloud.com/disposable/foreign',
+      published: true,
+    },
+  ])
+  await fixture.db.insert(listeningMembershipsTable).values(
+    ['r3-save', 'r3-private-save', 'r3-foreign-save'].map((mixId) => ({
+      collectionId: 'r3-collection',
+      mixId,
+    })),
+  )
+
+  const domainSnapshot = async () =>
+    Promise.all([
+      fixture.db.select().from(postsTable),
+      fixture.db.select().from(audioTable),
+      fixture.db.select().from(musicArtistsTable),
+      fixture.db.select().from(savedMixesTable),
+      fixture.db.select().from(listeningCollectionsTable),
+      fixture.db.select().from(listeningMembershipsTable),
+    ])
+
+  const beforeReads = await domainSnapshot()
+  const providerRequests: Array<string> = []
+
   // The production route manifest, not an injected principal or test-only toolkit.
   const handler = createTestWebHandler(
     fixture.db.$client,
@@ -737,6 +809,12 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
         ...fixture.config.auth,
         betterAuthSecret: 'disposable-test-secret-with-at-least-32-chars',
       },
+    }),
+    undefined,
+    Layer.succeed(ExternalMediaFetcher, async (url) => {
+      providerRequests.push(url)
+
+      return new Response('', { status: 404 })
     }),
   )
 
@@ -768,7 +846,23 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
       }),
     )
 
-  const contentNames = ['list_published_posts', 'get_show', 'list_show_episodes']
+  const contentNames = [
+    'list_published_posts',
+    'get_show',
+    'list_show_episodes',
+    'search_catalogue',
+    'get_mix',
+    'get_public_profile',
+    'get_public_collection',
+  ]
+
+  const newCalls = [
+    ['search_catalogue', { query: 'ID', kind: 'audio' }],
+    ['get_mix', { slug: 'r3-hidden-parent' }],
+    ['get_public_profile', { username: 'r3-user' }],
+    ['get_public_collection', { collectionId: 'r3-collection' }],
+  ] as const
+
   const legacyNames = ['create_draft', 'update_draft', 'list_drafts', 'get_post']
 
   try {
@@ -793,10 +887,11 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
       ).toEqual(names)
     }
 
-    for (const name of contentNames) {
-      expect(
-        await (await rpc(editorial.access_token, name, { slug: 'r3-show' })).json(),
-      ).toMatchObject({
+    for (const [name, args] of [
+      ...contentNames.slice(0, 3).map((name) => [name, { slug: 'r3-show' }] as const),
+      ...newCalls,
+    ]) {
+      expect(await (await rpc(editorial.access_token, name, args)).json()).toMatchObject({
         result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
       })
     }
@@ -846,6 +941,57 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
       expect(page.pagination).toEqual({ total: 2, limit: 1, offset, hasMore: offset === 0 })
     }
 
+    const search = Schema.decodeUnknownSync(
+      Schema.Struct({ result: Schema.Struct({ structuredContent: PublicSearchResult }) }),
+    )(await (await rpc(listener.access_token, 'search_catalogue', newCalls[0][1])).json())
+
+    expect(search.result.structuredContent.results.map(({ id }) => id)).toEqual([
+      'r3-episode-z',
+      'r3-episode-a',
+    ])
+    expect(search.result.structuredContent.endpoint).toEqual(posts.endpoint)
+
+    const mix = Schema.decodeUnknownSync(
+      Schema.Struct({ result: Schema.Struct({ structuredContent: PublicMixResult }) }),
+    )(await (await rpc(listener.access_token, 'get_mix', newCalls[1][1])).json())
+
+    expect(mix.result.structuredContent.mix.audioId).toBe('r3-hidden-parent')
+    expect(JSON.stringify(mix)).not.toMatch(/r3-hidden-show|showId|showSlug|SECRET BODY|\.mp3/)
+
+    for (const [username, kind] of [
+      ['r3-user', 'user'],
+      ['r3-artist', 'artist'],
+    ] as const) {
+      const profile = Schema.decodeUnknownSync(
+        Schema.Struct({ result: Schema.Struct({ structuredContent: PublicProfileResult }) }),
+      )(await (await rpc(listener.access_token, 'get_public_profile', { username })).json())
+
+      expect(profile.result.structuredContent.profile).toMatchObject({ id: 'reader', kind })
+    }
+
+    const collectionBody = await (
+      await rpc(listener.access_token, 'get_public_collection', newCalls[3][1])
+    ).text()
+
+    expect(collectionBody).not.toMatch(/SECRET|r3-private-save|r3-foreign-save|embedUrl|userId/)
+
+    const collection = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({ result: Schema.Struct({ structuredContent: PublicCollectionResult }) }),
+      ),
+    )(collectionBody).result.structuredContent
+
+    expect(collection.mixes.map(({ id }) => id)).toEqual(['r3-save'])
+    expect(collection.pagination).toEqual({ total: 1, limit: 20, offset: 0, hasMore: false })
+
+    for (const collectionId of ['r3-private-collection', 'absent']) {
+      expect(
+        await (await rpc(listener.access_token, 'get_public_collection', { collectionId })).json(),
+      ).toMatchObject({
+        result: { isError: true, content: [{ text: expect.stringContaining('not_found') }] },
+      })
+    }
+
     for (const name of ['get_show', 'list_show_episodes']) {
       const hidden = await (
         await rpc(listener.access_token, name, { slug: 'r3-hidden-show' })
@@ -858,6 +1004,9 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
         result: { isError: true, content: [{ text: expect.stringContaining('not_found') }] },
       })
     }
+
+    expect(await domainSnapshot()).toEqual(beforeReads)
+    expect(providerRequests).toEqual([])
 
     const Saved = Schema.Struct({ result: Schema.Struct({ structuredContent: GetPostResult }) })
 
@@ -887,12 +1036,21 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
     })
     await fixture.db.update(user).set({ banned: true }).where(eq(user.id, 'reader'))
     expect((await rpc(listener.access_token, 'get_show', { slug: 'r3-show' })).status).toBe(401)
+
+    for (const [name, args] of newCalls) {
+      expect((await rpc(listener.access_token, name, args)).status).toBe(401)
+    }
+
     await fixture.db.update(user).set({ banned: false }).where(eq(user.id, 'reader'))
     expect((await rpc(listener.access_token, 'get_show', { slug: 'r3-show' })).status).toBe(200)
     await Effect.runPromise(
       fixture.service.disconnect(Schema.decodeUnknownSync(UserId)('reader'), clientId),
     )
     expect((await rpc(listener.access_token, 'get_show', { slug: 'r3-show' })).status).toBe(401)
+
+    for (const [name, args] of newCalls) {
+      expect((await rpc(listener.access_token, name, args)).status).toBe(401)
+    }
 
     // Metadata follows live resource policy, including null (unrestricted) and
     // the existing drafts:write admission/downscoping exception.

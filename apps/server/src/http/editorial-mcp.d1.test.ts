@@ -270,6 +270,8 @@ test('composed OAuth MCP enforces draft-write consent, saved versions and revoca
 
 test('composed API serves connection instructions without OAuth while MCP stays protected', async () => {
   await using fixture = await createEditorialOAuthFixture()
+  // A never-seeded database must support the first metadata request, not only retries.
+  await fixture.db.delete(oauthResource)
 
   const handler = createTestWebHandler(
     fixture.db.$client,
@@ -280,6 +282,17 @@ test('composed API serves connection instructions without OAuth while MCP stays 
   )
 
   try {
+    const metadataUrl = 'https://editorial-test.localhost/.well-known/oauth-protected-resource/mcp'
+    const metadata = await handler.handler(new Request(metadataUrl))
+    expect(metadata.status).toBe(200)
+    expect(await metadata.json()).toMatchObject({
+      scopes_supported: ['drafts:write', 'posts:read'],
+    })
+    expect(await fixture.db.select().from(oauthResource)).toHaveLength(1)
+    // Once initialization completed, missing policy must still fail closed.
+    await fixture.db.delete(oauthResource)
+    expect((await handler.handler(new Request(metadataUrl))).status).toBe(503)
+
     const guide = await handler.handler(new Request('https://editorial-test.localhost/mcp.txt'))
 
     expect(guide.status).toBe(200)

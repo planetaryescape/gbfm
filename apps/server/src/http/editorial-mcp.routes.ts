@@ -315,6 +315,12 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>>(
 
       const protectedMetadata = () =>
         Effect.gen(function* () {
+          // The provider seeds resource policy during async Auth initialization.
+          yield* Effect.tryPromise({
+            try: () => auth.$context,
+            catch: () => new EditorialOAuthUnavailable(),
+          })
+
           const [resource] = yield* Effect.tryPromise({
             try: () =>
               db

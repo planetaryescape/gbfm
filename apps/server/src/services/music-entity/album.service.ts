@@ -1,4 +1,4 @@
-import { asc, desc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { Effect } from 'effect'
 
 import { projectEntityLabels, projectEntityLabelsForRows, replaceEntityLabels } from '@/db/labels'
@@ -274,8 +274,10 @@ export const removeArtistFromAlbumEffect = (albumId: string, artistId: string) =
         db
           .delete(musicAlbumArtistsTable)
           .where(
-            eq(musicAlbumArtistsTable.albumId, albumId) &&
+            and(
+              eq(musicAlbumArtistsTable.albumId, albumId),
               eq(musicAlbumArtistsTable.artistId, artistId),
+            ),
           ),
       catch: (e) =>
         new DatabaseError({

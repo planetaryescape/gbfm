@@ -5,27 +5,75 @@ import { Effect, Schema } from 'effect'
 import { Database } from '@/db/layer'
 import { validateCanonicalContent } from '@/lib/mdx'
 import { McpToolError, PostSlug } from '@/mcp/contracts'
-import { CreateMicroPostInput } from '@/mcp/creator/contracts'
+import { CreateMicroPostInput, ReplyToMicroPostInput } from '@/mcp/creator/contracts'
 import { EditorialMcpConfig } from '@/mcp/editorial'
 import { loadEditorialSnapshot } from '@/mcp/editorial-music/snapshot'
 import { projectPost } from '@/mcp/model'
 import { attachedMediaUrls } from '@/services/media-publication'
-import { normalizePostData, validatePostData } from '@/services/post.service'
+import {
+  deriveReplyThreadFields,
+  normalizePostData,
+  validatePostData,
+} from '@/services/post.service'
+import { publicMicroAncestorQuery } from '@/services/public-micro-ancestry'
 
 const invalid = () =>
   new McpToolError({ code: 'invalid_input', message: 'Invalid canonical post content.' })
 
 /** No writes, provider calls, rendering, notifications or media publication during preparation. */
 export const prepareCreatorMicro = Effect.fn('CreatorCommand.prepareMicro')(function* (options: {
-  readonly input: typeof CreateMicroPostInput.Type
+  readonly input: typeof CreateMicroPostInput.Type | typeof ReplyToMicroPostInput.Type
   readonly actorId: string
   readonly now: Date
 }) {
   const config = yield* EditorialMcpConfig
 
-  const input = yield* Schema.decodeUnknownEffect(CreateMicroPostInput, {
-    onExcessProperty: 'error',
-  })(options.input).pipe(Effect.mapError(invalid))
+  const input = yield* Schema.decodeUnknownEffect(
+    Schema.Union([ReplyToMicroPostInput, CreateMicroPostInput]),
+    {
+      onExcessProperty: 'error',
+    },
+  )(options.input).pipe(Effect.mapError(invalid))
+
+  const thread = yield* Effect.gen(function* () {
+    if (!('parentPostId' in input)) return { parentPostId: null, rootPostId: null, depth: 0 }
+
+    const db = yield* Database
+
+    const parents = yield* Effect.tryPromise({
+      try: () => db.all(publicMicroAncestorQuery(input.parentPostId)),
+      catch: () => new McpToolError({ code: 'unavailable', message: 'Reply unavailable.' }),
+    }).pipe(
+      Effect.flatMap(
+        Schema.decodeUnknownEffect(
+          Schema.Array(
+            Schema.Struct({
+              id: PostId,
+              parentPostId: Schema.NullOr(PostId),
+              rootPostId: Schema.NullOr(PostId),
+              depth: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 8 })),
+            }),
+          ),
+        ),
+      ),
+      Effect.mapError(
+        () => new McpToolError({ code: 'unavailable', message: 'Reply unavailable.' }),
+      ),
+    )
+
+    const parent = parents[0]
+
+    if (!parent || parent.depth >= 8)
+      return yield* new McpToolError({ code: 'not_found', message: 'Reply parent unavailable.' })
+
+    return yield* Schema.decodeUnknownEffect(
+      Schema.Struct({
+        parentPostId: PostId,
+        rootPostId: PostId,
+        depth: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 8 })),
+      }),
+    )(deriveReplyThreadFields(parent)).pipe(Effect.mapError(invalid))
+  })
 
   const id = yield* Schema.decodeUnknownEffect(PostId)(crypto.randomUUID()).pipe(
     Effect.mapError(invalid),
@@ -52,9 +100,7 @@ export const prepareCreatorMicro = Effect.fn('CreatorCommand.prepareMicro')(func
       bannerImageUrl: null,
       createdAt: options.now,
       updatedAt: options.now,
-      parentPostId: null,
-      rootPostId: null,
-      depth: 0,
+      ...thread,
       quotedPostId: null,
       musicEntityType: null,
       musicEntityId: null,
@@ -90,9 +136,7 @@ export const prepareCreatorMicro = Effect.fn('CreatorCommand.prepareMicro')(func
       musicEntityId: null,
       musicReferencesManaged: false,
       musicReferences: { references: [], primary: null },
-      parentPostId: null,
-      rootPostId: null,
-      depth: 0,
+      ...thread,
       quotedPostId: null,
     },
     config,

@@ -273,6 +273,184 @@ test('real OAuth HTTP composes public micro creation and separately consented de
   expect((await h.call('delete_content', request)).status).toBe(401)
 }, 20_000)
 
+test('OAuth replies derive actual depth, retry once, and refuse oversized acknowledgements before writing', async () => {
+  await using h = await harness()
+  const rootId = Schema.decodeUnknownSync(PostId)(crypto.randomUUID())
+  await h.fixture.db.insert(postsTable).values({
+    id: rootId,
+    slug: rootId,
+    content: 'Other creator public root',
+    type: 'micro',
+    draft: false,
+    depth: 7,
+  })
+  await h.fixture.db.insert(postCreators).values({ postId: rootId, creatorId: 'other' })
+  const input = { requestId: crypto.randomUUID(), parentPostId: rootId, content: 'Public reply' }
+
+  const decode = Schema.decodeUnknownSync(
+    Schema.Struct({ result: Schema.Struct({ structuredContent: CreatorCommandResult }) }),
+  )
+
+  expect((await h.call('reply_to_micro_post', input, 'a'.repeat(261500))).body).toMatchObject({
+    result: { isError: true },
+  })
+  expect(await h.fixture.db.select().from(mcpOperations)).toEqual([])
+  expect(await h.fixture.db.select().from(postsTable)).toHaveLength(1)
+
+  const [first, second] = await Promise.all([
+    h.call('reply_to_micro_post', input),
+    h.call('reply_to_micro_post', input),
+  ])
+
+  const applied = decode(first.body).result.structuredContent
+  const retry = decode(second.body).result.structuredContent
+  expect(applied.target).toEqual(retry.target)
+  expect([applied.replayed, retry.replayed].filter(Boolean)).toHaveLength(1)
+
+  const [reply] = await h.fixture.db
+    .select()
+    .from(postsTable)
+    .where(eq(postsTable.id, applied.target.targetId))
+
+  expect(reply).toMatchObject({ parentPostId: rootId, rootPostId: rootId, depth: 1, draft: false })
+  expect(
+    await h.fixture.db
+      .select()
+      .from(postCreators)
+      .where(eq(postCreators.postId, applied.target.targetId)),
+  ).toEqual([{ postId: applied.target.targetId, creatorId: 'owner' }])
+  expect(
+    (await h.call('reply_to_micro_post', { ...input, content: 'Changed' })).body,
+  ).toMatchObject({ result: { isError: true } })
+  expect(await h.fixture.db.select().from(postsTable)).toHaveLength(2)
+  expect(await h.fixture.db.select().from(mcpOperations)).toHaveLength(1)
+
+  if (!('version' in applied.target)) throw new Error('Expected reply version')
+  expect(
+    (
+      await h.call('unpublish_content', {
+        requestId: crypto.randomUUID(),
+        target: {
+          kind: 'micro',
+          targetId: applied.target.targetId,
+          expectedVersion: applied.target.version,
+        },
+      })
+    ).body,
+  ).toMatchObject({ result: { structuredContent: { status: 'applied' } } })
+  expect(
+    decode((await h.call('reply_to_micro_post', input)).body).result.structuredContent,
+  ).toMatchObject({ target: applied.target, replayed: true })
+  expect(
+    (
+      await h.fixture.db.select().from(postsTable).where(eq(postsTable.id, applied.target.targetId))
+    )[0]?.draft,
+  ).toBe(true)
+}, 20_000)
+
+test('reply admission checks intermediate ancestry and depth8 boundary, not stored depth or owner draft access', async () => {
+  await using h = await harness()
+  const ids = Array.from({ length: 9 }, () => Schema.decodeUnknownSync(PostId)(crypto.randomUUID()))
+  const rootId = ids[0]!
+
+  for (const [depth, id] of ids.entries()) {
+    await h.fixture.db.insert(postsTable).values({
+      id,
+      slug: id,
+      content: 'Public chain',
+      type: 'micro',
+      draft: false,
+      parentPostId: depth === 0 ? null : ids[depth - 1],
+      rootPostId: depth === 0 ? null : rootId,
+      depth: 0,
+    })
+    await h.fixture.db.insert(postCreators).values({ postId: id, creatorId: 'owner' })
+  }
+
+  const reply = (parentPostId: string) =>
+    h.call('reply_to_micro_post', {
+      requestId: crypto.randomUUID(),
+      parentPostId,
+      content: 'Boundary reply',
+    })
+
+  expect((await reply(crypto.randomUUID())).body).toMatchObject({ result: { isError: true } })
+  expect((await reply(ids[8]!)).body).toMatchObject({ result: { isError: true } })
+  const intermediate = ids[3]!
+
+  for (const patch of [
+    { draft: true },
+    { type: 'post' as const },
+    { rootPostId: ids[1]! },
+    { parentPostId: ids[7]! },
+  ]) {
+    await h.fixture.db.update(postsTable).set(patch).where(eq(postsTable.id, intermediate))
+    expect((await reply(ids[7]!)).body).toMatchObject({ result: { isError: true } })
+    expect(await h.fixture.db.select().from(mcpOperations)).toEqual([])
+    await h.fixture.db
+      .update(postsTable)
+      .set({
+        draft: false,
+        type: 'micro',
+        rootPostId: rootId,
+        parentPostId: ids[2]!,
+      })
+      .where(eq(postsTable.id, intermediate))
+  }
+
+  await h.fixture.db.insert(postCreators).values({ postId: intermediate, creatorId: 'other' })
+  await h.fixture.db.update(user).set({ banned: true }).where(eq(user.id, 'other'))
+  expect((await reply(ids[7]!)).body).toMatchObject({ result: { isError: true } })
+  await h.fixture.db.update(user).set({ banned: false }).where(eq(user.id, 'other'))
+  const response = await reply(ids[7]!)
+
+  const result = Schema.decodeUnknownSync(
+    Schema.Struct({ result: Schema.Struct({ structuredContent: CreatorCommandResult }) }),
+  )(response.body).result.structuredContent
+
+  expect(
+    (
+      await h.fixture.db.select().from(postsTable).where(eq(postsTable.id, result.target.targetId))
+    )[0],
+  ).toMatchObject({ depth: 8, parentPostId: ids[7], rootPostId: rootId })
+}, 20_000)
+
+test('reply INSERT rechecks ancestry after receipt reservation and rolls back hidden-root races', async () => {
+  await using h = await harness()
+  const rootId = Schema.decodeUnknownSync(PostId)(crypto.randomUUID())
+  await h.fixture.db.insert(postsTable).values({
+    id: rootId,
+    slug: rootId,
+    content: 'Public parent',
+    type: 'micro',
+    draft: false,
+  })
+  await h.fixture.db.insert(postCreators).values({ postId: rootId, creatorId: 'other' })
+  const before = await h.fixture.db.select().from(postsTable)
+  const relations = await h.fixture.db.select().from(postCreators)
+  await h.fixture.database
+    .prepare(`CREATE TRIGGER hide_reply_parent AFTER INSERT ON mcp_operations
+    BEGIN UPDATE posts SET draft=1 WHERE id='${rootId}'; END`)
+    .run()
+  // A final-only ancestry check would miss an invalid INSERT followed by restoration.
+  await h.fixture.database
+    .prepare(`CREATE TRIGGER restore_reply_parent AFTER INSERT ON posts
+    WHEN NEW.parent_post_id='${rootId}'
+    BEGIN UPDATE posts SET draft=0 WHERE id='${rootId}'; END`)
+    .run()
+  const input = { requestId: crypto.randomUUID(), parentPostId: rootId, content: 'Race reply' }
+  expect((await h.call('reply_to_micro_post', input)).body).toMatchObject({
+    result: { isError: true },
+  })
+  expect(await h.fixture.db.select().from(postsTable)).toEqual(before)
+  expect(await h.fixture.db.select().from(postCreators)).toEqual(relations)
+  expect(await h.fixture.db.select().from(mcpOperations)).toEqual([])
+  await h.fixture.database.prepare('DROP TRIGGER hide_reply_parent').run()
+  expect((await h.call('reply_to_micro_post', input)).body).toMatchObject({
+    result: { structuredContent: { status: 'applied', replayed: false } },
+  })
+}, 20_000)
+
 test('actual RPC ID acknowledgement overflow refuses creator writes and bounds replay disclosure', async () => {
   await using h = await harness()
 

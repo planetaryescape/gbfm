@@ -12,11 +12,12 @@ import {
   ListCreatorDraftsInput,
   ListCreatorDraftsResult,
   PublishEditorialInput,
+  ReplyToMicroPostInput,
   UnpublishContentInput,
   UpdateCreatorMetadataInput,
 } from './contracts'
 
-/** Candidate toolkit only; P1 owns registration. Reply awaits the named ancestry prerequisite. */
+/** Candidate toolkit only; P1 owns registration. */
 export const CreatorToolkit = Toolkit.make(
   Tool.make('list_creator_drafts', {
     description:
@@ -50,6 +51,20 @@ export const CreatorToolkit = Toolkit.make(
     description:
       'Publish a new canonical micro post publicly as yourself. Requires separately consented micros:publish and UUIDv4 requestId. No announcement, provider operation or private-media copying. Identical retries create one logical post and return its original shared PostVersion for later explicit lifecycle commands.',
     parameters: CreateMicroPostInput,
+    success: CreatorCommandResult,
+    failure: McpToolError,
+    failureMode: 'return',
+  })
+    .annotate(McpPermission, { scopes: ['micros:publish'] })
+    .annotate(Tool.Readonly, false)
+    .annotate(Tool.Destructive, true)
+    .annotate(Tool.Idempotent, true)
+    .annotate(Tool.OpenWorld, false)
+    .annotate(Tool.Strict, true),
+  Tool.make('reply_to_micro_post', {
+    description:
+      'Publish a canonical reply as yourself to a public micro. Requires separately consented micros:publish, canonical parentPostId and UUIDv4 requestId. The complete public, unbanned ancestor chain is checked inside the INSERT; server derives root and depth, capped at8. No private-media copy or notification. Identical retries return one original reply and its shared PostVersion.',
+    parameters: ReplyToMicroPostInput,
     success: CreatorCommandResult,
     failure: McpToolError,
     failureMode: 'return',
@@ -112,6 +127,7 @@ export const CreatorToolHandlersLayer = CreatorToolkit.toLayer(
       list_creator_drafts: service.listCreatorDrafts,
       update_creator_metadata: service.updateCreatorMetadata,
       create_micro_post: service.createMicroPost,
+      reply_to_micro_post: service.replyToMicroPost,
       publish_editorial: service.publishEditorial,
       unpublish_content: service.unpublishContent,
       delete_content: service.deleteContent,

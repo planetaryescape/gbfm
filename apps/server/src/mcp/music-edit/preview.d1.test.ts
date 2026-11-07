@@ -278,18 +278,18 @@ test('Unicode IDs preserve SQLite BINARY order in no-op credit and affiliation p
   const bmp = '\ue000'
   const astral = '\u{10000}'
   await db.insert(musicArtistsTable).values([
-    { id: bmp, name: 'BMP', slug: 'unicode-bmp' },
+    { id: bmp, name: 'BMP', slug: 'unicode-bmp', revision: 32 },
     { id: astral, name: 'Astral', slug: 'unicode-astral' },
   ])
   await db
     .insert(musicAlbumsTable)
-    .values({ id: 'unicode-album', title: 'Unicode', slug: 'unicode-album' })
+    .values({ id: 'unicode-album', title: 'Unicode', slug: 'unicode-album', revision: 7 })
   await db.insert(musicAlbumArtistsTable).values([
     { albumId: 'unicode-album', artistId: bmp, displayOrder: 0, role: null },
     { albumId: 'unicode-album', artistId: astral, displayOrder: 0, role: null },
   ])
   await db.insert(musicLabelsTable).values([
-    { id: bmp, name: 'BMP', slug: 'unicode-bmp' },
+    { id: bmp, name: 'BMP', slug: 'unicode-bmp', revision: 89 },
     { id: astral, name: 'Astral', slug: 'unicode-astral' },
   ])
   await db.insert(musicLabelAlbumsTable).values([
@@ -307,6 +307,10 @@ test('Unicode IDs preserve SQLite BINARY order in no-op credit and affiliation p
   })
 
   expect(credit.changed).toBe(false)
+  expect(credit).toMatchObject({
+    expectedRevision: 7,
+    references: [{ entityType: 'artist', entityId: bmp, expectedRevision: 32 }],
+  })
   expect(credit.after).toEqual(credit.before)
   expect(credit.after).toEqual([
     { artistId: bmp, name: 'BMP', role: null, displayOrder: 0 },
@@ -321,6 +325,10 @@ test('Unicode IDs preserve SQLite BINARY order in no-op credit and affiliation p
   })
 
   expect(affiliation).toMatchObject({ before: [bmp, astral], after: [bmp, astral], changed: false })
+  expect(affiliation).toMatchObject({
+    expectedRevision: 7,
+    references: [{ entityType: 'label', entityId: bmp, expectedRevision: 89 }],
+  })
 })
 
 test('missing targets/references, unsupported fields and unauthorized accounts deny', async () => {

@@ -6,7 +6,7 @@ import { Database } from '@/db/layer'
 import { McpAuthorization, McpPermission } from '../authorization'
 import { EndpointIdentity, McpToolError } from '../contracts'
 import { EditorialMcpConfig } from '../editorial'
-import { MusicEditId, MusicEditPreviewInput } from './commands'
+import { MusicEditCommand, MusicEditId, MusicEditPreviewInput, MusicRevision } from './commands'
 import { planMusicEdit } from './planner'
 
 export const PreviewMetadataInput = MusicEditPreviewInput
@@ -29,9 +29,11 @@ export const PreviewMetadataResult = Schema.Struct({
   before: Schema.Json,
   after: Schema.Json,
   changed: Schema.Boolean,
+  expectedRevision: MusicRevision,
+  references: MusicEditCommand.fields.references,
   applyAvailable: Schema.Literal(false),
   limitation: Schema.Literal(
-    'Shared atomic revision and durable receipt support is not installed.',
+    'Mutation activation awaits live command authority and all-client guarded writers.',
   ),
 })
 
@@ -76,8 +78,11 @@ const makePreview = Effect.gen(function* () {
         before: plan.before,
         after: plan.after,
         changed: plan.changed,
+        expectedRevision: plan.revision,
+        references: plan.references,
         applyAvailable: false,
-        limitation: 'Shared atomic revision and durable receipt support is not installed.',
+        limitation:
+          'Mutation activation awaits live command authority and all-client guarded writers.',
       }).pipe(Effect.mapError(unavailable))
     }),
   }
@@ -94,7 +99,7 @@ export const MusicEditPreviewLive = Layer.effect(MusicEditPreview, makePreview)
 export const MusicEditPreviewToolkit = Toolkit.make(
   Tool.make('preview_metadata_changes', {
     description:
-      'Read-only preview of supported music metadata, genre, album-type, track-album, artist-credit and label-affiliation changes. Admin and catalogue:write required. Explicit null clears nullable fields. Returns bounded observed before/after, not a revision, reservation or apply authorization. Apply is unavailable pending shared atomic revisions and durable receipts.',
+      'Read-only preview of supported music metadata, genre, album-type, track-album, artist-credit and label-affiliation changes. Admin and catalogue:write required. Explicit null clears nullable fields. Returns bounded before/after and observed target/reference revisions, not a reservation or apply authorization. Mutation activation awaits live command authority and all-client guarded writers.',
     parameters: PreviewMetadataInput,
     success: PreviewMetadataResult,
     failure: McpToolError,

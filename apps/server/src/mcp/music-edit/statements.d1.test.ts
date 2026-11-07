@@ -38,6 +38,7 @@ test('real domain statements keep exact credits, names, genres and both affiliat
       now: 1000,
       attemptId: crypto.randomUUID(),
       eligibility: sql`1`,
+      liveGuard: sql`1`,
       fence: sql`1`,
       prepare,
     })

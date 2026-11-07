@@ -175,7 +175,7 @@ async function harness() {
 }
 
 describe('media publication at the content/storage seam', () => {
-  test('audio creator failure rolls back creator replacement but retains its earlier content write without copying', async () => {
+  test('audio creator failure rolls back all fields and creator replacement without copying', async () => {
     await using h = await harness()
 
     const audio = await Effect.runPromise(
@@ -194,6 +194,13 @@ describe('media publication at the content/storage seam', () => {
       ),
     )
 
+    const before = await h.db.select().from(audioTable).where(eq(audioTable.id, audio.id))
+
+    const creatorsBefore = await h.db
+      .select()
+      .from(audioCreators)
+      .where(eq(audioCreators.audioId, audio.id))
+
     const result = await Effect.runPromise(
       h.audio
         .update('mix', 'partial-audio', actor.userId, actor.userRole, {
@@ -205,16 +212,10 @@ describe('media publication at the content/storage seam', () => {
     )
 
     expect(Result.isFailure(result) && result.failure).toBeInstanceOf(DatabaseError)
-    expect(await h.db.select().from(audioTable).where(eq(audioTable.id, audio.id))).toMatchObject([
-      {
-        title: 'Saved before creator failure',
-        draft: false,
-        url: assetUrl(publicKey(audioKey)),
-      },
-    ])
+    expect(await h.db.select().from(audioTable).where(eq(audioTable.id, audio.id))).toEqual(before)
     expect(
       await h.db.select().from(audioCreators).where(eq(audioCreators.audioId, audio.id)),
-    ).toMatchObject([{ creatorId: actor.userId }])
+    ).toEqual(creatorsBefore)
     expect(h.copies).toEqual([])
     expect(h.objects.has(audioKey)).toBe(true)
   })

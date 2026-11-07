@@ -9,7 +9,7 @@ import {
   getOptionalActor,
 } from '@/http/handler-utils'
 import { omitUndefined } from '@/lib/omit-undefined'
-import { makeSessionCommandAuthority } from '@/mcp/command-authority'
+import { CommandAuthority, makeSessionCommandAuthority } from '@/mcp/command-authority'
 import { membershipOutcome, membershipWriteContext } from '@/mcp/favorites/command'
 import { membershipHttpError } from '@/mcp/favorites/http'
 import { QRCodeService } from '@/services/qrcode.service'
@@ -143,6 +143,7 @@ export const ShowsHandlersLive = HttpApiBuilder.group(Api, 'shows', (handlers) =
       Effect.gen(function* () {
         const { user } = yield* AuthSession
         const { hostIds, tags, ...updateData } = payload
+        const authority = yield* makeSessionCommandAuthority
         const svc = yield* ShowService
 
         const show = yield* dieOnDatabaseError(
@@ -158,6 +159,8 @@ export const ShowsHandlersLive = HttpApiBuilder.group(Api, 'shows', (handlers) =
               }),
             )
             .pipe(
+              Effect.provideService(CommandAuthority, authority),
+              Effect.catchTag('ConflictError', () => new HttpApiError.Conflict()),
               Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
               Effect.catchTag('UnauthorizedError', () => new HttpApiError.Unauthorized()),
               Effect.catchTag('S3Error', () => new HttpApiError.InternalServerError()),
@@ -176,8 +179,11 @@ export const ShowsHandlersLive = HttpApiBuilder.group(Api, 'shows', (handlers) =
       Effect.gen(function* () {
         const { user } = yield* AuthSession
         const svc = yield* ShowService
+        const authority = yield* makeSessionCommandAuthority
         yield* dieOnDatabaseError(
           svc.delete(params.slug, user.id, user.role ?? 'user').pipe(
+            Effect.provideService(CommandAuthority, authority),
+            Effect.catchTag('ConflictError', () => new HttpApiError.Conflict()),
             Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
             Effect.catchTag('UnauthorizedError', () => new HttpApiError.Unauthorized()),
           ),

@@ -38,6 +38,9 @@ export const AudioResponse = Schema.Struct({
   playCount: Schema.Number,
   createdAt: Schema.String,
   updatedAt: Schema.String,
+  revision: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+  ),
   creators: Schema.optional(Schema.Array(Creator)),
   artists: Schema.optional(Schema.Array(Creator)),
 })
@@ -162,6 +165,9 @@ export type CreateAudioInput = typeof CreateAudioInput.Type
 // updateAudioSchema (old) omits `type` from the body since it's already in
 // the URL param -- this endpoint's payload does the same.
 export const UpdateAudioInput = Schema.Struct({
+  expectedRevision: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+  ),
   title: Schema.optional(Schema.NonEmptyString),
   description: Schema.optional(Schema.String),
   thumbnailUrl: Schema.optional(Schema.String),
@@ -257,6 +263,7 @@ export const AudioGroup = /* @__PURE__ */ (() =>
         payload: UpdateAudioInput,
         success: CompiledAudioResponse,
         error: [
+          HttpApiError.Conflict,
           HttpApiError.NotFound,
           HttpApiError.Unauthorized,
           ValidationHttpError,

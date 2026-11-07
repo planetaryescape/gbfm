@@ -38,16 +38,12 @@ import { MdxService, validateCanonicalContent } from '@/lib/mdx'
 import { createPaginationMetadata, type PaginationMetadata } from '@/lib/pagination'
 import { recordAudioCreate } from '@/lib/performance-monitoring'
 import { ConfigService } from '@/services/config.service'
+import { saveCreatorBrowserUpdate } from '@/services/creator-command/browser-save'
 import { makeMediaPublication, type MediaPublication } from '@/services/media-publication'
 import { ObjectStoreClient } from '@/services/storage/object-store-client'
 import { markAttachedAssets, UploadAssetService } from '@/services/upload-asset.service'
 
-import {
-  artistCredits,
-  projectAudioArtists,
-  replaceAudioArtists,
-  validateAudioArtists,
-} from './audio-artists'
+import { artistCredits, projectAudioArtists, validateAudioArtists } from './audio-artists'
 
 type AudioType = 'mix' | 'track' | 'misc'
 
@@ -182,10 +178,10 @@ export interface AudioService {
     slug: string,
     userId: string,
     userRole: string,
-    data: Partial<InsertAudio> & { creatorIds?: Array<string> },
+    data: Partial<InsertAudio> & { creatorIds?: Array<string>; expectedRevision?: number },
   ) => Effect.Effect<
     SelectMdxCompiledAudio,
-    DatabaseError | NotFoundError | UnauthorizedError | ValidationError | S3Error
+    DatabaseError | ConflictError | NotFoundError | UnauthorizedError | ValidationError | S3Error
   >
   readonly trackPlay: (
     id: string,
@@ -623,7 +619,7 @@ const updateEffect = (
   slug: string,
   userId: string,
   userRole: string,
-  data: Partial<InsertAudio> & { creatorIds?: Array<string> },
+  data: Partial<InsertAudio> & { creatorIds?: Array<string>; expectedRevision?: number },
   mdx: MdxService,
   media: MediaPublication,
 ) =>
@@ -659,84 +655,39 @@ const updateEffect = (
     yield* validateCanonicalContent(data.content)
     yield* validateAudioArtists(data.artistIds)
 
+    const { expectedRevision, ...fields } = data
+
+    if (expectedRevision !== undefined && expectedRevision !== existingAudio.revision)
+      return yield* new ConflictError({ message: 'Content changed; reload before saving.' })
+
     const publication = yield* media(
-      data,
+      fields,
       { userId, userRole, credential: undefined },
       existingAudio,
     )
 
     const { creatorIds, tags, artistIds, ...updateData } = publication.data
-    let updatedAudio = existingAudio
+    yield* saveCreatorBrowserUpdate('audio', existingAudio, userId, updateData, {
+      expectedRevision,
+      now: new Date(Math.max(Date.now(), existingAudio.updatedAt.getTime() + 1)),
+      allowAdmin: true,
+      tags,
+      creatorIds: creatorIds?.length ? creatorIds : undefined,
+      artistIds,
+    })
 
-    if (Object.keys(updateData).length > 0 || artistIds !== undefined) {
-      const updatedRecords = yield* Effect.tryPromise({
-        try: () =>
-          db
-            .update(audioTable)
-            .set({ ...updateData, updatedAt: new Date() })
-            .where(eq(audioTable.id, existingAudio.id))
-            .returning(),
-        catch: (error) =>
-          new DatabaseError({
-            message: `Failed to update audio: ${getErrorMessage(error)}`,
-            operation: 'update',
-            table: 'audio',
-          }),
-      })
-
-      if (!updatedRecords[0]) {
-        return yield* new DatabaseError({
-          message: 'Failed to update audio',
-          operation: 'update',
+    const [updatedAudio] = yield* Effect.tryPromise({
+      try: () => db.select().from(audioTable).where(eq(audioTable.id, existingAudio.id)).limit(1),
+      catch: () =>
+        new DatabaseError({
+          message: 'Failed to read saved audio',
+          operation: 'select',
           table: 'audio',
-        })
-      }
+        }),
+    })
 
-      updatedAudio = updatedRecords[0]
-
-      // An image/audio file attached via an edit form (not just at create
-      // time) still needs its upload_assets row moved out of 'pending', or
-      // it looks reclaimable to a future cleanup job despite being in use.
-      yield* markAttachedAssets('audio', updatedAudio.id, [
-        updatedAudio.url,
-        updatedAudio.thumbnailUrl,
-      ])
-    }
-
-    if (creatorIds && creatorIds.length > 0) {
-      yield* Effect.tryPromise({
-        try: () =>
-          db.batch([
-            db.delete(audioCreators).where(eq(audioCreators.audioId, updatedAudio.id)),
-            db.insert(audioCreators).values(
-              creatorIds.map((creatorId) => ({
-                audioId: updatedAudio.id,
-                creatorId,
-              })),
-            ),
-          ]),
-        catch: (error) =>
-          new DatabaseError({
-            message: `Failed to update creators: ${getErrorMessage(error)}`,
-            operation: 'transaction',
-            table: 'audio_creators',
-          }),
-      })
-    }
-
-    if (artistIds !== undefined) yield* replaceAudioArtists(updatedAudio.id, artistIds)
-
-    if (tags !== undefined) {
-      yield* Effect.tryPromise({
-        try: () => replaceEntityLabels(db, 'audio', updatedAudio.id, { tags }),
-        catch: (error) =>
-          new DatabaseError({
-            message: getErrorMessage(error),
-            operation: 'update',
-            table: 'labels',
-          }),
-      })
-    }
+    if (!updatedAudio)
+      return yield* new ConflictError({ message: 'Content changed; reload before saving.' })
 
     yield* publication.publish
 

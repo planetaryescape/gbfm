@@ -15,6 +15,7 @@ import {
   getOptionalActor,
 } from '@/http/handler-utils'
 import { omitUndefined } from '@/lib/omit-undefined'
+import { CommandAuthority, makeSessionCommandAuthority } from '@/mcp/command-authority'
 import { loadAudioPage } from '@/services/audio-page'
 import { AudioService } from '@/services/audio.service'
 import { getHomepageMixes } from '@/services/featured-mix'
@@ -180,6 +181,7 @@ export const AudioHandlersLive = HttpApiBuilder.group(Api, 'audio', (handlers) =
       Effect.gen(function* () {
         const { user } = yield* AuthSession
         const { tags, creatorIds, artistIds, ...updateData } = payload
+        const authority = yield* makeSessionCommandAuthority
 
         const svc = yield* AudioService
 
@@ -198,6 +200,8 @@ export const AudioHandlersLive = HttpApiBuilder.group(Api, 'audio', (handlers) =
               }),
             )
             .pipe(
+              Effect.provideService(CommandAuthority, authority),
+              Effect.catchTag('ConflictError', () => new HttpApiError.Conflict()),
               Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
               Effect.catchTag('S3Error', () => new HttpApiError.InternalServerError()),
               Effect.catchTag('UnauthorizedError', () => new HttpApiError.Unauthorized()),

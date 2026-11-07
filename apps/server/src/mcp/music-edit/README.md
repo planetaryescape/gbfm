@@ -1,0 +1,156 @@
+# M1 #523: partial read-only preview and shared-writer gate
+
+Base: verified remote `feat/514-mcp-foundation` at
+`2d1b5592826e66e3a198dc117c153e062264fc5c` (PR #548), above P0 #547;
+prod baseline `aec2782a97bd91e2f030ef05095f76b54fcc79b1`.
+Effect 4.0.6, Drizzle 0.45.4, Miniflare 5.20260801.1-alpha, MCP 2026-07-28.
+No #551 dependency. Owned files: this directory only. All shared paths below
+are **requested, not reserved or approved**. I1 owns music-import; M2 must use
+the eventual shared revision/receipt seam, not introduce another ledger.
+
+## Delivered surface
+
+`MusicEditPreviewToolkit`, `MusicEditPreviewHandlers`, `MusicEditPreviewLive`,
+`MusicEditPreview`, `PreviewMetadataInput`, `PreviewMetadataResult` are exported
+from `preview.ts` for P1 composition. No central registry/OAuth/consent change.
+The real MCP test composes this toolkit with the actual request-scoped adapter;
+its principal is injected, **not** evidence of persisted OAuth admission.
+
+Input is `{ change: { operation, entityId, albumType | albumId } }`.
+Required nullable fields distinguish explicit clearing from missing input.
+Only supported album types are accepted. A missing track, album or proposed
+album reference returns `not_found`. Shared music records have no per-user owner
+policy: current admin + `catalogue:write` is required even for this preview.
+No actor IDs, bodies, provider metadata, URLs or other unrelated fields are read.
+No network calls, writes, receipts or cache enrichment occur.
+
+Output is bounded observed before/after state with `status: preview_only` and
+`applyAvailable: false`. It is **not** a revision, reservation, guarded apply
+plan or authorization. Changes can occur after preview. Full preview acceptance
+must later use the same validated command planner as the approved writer.
+
+| Selected capability | This PR | Remaining contract / gate |
+| --- | --- | --- |
+| `update_music_metadata` | Undelivered | Explicit per-kind metadata allowlist; no owner, identity, slug, publication or broad partial payload |
+| `set_music_genres` | Undelivered | Desired ordered set, bounded distinct names; empty clears; preserve tags; atomic revision + genre junctions |
+| `set_album_type` | Preview only; no mutation tool | LP, EP, single, compilation or null; shared guarded writer + receipt |
+| `set_track_album` | Preview only; no mutation tool | Existing album or null; validate reference in atomic batch, guard track and relevant reference state |
+| `set_artist_credit` | Undelivered | Existing album/track credit, existing roles primary/featured/producer/null and display order; no new P2 recording roles |
+| `remove_artist_credit` | Undelivered | Exact parent+artist pair; atomic junction, display names and parent revision |
+| `set_label_affiliation` | Undelivered | Existing label ↔ artist/album only; guard both endpoints; no invented roles |
+| `remove_label_affiliation` | Undelivered | Exact pair, same endpoint guards and receipts |
+| `preview_metadata_changes` | Partial, two proposals above | Other six proposal forms and shared guarded command planner remain undelivered |
+
+All eight write capabilities remain undelivered, not registered stubs. #523 is
+not complete. No storage, migration, replay list, exports, shared writer, browser,
+production resource policy, merge or deployment change is included.
+
+## Reproducible evidence
+
+From `apps/server`:
+
+```sh
+bunx vitest run --config vitest.d1.config.ts src/mcp/music-edit
+```
+
+`preview.d1.test.ts` runs the actual service against migrated D1, including a real
+`updateAlbumEffect` browser-service change, scope loss, account-role reduction,
+ban, unsupported/extra fields, missing references, clearing/no-op and persisted
+state equality around preview. It also exercises the actual MCP tools/call route.
+It does not prove production OAuth or browser concurrency is safe.
+
+`revision-proposal.d1.test.ts` contains the **exact candidate SQL**. It creates
+an isolated migrated Miniflare D1 binding and applies test-only revision/receipt
+DDL there; disposal destroys it. The candidate conditional receipt acquisition
+and attempt-token-gated writes run in one D1 batch. Assertions distinguish:
+
+- browser CAS first → stale MCP has no receipt or junction;
+- parallel identical MCP attempts → one receipt, one junction, one revision advance;
+- MCP first → stale browser CAS changes zero rows;
+- same key with changed payload/current revision cannot mutate again;
+- missing artist FK and failure after junction/projection both roll back the batch;
+- clearing expired result payload leaves key evidence that prevents reapplication.
+
+The candidate output is revision 2, `artistNames: ["Zed"]`, one receipt and one
+credit after contention/failure/expiry. This is a feasibility proof, **not** a
+production receipt implementation or proof of existing writer compliance. The
+probe intentionally omits full authorization, replay classification, multi-kind
+triggers, artist rename fan-out, genre and affiliation plans. Those require real
+service/protocol/browser tests after approval, not extrapolation from this probe.
+
+## One proposal for P1 consolidation (not implementation authority)
+
+Existing `editorial_operations` is post-bound (`post_id`); `draft-store.ts`
+inserts receipts by selecting guarded `posts` rows. Do not use fake post IDs,
+copy that store per lane, or create another music-only request ledger.
+
+Candidate columns in `apps/server/src/db/music-entity.schema.ts`: `revision`
+INTEGER NOT NULL DEFAULT 0 on artists, albums, tracks and labels. Playlists
+already have their own revision and remain PL2-owned. Prefer DB invalidation
+triggers for every mutation that changes the observable state, plus explicit
+caller-revision guards in user-driven writes. Timestamps alone are insufficient.
+Revisions are opaque monotonic values, not a promise of exactly one increment
+per command: projection triggers may invalidate multiple affected parents.
+
+Candidate **single P1-owned** receipt schema path:
+`apps/server/src/db/mcp-operation.schema.ts` (name not reserved).
+Key: actor + OAuth client + resource audience URL + operation + UUIDv4 request ID.
+Columns: scoped key components, normalized input hash, target kind/ID,
+per-attempt commit token, bounded authorized result, created/expiry timestamps.
+Hash includes target and every expected revision, explicit null versus omission,
+and normalized desired state. Unique key prevents parallel retry application;
+attempt-token predicates prevent an old receipt authorizing fresh writes.
+
+One D1 batch must combine eligible live account/target/revision checks, conditional
+receipt acquisition, metadata/junction/genre mutations, ordered `artistNames`
+projection, all affected revision invalidations and saved outcome. A failed
+statement rolls back all of it. Changed payload under the same key returns conflict; identical
+retries replay the saved result after checking current grant, account, role,
+client/resource/operation ownership and target access. Missing non-lifecycle
+targets do not replay. A timeout after commit is ambiguous, not "not applied".
+No transaction spans provider calls. One receipt implementation is shared with
+I1/L1/L2/L3 as P1 decides; the probe table is never a runtime dependency.
+
+24-hour result expiry is the proposed replay window, not approval of indefinite
+storage. At expiry remove result/private payload, retain only minimal approved
+anti-replay evidence (scoped-key digest, input digest, expiry/status as needed).
+**Retention horizon, digest/key rotation and deletion rules require the combined
+schema/privacy decision.** Actor/client deletion must immediately deny all replay
+and remove private result/identifying material as approved; cascading the entire
+anti-replay key away is unsafe if that key namespace can ever become eligible
+again. Choose approved minimal opaque tombstones or irrevocably retire the
+namespace so old keys can never execute. Do not claim indefinite retention or a
+particular anonymization policy is approved. Current probe checks result expiry
+only, not account/client deletion or an approved retention mechanism.
+
+### Exact writer coverage requested
+
+- `services/music-entity/{artist,album,track,label}.service.ts`: update methods,
+  artist rename and delete fan-out; album/track create/update and add/remove credit
+  methods. Junction inserts/updates/deletes and ordered display names must commit
+  together; tie break `displayOrder, artistId`. No direct `artistNames` override
+  may contradict credits. Artist rename updates linked names and invalidates
+  parents. Deleting a referenced artist/album must invalidate affected parents.
+- `services/music-entity/label-affiliation.service.ts`: all four affiliation
+  methods compare expected endpoint revisions and invalidate both endpoints.
+- `db/labels.ts`: genre-only replacement must preserve tags and share the guarded
+  entity batch; today's replacement deletes both kinds and uses a separate batch.
+- `packages/api/src/music.ts`, `http/music.handlers.ts`: return revisions in reads,
+  require expected revisions on updates/relationships, preserve current admin
+  checks; no legacy browser/PAT bypass that re-reads a revision just before writing.
+- `apps/www/src/page/dashboard/{command.ts,page/catalog.ts}`: carry the revision
+  observed when loading the form into save commands. Current `WriteCatalog` PATCH
+  sends form state without any entity precondition. Other callers of those API
+  endpoints must adopt the same contract before mutation tools enable.
+- `services/canonical-music-identity/repository.ts`: `updateArtwork` and
+  `refreshEntity` write ORM/raw SQL state independently; coordinate with I1/U1,
+  including canonical insert statements and artist/genre writers. These paths
+  must invalidate revisions and preserve credit projection invariants; a provider
+  refresh cannot overwrite an intervening browser/MCP change using a stale plan.
+
+Proposed integration seam is one shared guarded writer, serialized with I1,
+not a parallel MCP backend. M1 has **not** reserved or edited those paths.
+P1 alone coordinates migration filename, `db/exports.ts`, and
+`test/migrate-d1.ts` after explicit schema approval. Before enabling mutations,
+test composed real browser/API/PAT/canonical/MCP contenders, durable receipt
+replay after lost response, changed payload, expiry and revoked/deleted accounts.

@@ -26,7 +26,7 @@ test('real domain statements keep exact credits, names, genres and both affiliat
 
   const requestId = '2f1078f5-239b-4fc9-9022-d1126bd194d3'
 
-  const apply = async (input: MusicEditCommand, token: string) => {
+  const apply = async (input: MusicEditCommand, token: string, artistNameChanged = false) => {
     const plan = await Effect.runPromise(
       planMusicEdit(input.change).pipe(Effect.provideService(Database, db)),
     )
@@ -34,7 +34,7 @@ test('real domain statements keep exact credits, names, genres and both affiliat
     const batch = musicEditStatements({
       command: input,
       changed: plan.changed,
-      artistNameChanged: false,
+      artistNameChanged,
       now: 1000,
       attemptId: token,
       eligibility: sql`1`,
@@ -248,6 +248,100 @@ test('real domain statements keep exact credits, names, genres and both affiliat
         .prepare(`SELECT title,trackNumber,revision,albumId FROM music_tracks WHERE id='t'`)
         .first(),
     ).toEqual({ title: 'New', trackNumber: 2, revision: 2, albumId: 'x' })
+
+    await d1
+      .prepare(`UPDATE music_albums SET revision=?,albumType='LP' WHERE id='x'`)
+      .bind(Number.MAX_SAFE_INTEGER - 1)
+      .run()
+
+    const typeChange = {
+      requestId,
+      references: [],
+      change: { operation: 'set_album_type', entityId: 'x', albumType: 'EP' },
+    }
+
+    expect(
+      await apply(
+        command({ ...typeChange, expectedRevision: Number.MAX_SAFE_INTEGER - 1 }),
+        'last-capacity',
+      ),
+    ).toEqual({ winner: 1 })
+    expect(
+      await d1.prepare(`SELECT revision,albumType FROM music_albums WHERE id='x'`).first(),
+    ).toEqual({ revision: Number.MAX_SAFE_INTEGER, albumType: 'EP' })
+    expect(
+      await apply(
+        command({
+          ...typeChange,
+          expectedRevision: Number.MAX_SAFE_INTEGER,
+          change: { ...typeChange.change, albumType: 'LP' },
+        }),
+        'overflow',
+      ),
+    ).toEqual({ winner: 0 })
+    expect(
+      await d1.prepare(`SELECT revision,albumType FROM music_albums WHERE id='x'`).first(),
+    ).toEqual({ revision: Number.MAX_SAFE_INTEGER, albumType: 'EP' })
+    expect(
+      await apply(
+        command({ ...typeChange, expectedRevision: Number.MAX_SAFE_INTEGER }),
+        'capacity-noop',
+      ),
+    ).toEqual({ winner: 1 })
+
+    await d1
+      .prepare(`UPDATE music_labels SET revision=? WHERE id='l'`)
+      .bind(Number.MAX_SAFE_INTEGER)
+      .run()
+    expect(
+      await apply(
+        command({
+          requestId,
+          expectedRevision: 0,
+          references: [
+            { entityType: 'label', entityId: 'l', expectedRevision: Number.MAX_SAFE_INTEGER },
+          ],
+          change: {
+            operation: 'set_label_affiliation',
+            entityType: 'album',
+            entityId: 'y',
+            labelId: 'l',
+          },
+        }),
+        'label-overflow',
+      ),
+    ).toEqual({ winner: 0 })
+    expect(await d1.prepare(`SELECT revision FROM music_albums WHERE id='y'`).first()).toEqual({
+      revision: 0,
+    })
+    expect((await d1.prepare(`SELECT * FROM music_label_albums`).all()).results).toEqual([])
+
+    // One exhausted linked album must prevent the artist rename and every other
+    // parent projection, not just skip that album and commit a partial fanout.
+    await d1
+      .prepare(`UPDATE music_albums SET revision=? WHERE id='y'`)
+      .bind(Number.MAX_SAFE_INTEGER)
+      .run()
+    expect(
+      await apply(
+        command({
+          requestId,
+          expectedRevision: 0,
+          references: [],
+          change: {
+            operation: 'update_music_metadata',
+            entityType: 'artist',
+            entityId: 'z',
+            metadata: { name: 'Do not rename' },
+          },
+        }),
+        'fanout-overflow',
+        true,
+      ),
+    ).toEqual({ winner: 0 })
+    expect(
+      await d1.prepare(`SELECT name,revision FROM music_artists WHERE id='z'`).first(),
+    ).toEqual({ name: 'Zed', revision: 0 })
   } finally {
     await resource.dispose()
   }

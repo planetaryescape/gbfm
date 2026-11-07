@@ -274,6 +274,55 @@ test('metadata allowlists reject hidden authority, unsupported fields and ambigu
   }
 })
 
+test('Unicode IDs preserve SQLite BINARY order in no-op credit and affiliation previews', async () => {
+  const bmp = '\ue000'
+  const astral = '\u{10000}'
+  await db.insert(musicArtistsTable).values([
+    { id: bmp, name: 'BMP', slug: 'unicode-bmp' },
+    { id: astral, name: 'Astral', slug: 'unicode-astral' },
+  ])
+  await db
+    .insert(musicAlbumsTable)
+    .values({ id: 'unicode-album', title: 'Unicode', slug: 'unicode-album' })
+  await db.insert(musicAlbumArtistsTable).values([
+    { albumId: 'unicode-album', artistId: bmp, displayOrder: 0, role: null },
+    { albumId: 'unicode-album', artistId: astral, displayOrder: 0, role: null },
+  ])
+  await db.insert(musicLabelsTable).values([
+    { id: bmp, name: 'BMP', slug: 'unicode-bmp' },
+    { id: astral, name: 'Astral', slug: 'unicode-astral' },
+  ])
+  await db.insert(musicLabelAlbumsTable).values([
+    { albumId: 'unicode-album', labelId: bmp },
+    { albumId: 'unicode-album', labelId: astral },
+  ])
+
+  const credit = await preview({
+    operation: 'set_artist_credit',
+    entityType: 'album',
+    entityId: 'unicode-album',
+    artistId: bmp,
+    role: null,
+    displayOrder: 0,
+  })
+
+  expect(credit.changed).toBe(false)
+  expect(credit.after).toEqual(credit.before)
+  expect(credit.after).toEqual([
+    { artistId: bmp, name: 'BMP', role: null, displayOrder: 0 },
+    { artistId: astral, name: 'Astral', role: null, displayOrder: 0 },
+  ])
+
+  const affiliation = await preview({
+    operation: 'set_label_affiliation',
+    entityType: 'album',
+    entityId: 'unicode-album',
+    labelId: bmp,
+  })
+
+  expect(affiliation).toMatchObject({ before: [bmp, astral], after: [bmp, astral], changed: false })
+})
+
 test('missing targets/references, unsupported fields and unauthorized accounts deny', async () => {
   await expect(
     preview({ operation: 'set_track_album', entityId: 'm1-track', albumId: 'missing' }),

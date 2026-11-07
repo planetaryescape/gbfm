@@ -51,8 +51,8 @@ export type OperationPreparation =
   | { readonly status: 'ready'; readonly build: (context: OperationContext) => AtomicOperationPlan }
   | { readonly status: 'conflict' | 'not_found' | 'invalid_input' | 'unavailable' }
 
-/** Authorization is fresh both before lookup and before disclosure; receipts never confer authority. */
-export type ExecuteOperation = {
+/** Trusted lookup input, also used by execute; a miss does not reserve anything or confer authority. */
+export interface LookupOperation {
   readonly key: OperationKey
   readonly normalizedInput: JsonValue
   readonly now: number
@@ -61,29 +61,50 @@ export type ExecuteOperation = {
    * False means denied; rejection means unavailable, never authority to continue.
    */
   readonly authorize: (outcome?: OperationOutcome) => Promise<boolean>
-} & (
-  | { readonly build: (context: OperationContext) => AtomicOperationPlan; readonly prepare?: never }
-  | { readonly prepare: () => Promise<OperationPreparation>; readonly build?: never }
-)
+}
+
+/** Authorization is fresh both before lookup and before disclosure; receipts never confer authority. */
+export type ExecuteOperation = LookupOperation &
+  (
+    | {
+        readonly build: (context: OperationContext) => AtomicOperationPlan
+        readonly prepare?: never
+      }
+    | { readonly prepare: () => Promise<OperationPreparation>; readonly build?: never }
+  )
+
+/** Bounded original committed evidence, never a fresh domain read. */
+export interface OperationReceipt {
+  readonly operationId: string
+  readonly outcome: OperationOutcome
+  readonly createdAt: number
+  readonly expiresAt: number
+}
+
+type ReceiptFailure = {
+  readonly status: 'conflict' | 'expired' | 'access_denied' | 'invalid_input' | 'unavailable'
+}
 
 /** Unavailable means commit may have happened: retry only the identical key/input. */
 export type OperationResult =
+  | (OperationReceipt & { readonly status: 'applied' | 'replayed' })
+  | ReceiptFailure
+  | { readonly status: 'not_found' }
+
+/** Miss is neither storage failure nor a reservation; only execute may commit after provider fetch. */
+export type OperationLookupResult =
+  | (OperationReceipt & { readonly status: 'replayed' })
+  | ReceiptFailure
+  | { readonly status: 'miss' }
+
+type OperationInspection =
+  | { readonly status: 'miss'; readonly operationId: string; readonly inputHash: string }
   | {
-      readonly status: 'applied' | 'replayed'
-      readonly operationId: string
-      readonly outcome: OperationOutcome
-      readonly createdAt: number
-      readonly expiresAt: number
+      readonly status: 'found'
+      readonly receipt: OperationReceipt
+      readonly attemptId: string | null
     }
-  | {
-      readonly status:
-        | 'conflict'
-        | 'not_found'
-        | 'expired'
-        | 'access_denied'
-        | 'invalid_input'
-        | 'unavailable'
-    }
+  | ReceiptFailure
 
 /** Fixed adapter diagnostics only: never include errors, SQL, keys, IDs or receipt data. */
 export interface OperationDiagnostic {
@@ -142,7 +163,111 @@ export const createMcpOperationStore = (
 
   const redact = sql`actor_id = NULL, client_id = NULL, attempt_id = NULL, outcome = NULL, state = 'expired'`
 
+  // One receipt path for provider preflight, execute, preparation races and lost responses.
+  const inspect = async (input: LookupOperation): Promise<OperationInspection> => {
+    const { now } = input
+
+    if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + windowMs))
+      return { status: 'invalid_input' }
+
+    let operationId: string
+    let inputHash: string
+
+    try {
+      const identity = await operationIdentity(input.key, input.normalizedInput)
+      operationId = identity.operationId
+      inputHash = identity.inputHash
+    } catch {
+      return { status: 'invalid_input' }
+    }
+
+    let failure: OperationDiagnostic = {
+      operation: 'receipt.authorize',
+      dependency: 'authorization',
+      code: 'authorization_failed',
+    }
+
+    try {
+      if (!(await input.authorize())) return { status: 'access_denied' }
+      failure = { operation: 'receipt.lookup', dependency: 'database', code: 'storage_failed' }
+
+      const raw = await prepare(
+        sql`SELECT input_hash, state, outcome, created_at, expires_at, attempt_id FROM mcp_operations WHERE id = ${operationId}`,
+      ).first()
+
+      if (!raw) return { status: 'miss', operationId, inputHash }
+
+      failure = { operation: 'receipt.decode', dependency: 'codec', code: 'decode_failed' }
+      const row = decodeRow(raw)
+
+      if (
+        !Number.isSafeInteger(row.created_at) ||
+        row.created_at < 0 ||
+        row.expires_at !== row.created_at + windowMs
+      ) {
+        diagnostic(failure)
+
+        return { status: 'unavailable' }
+      }
+
+      if (row.expires_at <= now || row.state === 'expired') {
+        failure = { operation: 'receipt.prune', dependency: 'database', code: 'storage_failed' }
+        await prepare(sql`UPDATE mcp_operations SET ${redact} WHERE id = ${operationId}`).run()
+
+        return { status: 'expired' }
+      }
+
+      if (row.input_hash !== inputHash) return { status: 'conflict' }
+
+      if (row.state !== 'complete' || row.outcome === null) {
+        diagnostic(failure)
+
+        return { status: 'unavailable' }
+      }
+
+      const outcome = decodeOutcome(JSON.parse(row.outcome))
+      failure = {
+        operation: 'receipt.authorize',
+        dependency: 'authorization',
+        code: 'authorization_failed',
+      }
+
+      if (!(await input.authorize(outcome))) return { status: 'access_denied' }
+
+      return {
+        status: 'found',
+        attemptId: row.attempt_id,
+        receipt: { operationId, outcome, createdAt: row.created_at, expiresAt: row.expires_at },
+      }
+    } catch {
+      diagnostic(failure)
+
+      return { status: 'unavailable' }
+    }
+  }
+
+  const resultFrom = (
+    inspection: Exclude<OperationInspection, { readonly status: 'miss' }>,
+    attemptId?: string,
+  ): OperationResult =>
+    inspection.status === 'found'
+      ? {
+          ...inspection.receipt,
+          status: inspection.attemptId === attemptId ? 'applied' : 'replayed',
+        }
+      : inspection
+
   return {
+    /** Authorized provider preflight only. Never executes preparation, claims a key or returns a miss on failure. */
+    async lookup(input: LookupOperation): Promise<OperationLookupResult> {
+      const inspection = await inspect(input)
+
+      if (inspection.status === 'miss') return { status: 'miss' }
+
+      if (inspection.status === 'found') return { ...inspection.receipt, status: 'replayed' }
+
+      return inspection
+    },
     /** Run from the existing maintenance owner at least daily; never delete key/input tombstones. */
     async pruneExpired(
       now: number,
@@ -165,90 +290,24 @@ export const createMcpOperationStore = (
     /** Atomic local phase only. All coupled domain writes and receipt commit or roll back together. */
     async execute(input: ExecuteOperation): Promise<OperationResult> {
       const { key, now } = input
+      const initial = await inspect(input)
 
-      if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + windowMs))
-        return { status: 'invalid_input' }
+      if (initial.status !== 'miss') return resultFrom(initial)
+      const { operationId, inputHash } = initial
 
-      let operationId: string
-      let inputHash: string
+      const read = async (attemptId?: string): Promise<OperationResult | undefined> => {
+        const inspection = await inspect(input)
 
-      try {
-        const identity = await operationIdentity(key, input.normalizedInput)
-        operationId = identity.operationId
-        inputHash = identity.inputHash
-      } catch {
-        return { status: 'invalid_input' }
+        return inspection.status === 'miss' ? undefined : resultFrom(inspection, attemptId)
       }
 
       let failure: OperationDiagnostic = {
-        operation: 'receipt.authorize',
-        dependency: 'authorization',
-        code: 'authorization_failed',
-      }
-
-      const read = async (attemptId?: string): Promise<OperationResult | undefined> => {
-        failure = { operation: 'receipt.lookup', dependency: 'database', code: 'storage_failed' }
-
-        const raw = await prepare(
-          sql`SELECT input_hash, state, outcome, created_at, expires_at, attempt_id FROM mcp_operations WHERE id = ${operationId}`,
-        ).first()
-
-        if (!raw) return undefined
-        failure = { operation: 'receipt.decode', dependency: 'codec', code: 'decode_failed' }
-        const row = decodeRow(raw)
-
-        if (
-          !Number.isSafeInteger(row.created_at) ||
-          row.created_at < 0 ||
-          row.expires_at !== row.created_at + windowMs
-        ) {
-          diagnostic(failure)
-
-          return { status: 'unavailable' }
-        }
-
-        if (row.expires_at <= now || row.state === 'expired') {
-          failure = { operation: 'receipt.prune', dependency: 'database', code: 'storage_failed' }
-          await prepare(sql`UPDATE mcp_operations SET ${redact} WHERE id = ${operationId}`).run()
-
-          return { status: 'expired' }
-        }
-
-        if (row.input_hash !== inputHash) return { status: 'conflict' }
-
-        if (row.state !== 'complete' || row.outcome === null) {
-          diagnostic(failure)
-
-          return { status: 'unavailable' }
-        }
-
-        const outcome = decodeOutcome(JSON.parse(row.outcome))
-
-        failure = {
-          operation: 'receipt.authorize',
-          dependency: 'authorization',
-          code: 'authorization_failed',
-        }
-
-        if (!(await input.authorize(outcome))) return { status: 'access_denied' }
-
-        return {
-          status: row.attempt_id === attemptId ? 'applied' : 'replayed',
-          operationId,
-          outcome,
-          createdAt: row.created_at,
-          expiresAt: row.expires_at,
-        }
+        operation: 'receipt.prepare',
+        dependency: 'domain',
+        code: 'preparation_failed',
       }
 
       try {
-        if (!(await input.authorize())) return { status: 'access_denied' }
-        const previous = await read()
-
-        if (previous) return previous
-
-        failure = { operation: 'receipt.prepare', dependency: 'domain', code: 'preparation_failed' }
-
         const prepared = input.prepare
           ? await input.prepare()
           : { status: 'ready' as const, build: input.build }

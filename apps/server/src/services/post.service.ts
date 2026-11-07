@@ -73,6 +73,10 @@ import { MdxService, validateCanonicalContent } from '@/lib/mdx'
 import { createPaginationMetadata, type PaginationMetadata } from '@/lib/pagination'
 import { ConfigService } from '@/services/config.service'
 import {
+  prepareCreatorMicro,
+  prepareCreatorPostTransition,
+} from '@/services/creator-command/prepare-post'
+import {
   attachedMediaUrls,
   makeMediaPublication,
   type MediaActor,
@@ -126,6 +130,8 @@ export type SourcePost = SelectPost & {
 }
 
 export interface PostService {
+  readonly prepareCreatorMicro: typeof prepareCreatorMicro
+  readonly prepareCreatorPostTransition: typeof prepareCreatorPostTransition
   readonly getSourcesForEdit: (
     options: { limit: number; offset: number; draft?: boolean; type?: PostType },
     reader: typeof PostSourceAccess.cases.Authored.Type,
@@ -2854,6 +2860,8 @@ export const PostServiceLayer = Layer.effect(
           Effect.provideService(UploadAssetService, uploadAssetService),
         ),
       createMicroPostReply: (opts) => provideDb(createMicroPostReplyEffect(opts, mdx, media)),
+      prepareCreatorMicro,
+      prepareCreatorPostTransition: (opts) => provideDb(prepareCreatorPostTransition(opts)),
       getMicroPostReplies: (parentSlug, opts) =>
         provideDb(getMicroPostRepliesEffect(parentSlug, opts, mdx)),
       getMicroPostThread: (slug, opts) => provideDb(getMicroPostThreadEffect(slug, opts, mdx)),

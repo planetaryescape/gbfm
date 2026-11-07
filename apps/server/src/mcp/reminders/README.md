@@ -4,6 +4,89 @@ Partial delivery on P1 #548, exact prerequisite
 `2d1b5592826e66e3a198dc117c153e062264fc5c`. No production registration,
 OAuth policy, schema or scheduler changes are included. #538 stays open.
 
+## Resumed commands — superseding approval, 2026-11-07 17:30 UTC
+
+Guide Fari's exact approval, relayed by P1:
+
+> everything that needs my approval, you have my thumbs up; the claude threads that got stuck because of limits, you can take that wrok over as a medium sol thing instead
+
+Source: [P1 approval relay, 17:30:38.618 UTC](https://ampcode.com/threads/T-01a1b54f-7ac1-7503-9b0f-ffaf3fbc6c3e#M-25AnVGIQb4kP4RIwEzygur).
+This is a relayed human quote, not an independently inspected original human
+message. P1 explicitly applies it to the surfaced consolidated receipts,
+revision/fence, caller-observed revision cutover and conservative historical
+classification below. Those recommendations no longer await owner approval.
+Earlier approval-gated language below is retained as historical evidence and
+is superseded by this section; implementation/proof is not thereby complete.
+
+L3 resumes above reviewed `77cd30c3bd9abb1270be6c4c84cba9edc850e561` and owns
+reminder commands/contracts/tests plus allocated reminder service, processor,
+HTTP/API and reminder-statistic methods. P1 retains shared dashboard assembly.
+The common receipt owner supplies `mcp/operations/**` and migration 0016; the
+sole domain-schema owner supplies reminder fields/historical constraints in
+0017. L3 makes no declarations/migration/replay/export edits. New work needs a
+single tested combined prerequisite before integrating those shared changes.
+
+Frozen schema-owner names: `commandRevision`, `dispatchState`, and physical
+attempt marker `lastOperationId` (`last_operation_id`, nullable TEXT with length
+36), not `lastTransitionId` and never the logical request ID. Migration 0017
+classifies coherent historical sent rows as `accepted`, all coherent unsent
+rows as `fenced`, and inconsistent rows as NULL so NOT NULL aborts the entire
+migration batch. New rows default to `open`, revision 1. No triggers are added.
+The schema owner reports populated/abort real-D1 tests passing; that report is
+not yet L3's verification of an adopted combined head.
+
+`prepareReminderCommand` currently parses bounded command intent, rejects excess
+owner/recipient fields, validates calendar-valid explicit UTC with at most
+millisecond precision, normalizes equivalent instants, and preserves absent/null
+payload identity. It does not persist, schedule, authorize or replay commands.
+No always-failing scheduling tools are registered while shared seams are built.
+Technical receipt atomicity, stale intent, both sides of dispatch fencing,
+restart/expiry, privacy and provider-acceptance crash proofs remain required.
+No production operation, merge, auto-merge or live email is authorized here.
+
+All future independent actual-PR review uses `openai/gpt-6.1-sol`, medium effort,
+with `code-review`, original finding history and inline follow-up. Completed
+Claude review evidence for the prior read-only head remains valid for that head.
+
+### Command implementation checkpoint
+
+The command follow-up is rooted on P1's named combined prerequisite
+`695bb12d2149bcbe123f0b6e7661909c4c3ea5ee` (`feat/514-command-foundation`,
+PR #575), not woven from sibling schema/receipt branches. The earlier read-only
+PR #564 remains at `77cd30c3bd9abb1270be6c4c84cba9edc850e561`.
+
+`ReminderCommandService` and `ReminderCommandServiceLayer` in `./service.ts`
+require `Database` and `McpOperationStore`; they do not broaden the read service.
+`execute(raw, authority)` accepts only trusted request composition for the
+checkpoint closure. P1 must supply its credential-bound `CommandAuthority`,
+including the live SQL predicate. The disposable persisted-account test authority
+is **not** evidence of production OAuth, session or PAT authorization.
+
+The service atomically saves create/reschedule/cancel outcomes with the common
+receipt, owner/revision/open-state CAS and physical `lastOperationId` marker.
+Retries replay the original result even after cancellation; revoked authority
+cannot disclose it. Cancellation retains its row as a tombstone.
+
+The processor now atomically advances `open → fenced` (or reclaims sticky fenced
+work) while advancing its claim generation, independently of command revision.
+Cancel/reschedule before that fence suppresses stale work; after it the command
+returns conflict with `delivery_may_have_started`, never a false recall promise.
+Terminal success marks `accepted`. Cancelled/accepted work is excluded from due,
+next-due and pending statistics. Existing recovery remains at-least-once: a
+provider acceptance followed by a failed terminal write can still duplicate
+email. No new scheduler or reminder ledger is introduced.
+
+Reproduce with `bun run --filter @gbfm/server test:d1 src/mcp/reminders
+src/services/reminder-processor.d1.test.ts`. The deterministic gate cases use
+fully migrated local D1 and recording-only delivery, covering both commands on
+both sides of the fence. Existing provider/terminal-write crash procedures use
+local fault triggers and a recording transport; no real email is sent.
+
+This checkpoint does **not** expose command tools or replace existing HTTP
+writers. The allocated guarded HTTP/API cutover, removal of unsafe service
+writers, P1 dashboard/runtime/authority integration, actual-PR review and exact
+updated-head CI remain required before command activation.
+
 ## Capability mapping
 
 | Selected capability | Scope | Delivery |

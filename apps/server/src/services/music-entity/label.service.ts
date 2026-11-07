@@ -17,9 +17,9 @@ import {
 } from '@/db/music-entity.schema'
 import { DatabaseError, getErrorMessage } from '@/errors'
 import { MdxService, validateCanonicalContent } from '@/lib/mdx'
-import { omitUndefined } from '@/lib/omit-undefined'
 import { toSlug } from '@/services/to-slug'
 
+import { insertMusicEntity } from './create-statements'
 import { deleteEntityLabels, deleteLinksForEntity, requireInserted, requireOne } from './shared'
 
 export interface CreateLabelInput {
@@ -40,31 +40,17 @@ export const createLabelEffect = Effect.fn('musicEntity.createLabel')(function* 
 ) {
   yield* validateCanonicalContent(data.content)
   const db = yield* Database
-  const { tags, genres, ...labelData } = data
   const id = crypto.randomUUID()
 
   const rows = yield* Effect.tryPromise({
     try: async () => {
-      await db.batch([
-        db.insert(musicLabelsTable).values({ ...labelData, id }),
-        ...(labelData.createdById
-          ? [
-              db
-                .insert(musicLabelCreatorsTable)
-                .values({ labelId: id, creatorId: labelData.createdById }),
-            ]
-          : []),
-      ])
+      await insertMusicEntity(db, { entityType: 'label', data, attribution: 'creator' }, id)
 
       const rows = await db
         .select()
         .from(musicLabelsTable)
         .where(eq(musicLabelsTable.id, id))
         .limit(1)
-
-      if (rows[0] && (tags !== undefined || genres !== undefined)) {
-        await replaceEntityLabels(db, 'musicLabel', id, omitUndefined({ tags, genres }))
-      }
 
       return rows
     },

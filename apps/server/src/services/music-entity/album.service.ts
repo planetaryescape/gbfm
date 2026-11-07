@@ -7,6 +7,7 @@ import { musicAlbumArtistsTable, musicAlbumsTable } from '@/db/music-entity.sche
 import { DatabaseError, getErrorMessage } from '@/errors'
 import { toSlug } from '@/services/to-slug'
 
+import { insertMusicEntity } from './create-statements'
 import {
   deleteEntityLabels,
   deleteIdentitiesForEntity,
@@ -31,31 +32,11 @@ export const createAlbumEffect = Effect.fn('musicEntity.createAlbum')(function* 
   data: CreateAlbumInput,
 ) {
   const db = yield* Database
-  const { artistIds, genres, ...albumData } = data
   const id = crypto.randomUUID()
 
   const rows = yield* Effect.tryPromise({
     try: async () => {
-      await db.batch([
-        db.insert(musicAlbumsTable).values({ ...albumData, id }),
-        ...(artistIds?.length
-          ? [
-              db
-                .insert(musicAlbumArtistsTable)
-                .values(
-                  artistIds.map((artistId, displayOrder) => ({
-                    albumId: id,
-                    artistId,
-                    displayOrder,
-                  })),
-                )
-                .onConflictDoUpdate({
-                  target: [musicAlbumArtistsTable.albumId, musicAlbumArtistsTable.artistId],
-                  set: { displayOrder: sql`excluded.displayOrder` },
-                }),
-            ]
-          : []),
-      ])
+      await insertMusicEntity(db, { entityType: 'album', data }, id)
 
       const rows = await db
         .select()
@@ -66,8 +47,6 @@ export const createAlbumEffect = Effect.fn('musicEntity.createAlbum')(function* 
       const album = rows[0]
 
       if (!album) throw new Error('Insert returned no rows')
-
-      if (genres !== undefined) await replaceEntityLabels(db, 'album', album.id, { genres })
 
       return album
     },

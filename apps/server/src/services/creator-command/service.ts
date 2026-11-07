@@ -16,6 +16,7 @@ import {
   ListCreatorDraftsResult,
   UpdateCreatorMetadataInput,
 } from '@/mcp/creator/contracts'
+import { checkCreatorResponse, creatorResultFits, requireCreatorWire } from '@/mcp/creator/wire'
 import { EditorialMcpConfig } from '@/mcp/editorial'
 import { McpOperationStore } from '@/mcp/operations/store'
 
@@ -129,12 +130,14 @@ const make = Effect.gen(function* () {
       endpoint,
       drafts,
       pagination: { limit, offset, hasMore: rows.length > limit },
-    }).pipe(Effect.mapError(unavailable), Effect.flatMap(bound))
+    }).pipe(Effect.mapError(unavailable), Effect.flatMap(checkCreatorResponse))
   })
 
   const updateCreatorMetadata = Effect.fn('CreatorCommand.updateMetadata')(function* (
     raw: typeof UpdateCreatorMetadataInput.Type,
   ) {
+    const wire = yield* requireCreatorWire
+
     const actor = yield* authorization
       .requireScopes(['creator:write'])
       .pipe(
@@ -248,6 +251,8 @@ const make = Effect.gen(function* () {
               state: 'unpublished' as const,
             }
 
+            if (!creatorResultFits(wire, endpoint, next)) return { status: 'invalid_input' }
+
             return {
               status: 'ready',
               build: (ctx) => {
@@ -304,7 +309,7 @@ const make = Effect.gen(function* () {
       status: 'applied',
       replayed: result.status === 'replayed',
       target: result.outcome.result,
-    }).pipe(Effect.mapError(unavailable), Effect.flatMap(bound))
+    }).pipe(Effect.mapError(unavailable), Effect.flatMap(checkCreatorResponse))
   })
 
   return {

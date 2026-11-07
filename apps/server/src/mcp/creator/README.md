@@ -47,6 +47,19 @@ attempt fence. MCP commands must save the outcome in the same durable-operation
 batch, not call an existing committing method and save a receipt afterward.
 An exhausted safe integer revision must refuse rather than wrap.
 
+Every browser save finishes with an in-batch winner/live-authority assertion.
+Browser deletion asserts that winner before removal and live authority plus
+absence after removal. A false predicate raises SQLite integer overflow from
+the selected CASE branch, aborting D1's batch and restoring all earlier writes
+and trigger effects. Post-commit row-count checks cannot provide this rollback.
+
+Every creator mutation requires the invocation's `McpWireResponse` before
+preparation. Its complete prospective acknowledgement (endpoint, actual target,
+version/revision, replay flag, duplicated text/structured result, actual RPC ID
+and transport framing) must fit before the receipt/write batch. There is no
+fallback ID or source-only estimate. Read/replay disclosure is checked against
+its own current request budget too; overflow does not repeat a mutation.
+
 Optional `expectedRevision` on legacy HTTP inputs preserves their shape, not a
 stale-intent guarantee. A caller without an observation gets only race protection
 against the source loaded by that request. A version-aware client must send the

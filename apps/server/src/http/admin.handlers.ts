@@ -349,12 +349,31 @@ async function loadAdminOverview(db: Database['Service']) {
       .limit(5),
     db
       .select({
-        pending: db.$count(musicReminder, eq(musicReminder.status, REMINDER_STATUS.PENDING)),
-        processing: db.$count(musicReminder, eq(musicReminder.status, REMINDER_STATUS.PROCESSING)),
-        failed: db.$count(musicReminder, eq(musicReminder.status, REMINDER_STATUS.FAILED)),
+        pending: db.$count(
+          musicReminder,
+          and(
+            inArray(musicReminder.dispatchState, ['open', 'fenced']),
+            eq(musicReminder.status, REMINDER_STATUS.PENDING),
+          ),
+        ),
+        processing: db.$count(
+          musicReminder,
+          and(
+            inArray(musicReminder.dispatchState, ['open', 'fenced']),
+            eq(musicReminder.status, REMINDER_STATUS.PROCESSING),
+          ),
+        ),
+        failed: db.$count(
+          musicReminder,
+          and(
+            inArray(musicReminder.dispatchState, ['open', 'fenced']),
+            eq(musicReminder.status, REMINDER_STATUS.FAILED),
+          ),
+        ),
         dueNow: db.$count(
           musicReminder,
           and(
+            inArray(musicReminder.dispatchState, ['open', 'fenced']),
             lte(musicReminder.reminderDate, now),
             or(
               eq(musicReminder.status, REMINDER_STATUS.PENDING),

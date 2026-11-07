@@ -1,3 +1,4 @@
+import type { McpScope } from '@gbfm/core/editorial-mcp'
 import { and, eq, sql, type SQL } from 'drizzle-orm'
 import { Clock, Context, Effect, Layer, Schema } from 'effect'
 
@@ -11,7 +12,7 @@ import { ReminderCommandResult } from './contracts'
 
 /** Trusted request composition supplies this closure, never caller-selected identity or SQL. */
 export interface ReminderAuthority {
-  readonly checkpoint: (requiredScopes: ReadonlyArray<string>) => Effect.Effect<
+  readonly checkpoint: (requiredScopes: ReadonlyArray<McpScope>) => Effect.Effect<
     {
       readonly actorId: string
       readonly clientId: string
@@ -44,6 +45,17 @@ const makeCommands = Effect.gen(function* () {
     const command = yield* prepareReminderCommand(raw)
     const now = yield* Clock.currentTimeMillis
 
+    const diagnose = (
+      code: 'database_error' | 'invalid_persisted_row' | 'operation_unavailable',
+      dependency: 'database' | 'operation-store',
+    ) =>
+      Effect.logError('mcp.reminders.command.unavailable', {
+        operation: command.operation,
+        table: 'music_reminder',
+        dependency,
+        code,
+      })
+
     const findOwned = (id: string) =>
       Effect.tryPromise({
         try: () =>
@@ -57,7 +69,10 @@ const makeCommands = Effect.gen(function* () {
             .where(and(eq(musicReminder.id, id), eq(musicReminder.userId, initial.actorId)))
             .limit(1),
         catch: unavailable,
-      }).pipe(Effect.map((rows) => rows[0]))
+      }).pipe(
+        Effect.tapError(() => diagnose('database_error', 'database')),
+        Effect.map((rows) => rows[0]),
+      )
 
     const previous =
       command.operation === 'create_music_reminder'
@@ -85,6 +100,7 @@ const makeCommands = Effect.gen(function* () {
         : new Date(command.payload.reminderDate)
 
     const validDate = yield* Schema.decodeUnknownEffect(Schema.Date)(date).pipe(
+      Effect.tapError(() => diagnose('invalid_persisted_row', 'database')),
       Effect.mapError(unavailable),
     )
 
@@ -93,7 +109,10 @@ const makeCommands = Effect.gen(function* () {
       commandRevision: expected + 1,
       dispatchState: command.operation === 'cancel_music_reminder' ? 'cancelled' : 'open',
       reminderDate: validDate.toISOString(),
-    }).pipe(Effect.mapError(unavailable))
+    }).pipe(
+      Effect.tapError(() => diagnose('invalid_persisted_row', 'database')),
+      Effect.mapError(unavailable),
+    )
 
     const saved = yield* Effect.tryPromise({
       try: () =>
@@ -125,7 +144,13 @@ const makeCommands = Effect.gen(function* () {
             if (!current) return false
 
             if (!outcome) return true
-            const original = Schema.decodeUnknownSync(ReminderCommandResult)(outcome.result)
+
+            const original = await runPromise(
+              Schema.decodeUnknownEffect(ReminderCommandResult)(outcome.result).pipe(
+                Effect.tapError(() => diagnose('invalid_persisted_row', 'operation-store')),
+                Effect.mapError(unavailable),
+              ),
+            )
 
             return (await runPromise(findOwned(original.reminderId))) !== undefined
           },
@@ -152,12 +177,13 @@ const makeCommands = Effect.gen(function* () {
           },
         }),
       catch: unavailable,
-    })
+    }).pipe(Effect.tapError(() => diagnose('operation_unavailable', 'operation-store')))
 
     switch (saved.status) {
       case 'applied':
       case 'replayed':
         return yield* Schema.decodeUnknownEffect(ReminderCommandResult)(saved.outcome.result).pipe(
+          Effect.tapError(() => diagnose('invalid_persisted_row', 'operation-store')),
           Effect.mapError(unavailable),
         )
       case 'conflict': {
@@ -173,6 +199,8 @@ const makeCommands = Effect.gen(function* () {
       }
 
       case 'unavailable':
+        yield* diagnose('operation_unavailable', 'operation-store')
+
         return yield* unavailable()
       default:
         return yield* new McpToolError({

@@ -22,7 +22,14 @@ export interface MusicReminderService {
       readonly reminders: ReadonlyArray<
         Pick<
           MusicReminder,
-          'id' | 'musicTitle' | 'artistName' | 'reminderDate' | 'status' | 'isSent'
+          | 'id'
+          | 'musicTitle'
+          | 'artistName'
+          | 'reminderDate'
+          | 'status'
+          | 'isSent'
+          | 'commandRevision'
+          | 'dispatchState'
         >
       >
       readonly hasMore: boolean
@@ -135,6 +142,8 @@ const getPageByUserIdEffect = (
             reminderDate: musicReminder.reminderDate,
             status: musicReminder.status,
             isSent: musicReminder.isSent,
+            commandRevision: musicReminder.commandRevision,
+            dispatchState: musicReminder.dispatchState,
           })
           .from(musicReminder)
           .where(eq(musicReminder.userId, userId))

@@ -145,6 +145,42 @@ Images may contain moved/deleted domain rows only, not post bodies or provider/
 account payloads. Attribution privacy/existing-account checks are backend policy;
 this schema does not silently invent exact-restore guarantees for deleted actors.
 
+## Specialized playlist import status
+
+0025 exports playlistImportStatusesTable from playlist-import-status.schema.ts.
+Its operationId is the same common receipt ID with a cascading FK, not a new
+request key, hash, outcome ledger or rewrite of #521's immutable create result.
+Actor deletion cascades status. Trusted client/resource strings have no OAuth FK:
+session uses `gbfm:session`, PAT uses `gbfm:pat:${persistedKeyId}` only at existing
+PAT-capable handlers; the resource is `new URL('/api', config.urls.share).href`.
+Backend authorization checks immutable namespace equality against the receipt.
+
+Storage checks bound actual counters, phase/terminal timestamps, known totals,
+target/cursor pairs, lease fields and dispatch combinations. Queue acceptance is
+not completion. Partial requires known successful import totals and actual
+enrichment failures; interruption never invents failed items. Terminal target
+pruning preserves these scalar proofs and clears lease/cursor/dispatch fields.
+Live status survives receipt result expiry; terminal pruning and common receipt
+deletion are separate backend policies, with the latter cascading final cleanup.
+
+Importing starts with generation 1 and its original physical attempt/60-second
+lease, renewed every 20 seconds without takeover or catalogue reexecution.
+enrichment_pending has no lease; a delivered worker acquires enriching with a
+fresh attempt and incremented generation. Progress/renewal/transition require
+current authority, target existence/pinned revision and the UUID/generation plus
+unexpired DB-current-time fence; the backend asserts the winning mutation.
+Expired importing becomes interrupted with actual counts. Only enrichment can
+take over an expired lease. Sender mark-sent must not overwrite a running or
+terminal row. The worker may acknowledge delivery while acquiring its lease.
+Keyset pages are at most 100 from the PL2 snapshot seam; no raw provider URL,
+token, source snapshot or discarded provider payload is persisted.
+
+There is deliberately no playlist FK: guarded playlist deletion must first
+retire matching statuses and clear target pair/cursor/lease/dispatch atomically,
+preserving safe aggregate outcome. Trusted namespace revocation uses the same
+retirement policy, never fake OAuth rows. Schema does not supply those writer,
+queue, scheduler, pruning or concurrency guards; I1/PL2/P1 own their integration.
+
 The migration D1 tests prove schema/defaults, fresh and populated replay,
 historical classification failure, constraints and FK policies. They do not prove
 browser/API/MCP writer atomicity, service normalization, private projections,

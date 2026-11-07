@@ -53,13 +53,21 @@ omitted because the existing parser silently caps dimensions; this view must not
 present a truncated table as complete. Parser depth/block/embed-limit diagnostics
 fail `unavailable`, including warning-severity depth diagnostics.
 
-Topology traversal caps visible nodes at 500 including root, depth at 8 edges,
-and parent-query batches at 50 IDs. An extra node/depth fails, not a partial count.
-Each selected source is SQL-prefix bounded and checked at 100 KiB UTF-8, combined
-sources at 256 KiB before parsing, result JSON at 256 KiB. SQL limits bound returned
-rows, not total database work; visibility/creator subqueries and sibling sorting
-may scan many rows. Pagination and multi-query traversal are not a transactional
-snapshot across concurrent publication edits.
+Topology traversal caps visible nodes at 500 including root and depth at 8 edges.
+An extra node/depth fails, not a partial count. One recursive SQLite statement
+ties ancestry/reachable closure, count, page and selected metadata/source to the
+same read snapshot. A concurrent hidden ancestor cannot authorize later private
+descendant prose from a different snapshot. Separate page requests are not one
+snapshot across concurrent edits.
+SQL checks true BLOB source/title byte lengths before returning their text;
+over 100 KiB per selected source/title or any source NUL fails `unavailable`, never
+a silently truncated prefix. Combined sources cap at 256 KiB before parsing,
+result JSON at 256 KiB. SQL limits bound returned rows, not total database work;
+visibility/creator subqueries and sibling sorting may scan many rows.
+The opt-in `parseRichContent(..., { publicSourceProse: true })` mode resolves
+reference-style authored links/images and redacts unsupported inline HTML/directive
+AST nodes before they can become Text. Default/browser parsing remains unchanged;
+literal authored inline/block code and escaped prose are not sanitized as markup.
 
 Future PRs are normal OPEN, not drafts; all MCP PRs stay unmerged with auto-merge
 off. No production operation or policy/data activation follows from this approval.
@@ -159,6 +167,9 @@ artist IDs are never interpreted as one identity namespace.
   supported prose retained and embedded target IDs/URLs absent. Seed draft/banned
   root/focus/intermediate ancestor, public children below hidden ancestors, equal
   timestamps with opposite insertion order, public empty root and budget overflow.
+  Include an off-page ancestor hide/ban interleaved immediately before source
+  execution, early-NUL over-budget source, inline/nested unsupported attributes,
+  and authored reference link/image + literal code survival.
   Assert totals/pages omit hidden subtrees, wrong scope/live ban/revoked tokens
   deny, and all calls are SELECT-only/provider-free. Keep all seven existing R3
   tools plus R1/legacy compatibility in the final exact integrated-head proof.

@@ -1,4 +1,6 @@
+import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types'
 import { McpPrincipal } from '@gbfm/core/editorial-mcp'
+import { parseRichContent } from '@gbfm/rich-content/source'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import { Effect, Layer, Schema } from 'effect'
@@ -13,6 +15,7 @@ import { ExternalMediaFetcher } from '@/lib/external-media'
 import { MdxServiceCatalogLayer } from '@/lib/mdx'
 import { ConfigServiceLayer } from '@/services/config.service'
 import { PostServiceLayer } from '@/services/post.service'
+import { getPublicMicroThreadEffect } from '@/services/public-micro-thread'
 import { RichContentMusicResolverLayer } from '@/services/rich-content-music.service'
 import { UnavailableObjectStoreClientLayer } from '@/services/storage/object-store-client'
 import { UploadAssetServiceLayer } from '@/services/upload-asset.service'
@@ -373,6 +376,163 @@ test('parser limits fail closed and capped tables are explicitly omitted', async
 test('all thread protocol calls, including failures, are SELECT-only and provider-free', async () => {
   await read('empty-root')
   expect(queries.length).toBeGreaterThan(0)
-  expect(queries.every((query) => query.trimStart().toLowerCase().startsWith('select'))).toBe(true)
+  expect(
+    queries.every(
+      (query) =>
+        /^(select\b|with recursive\b)/i.test(query.trimStart()) &&
+        !/\b(insert|update|delete)\b/i.test(query),
+    ),
+  ).toBe(true)
   expect(providers).toEqual([])
+})
+
+test('inline unsupported markup is redacted by AST provenance; literal code/prose and reference links survive', async () => {
+  const content =
+    'Before <MusicEmbed id="INLINE-SECRET" url="https://example.test/INLINE-SECRET"/> after.\n\n> Nested <span data-secret="INLINE-SECRET">text</span> prose.\n\n- List <MusicEmbed id="INLINE-SECRET"/> text.\n\nLiteral `<MusicEmbed id="authored-code"/>`.\n\n```html\n<span data-id="authored-block-code"/>\n```\n\nEscaped \\<span data-id="authored-escaped"\\>.\n\n[authored link][Ref] and [inline link](https://example.com/).\n\n![authored image][img]\n\n[ref]: https://example.com/\n[img]: https://example.com/image.png'
+
+  await db.insert(postsTable).values({ ...node('source-prose', null, null), content })
+  const result = await read('source-prose')
+  const body = JSON.stringify(result.root.body)
+  expect(body).not.toContain('INLINE-SECRET')
+
+  for (const value of [
+    'Before ',
+    ' after.',
+    'Nested ',
+    'text',
+    'List ',
+    'authored-code',
+    'authored-block-code',
+    'authored-escaped',
+    'authored link',
+    'inline link',
+    'authored image',
+    'https://example.com/',
+    'https://example.com/image.png',
+  ])
+    expect(body).toContain(value)
+  /* oxlint-disable anti-slop-effect/no-manual-tagged-construction -- Independent expected wire values; the recursive public Block/Inline codecs expose no variant constructors. */
+  expect(result.root.body.blocks).toContainEqual({
+    _tag: 'Paragraph',
+    children: [
+      {
+        _tag: 'Link',
+        href: 'https://example.com/',
+        title: null,
+        children: [{ _tag: 'Text', value: 'authored link' }],
+      },
+      { _tag: 'Text', value: ' and ' },
+      {
+        _tag: 'Link',
+        href: 'https://example.com/',
+        title: null,
+        children: [{ _tag: 'Text', value: 'inline link' }],
+      },
+      { _tag: 'Text', value: '.' },
+    ],
+  })
+  /* oxlint-enable anti-slop-effect/no-manual-tagged-construction */
+  // The opt-in must not silently change existing browser parsing.
+  expect(
+    JSON.stringify(parseRichContent('Before <span data-id="unchanged-browser"/> after.').document),
+  ).toContain('unchanged-browser')
+})
+
+test('NUL-containing stored sources never succeed as a silently truncated prefix', async () => {
+  for (const { id, content } of [
+    { id: 'nul-small', content: 'Before\0after' },
+    { id: 'nul-large', content: `Before\0${'é'.repeat(60000)}` },
+  ]) {
+    await db.insert(postsTable).values({ ...node(id, null, null), content })
+    const result = await call({ slug: id })
+    expect(JSON.stringify(result)).toContain('unavailable')
+    expect(result.result?.structuredContent).toBeUndefined()
+  }
+})
+
+test('off-page ancestor hiding/ban before source execution cannot mix old closure with new private prose', async () => {
+  for (const mode of ['draft', 'ban']) {
+    const rootId = `race-${mode}-root`
+    const parentId = `race-${mode}-parent`
+    const childId = `race-${mode}-child`
+    const authorId = `race-${mode}-author`
+    await db
+      .insert(user)
+      .values({ id: authorId, name: 'Race author', email: `${authorId}@example.test` })
+
+    for (const post of [
+      node(rootId, null, null, 1000),
+      node(parentId, rootId, rootId, 2000),
+      node(childId, parentId, rootId, 3000),
+    ])
+      await db.insert(postsTable).values(post)
+    await db.insert(postCreators).values({ postId: parentId, creatorId: authorId })
+    let writes = 0
+
+    const interleave = async () => {
+      if (writes) return
+      writes++
+
+      if (mode === 'draft')
+        await db.update(postsTable).set({ draft: true }).where(eq(postsTable.id, parentId))
+      else await db.update(user).set({ banned: true }).where(eq(user.id, authorId))
+      await db
+        .update(postsTable)
+        .set({ content: 'NEW PRIVATE-ANCESTRY PROSE' })
+        .where(eq(postsTable.id, childId))
+    }
+
+    class SourceRead implements D1PreparedStatement {
+      constructor(readonly statement: D1PreparedStatement) {}
+      bind(...values: Parameters<D1PreparedStatement['bind']>): D1PreparedStatement {
+        return new SourceRead(this.statement.bind(...values))
+      }
+      first<T = unknown>(column?: string): Promise<T | null> {
+        return column === undefined ? this.statement.first<T>() : this.statement.first<T>(column)
+      }
+      run<T = unknown>() {
+        return this.statement.run<T>()
+      }
+      async all<T = unknown>() {
+        await interleave()
+
+        return this.statement.all<T>()
+      }
+      raw<T = Array<unknown>>(options: { columnNames: true }): Promise<[Array<string>, ...Array<T>]>
+      raw<T = Array<unknown>>(options?: { columnNames?: false }): Promise<Array<T>>
+      async raw<T = Array<unknown>>(options?: {
+        columnNames?: boolean
+      }): Promise<Array<T> | [Array<string>, ...Array<T>]> {
+        await interleave()
+
+        return options?.columnNames
+          ? this.statement.raw<T>({ columnNames: true })
+          : this.statement.raw<T>()
+      }
+    }
+
+    // Every statement and interleaved write executes against the migrated D1.
+    // Gate the first source-bearing query: old code checked closure before it;
+    // the fixed single statement must observe the hidden closure as well.
+    const binding: D1Database = {
+      prepare: (query) =>
+        /\bcontent\b/.test(query) ? new SourceRead(d1.prepare(query)) : d1.prepare(query),
+      batch: (statements) => d1.batch(statements),
+      exec: (query) => d1.exec(query),
+      withSession: (constraint) => d1.withSession(constraint),
+      dump: () => d1.dump(),
+    }
+
+    const result = await Effect.runPromise(
+      getPublicMicroThreadEffect(rootId, { limit: 1, offset: 1 }).pipe(
+        Effect.provideService(Database, drizzle(binding, { schema: tables })),
+      ),
+    )
+
+    expect(writes).toBe(1)
+    expect(result.pagination.total).toBe(0)
+    expect(result.posts).toEqual([])
+    expect(JSON.stringify(result)).not.toContain('NEW PRIVATE-ANCESTRY PROSE')
+    expect(JSON.stringify(result)).not.toContain(parentId)
+  }
 })

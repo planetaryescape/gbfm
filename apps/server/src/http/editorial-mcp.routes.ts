@@ -5,6 +5,8 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
 
 import { Auth } from '@/lib/auth'
 import { McpPermission } from '@/mcp/authorization'
+import { ContentReadServiceLayer } from '@/mcp/content-read/service'
+import { ContentReadHandlersLayer, ContentReadToolkit } from '@/mcp/content-read/toolkit'
 import { EditorialToolError } from '@/mcp/contracts'
 import { EditorialDraftServiceLayer } from '@/mcp/drafts'
 import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from '@/mcp/editorial'
@@ -356,6 +358,8 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>>(
           authorizationMetadata,
         ),
         makeMcpLayer(origins, toolkit).pipe(
+          Layer.provide(ContentReadHandlersLayer),
+          Layer.provide(ContentReadServiceLayer),
           Layer.provide(EditorialToolHandlersLayer),
           Layer.provide(EditorialDraftServiceLayer),
           Layer.provide(EditorialReadServiceLayer),
@@ -365,7 +369,9 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>>(
     }),
   )
 
-export const EditorialMcpRoutesLive = makeMcpRoutes(composeMcpToolkits(EditorialToolkit))
+export const EditorialMcpRoutesLive = makeMcpRoutes(
+  composeMcpToolkits(EditorialToolkit, ContentReadToolkit),
+)
 
 export function privateEditorialResponse(request: Request, response: Response): Response {
   const path = new URL(request.url).pathname

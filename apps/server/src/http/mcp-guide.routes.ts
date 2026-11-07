@@ -100,10 +100,20 @@ They do not control playback or access your private listening library.
 Review and publishing stay in GBFM.
 
 Tool discovery reflects the connection's current scopes and role on each request.
-Remembered tool names do not authorize calls. The foundation supports separately
-validated listener grants without posts:read, but no new domain tools are enabled
-here and production resource-policy permissions are not expanded by this change.
-New domain permissions require fresh consent and their own delivery gates.
+Remembered tool names do not authorize calls. Three public-content reads are also
+registered, but require content:read and a resource policy explicitly allowing it:
+- list_published_posts: public editorial summaries only, never source bodies or micro posts.
+- get_show: public show metadata by slug, without body rendering or media URLs.
+- list_show_episodes: public audio metadata under a public show; private parents and
+  children remain excluded from pages and counts. Audio IDs are not music-track IDs.
+Lists default to 20 items, maximum 50, with offset up to 10,000. Reads are safe to
+retry but pages are not snapshots across concurrent edits. A missing or private
+show returns not_found. These reads perform no playback, seen-state or subscription writes.
+Eligible listeners can authorize content:read without posts:read only where enabled.
+Production allowedScopes is unchanged; registering these tools does not activate
+content:read on a resource or add it to existing grants. Fresh consent and explicit
+resource-policy authorization are separate requirements. No catalogue toolkit or
+other public-content reads are registered by this slice.
 
 ## Other clients, including Claude Code
 

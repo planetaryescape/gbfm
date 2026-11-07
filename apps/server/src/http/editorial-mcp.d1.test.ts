@@ -3,10 +3,17 @@ import { eq } from 'drizzle-orm'
 import { Effect, Layer, Match, Redacted, Schema } from 'effect'
 import { expect, test } from 'vitest'
 
+import { audioTable } from '@/db/audio.schema'
 import { user } from '@/db/auth.schema'
 import { musicArtistsTable } from '@/db/music-entity.schema'
-import { oauthClient, oauthResource } from '@/db/oauth.schema'
+import { oauthClient, oauthConsent, oauthResource } from '@/db/oauth.schema'
 import { postCreators, postsTable } from '@/db/post.schema'
+import { showsTable } from '@/db/show.schema'
+import {
+  PublishedPostsResult,
+  PublicShowResult,
+  ShowEpisodesResult,
+} from '@/mcp/content-read/contracts'
 import { GetPostResult } from '@/mcp/contracts'
 import { ConfigService, createConfig } from '@/services/config.service'
 import { createEditorialOAuthFixture, OAuthTokens } from '@/test/editorial-oauth'
@@ -569,6 +576,271 @@ test('composed HTTP MCP scopes tokens, drafts, connections and disconnection to 
     await handler.dispose()
   }
 }, 15_000)
+
+test('R3 public reads compose with persisted listener OAuth and legacy drafts without scope activation', async () => {
+  await using fixture = await createEditorialOAuthFixture()
+  const clientId = await fixture.register('posts:read drafts:write content:read offline_access')
+
+  // Knowing/registering the scope does not enable it on the production-default resource.
+  const authorization = await fixture.request(
+    `/oauth2/authorize?${fixture.authorizationQuery(clientId, 'content:read offline_access')}`,
+    undefined,
+    'reader',
+  )
+
+  expect(authorization.status).toBe(400)
+  expect(await authorization.json()).toMatchObject({ error: 'invalid_scope' })
+  expect(await fixture.db.select().from(oauthConsent)).toHaveLength(0)
+
+  // Only this disposable D1 resource opts in; no production policy definition changes.
+  await fixture.db.update(oauthResource).set({
+    allowedScopes: JSON.stringify(['posts:read', 'drafts:write', 'content:read', 'offline_access']),
+  })
+
+  const tokens = async (actor: string, scope: string) =>
+    Schema.decodeUnknownSync(OAuthTokens)(
+      await (
+        await fixture.exchange(clientId, await fixture.authorize(clientId, actor, scope))
+      ).json(),
+    )
+
+  const listener = await tokens('reader', 'content:read offline_access')
+  const editorial = await tokens('owner', 'posts:read drafts:write offline_access')
+  const combined = await tokens('other', 'posts:read drafts:write content:read offline_access')
+
+  await fixture.db.insert(postsTable).values([
+    {
+      id: 'r3-public',
+      slug: 'r3-public',
+      title: 'Public editorial',
+      type: 'post',
+      content: 'Public source',
+    },
+    {
+      id: 'r3-private',
+      slug: 'r3-private',
+      title: 'SECRET POST',
+      type: 'post',
+      content: 'SECRET BODY',
+      draft: true,
+    },
+  ])
+  await fixture.db.insert(postCreators).values({ postId: 'r3-private', creatorId: 'reader' })
+  await fixture.db.insert(showsTable).values([
+    { id: 'r3-show', slug: 'r3-show', title: 'Public show', content: 'DO NOT RENDER' },
+    {
+      id: 'r3-hidden-show',
+      slug: 'r3-hidden-show',
+      title: 'SECRET SHOW',
+      content: 'SECRET',
+      draft: true,
+    },
+  ])
+  await fixture.db.insert(audioTable).values([
+    {
+      id: 'r3-episode-a',
+      slug: 'r3-episode-a',
+      title: 'Older ID',
+      type: 'mix',
+      content: 'DO NOT RENDER',
+      url: 'https://example.test/a.mp3',
+      showId: 'r3-show',
+      createdAt: new Date(1000),
+    },
+    {
+      id: 'r3-episode-z',
+      slug: 'r3-episode-z',
+      title: 'Newer ID',
+      type: 'track',
+      content: 'DO NOT RENDER',
+      url: 'https://example.test/z.mp3',
+      showId: 'r3-show',
+      createdAt: new Date(1000),
+    },
+    {
+      id: 'r3-private-episode',
+      slug: 'r3-private-episode',
+      title: 'SECRET EPISODE',
+      type: 'mix',
+      content: 'SECRET BODY',
+      url: 'https://example.test/private.mp3',
+      showId: 'r3-show',
+      draft: true,
+      createdAt: new Date(3000),
+    },
+    {
+      id: 'r3-hidden-parent',
+      slug: 'r3-hidden-parent',
+      title: 'SECRET PARENT CHILD',
+      type: 'mix',
+      content: 'SECRET BODY',
+      url: 'https://example.test/parent.mp3',
+      showId: 'r3-hidden-show',
+    },
+  ])
+
+  // The production route manifest, not an injected principal or test-only toolkit.
+  const handler = createTestWebHandler(
+    fixture.db.$client,
+    undefined,
+    undefined,
+    undefined,
+    Layer.succeed(ConfigService, {
+      ...fixture.config,
+      auth: {
+        ...fixture.config.auth,
+        betterAuthSecret: 'disposable-test-secret-with-at-least-32-chars',
+      },
+    }),
+  )
+
+  const rpc = (token: typeof listener.access_token, name?: string, args: Schema.Json = {}) =>
+    handler.handler(
+      new Request(fixture.config.mcp.resourceUrl, {
+        method: 'POST',
+        headers: {
+          accept: 'application/json, text/event-stream',
+          'content-type': 'application/json',
+          'mcp-protocol-version': '2026-07-28',
+          'mcp-method': name ? 'tools/call' : 'tools/list',
+          'mcp-name': name ?? '',
+          authorization: `Bearer ${Redacted.value(token)}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 91,
+          method: name ? 'tools/call' : 'tools/list',
+          params: {
+            name,
+            arguments: args,
+            _meta: {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': {},
+            },
+          },
+        }),
+      }),
+    )
+
+  const contentNames = ['list_published_posts', 'get_show', 'list_show_episodes']
+  const legacyNames = ['create_draft', 'update_draft', 'list_drafts', 'get_post']
+
+  try {
+    for (const [token, names] of [
+      [listener.access_token, contentNames],
+      [editorial.access_token, legacyNames],
+      [combined.access_token, [...legacyNames, ...contentNames]],
+    ] as const) {
+      const response = await rpc(token)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('cache-control')).toBe('private, no-store')
+      expect(
+        Schema.decodeUnknownSync(ToolList)(await response.json()).result.tools.map(
+          ({ name }) => name,
+        ),
+      ).toEqual(names)
+    }
+
+    for (const name of contentNames) {
+      expect(
+        await (await rpc(editorial.access_token, name, { slug: 'r3-show' })).json(),
+      ).toMatchObject({
+        result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
+      })
+    }
+
+    expect(
+      await (await rpc(listener.access_token, 'get_post', { postId: 'r3-private' })).json(),
+    ).toMatchObject({ result: { isError: true } })
+
+    const posts = Schema.decodeUnknownSync(
+      Schema.Struct({ result: Schema.Struct({ structuredContent: PublishedPostsResult }) }),
+    )(await (await rpc(listener.access_token, 'list_published_posts')).json()).result
+      .structuredContent
+
+    expect(posts.posts.map(({ postId }) => postId)).toEqual(['r3-public'])
+    const showResponse = await rpc(listener.access_token, 'get_show', { slug: 'r3-show' })
+    expect(
+      Schema.decodeUnknownSync(
+        Schema.Struct({ result: Schema.Struct({ structuredContent: PublicShowResult }) }),
+      )(await showResponse.json()).result.structuredContent.show,
+    ).toMatchObject({
+      showId: 'r3-show',
+      reviewUrl: 'https://editorial-test.localhost/shows/r3-show',
+    })
+
+    for (const [offset, expected] of [
+      [0, 'r3-episode-z'],
+      [1, 'r3-episode-a'],
+    ] as const) {
+      const response = await rpc(listener.access_token, 'list_show_episodes', {
+        slug: 'r3-show',
+        limit: 1,
+        offset,
+      })
+
+      const body = await response.text()
+      expect(body).not.toMatch(/SECRET|\.mp3|DO NOT RENDER|createdById|playCount/)
+
+      const page = Schema.decodeUnknownSync(
+        Schema.fromJsonString(
+          Schema.Struct({ result: Schema.Struct({ structuredContent: ShowEpisodesResult }) }),
+        ),
+      )(body).result.structuredContent
+
+      expect(page.episodes.map(({ audioId }) => audioId)).toEqual([expected])
+      expect(page.pagination).toEqual({ total: 2, limit: 1, offset, hasMore: offset === 0 })
+    }
+
+    for (const name of ['get_show', 'list_show_episodes']) {
+      const hidden = await (
+        await rpc(listener.access_token, name, { slug: 'r3-hidden-show' })
+      ).json()
+
+      expect(hidden).toEqual(
+        await (await rpc(listener.access_token, name, { slug: 'absent' })).json(),
+      )
+      expect(hidden).toMatchObject({
+        result: { isError: true, content: [{ text: expect.stringContaining('not_found') }] },
+      })
+    }
+
+    const Saved = Schema.Struct({ result: Schema.Struct({ structuredContent: GetPostResult }) })
+
+    const draft = Schema.decodeUnknownSync(Saved)(
+      await (
+        await rpc(combined.access_token, 'create_draft', {
+          requestId: crypto.randomUUID(),
+          title: 'Combined R3 draft',
+          content: 'Private combined body',
+        })
+      ).json(),
+    ).result.structuredContent
+
+    expect(draft.post.content).toBe('Private combined body')
+    expect(
+      Schema.decodeUnknownSync(Saved)(
+        await (await rpc(combined.access_token, 'get_post', { postId: draft.post.postId })).json(),
+      ).result.structuredContent,
+    ).toEqual(draft)
+    expect(
+      await (await rpc(combined.access_token, 'get_show', { slug: 'r3-show' })).json(),
+    ).toMatchObject({ result: { structuredContent: { show: { showId: 'r3-show' } } } })
+    expect(
+      await (await rpc(listener.access_token, 'get_post', { postId: draft.post.postId })).json(),
+    ).toMatchObject({ result: { isError: true } })
+    await fixture.db.update(user).set({ banned: true }).where(eq(user.id, 'reader'))
+    expect((await rpc(listener.access_token, 'get_show', { slug: 'r3-show' })).status).toBe(401)
+    await fixture.db.update(user).set({ banned: false }).where(eq(user.id, 'reader'))
+    expect((await rpc(listener.access_token, 'get_show', { slug: 'r3-show' })).status).toBe(200)
+    await Effect.runPromise(
+      fixture.service.disconnect(Schema.decodeUnknownSync(UserId)('reader'), clientId),
+    )
+    expect((await rpc(listener.access_token, 'get_show', { slug: 'r3-show' })).status).toBe(401)
+  } finally {
+    await handler.dispose()
+  }
+}, 30_000)
 
 test('independent catalogue module composes with live OAuth and owned draft services', async () => {
   await using fixture = await createEditorialOAuthFixture()

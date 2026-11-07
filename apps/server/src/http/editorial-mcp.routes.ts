@@ -3,6 +3,7 @@ import { ByteSize, Effect, Layer, Match, Option, Redacted, Schema } from 'effect
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
 
 import { Auth } from '@/lib/auth'
+import { EditorialDraftServiceLayer } from '@/mcp/drafts'
 import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from '@/mcp/editorial'
 import { EditorialMcpSettings } from '@/mcp/model'
 import { makeEditorialMcpLayer } from '@/mcp/server'
@@ -94,7 +95,7 @@ export const EditorialMcpRoutesLive = Layer.unwrap(
                   onSuccess: (principal) =>
                     httpEffect.pipe(
                       Effect.provideService(EditorialActor, principal),
-                      Effect.provideService(HttpServerRequest.MaxBodySize, ByteSize.kibibytes(16)),
+                      Effect.provideService(HttpServerRequest.MaxBodySize, ByteSize.kibibytes(640)),
                       Effect.map(noStore),
                     ),
                 }),
@@ -110,7 +111,7 @@ export const EditorialMcpRoutesLive = Layer.unwrap(
       HttpServerResponse.json({
         resource: settings.resourceUrl,
         authorization_servers: [settings.issuer],
-        scopes_supported: ['posts:read'],
+        scopes_supported: ['posts:read', 'drafts:write'],
         bearer_methods_supported: ['header'],
       }).pipe(Effect.map(noStore), Effect.orDie)
 
@@ -143,6 +144,7 @@ export const EditorialMcpRoutesLive = Layer.unwrap(
       HttpRouter.add('GET', '/.well-known/oauth-authorization-server', authorizationMetadata),
       HttpRouter.add('GET', '/.well-known/oauth-authorization-server/auth', authorizationMetadata),
       makeEditorialMcpLayer(origins).pipe(
+        Layer.provide(EditorialDraftServiceLayer),
         Layer.provide(EditorialReadServiceLayer),
         Layer.provide(endpointConfig),
       ),

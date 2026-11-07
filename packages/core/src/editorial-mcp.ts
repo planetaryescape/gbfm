@@ -69,10 +69,22 @@ export const EditorialReadScopes = Schema.Array(EditorialReadScope).check(
 
 export type EditorialReadScopes = typeof EditorialReadScopes.Type
 
+export const EditorialScope = Schema.Literals(['posts:read', 'offline_access', 'drafts:write'])
+
+export type EditorialScope = typeof EditorialScope.Type
+
+export const EditorialScopes = Schema.Array(EditorialScope).check(
+  Schema.makeFilter(
+    (scopes) => scopes.includes('posts:read') && new Set(scopes).size === scopes.length,
+  ),
+)
+
+export type EditorialScopes = typeof EditorialScopes.Type
+
 export const EditorialPrincipal = Schema.Struct({
   userId: UserId,
   clientId: OAuthClientId,
-  scopes: EditorialReadScopes,
+  scopes: EditorialScopes,
 })
 
 export type EditorialPrincipal = typeof EditorialPrincipal.Type

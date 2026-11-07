@@ -68,7 +68,42 @@ test('signed-out users see connection context, recover from a bad password and a
 
   await page.getByRole('button', { name: 'Allow connection', exact: true }).click()
   await expect(
-    page.getByText('Connected to local GBFM. Read-only tools: list_drafts, get_post.'),
+    page.getByText(
+      'Connected to local GBFM. Available tools: create_draft, update_draft, list_drafts, get_post.',
+    ),
+  ).toBeVisible()
+})
+
+test('draft-write consent accurately limits editing to owned unpublished drafts', async ({
+  page,
+}, info) => {
+  await page.goto('/api/e2e/mcp-start?write=1')
+  await signIn(page)
+  await expect(consent(page)).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Read and draft-write access', exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByText('Create and edit your own unpublished editorial drafts'),
+  ).toBeVisible()
+  await expect(
+    page.getByText('Cannot publish, delete, upload files or edit published posts.'),
+  ).toBeVisible()
+  await expect(page.getByText('Read-only access', { exact: true })).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+
+  if (process.env.MCP_EVIDENCE_DIR)
+    await page.screenshot({
+      path: `${process.env.MCP_EVIDENCE_DIR}/${info.project.name}-draft-consent.png`,
+      fullPage: true,
+    })
+  await page.getByRole('button', { name: 'Allow connection', exact: true }).click()
+  await expect(
+    page.getByText(
+      'Connected to local GBFM. Available tools: create_draft, update_draft, list_drafts, get_post.',
+    ),
   ).toBeVisible()
 })
 

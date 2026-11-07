@@ -1,7 +1,7 @@
 import {
   EditorialPrincipal,
-  EditorialReadScope,
-  EditorialReadScopes,
+  EditorialScope,
+  EditorialScopes,
   McpResourceUrl,
   OAuthClientId,
   OAuthGrantId,
@@ -41,7 +41,7 @@ const PersistedGrant = Schema.Struct({
   userId: UserId,
   clientId: OAuthClientId,
   referenceId: OAuthGrantId,
-  scopes: Schema.fromJsonString(EditorialReadScopes),
+  scopes: Schema.fromJsonString(EditorialScopes),
   resources: Schema.fromJsonString(Schema.Array(McpResourceUrl)),
   sessionId: Schema.NullOr(Schema.String),
   sessionExpiresAt: Schema.NullOr(Schema.Date),
@@ -54,7 +54,7 @@ const PersistedGrant = Schema.Struct({
 const PersistedConnection = Schema.Struct({
   clientId: OAuthClientId,
   name: Schema.NullOr(Schema.String),
-  scopes: Schema.fromJsonString(EditorialReadScopes),
+  scopes: Schema.fromJsonString(EditorialScopes),
   createdAt: Schema.Date,
 })
 
@@ -140,7 +140,7 @@ const makeEditorialOAuth = Effect.gen(function* () {
     const policy = yield* Schema.decodeUnknownEffect(
       Schema.Struct({
         disabled: Schema.NullOr(Schema.Boolean),
-        allowedScopes: Schema.NullOr(Schema.fromJsonString(Schema.Array(EditorialReadScope))),
+        allowedScopes: Schema.NullOr(Schema.fromJsonString(Schema.Array(EditorialScope))),
       }),
     )(resource).pipe(Effect.mapError(() => new EditorialOAuthInvalidToken()))
 
@@ -178,7 +178,7 @@ const makeEditorialOAuth = Effect.gen(function* () {
 
     const connections = new Map<
       OAuthClientId,
-      { clientId: OAuthClientId; name: string; scopes: EditorialReadScopes; createdAt: string }
+      { clientId: OAuthClientId; name: string; scopes: EditorialScopes; createdAt: string }
     >()
 
     for (const row of parsed) {

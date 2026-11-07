@@ -114,7 +114,9 @@ const server = Bun.serve({
         client_id: client.client_id,
         redirect_uri: callback,
         response_type: 'code',
-        scope: 'posts:read offline_access',
+        scope: url.searchParams.has('write')
+          ? 'posts:read offline_access drafts:write'
+          : 'posts:read offline_access',
         resource: settings.resourceUrl,
         code_challenge: challenge,
         code_challenge_method: 'S256',
@@ -195,7 +197,7 @@ const server = Bun.serve({
       )(await discovered.json())
 
       return new Response(
-        `Connected to local GBFM. Read-only tools: ${tools.result.tools.map((tool) => tool.name).join(', ')}.`,
+        `Connected to local GBFM. Available tools: ${tools.result.tools.map((tool) => tool.name).join(', ')}.`,
         { headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' } },
       )
     }

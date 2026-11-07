@@ -4,6 +4,7 @@ import { expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
 import { postCreators, postsTable } from '@/db/post.schema'
+import { GetPostResult } from '@/mcp/contracts'
 import { ConfigService, createConfig } from '@/services/config.service'
 import { createEditorialOAuthFixture, OAuthTokens } from '@/test/editorial-oauth'
 import { createTestWebHandler } from '@/test/http-handler'
@@ -19,6 +20,128 @@ const ReadResult = Schema.Struct({
       posts: Schema.Array(Schema.Struct({ postId: Schema.String })),
     }),
   }),
+})
+
+test('composed OAuth MCP enforces draft-write consent, saved versions and revocation', async () => {
+  await using fixture = await createEditorialOAuthFixture()
+  const clientId = await fixture.register()
+
+  const readTokens = Schema.decodeUnknownSync(OAuthTokens)(
+    await (await fixture.exchange(clientId, await fixture.authorize(clientId))).json(),
+  )
+
+  const writeTokens = Schema.decodeUnknownSync(OAuthTokens)(
+    await (
+      await fixture.exchange(
+        clientId,
+        await fixture.authorize(clientId, 'owner', 'posts:read offline_access drafts:write'),
+      )
+    ).json(),
+  )
+
+  const handler = createTestWebHandler(
+    fixture.db.$client,
+    undefined,
+    undefined,
+    undefined,
+    Layer.succeed(ConfigService, {
+      ...fixture.config,
+      auth: {
+        ...fixture.config.auth,
+        betterAuthSecret: 'disposable-test-secret-with-at-least-32-chars',
+      },
+    }),
+  )
+
+  const call = (name: string, args: Schema.Json, token = writeTokens.access_token) =>
+    handler.handler(
+      new Request(fixture.config.mcp.resourceUrl, {
+        method: 'POST',
+        headers: {
+          accept: 'application/json, text/event-stream',
+          'content-type': 'application/json',
+          'mcp-protocol-version': '2026-07-28',
+          'mcp-method': 'tools/call',
+          'mcp-name': name,
+          authorization: `Bearer ${Redacted.value(token)}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: {
+            name,
+            arguments: args,
+            _meta: {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': {},
+            },
+          },
+        }),
+      }),
+    )
+
+  const Saved = Schema.Struct({ result: Schema.Struct({ structuredContent: GetPostResult }) })
+
+  const input = {
+    requestId: crypto.randomUUID(),
+    title: 'An ode to jazz',
+    content: 'A disposable editorial draft.',
+  }
+
+  try {
+    const denied = await call('create_draft', input, readTokens.access_token)
+    expect(denied.status).toBe(200)
+    expect(await denied.json()).toMatchObject({
+      result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
+    })
+    const created = await call('create_draft', input)
+    expect(created.status).toBe(200)
+    expect(created.headers.get('cache-control')).toBe('private, no-store')
+    const saved = Schema.decodeUnknownSync(Saved)(await created.json()).result.structuredContent
+    expect(saved.post).toMatchObject({ creatorIds: ['owner'], draft: true, title: input.title })
+
+    const update = {
+      requestId: crypto.randomUUID(),
+      postId: saved.post.postId,
+      expectedVersion: saved.post.version,
+      content: 'A jazz thought. '.repeat(2000),
+    }
+
+    const updated = await call('update_draft', update)
+    expect(updated.status).toBe(200)
+    const next = Schema.decodeUnknownSync(Saved)(await updated.json()).result.structuredContent
+    expect(next.post.content).toBe(update.content)
+    const replay = await call('update_draft', update)
+    expect(Schema.decodeUnknownSync(Saved)(await replay.json()).result.structuredContent).toEqual(
+      next,
+    )
+
+    const deniedUpdate = await call(
+      'update_draft',
+      { ...update, requestId: crypto.randomUUID(), expectedVersion: next.post.version },
+      readTokens.access_token,
+    )
+
+    expect(await deniedUpdate.json()).toMatchObject({ result: { isError: true } })
+
+    await fixture.db.update(user).set({ banned: true }).where(eq(user.id, 'owner'))
+    expect((await call('create_draft', { ...input, requestId: crypto.randomUUID() })).status).toBe(
+      401,
+    )
+    await fixture.db.update(user).set({ banned: false }).where(eq(user.id, 'owner'))
+    await Effect.runPromise(fixture.service.disconnect(fixture.userId, clientId))
+    expect((await call('update_draft', update)).status).toBe(401)
+
+    const [persisted] = await fixture.db
+      .select()
+      .from(postsTable)
+      .where(eq(postsTable.id, next.post.postId))
+
+    expect(persisted).toMatchObject({ draft: true, content: update.content })
+  } finally {
+    await handler.dispose()
+  }
 })
 
 test('composed API serves connection instructions without OAuth while MCP stays protected', async () => {
@@ -243,6 +366,8 @@ test('composed HTTP MCP scopes tokens, drafts, connections and disconnection to 
     const listed = await rpc('tools/list', tokens.access_token)
     expect(listed.status).toBe(200)
     expect(Schema.decodeUnknownSync(ToolList)(await listed.json()).result.tools).toEqual([
+      { name: 'create_draft' },
+      { name: 'update_draft' },
       { name: 'list_drafts' },
       { name: 'get_post' },
     ])

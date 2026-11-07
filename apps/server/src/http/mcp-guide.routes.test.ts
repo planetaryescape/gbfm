@@ -48,7 +48,13 @@ test.each([
     expect(text).toContain('posts:read')
     expect(text).toContain('list_drafts')
     expect(text).toContain('get_post')
-    expect(text).toContain('cannot create, edit, publish or delete')
+    expect(text).toContain('create_draft')
+    expect(text).toContain('update_draft')
+    expect(text).toContain('drafts:write')
+    expect(text).toContain('Existing connections remain read-only')
+    expect(text).toContain(
+      'never publish, delete, change creators, change media or edit published posts',
+    )
     expect(text).toContain('/mcps')
     expect(text).toContain('personal API keys cannot replace MCP OAuth credentials')
 

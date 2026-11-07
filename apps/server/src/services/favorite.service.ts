@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, or } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, isNull, or } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/sqlite-core'
 import { Context, Effect, Layer } from 'effect'
 
@@ -403,17 +403,28 @@ const getFavoritesEffect = (
             .from(favoritesTable)
             .leftJoin(audioTable, eq(favoritesTable.audioId, audioTable.id))
             .leftJoin(showsTable, eq(favoritesTable.showId, showsTable.id))
-            .leftJoin(audioShowsTable, eq(audioTable.showId, audioShowsTable.id))
+            .leftJoin(
+              audioShowsTable,
+              and(eq(audioTable.showId, audioShowsTable.id), eq(audioShowsTable.draft, false)),
+            )
             .where(
               and(
                 eq(favoritesTable.userId, userId),
                 or(
-                  and(isNotNull(favoritesTable.audioId), eq(audioTable.draft, false)),
-                  and(isNotNull(favoritesTable.showId), eq(showsTable.draft, false)),
+                  and(
+                    isNotNull(favoritesTable.audioId),
+                    isNull(favoritesTable.showId),
+                    eq(audioTable.draft, false),
+                  ),
+                  and(
+                    isNotNull(favoritesTable.showId),
+                    isNull(favoritesTable.audioId),
+                    eq(showsTable.draft, false),
+                  ),
                 ),
               ),
             )
-            .orderBy(desc(favoritesTable.createdAt))
+            .orderBy(desc(favoritesTable.createdAt), desc(favoritesTable.id))
             .limit(limit)
             .offset(offset),
         catch: (error) =>

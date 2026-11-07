@@ -9,6 +9,12 @@ const notes = Schema.String.pipe(Schema.check(Schema.isMaxLength(20000)))
 
 const sourceUrl = Schema.String.pipe(Schema.check(Schema.isMaxLength(2048)))
 
+/** Owner-observed concurrency token; public projections omit it. */
+export const ListeningVersion = Schema.String.check(
+  Schema.isPattern(/^revision:[1-9][0-9]{0,15}$/),
+  Schema.makeFilter((value) => Number.isSafeInteger(Number(value.slice('revision:'.length)))),
+)
+
 /** A user's saved external mix; notes share the mix's publication state. */
 export const SavedMix = Schema.Struct({
   id: Schema.String,
@@ -19,6 +25,7 @@ export const SavedMix = Schema.Struct({
   notes: Schema.String,
   status: Schema.Literals(['to-listen', 'listening', 'listened']),
   published: Schema.Boolean,
+  version: Schema.optionalKey(ListeningVersion),
 })
 
 export type SavedMix = typeof SavedMix.Type
@@ -30,6 +37,7 @@ export const ListeningCollection = Schema.Struct({
   description: Schema.String,
   published: Schema.Boolean,
   ownerName: Schema.String,
+  version: Schema.optionalKey(ListeningVersion),
 })
 
 /** Snapshot candidates; saving them is a separate, explicit operation. */
@@ -56,22 +64,41 @@ export const SaveMixesInput = Schema.Struct({
 
 /** One notes field, explicitly published with its saved mix. */
 export const EditMixInput = Schema.Struct({
+  expectedVersion: ListeningVersion,
   title: shortText,
   notes,
   status: SavedMix.fields.status,
   published: Schema.Boolean,
 })
 
-/** Collections have their own public/private switch. */
-export const EditCollectionInput = Schema.Struct({
+/** Browser creation retains its explicit public/private switch. MCP creation is private-only. */
+export const CreateListeningCollectionInput = Schema.Struct({
   title: shortText,
   description: Schema.String.pipe(Schema.check(Schema.isMaxLength(2000))),
   published: Schema.Boolean,
 })
 
+/** Existing collection changes require the version the caller actually observed. */
+export const EditCollectionInput = Schema.Struct({
+  ...CreateListeningCollectionInput.fields,
+  expectedVersion: ListeningVersion,
+})
+
+export const ListeningVersionInput = Schema.Struct({ expectedVersion: ListeningVersion })
+
+export const ListeningMembershipInput = Schema.Struct({
+  expectedVersion: ListeningVersion,
+  included: Schema.Boolean,
+})
+
 const success = Schema.Struct({ success: Schema.Boolean })
 
-const errors = [HttpApiError.BadRequest, HttpApiError.NotFound, HttpApiError.ServiceUnavailable]
+const errors = [
+  HttpApiError.BadRequest,
+  HttpApiError.NotFound,
+  HttpApiError.Conflict,
+  HttpApiError.ServiceUnavailable,
+]
 
 /** Multi-user listening library and anonymous, publication-filtered collections. */
 export const ListeningGroup = HttpApiGroup.make('listening')
@@ -106,13 +133,14 @@ export const ListeningGroup = HttpApiGroup.make('listening')
   .add(
     HttpApiEndpoint.delete('deleteMix', '/api/listening/mixes/:id', {
       params: { id: Schema.String },
+      payload: ListeningVersionInput,
       success,
       error: errors,
     }).middleware(AuthMiddleware),
   )
   .add(
     HttpApiEndpoint.post('createCollection', '/api/listening/collections', {
-      payload: EditCollectionInput,
+      payload: CreateListeningCollectionInput,
       success,
       error: errors,
     }).middleware(AuthMiddleware),
@@ -128,6 +156,7 @@ export const ListeningGroup = HttpApiGroup.make('listening')
   .add(
     HttpApiEndpoint.delete('deleteCollection', '/api/listening/collections/:id', {
       params: { id: Schema.String },
+      payload: ListeningVersionInput,
       success,
       error: errors,
     }).middleware(AuthMiddleware),
@@ -135,7 +164,7 @@ export const ListeningGroup = HttpApiGroup.make('listening')
   .add(
     HttpApiEndpoint.put('membership', '/api/listening/collections/:id/mixes/:mixId', {
       params: { id: Schema.String, mixId: Schema.String },
-      payload: Schema.Struct({ included: Schema.Boolean }),
+      payload: ListeningMembershipInput,
       success,
       error: errors,
     }).middleware(AuthMiddleware),

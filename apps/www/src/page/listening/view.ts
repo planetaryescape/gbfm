@@ -235,6 +235,7 @@ const mixEditor = (
       ),
       action('edit-mix', returnTo, [
         hidden('id', mix.id),
+        hidden('expectedVersion', mix.version ?? ''),
         h.label(
           [],
           [
@@ -350,6 +351,7 @@ const mixEditor = (
 
                 return action('membership', returnTo, [
                   hidden('id', collection.id),
+                  hidden('expectedVersion', collection.version ?? ''),
                   hidden('mixId', mix.id),
                   hidden('included', String(!included)),
                   button(`${included ? '− Remove from' : '+ Add to'} ${collection.title}`),
@@ -361,7 +363,11 @@ const mixEditor = (
                     ['Create a collection to group your mixes.'],
                   )
                 : h.empty,
-              action('delete-mix', returnTo, [hidden('id', mix.id), button('Remove saved mix')]),
+              action('delete-mix', returnTo, [
+                hidden('id', mix.id),
+                hidden('expectedVersion', mix.version ?? ''),
+                button('Remove saved mix'),
+              ]),
             ],
           ),
         ],
@@ -399,6 +405,7 @@ const collectionSettings = (
                 [
                   action('edit-collection', returnTo, [
                     hidden('id', collection.id),
+                    hidden('expectedVersion', collection.version ?? ''),
                     textField('title', 'Collection name', collection.title, true),
                     textField('description', 'Description', collection.description),
                     checkbox('published', 'Make collection public', collection.published),
@@ -415,6 +422,7 @@ const collectionSettings = (
                     : h.empty,
                   action('delete-collection', '/listening', [
                     hidden('id', collection.id),
+                    hidden('expectedVersion', collection.version ?? ''),
                     button('Delete collection'),
                   ]),
                 ],

@@ -1,5 +1,7 @@
-import { SavedMix, ListeningCollection } from '@gbfm/api/listening'
+import { SavedMix, ListeningCollection, ListeningVersion } from '@gbfm/api/listening'
 import { Schema } from 'effect'
+
+export { ListeningVersion } from '@gbfm/api/listening'
 
 /** Owner-only pages never accept an owner ID or disclose global totals. */
 export const ListeningPageInput = Schema.Struct({
@@ -10,11 +12,16 @@ export const ListeningPageInput = Schema.Struct({
 const pagination = Schema.Struct({ limit: Schema.Int, offset: Schema.Int, hasMore: Schema.Boolean })
 
 /** Private notes are returned only with listening:read authority. */
-export const SavedMixPage = Schema.Struct({ mixes: Schema.Array(SavedMix), pagination })
+export const SavedMixPage = Schema.Struct({
+  mixes: Schema.Array(Schema.Struct({ ...SavedMix.fields, version: ListeningVersion })),
+  pagination,
+})
 
 /** Collection metadata excludes membership counts and other owners' records. */
 export const CollectionPage = Schema.Struct({
-  collections: Schema.Array(ListeningCollection),
+  collections: Schema.Array(
+    Schema.Struct({ ...ListeningCollection.fields, version: ListeningVersion }),
+  ),
   pagination,
 })
 
@@ -22,21 +29,29 @@ const requestId = Schema.String.check(Schema.isUUID(4))
 
 const id = Schema.NonEmptyString.check(Schema.isMaxLength(200))
 
-const expectedVersion = Schema.NonEmptyString.check(Schema.isMaxLength(200))
+const expectedVersion = ListeningVersion
+
+/** Receipts retain only stable identity/version, never private text or publication controls. */
+export const SavedMixCommandResult = Schema.Struct({ mixId: id, version: ListeningVersion })
+
+export const CollectionCommandResult = Schema.Struct({
+  collectionId: id,
+  version: ListeningVersion,
+})
 
 const title = Schema.NonEmptyString.check(
   Schema.isMaxLength(300),
   Schema.makeFilter((value) => value.trim().length > 0),
 )
 
-/** Contract only: disabled until approved durable receipts exist; never accepts publication. */
+/** Save privately through durable receipts; never accepts publication. */
 export const SaveMixInput = Schema.Struct({
   requestId,
   url: Schema.NonEmptyString.check(Schema.isMaxLength(2048)),
   title,
 })
 
-/** Contract only: notes edit cannot replace title, status or publication state. */
+/** Notes edit cannot replace title, status or publication state. */
 export const UpdateListeningNotesInput = Schema.Struct({
   requestId,
   mixId: id,
@@ -44,7 +59,7 @@ export const UpdateListeningNotesInput = Schema.Struct({
   notes: Schema.String.check(Schema.isMaxLength(20_000)),
 })
 
-/** Contract only: status edit cannot overwrite notes or publish a saved mix. */
+/** Status edit cannot overwrite notes or publish a saved mix. */
 export const SetListeningStatusInput = Schema.Struct({
   requestId,
   mixId: id,
@@ -52,14 +67,14 @@ export const SetListeningStatusInput = Schema.Struct({
   status: SavedMix.fields.status,
 })
 
-/** Contract only: new collections are private, with no publication parameter. */
+/** New collections are private, with no publication parameter. */
 export const CreateCollectionInput = Schema.Struct({
   requestId,
   title,
   description: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000))),
 })
 
-/** Contract only: a collection edit needs an atomic collection revision check. */
+/** A collection edit needs an atomic collection revision check. */
 export const UpdateCollectionInput = Schema.Struct({
   requestId,
   collectionId: id,
@@ -68,7 +83,7 @@ export const UpdateCollectionInput = Schema.Struct({
   description: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000))),
 }).check(Schema.makeFilter((input) => input.title !== undefined || input.description !== undefined))
 
-/** Contract only: desired membership, both targets owned, guarded by collection revision. */
+/** Desired membership, both targets owned/private, guarded by collection revision. */
 export const SetCollectionMembershipInput = Schema.Struct({
   requestId,
   collectionId: id,

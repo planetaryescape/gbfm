@@ -1,13 +1,53 @@
-# M1 #523: partial read-only preview and shared-writer gate
+# M1 #523: music edits and shared guarded writer
+
+## Resumed implementation authority (2026-11-07)
+
+P1 relayed Guide Fari's blanket approval at 17:30:38.618Z, source coordinator
+message `M-25AnVGIQb4kP4RIwEzygur`:
+
+> everything that needs my approval, you have my thumbs up; the claude threads that got stuck because of limits, you can take that wrok over as a medium sol thing instead
+
+This records a relay, not direct human-message provenance. The approval covers
+the surfaced consolidated receipt/revision/guarded-writer recommendations, not
+production operations or merging MCP PRs. See #523's resumed-scope comment.
+Earlier proposal/approval language below describes the reviewed preview baseline;
+the remaining requirements are implementation and verification work, not another
+approval request. P1 has now allocated the exact edit/delete music service
+methods, genre-only writer and existing edit/read API/HTTP envelopes to M1.
+I1 retains creates/canonical/artwork. Dashboard shared command/update/model/message
+remain P1-only; M1 may change `page/catalog.ts` only. Domain schema owner supplies
+0017 revisions and 0018 facts; common operations owner supplies 0016 receipts.
+No triggers are assumed: allocated service/raw writers must implement all
+invalidation and projection changes explicitly in the guarded batch.
+
+Current local continuation extends read-only preview to all eight command forms.
+Metadata allowlists: artist name/bio; album title/releaseDate (canonical UTC ISO);
+track title/trackNumber; label name/description. Identity, owner, publication,
+content authoring and managed artwork are excluded. Genre sets are distinct,
+ordered, at most 30 trimmed names; empty clears. Credit roles are exactly existing
+primary/featured/producer/null, ordered by displayOrder then artistId. Each plan
+reads target, relationship and reference state in one SELECT; oversized existing
+collections fail closed rather than truncate a purported complete observation.
+Mutation registration remains absent until the actual common executor and all
+browser/API/PAT/canonical writers are integrated and verified.
+
+`artist-fanout.ts` is the canonical/MCP shared SQL-statement seam: append after
+the artist CAS marks the physical attempt, before the shared receipt outcome.
+Every statement requires common fence plus the artist's matching attempt marker;
+parent projection and revision invalidation occur in the same batch. It does not
+prove canonical caller compliance until integrated. M2 alias observations bind to
+the same artist revision, so rename does not delete valid alias facts. Primary
+name/alias-name-key collisions must reject before rename; recording-credit FKs
+restrict artist deletion. `version.ts` provides M2's opaque resource-bound token
+from this same integer revision, not another ledger.
 
 Base: verified remote `feat/514-mcp-foundation` at
 `2d1b5592826e66e3a198dc117c153e062264fc5c` (PR #548), above P0 #547;
 prod baseline `aec2782a97bd91e2f030ef05095f76b54fcc79b1`.
 Effect 4.0.6, Drizzle 0.45.4, Miniflare 5.20260801.1-alpha, MCP 2026-07-28.
-No #551 dependency. Owned files: this directory plus the explicitly cleared
-`album.service.ts` import/`removeArtistFromAlbumEffect` predicate correction only.
-All broader shared paths below are **requested, not reserved or approved**. I1 owns music-import; M2 must use
-the eventual shared revision/receipt seam, not introduce another ledger.
+No #551 dependency. Ownership is the confirmed scope above; the earlier
+exact-pair fix remains limited to `album.service.ts`'s import/predicate.
+I1 owns music-import; M2 uses the shared revision/receipt seam, not another ledger.
 
 ## Delivered surface
 
@@ -19,12 +59,13 @@ Composition requires existing `Database`, `McpAuthorization`, and
 The real MCP test composes this toolkit with the actual request-scoped adapter;
 its principal is injected, **not** evidence of persisted OAuth admission.
 
-Input is `{ change: { operation, entityId, albumType | albumId } }`.
+Input is `{ change: { operation, entityId, ...operationSpecificFields } }`;
+`commands.ts` defines the exact per-operation forms and metadata allowlists.
 Required nullable fields distinguish explicit clearing from missing input.
-Only supported album types are accepted. A missing track, album or proposed
-album reference returns `not_found`. Shared music records have no per-user owner
+Only supported album types/credit roles are accepted. A missing target or
+proposed reference returns `not_found`. Shared music records have no per-user owner
 policy: current admin + `catalogue:write` is required even for this preview.
-No actor IDs, bodies, provider metadata, URLs or other unrelated fields are read.
+No actor IDs, content bodies, provider metadata, URLs or other unrelated fields are read.
 No network calls, writes, receipts or cache enrichment occur.
 
 Output is bounded observed before/after state with `status: preview_only` and
@@ -43,15 +84,15 @@ authorization ordering belongs to P1, not a domain-specific transport override.
 
 | Selected capability | This PR | Remaining contract / gate |
 | --- | --- | --- |
-| `update_music_metadata` | Undelivered | Explicit per-kind metadata allowlist; no owner, identity, slug, publication or broad partial payload |
-| `set_music_genres` | Undelivered | Desired ordered set, bounded distinct names; empty clears; preserve tags; atomic revision + genre junctions |
+| `update_music_metadata` | Preview only; no mutation tool | Explicit per-kind metadata allowlist; guarded apply remains |
+| `set_music_genres` | Preview only; no mutation tool | Desired ordered set, empty clears; atomic revision + genre junctions must preserve tags |
 | `set_album_type` | Preview only; no mutation tool | LP, EP, single, compilation or null; shared guarded writer + receipt |
 | `set_track_album` | Preview only; no mutation tool | Existing album or null; validate reference in atomic batch, guard track and relevant reference state |
-| `set_artist_credit` | Undelivered | Existing album/track credit, existing roles primary/featured/producer/null and display order; no new P2 recording roles |
-| `remove_artist_credit` | Undelivered | Exact parent+artist pair; atomic junction, display names and parent revision |
-| `set_label_affiliation` | Undelivered | Existing label ↔ artist/album only; guard both endpoints; no invented roles |
-| `remove_label_affiliation` | Undelivered | Exact pair, same endpoint guards and receipts |
-| `preview_metadata_changes` | Partial, two proposals above | Other six proposal forms and shared guarded command planner remain undelivered |
+| `set_artist_credit` | Preview only; no mutation tool | Existing album/track credit and existing roles/order; atomic projection apply remains |
+| `remove_artist_credit` | Preview only; no mutation tool | Exact parent+artist pair; atomic junction, display names and parent revision |
+| `set_label_affiliation` | Preview only; no mutation tool | Existing label ↔ artist/album only; atomic guards for both endpoints remain |
+| `remove_label_affiliation` | Preview only; no mutation tool | Exact pair, same endpoint guards and receipts |
+| `preview_metadata_changes` | All eight proposal forms | Actual revision observation and shared guarded apply integration remain |
 
 All eight write capabilities remain undelivered, not registered stubs. #523 is
 not complete. Apart from the exact-pair bug fix, no shared writer changed.

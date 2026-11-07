@@ -1,41 +1,33 @@
-import { eq } from 'drizzle-orm'
 import { Context, Effect, Layer, Schema } from 'effect'
 import { Tool, Toolkit } from 'effect/ai'
 
 import { Database } from '@/db/layer'
-import { ALBUM_TYPES, musicAlbumsTable, musicTracksTable } from '@/db/music-entity.schema'
 
 import { McpAuthorization, McpPermission } from '../authorization'
 import { EndpointIdentity, McpToolError } from '../contracts'
 import { EditorialMcpConfig } from '../editorial'
+import { MusicEditId, MusicEditPreviewInput } from './commands'
+import { planMusicEdit } from './planner'
 
-const Id = Schema.NonEmptyString.check(Schema.isMaxLength(200))
-
-// This is deliberately not an apply envelope: no request key or revision is issued
-// until the shared browser/MCP writer and durable receipt gate are satisfied.
-export const PreviewMetadataInput = Schema.Struct({
-  change: Schema.Union([
-    Schema.Struct({
-      operation: Schema.Literal('set_album_type'),
-      entityId: Id,
-      albumType: Schema.NullOr(Schema.Literals(ALBUM_TYPES)),
-    }),
-    Schema.Struct({
-      operation: Schema.Literal('set_track_album'),
-      entityId: Id,
-      albumId: Schema.NullOr(Id),
-    }),
-  ]),
-}).annotate({ parseOptions: { onExcessProperty: 'error' } })
+export const PreviewMetadataInput = MusicEditPreviewInput
 
 export const PreviewMetadataResult = Schema.Struct({
   endpoint: EndpointIdentity,
   status: Schema.Literal('preview_only'),
-  operation: Schema.Literals(['set_album_type', 'set_track_album']),
-  entityId: Id,
-  field: Schema.Literals(['albumType', 'albumId']),
-  before: Schema.NullOr(Schema.String.check(Schema.isMaxLength(200))),
-  after: Schema.NullOr(Schema.String.check(Schema.isMaxLength(200))),
+  operation: Schema.Literals([
+    'update_music_metadata',
+    'set_music_genres',
+    'set_album_type',
+    'set_track_album',
+    'set_artist_credit',
+    'remove_artist_credit',
+    'set_label_affiliation',
+    'remove_label_affiliation',
+  ]),
+  entityId: MusicEditId,
+  field: Schema.Literals(['metadata', 'genres', 'albumType', 'albumId', 'credits', 'labelIds']),
+  before: Schema.Json,
+  after: Schema.Json,
   changed: Schema.Boolean,
   applyAvailable: Schema.Literal(false),
   limitation: Schema.Literal(
@@ -45,8 +37,6 @@ export const PreviewMetadataResult = Schema.Struct({
 
 const unavailable = () =>
   new McpToolError({ code: 'unavailable', message: 'Music metadata preview is unavailable.' })
-
-const notFound = () => new McpToolError({ code: 'not_found', message: 'Music entity not found.' })
 
 const makePreview = Effect.gen(function* () {
   const db = yield* Database
@@ -71,44 +61,7 @@ const makePreview = Effect.gen(function* () {
         ),
       )
 
-      // One statement observes both the track and referenced album. No provider,
-      // mutation service, cache enrichment, receipt or identity writer is invoked.
-      const row = yield* Effect.tryPromise({
-        try: async () => {
-          if (input.operation === 'set_album_type') {
-            const [album] = await db
-              .select({ before: musicAlbumsTable.albumType })
-              .from(musicAlbumsTable)
-              .where(eq(musicAlbumsTable.id, input.entityId))
-              .limit(1)
-
-            return album && { ...album, referenceExists: true }
-          }
-
-          const [track] = await db
-            .select({ before: musicTracksTable.albumId, referencedId: musicAlbumsTable.id })
-            .from(musicTracksTable)
-            .leftJoin(musicAlbumsTable, eq(musicAlbumsTable.id, input.albumId ?? ''))
-            .where(eq(musicTracksTable.id, input.entityId))
-            .limit(1)
-
-          return (
-            track && {
-              before: track.before,
-              referenceExists: input.albumId === null || track.referencedId !== null,
-            }
-          )
-        },
-        catch: unavailable,
-      })
-
-      if (!row || !row.referenceExists) return yield* notFound()
-
-      const observed = yield* Schema.decodeUnknownEffect(
-        Schema.Struct({ before: PreviewMetadataResult.fields.before }),
-      )(row).pipe(Effect.mapError(unavailable))
-
-      const after = input.operation === 'set_album_type' ? input.albumType : input.albumId
+      const plan = yield* planMusicEdit(input).pipe(Effect.provideService(Database, db))
 
       return yield* Schema.decodeUnknownEffect(PreviewMetadataResult)({
         endpoint: {
@@ -119,10 +72,10 @@ const makePreview = Effect.gen(function* () {
         status: 'preview_only',
         operation: input.operation,
         entityId: input.entityId,
-        field: input.operation === 'set_album_type' ? 'albumType' : 'albumId',
-        before: observed.before,
-        after,
-        changed: observed.before !== after,
+        field: plan.field,
+        before: plan.before,
+        after: plan.after,
+        changed: plan.changed,
         applyAvailable: false,
         limitation: 'Shared atomic revision and durable receipt support is not installed.',
       }).pipe(Effect.mapError(unavailable))
@@ -141,7 +94,7 @@ export const MusicEditPreviewLive = Layer.effect(MusicEditPreview, makePreview)
 export const MusicEditPreviewToolkit = Toolkit.make(
   Tool.make('preview_metadata_changes', {
     description:
-      'Read-only proposed album-type or track-album change. Admin and catalogue:write required. Explicit null clears the field. Returns observed before/after, not a revision, reservation or apply authorization. Other metadata and relationship previews are not yet supported. Apply is unavailable pending shared atomic revisions and durable receipts.',
+      'Read-only preview of supported music metadata, genre, album-type, track-album, artist-credit and label-affiliation changes. Admin and catalogue:write required. Explicit null clears nullable fields. Returns bounded observed before/after, not a revision, reservation or apply authorization. Apply is unavailable pending shared atomic revisions and durable receipts.',
     parameters: PreviewMetadataInput,
     success: PreviewMetadataResult,
     failure: McpToolError,

@@ -90,6 +90,22 @@ test('the production fanout helper fences stale attempts, projects ordered names
     expect(
       await d1.prepare(`SELECT artistNames,revision FROM music_albums WHERE id='linked'`).first(),
     ).toEqual({ artistNames: '["Ada","Renamed"]', revision: 1 })
+    // Even a caller missing the pre-CAS capacity predicate cannot overflow or
+    // commit the earlier album projection when the later track is exhausted.
+    await d1
+      .prepare(`UPDATE music_tracks SET revision=? WHERE id='track'`)
+      .bind(Number.MAX_SAFE_INTEGER)
+      .run()
+    await expect(d1.batch(rename('overflow-fallback', 1, 'Must not commit'))).rejects.toThrow()
+    expect(
+      await d1.prepare(`SELECT name,revision FROM music_artists WHERE id='z'`).first(),
+    ).toEqual({ name: 'Renamed', revision: 1 })
+    expect(
+      await d1.prepare(`SELECT artistNames,revision FROM music_albums WHERE id='linked'`).first(),
+    ).toEqual({ artistNames: '["Ada","Renamed"]', revision: 1 })
+    expect(
+      await d1.prepare(`SELECT artistNames,revision FROM music_tracks WHERE id='track'`).first(),
+    ).toEqual({ artistNames: '["Renamed"]', revision: Number.MAX_SAFE_INTEGER })
   } finally {
     await resource.dispose()
   }

@@ -1,7 +1,7 @@
 import type { D1PreparedStatement } from '@cloudflare/workers-types'
 import { type SQL, sql } from 'drizzle-orm'
 
-import { artistNameFanoutStatements } from './artist-fanout'
+import { artistNameFanoutCapacity, artistNameFanoutStatements } from './artist-fanout'
 import type { MusicEditCommand } from './commands'
 import { musicEditTarget } from './planner'
 
@@ -50,6 +50,21 @@ export const musicEditStatements = (input: {
     musicParentGuard(reference, reference.expectedRevision),
   )
 
+  const capacityGuards: Array<SQL> = []
+
+  if (input.changed) capacityGuards.push(sql`revision<${Number.MAX_SAFE_INTEGER}`)
+
+  if (
+    input.changed &&
+    (change.operation === 'set_label_affiliation' ||
+      change.operation === 'remove_label_affiliation')
+  ) {
+    capacityGuards.push(sql`EXISTS (SELECT 1 FROM music_labels
+      WHERE id=${change.labelId} AND revision<${Number.MAX_SAFE_INTEGER})`)
+  }
+
+  if (input.artistNameChanged) capacityGuards.push(artistNameFanoutCapacity(target.entityId))
+
   const assignments: Array<SQL> = [
     sql`revision=revision+${input.changed ? 1 : 0}`,
     sql`last_operation_id=${attemptId}`,
@@ -84,6 +99,7 @@ export const musicEditStatements = (input: {
     prepare(sql`UPDATE ${table} SET ${sql.join(assignments, sql`, `)}
       WHERE id=${target.entityId} AND revision=${command.expectedRevision}
       AND ${fence} AND ${input.eligibility}
+      ${capacityGuards.length ? sql`AND ${sql.join(capacityGuards, sql` AND `)}` : sql``}
       ${referenceGuards.length ? sql`AND ${sql.join(referenceGuards, sql` AND `)}` : sql``}`),
   ]
 

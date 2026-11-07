@@ -76,7 +76,7 @@ const boundMcpBody = Effect.fn('EditorialMcp.boundBody')(function* <E>(
 const MAX_MCP_JSON_BYTES = 256 * 1024
 
 const ToolCallRequest = Schema.Struct({
-  ...McpSchema.JsonRpcRequest.fields,
+  id: Schema.optional(Schema.Unknown),
   method: Schema.Literal('tools/call'),
   params: Schema.Struct({ name: Schema.String }),
 })
@@ -190,50 +190,50 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>>(
                           Schema.fromJsonString(ToolCallRequest),
                         )(new TextDecoder().decode(bounded.value))
 
-                        // Unknown/malformed calls stay with MCP's protocol validator. Registered
-                        // tools cannot bypass declared permission by guessing a hidden wire name.
-                        if (
+                        // The installed transport executes id-less calls too. Admission must
+                        // cover them, not merely fully formed JSON-RPC requests.
+                        const response =
                           Option.isSome(call) &&
                           Object.values(toolkit.tools).some(
                             (tool) => tool.name === call.value.params.name,
                           ) &&
                           !visible.has(call.value.params.name)
-                        )
-                          return yield* HttpServerResponse.json({
-                            jsonrpc: '2.0',
-                            id: call.value.id,
-                            result: {
-                              isError: true,
-                              content: [
-                                {
-                                  type: 'text',
-                                  text: JSON.stringify(
-                                    new EditorialToolError({
-                                      code: 'access_denied',
-                                      message: 'MCP access denied.',
-                                    }),
-                                  ),
+                            ? yield* HttpServerResponse.json({
+                                jsonrpc: '2.0',
+                                id: Schema.decodeUnknownOption(McpSchema.RequestId)(
+                                  call.value.id,
+                                ).pipe(Option.getOrNull),
+                                result: {
+                                  isError: true,
+                                  content: [
+                                    {
+                                      type: 'text',
+                                      text: JSON.stringify(
+                                        new EditorialToolError({
+                                          code: 'access_denied',
+                                          message: 'MCP access denied.',
+                                        }),
+                                      ),
+                                    },
+                                  ],
                                 },
-                              ],
-                            },
-                          }).pipe(Effect.map(noStore), Effect.orDie)
-
-                        const response = yield* httpEffect.pipe(
-                          Effect.provideService(EditorialActor, principal),
-                          Effect.provideService(
-                            HttpServerRequest.HttpServerRequest,
-                            request.method === 'POST'
-                              ? HttpServerRequest.fromWeb(
-                                  new Request(new URL(request.url, origin), {
-                                    method: request.method,
-                                    headers: request.headers,
-                                    body: bounded.value,
-                                  }),
-                                )
-                              : request,
-                          ),
-                          Effect.map(noStore),
-                        )
+                              }).pipe(Effect.map(noStore), Effect.orDie)
+                            : yield* httpEffect.pipe(
+                                Effect.provideService(EditorialActor, principal),
+                                Effect.provideService(
+                                  HttpServerRequest.HttpServerRequest,
+                                  request.method === 'POST'
+                                    ? HttpServerRequest.fromWeb(
+                                        new Request(new URL(request.url, origin), {
+                                          method: request.method,
+                                          headers: request.headers,
+                                          body: bounded.value,
+                                        }),
+                                      )
+                                    : request,
+                                ),
+                                Effect.map(noStore),
+                              )
 
                         // Buffer only the bounded response; never truncate a private body.
                         const web = HttpServerResponse.toWeb(response)

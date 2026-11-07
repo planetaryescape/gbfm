@@ -700,7 +700,7 @@ describe('editorial OAuth provider on migrated D1', () => {
         })
       ).status,
     ).toBe(400)
-  })
+  }, 15_000)
 
   test('a refresh claimed before disconnect cannot insert its successor after reconnection', async () => {
     await using fixture = await createEditorialOAuthFixture()

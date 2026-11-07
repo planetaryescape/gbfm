@@ -718,6 +718,39 @@ test('independent catalogue module composes with live OAuth and owned draft serv
       result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
     })
     expect(
+      await (
+        await handler.handler(
+          new Request('https://editorial-test.localhost/mcp', {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${Redacted.value(owner.access_token)}`,
+              'content-type': 'application/json',
+              accept: 'application/json, text/event-stream',
+              'mcp-protocol-version': '2026-07-28',
+              'mcp-method': 'tools/call',
+              'mcp-name': 'fixture_declared_permission',
+            },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'tools/call',
+              params: {
+                name: 'fixture_declared_permission',
+                arguments: { nonce: 'id-less-dispatch-probe' },
+                _meta: {
+                  'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                  'io.modelcontextprotocol/clientCapabilities': {},
+                },
+              },
+            }),
+          }),
+        )
+      ).json(),
+    ).toMatchObject({
+      jsonrpc: '2.0',
+      id: null,
+      result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
+    })
+    expect(
       await (await rpc('tools/call', owner.access_token, 'fixture_unknown_tool')).json(),
     ).toMatchObject({ jsonrpc: '2.0', id: 71, error: { code: -32602 } })
     // Cached/guessed wire names never grant editorial access.

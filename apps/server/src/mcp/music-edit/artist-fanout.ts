@@ -28,7 +28,7 @@ export const artistNameFanoutStatements = (input: {
   readonly attemptId: string
   readonly fence: SQL
 }): ReadonlyArray<D1PreparedStatement> => {
-  const winner = sql`${input.fence} AND EXISTS (
+  const winner = sql`(${input.fence}) AND EXISTS (
     SELECT 1 FROM music_artists WHERE id = ${input.artistId}
     AND last_operation_id = ${input.attemptId})`
 
@@ -39,7 +39,7 @@ export const artistNameFanoutStatements = (input: {
         WHERE c.albumId = music_albums.id ORDER BY c.displayOrder, c.artistId)),
       revision = CASE WHEN revision<${Number.MAX_SAFE_INTEGER} THEN revision+1 ELSE NULL END,
       last_operation_id = ${input.attemptId}
-      WHERE ${winner} AND EXISTS (
+      WHERE (${winner}) AND EXISTS (
         SELECT 1 FROM music_album_artists c
         WHERE c.albumId = music_albums.id AND c.artistId = ${input.artistId})`),
     input.prepare(sql`UPDATE music_tracks SET
@@ -48,7 +48,7 @@ export const artistNameFanoutStatements = (input: {
         WHERE c.trackId = music_tracks.id ORDER BY c.displayOrder, c.artistId)),
       revision = CASE WHEN revision<${Number.MAX_SAFE_INTEGER} THEN revision+1 ELSE NULL END,
       last_operation_id = ${input.attemptId}
-      WHERE ${winner} AND EXISTS (
+      WHERE (${winner}) AND EXISTS (
         SELECT 1 FROM music_track_artists c
         WHERE c.trackId = music_tracks.id AND c.artistId = ${input.artistId})`),
   ]

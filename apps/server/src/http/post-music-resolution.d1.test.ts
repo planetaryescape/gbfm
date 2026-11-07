@@ -10,6 +10,7 @@ import {
   musicSourceIdentitiesTable,
   musicTracksTable,
 } from '@/db/music-entity.schema'
+import { postMusicReferencesTable } from '@/db/post-music-reference.schema'
 import { postCreators, postsTable } from '@/db/post.schema'
 import { seedMusicLookups } from '@/db/seed-music-lookups'
 import { createTestWebHandler } from '@/test/http-handler'
@@ -118,10 +119,17 @@ test('post-scoped resolution authorizes the owner or admin and writes only the c
       musicEntityId: entityId,
     })
 
-    await db
-      .update(postsTable)
-      .set({ musicEntityId: null, musicEntityType: null })
-      .where(eq(postsTable.id, id))
+    // Clear the compatibility primary and its structured projection together, as real writers do.
+    await db.batch([
+      db
+        .update(postsTable)
+        .set({ musicEntityId: null, musicEntityType: null })
+        .where(eq(postsTable.id, id)),
+      db
+        .update(postMusicReferencesTable)
+        .set({ isPrimary: false })
+        .where(eq(postMusicReferencesTable.postId, id)),
+    ])
     const missing = await resolve('owner')
     expect(missing.status).toBe(422)
     expect(await missing.json()).toMatchObject({

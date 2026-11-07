@@ -28,7 +28,7 @@ import { Clock, Context, Effect, Layer, Match, Schema } from 'effect'
 import { user as usersTable } from '@/db/auth.schema'
 import { postIdsForCreator } from '@/db/creator-membership'
 import { blueskyPostSources } from '@/db/external-account.schema'
-import { guardedPostUpdate } from '@/db/guarded-post-update'
+import { changesPostMusicPrimary, guardedPostUpdate } from '@/db/guarded-post-update'
 import {
   hasEntityLabel,
   hasEntityLabelLike,
@@ -2685,7 +2685,7 @@ const updateEffect = (
     if (
       existingPost.musicReferencesManaged &&
       !existingPost.draft &&
-      (rawData.musicEntityId !== undefined || rawData.musicEntityType !== undefined)
+      changesPostMusicPrimary(existingPost, rawData)
     )
       return yield* new ValidationError({
         message: 'Managed published music associations are frozen',

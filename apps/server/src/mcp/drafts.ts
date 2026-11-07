@@ -1,25 +1,15 @@
-import {
-  canReadEditorial,
-  EDITORIAL_DRAFT_RETRY_WINDOW_MS,
-  EditorialAccount,
-  EditorialPrincipal,
-  PostId,
-} from '@gbfm/core/editorial-mcp'
-import { eq } from 'drizzle-orm'
+import { EDITORIAL_DRAFT_RETRY_WINDOW_MS, PostId } from '@gbfm/core/editorial-mcp'
 import { Clock, Context, Effect, Layer, Option, Schema } from 'effect'
 
-import { user } from '@/db/auth.schema'
 import { Database } from '@/db/layer'
 import { validateCanonicalContent } from '@/lib/mdx'
 import { PostService, PostSourceAccess, validatePostData } from '@/services/post.service'
 
+import { McpAuthorization, McpAuthorizationLive } from './authorization'
 import { CreateDraftInput, EditorialToolError, GetPostResult, UpdateDraftInput } from './contracts'
 import { insertEditorialDraft, readEditorialReceipt, updateEditorialDraft } from './draft-store'
-import { EditorialActor, EditorialMcpConfig } from './editorial'
+import { EditorialMcpConfig } from './editorial'
 import { PersistedPost, projectPost, unavailable, notFound } from './model'
-
-const denied = () =>
-  new EditorialToolError({ code: 'access_denied', message: 'Draft-write access denied.' })
 
 const conflict = () =>
   new EditorialToolError({
@@ -55,38 +45,11 @@ export const EditorialDraftServiceLayer = Layer.effect(
   EditorialDraftService,
   Effect.gen(function* () {
     const db = yield* Database
+    const authorization = yield* McpAuthorization
     const posts = yield* PostService
     const config = yield* EditorialMcpConfig
 
-    const authorize = Effect.gen(function* () {
-      const identity = yield* Effect.serviceOption(EditorialActor)
-
-      if (Option.isNone(identity)) return yield* denied()
-
-      const principal = yield* Schema.decodeUnknownEffect(EditorialPrincipal)(identity.value).pipe(
-        Effect.mapError(denied),
-      )
-
-      if (!principal.scopes.includes('drafts:write')) return yield* denied()
-
-      const [row] = yield* Effect.tryPromise({
-        try: () =>
-          db
-            .select({ role: user.role, banned: user.banned })
-            .from(user)
-            .where(eq(user.id, principal.userId))
-            .limit(1),
-        catch: unavailable,
-      })
-
-      const account = yield* Schema.decodeUnknownEffect(EditorialAccount)(row).pipe(
-        Effect.mapError(denied),
-      )
-
-      if (!canReadEditorial(account)) return yield* denied()
-
-      return { ...principal, role: account.role }
-    })
+    const authorize = authorization.editorial(true)
 
     const loadDraft = Effect.fn('EditorialDraftService.loadDraft')(function* (
       postId: PostId,
@@ -328,4 +291,4 @@ export const EditorialDraftServiceLayer = Layer.effect(
 
     return EditorialDraftService.of({ createDraft, updateDraft })
   }),
-)
+).pipe(Layer.provide(McpAuthorizationLive))

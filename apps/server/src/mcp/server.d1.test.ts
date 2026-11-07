@@ -1,4 +1,4 @@
-import { EditorialPrincipal, PostId } from '@gbfm/core/editorial-mcp'
+import { EditorialPrincipal, McpPrincipal, PostId } from '@gbfm/core/editorial-mcp'
 import { UserId } from '@gbfm/core/identity'
 import { Role } from '@gbfm/core/roles'
 import { eq, inArray } from 'drizzle-orm'
@@ -20,12 +20,13 @@ import { UploadAssetServiceLayer } from '@/services/upload-asset.service'
 import { DatabaseTestLayer, db } from '@/test/database'
 import { withTestLayer } from '@/test/effect'
 
+import { McpActor, McpAuthorization, McpAuthorizationLive } from './authorization'
 import { GetPostResult, ListDraftsResult } from './contracts'
 import { insertEditorialDraft, updateEditorialDraft } from './draft-store'
 import { EditorialDraftServiceLayer } from './drafts'
 import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from './editorial'
 import { EditorialMcpSettings, PersistedPost } from './model'
-import { makeEditorialMcpLayer } from './server'
+import { composeMcpToolkits, EditorialToolkit, makeEditorialMcpLayer } from './server'
 
 const ownerId = Schema.decodeUnknownSync(UserId)('mcp-owner')
 
@@ -242,6 +243,43 @@ beforeAll(async () => {
 })
 
 afterAll(() => app.dispose())
+
+test('composition rejects duplicate wire names instead of replacing a domain tool', () => {
+  expect(() => composeMcpToolkits(EditorialToolkit, EditorialToolkit)).toThrow('Duplicate MCP tool')
+})
+
+test('high-trust authorization requires an exact scope and the live admin role', async () => {
+  const check = (scopes: typeof McpPrincipal.Type.scopes) =>
+    Effect.runPromise(
+      withTestLayer(
+        Effect.gen(function* () {
+          const authorization = yield* McpAuthorization
+
+          return yield* Effect.result(authorization.highTrust('catalogue:write'))
+        }).pipe(
+          Effect.provideService(
+            McpActor,
+            Schema.decodeUnknownSync(McpPrincipal)({
+              userId: ownerId,
+              clientId: 'fixture-client',
+              scopes,
+            }),
+          ),
+        ),
+        McpAuthorizationLive.pipe(Layer.provide(DatabaseTestLayer)),
+      ),
+    )
+
+  expect((await check(['catalogue:read']))._tag).toBe('Failure')
+  expect((await check(['catalogue:write']))._tag).toBe('Success')
+
+  try {
+    await db.update(user).set({ role: 'creator' }).where(eq(user.id, ownerId))
+    expect((await check(['catalogue:write']))._tag).toBe('Failure')
+  } finally {
+    await db.update(user).set({ role: 'admin' }).where(eq(user.id, ownerId))
+  }
+})
 
 describe('draft-only MCP writes', () => {
   afterEach(async () => {

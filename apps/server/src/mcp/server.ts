@@ -1,6 +1,7 @@
-import { Effect, Layer } from 'effect'
+import { Context, Effect, Layer, Option } from 'effect'
 import { McpProtocol, McpServer, Tool, Toolkit } from 'effect/ai'
 
+import { McpPermission } from './authorization'
 import {
   CreateDraftInput,
   EditorialToolError,
@@ -22,6 +23,7 @@ export const EditorialToolkit = Toolkit.make(
     failure: EditorialToolError,
     failureMode: 'return',
   })
+    .annotate(McpPermission, { scopes: ['posts:read', 'drafts:write'] })
     .annotate(Tool.Readonly, false)
     .annotate(Tool.Destructive, false)
     .annotate(Tool.Idempotent, true)
@@ -35,6 +37,7 @@ export const EditorialToolkit = Toolkit.make(
     failure: EditorialToolError,
     failureMode: 'return',
   })
+    .annotate(McpPermission, { scopes: ['posts:read', 'drafts:write'] })
     .annotate(Tool.Readonly, false)
     .annotate(Tool.Destructive, false)
     .annotate(Tool.Idempotent, true)
@@ -47,6 +50,7 @@ export const EditorialToolkit = Toolkit.make(
     failure: EditorialToolError,
     failureMode: 'return',
   })
+    .annotate(McpPermission, { scopes: ['posts:read'] })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false)
     .annotate(Tool.Idempotent, true)
@@ -59,6 +63,7 @@ export const EditorialToolkit = Toolkit.make(
     failure: EditorialToolError,
     failureMode: 'return',
   })
+    .annotate(McpPermission, { scopes: ['posts:read'] })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false)
     .annotate(Tool.Idempotent, true)
@@ -80,9 +85,30 @@ export const EditorialToolHandlersLayer = EditorialToolkit.toLayer(
   }),
 )
 
-export const makeEditorialMcpLayer = (allowedOrigins: ReadonlyArray<string>) =>
-  McpServer.toolkit(EditorialToolkit).pipe(
-    Layer.provide(EditorialToolHandlersLayer),
+// Effect's merge is last-writer-wins. A wire-name collision is a composition defect.
+export const composeMcpToolkits = <const Toolkits extends ReadonlyArray<Toolkit.Any>>(
+  ...toolkits: Toolkits
+) => {
+  const names = new Set<string>()
+
+  for (const toolkit of toolkits) {
+    for (const tool of Object.values(toolkit.tools)) {
+      if (names.has(tool.name)) throw new Error(`Duplicate MCP tool: ${tool.name}`)
+
+      if (Option.isNone(Context.getOption(tool.annotations, McpPermission)))
+        throw new Error(`Missing MCP permission: ${tool.name}`)
+      names.add(tool.name)
+    }
+  }
+
+  return Toolkit.merge(...toolkits)
+}
+
+export const makeMcpLayer = <Tools extends Record<string, Tool.Any>>(
+  allowedOrigins: ReadonlyArray<string>,
+  toolkit: Toolkit.Toolkit<Tools>,
+) =>
+  McpServer.toolkit(toolkit).pipe(
     Layer.provideMerge(
       McpServer.layerHttpRequestScoped({
         name: 'GBFM Editorial',
@@ -95,5 +121,8 @@ export const makeEditorialMcpLayer = (allowedOrigins: ReadonlyArray<string>) =>
       }),
     ),
   )
+
+export const makeEditorialMcpLayer = (allowedOrigins: ReadonlyArray<string>) =>
+  makeMcpLayer(allowedOrigins, EditorialToolkit).pipe(Layer.provide(EditorialToolHandlersLayer))
 
 export const EditorialMcpLayer = makeEditorialMcpLayer([])

@@ -1,11 +1,8 @@
-import { canReadEditorial, EditorialAccount, EditorialPrincipal } from '@gbfm/core/editorial-mcp'
-import { eq } from 'drizzle-orm'
-import { Context, Effect, Layer, Option, Schema } from 'effect'
+import { Context, Effect, Layer, Schema } from 'effect'
 
-import { user } from '@/db/auth.schema'
-import { Database } from '@/db/layer'
 import { PostService, PostSourceAccess } from '@/services/post.service'
 
+import { McpActor, McpAuthorization, McpAuthorizationLive } from './authorization'
 import {
   type EditorialToolError,
   EndpointIdentity,
@@ -16,16 +13,14 @@ import {
   PostSummary,
 } from './contracts'
 import {
-  accessDenied,
   type EditorialMcpSettings,
-  EditorialReader,
   notFound,
   PersistedPost,
   projectPost,
   unavailable,
 } from './model'
 
-export const EditorialActor = Context.Service<EditorialPrincipal>('gbfm/mcp/EditorialActor')
+export const EditorialActor = McpActor
 
 export const EditorialMcpConfig = Context.Service<typeof EditorialMcpSettings.Type>(
   'gbfm/mcp/EditorialMcpConfig',
@@ -46,7 +41,7 @@ export class EditorialReadService extends Context.Service<
 export const EditorialReadServiceLayer = Layer.effect(
   EditorialReadService,
   Effect.gen(function* () {
-    const db = yield* Database
+    const authorization = yield* McpAuthorization
     const posts = yield* PostService
     const config = yield* EditorialMcpConfig
 
@@ -54,43 +49,7 @@ export const EditorialReadServiceLayer = Layer.effect(
       Effect.mapError(unavailable),
     )
 
-    const authorize = Effect.gen(function* () {
-      const identity = yield* Effect.serviceOption(EditorialActor)
-
-      if (Option.isNone(identity)) return yield* accessDenied()
-
-      const principal = yield* Schema.decodeUnknownEffect(EditorialPrincipal)(identity.value).pipe(
-        Effect.mapError(accessDenied),
-      )
-
-      const rows = yield* Effect.tryPromise({
-        try: () =>
-          db
-            .select({ role: user.role, banned: user.banned })
-            .from(user)
-            .where(eq(user.id, principal.userId))
-            .limit(1),
-        catch: unavailable,
-      }).pipe(
-        Effect.tapError(() =>
-          Effect.logError('editorial.authorization.unavailable', {
-            operation: 'account.lookup',
-            dependency: 'database',
-          }),
-        ),
-      )
-
-      const account = yield* Schema.decodeUnknownEffect(EditorialAccount)(rows[0]).pipe(
-        Effect.mapError(accessDenied),
-      )
-
-      if (!canReadEditorial(account)) return yield* accessDenied()
-
-      return yield* Schema.decodeUnknownEffect(EditorialReader)({
-        ...principal,
-        role: account.role,
-      }).pipe(Effect.mapError(accessDenied))
-    })
+    const authorize = authorization.editorial()
 
     const listDrafts = Effect.fn('EditorialReadService.listDrafts')(function* (
       input: typeof ListDraftsInput.Type,
@@ -153,4 +112,4 @@ export const EditorialReadServiceLayer = Layer.effect(
 
     return EditorialReadService.of({ listDrafts, getPost })
   }),
-)
+).pipe(Layer.provide(McpAuthorizationLive))

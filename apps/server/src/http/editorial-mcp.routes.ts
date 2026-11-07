@@ -1,12 +1,19 @@
 import { oauthProviderAuthServerMetadata } from '@better-auth/oauth-provider'
-import { Effect, Layer, Match, Option, Redacted, Schema, Stream } from 'effect'
+import { Context, Effect, Layer, Match, Option, Redacted, Schema, Stream } from 'effect'
+import type { Tool, Toolkit } from 'effect/ai'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
 
 import { Auth } from '@/lib/auth'
+import { McpPermission } from '@/mcp/authorization'
 import { EditorialDraftServiceLayer } from '@/mcp/drafts'
 import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from '@/mcp/editorial'
 import { EditorialMcpSettings } from '@/mcp/model'
-import { makeEditorialMcpLayer } from '@/mcp/server'
+import {
+  composeMcpToolkits,
+  EditorialToolkit,
+  EditorialToolHandlersLayer,
+  makeMcpLayer,
+} from '@/mcp/server'
 import { ConfigService } from '@/services/config.service'
 import { EditorialOAuth, EditorialOAuthUnavailable } from '@/services/editorial-oauth.service'
 
@@ -36,15 +43,13 @@ const parseCredential = (authorization: string | undefined) =>
 const noStore = (response: HttpServerResponse.HttpServerResponse) =>
   HttpServerResponse.setHeader(response, 'cache-control', 'private, no-store')
 
-const boundMcpBody = Effect.fn('EditorialMcp.boundBody')(function* (
-  request: HttpServerRequest.HttpServerRequest,
-  origin: string,
+const boundMcpBody = Effect.fn('EditorialMcp.boundBody')(function* <E>(
+  stream: Stream.Stream<Uint8Array, E>,
   maximum: number,
 ) {
-  if (request.method !== 'POST') return Option.some(request)
   let size = 0
   const chunks: Array<Uint8Array> = []
-  yield* Stream.runForEachWhile(request.stream, (chunk) =>
+  yield* Stream.runForEachWhile(stream, (chunk) =>
     Effect.sync(() => {
       size += chunk.byteLength
 
@@ -64,143 +69,264 @@ const boundMcpBody = Effect.fn('EditorialMcp.boundBody')(function* (
     offset += chunk.byteLength
   }
 
-  return Option.some(
-    HttpServerRequest.fromWeb(
-      new Request(new URL(request.url, origin), {
-        method: request.method,
-        headers: request.headers,
-        body,
-      }),
-    ),
-  )
+  return Option.some(body)
 })
 
-export const EditorialMcpRoutesLive = Layer.unwrap(
-  Effect.gen(function* () {
-    const config = yield* ConfigService
-    const settings = config.mcp
+const MAX_MCP_JSON_BYTES = 256 * 1024
 
-    if (!settings)
-      return config.mcpConfigurationError
-        ? HttpRouter.add(
-            '*',
-            '/mcp',
-            HttpServerResponse.empty({
-              status: 503,
-              headers: { 'cache-control': 'private, no-store' },
-            }),
-          )
-        : Layer.empty
-
-    const oauth = yield* EditorialOAuth
-    const auth = yield* Auth
-    const origin = new URL(settings.resourceUrl).origin
-    const origins = [origin, new URL(config.urls.frontend).origin]
-    const resourceMetadata = `${origin}/.well-known/oauth-protected-resource/mcp`
-    const challenge = `Bearer resource_metadata="${resourceMetadata}", scope="posts:read"`
-
-    const unauthorized = Effect.succeed(
-      HttpServerResponse.empty({
-        status: 401,
-        headers: { 'www-authenticate': challenge, 'cache-control': 'private, no-store' },
+const ToolListing = Schema.StructWithRest(
+  Schema.Struct({
+    result: Schema.StructWithRest(
+      Schema.Struct({
+        tools: Schema.Array(
+          Schema.StructWithRest(Schema.Struct({ name: Schema.String }), [
+            Schema.Record(Schema.String, Schema.Unknown),
+          ]),
+        ),
       }),
-    )
+      [Schema.Record(Schema.String, Schema.Unknown)],
+    ),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+)
 
-    const admission = HttpRouter.middleware(
-      (httpEffect) =>
-        Effect.gen(function* () {
-          const request = yield* HttpServerRequest.HttpServerRequest
-          const path = new URL(request.url, origin).pathname
+export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>>(
+  toolkit: Toolkit.Toolkit<Tools>,
+) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const config = yield* ConfigService
+      const settings = config.mcp
 
-          if (path !== '/mcp') return yield* httpEffect
+      if (!settings)
+        return config.mcpConfigurationError
+          ? HttpRouter.add(
+              '*',
+              '/mcp',
+              HttpServerResponse.empty({
+                status: 503,
+                headers: { 'cache-control': 'private, no-store' },
+              }),
+            )
+          : Layer.empty
 
-          if (request.headers.origin && !origins.includes(request.headers.origin))
-            return noStore(HttpServerResponse.empty({ status: 403 }))
+      const oauth = yield* EditorialOAuth
+      const auth = yield* Auth
+      const origin = new URL(settings.resourceUrl).origin
+      const origins = [origin, new URL(config.urls.frontend).origin]
+      const resourceMetadata = `${origin}/.well-known/oauth-protected-resource/mcp`
+      const challenge = `Bearer resource_metadata="${resourceMetadata}"`
 
-          return yield* Match.value(parseCredential(request.headers.authorization)).pipe(
-            Match.tag('Missing', () => unauthorized),
-            Match.tag('Malformed', () => unauthorized),
-            Match.tag('Bearer', ({ token }) =>
-              oauth.verify(token).pipe(
-                Effect.matchEffect({
-                  onFailure: (failure) =>
-                    Match.value(failure).pipe(
-                      Match.tag('EditorialOAuthInvalidToken', () => unauthorized),
-                      Match.tag('EditorialOAuthUnavailable', () =>
-                        Effect.succeed(noStore(HttpServerResponse.empty({ status: 503 }))),
-                      ),
-                      Match.exhaustive,
-                    ),
-                  onSuccess: (principal) =>
-                    Effect.gen(function* () {
-                      const bounded = yield* boundMcpBody(
-                        request,
-                        origin,
-                        (principal.scopes.includes('drafts:write') ? 640 : 16) * 1024,
-                      )
-
-                      if (Option.isNone(bounded))
-                        return noStore(HttpServerResponse.empty({ status: 413 }))
-
-                      return yield* httpEffect.pipe(
-                        Effect.provideService(EditorialActor, principal),
-                        Effect.provideService(HttpServerRequest.HttpServerRequest, bounded.value),
-                        Effect.map(noStore),
-                      )
-                    }),
-                }),
-              ),
-            ),
-            Match.exhaustive,
-          )
+      const unauthorized = Effect.succeed(
+        HttpServerResponse.empty({
+          status: 401,
+          headers: { 'www-authenticate': challenge, 'cache-control': 'private, no-store' },
         }),
-      { global: true },
-    )
-
-    const protectedMetadata = () =>
-      HttpServerResponse.json({
-        resource: settings.resourceUrl,
-        authorization_servers: [settings.issuer],
-        scopes_supported: ['posts:read', 'drafts:write'],
-        bearer_methods_supported: ['header'],
-      }).pipe(Effect.map(noStore), Effect.orDie)
-
-    const authorizationMetadata = () =>
-      Effect.tryPromise({
-        try: () =>
-          oauthProviderAuthServerMetadata(auth)(
-            new Request(`${origin}/.well-known/oauth-authorization-server/auth`),
-          ),
-        catch: () => new EditorialOAuthUnavailable(),
-      }).pipe(
-        Effect.map(HttpServerResponse.fromWeb),
-        Effect.catch(() => Effect.succeed(HttpServerResponse.empty({ status: 503 }))),
-        Effect.map(noStore),
       )
 
-    const endpoint = yield* Schema.decodeUnknownEffect(EditorialMcpSettings)({
-      readScope: 'posts:read',
-      environment: settings.resourceUrl.includes('.localhost/') ? 'local' : config.app.stage,
-      resourceUrl: settings.resourceUrl,
-      frontendUrl: config.urls.frontend,
-    }).pipe(Effect.mapError(() => new EditorialOAuthUnavailable()))
+      const admission = HttpRouter.middleware(
+        (httpEffect) =>
+          Effect.gen(function* () {
+            const request = yield* HttpServerRequest.HttpServerRequest
+            const path = new URL(request.url, origin).pathname
 
-    const endpointConfig = Layer.succeed(EditorialMcpConfig, endpoint)
+            if (path !== '/mcp') return yield* httpEffect
 
-    return Layer.mergeAll(
-      admission,
-      HttpRouter.add('GET', '/.well-known/oauth-protected-resource', protectedMetadata),
-      HttpRouter.add('GET', '/.well-known/oauth-protected-resource/mcp', protectedMetadata),
-      HttpRouter.add('GET', '/.well-known/oauth-authorization-server', authorizationMetadata),
-      HttpRouter.add('GET', '/.well-known/oauth-authorization-server/auth', authorizationMetadata),
-      makeEditorialMcpLayer(origins).pipe(
-        Layer.provide(EditorialDraftServiceLayer),
-        Layer.provide(EditorialReadServiceLayer),
-        Layer.provide(endpointConfig),
-      ),
-    )
-  }),
-)
+            if (request.headers.origin && !origins.includes(request.headers.origin))
+              return noStore(HttpServerResponse.empty({ status: 403 }))
+
+            return yield* Match.value(parseCredential(request.headers.authorization)).pipe(
+              Match.tag('Missing', () => unauthorized),
+              Match.tag('Malformed', () => unauthorized),
+              Match.tag('Bearer', ({ token }) =>
+                oauth.verify(token).pipe(
+                  Effect.matchEffect({
+                    onFailure: (failure) =>
+                      Match.value(failure).pipe(
+                        Match.tag('EditorialOAuthInvalidToken', () => unauthorized),
+                        Match.tag('EditorialOAuthUnavailable', () =>
+                          Effect.succeed(noStore(HttpServerResponse.empty({ status: 503 }))),
+                        ),
+                        Match.exhaustive,
+                      ),
+                    onSuccess: (principal) =>
+                      Effect.gen(function* () {
+                        const bounded =
+                          request.method === 'POST'
+                            ? yield* boundMcpBody(
+                                request.stream,
+                                principal.scopes.includes('drafts:write')
+                                  ? MAX_MCP_JSON_BYTES
+                                  : 16 * 1024,
+                              )
+                            : Option.some(new Uint8Array())
+
+                        if (Option.isNone(bounded))
+                          return noStore(HttpServerResponse.empty({ status: 413 }))
+
+                        const response = yield* httpEffect.pipe(
+                          Effect.provideService(EditorialActor, principal),
+                          Effect.provideService(
+                            HttpServerRequest.HttpServerRequest,
+                            request.method === 'POST'
+                              ? HttpServerRequest.fromWeb(
+                                  new Request(new URL(request.url, origin), {
+                                    method: request.method,
+                                    headers: request.headers,
+                                    body: bounded.value,
+                                  }),
+                                )
+                              : request,
+                          ),
+                          Effect.map(noStore),
+                        )
+
+                        // Buffer only the bounded response; never truncate a private body.
+                        const web = HttpServerResponse.toWeb(response)
+                        const responseBody = web.body
+
+                        if (!responseBody) return response
+
+                        const body = yield* boundMcpBody(
+                          Stream.fromReadableStream({
+                            evaluate: () => responseBody,
+                            onError: () => new EditorialOAuthUnavailable(),
+                          }),
+                          MAX_MCP_JSON_BYTES,
+                        )
+
+                        if (Option.isNone(body))
+                          return noStore(
+                            HttpServerResponse.text(
+                              'MCP response exceeds the supported byte limit.',
+                              { status: 413 },
+                            ),
+                          )
+                        const text = new TextDecoder().decode(body.value)
+
+                        const visible = new Set(
+                          Object.values(toolkit.tools)
+                            .filter((tool) => {
+                              const permission = Context.getOption(tool.annotations, McpPermission)
+
+                              return (
+                                Option.isSome(permission) &&
+                                permission.value.scopes.every((scope) =>
+                                  principal.scopes.includes(scope),
+                                )
+                              )
+                            })
+                            .map((tool) => tool.name),
+                        )
+
+                        const filterListing = (json: string) => {
+                          const listing = Schema.decodeUnknownOption(
+                            Schema.fromJsonString(ToolListing),
+                          )(json)
+
+                          return Option.isSome(listing)
+                            ? JSON.stringify({
+                                ...listing.value,
+                                result: {
+                                  ...listing.value.result,
+                                  tools: listing.value.result.tools.filter((tool) =>
+                                    visible.has(tool.name),
+                                  ),
+                                },
+                              })
+                            : json
+                        }
+
+                        const filtered = response.headers['content-type']?.includes(
+                          'text/event-stream',
+                        )
+                          ? text
+                              .split('\n')
+                              .map((line) =>
+                                line.startsWith('data:')
+                                  ? `data: ${filterListing(line.slice(5).trimStart())}`
+                                  : line,
+                              )
+                              .join('\n')
+                          : filterListing(text)
+
+                        return noStore(
+                          HttpServerResponse.text(filtered, {
+                            status: response.status,
+                            headers: response.headers,
+                            contentType: response.headers['content-type'],
+                          }),
+                        )
+                      }),
+                  }),
+                ),
+              ),
+              Match.exhaustive,
+            )
+          }),
+        { global: true },
+      )
+
+      const protectedMetadata = () =>
+        HttpServerResponse.json({
+          resource: settings.resourceUrl,
+          authorization_servers: [settings.issuer],
+          scopes_supported: [
+            ...new Set(
+              Object.values(toolkit.tools).flatMap((tool) =>
+                Context.getOption(tool.annotations, McpPermission).pipe(
+                  Option.map((permission) => permission.scopes),
+                  Option.getOrElse(() => []),
+                ),
+              ),
+            ),
+          ].sort(),
+          bearer_methods_supported: ['header'],
+        }).pipe(Effect.map(noStore), Effect.orDie)
+
+      const authorizationMetadata = () =>
+        Effect.tryPromise({
+          try: () =>
+            oauthProviderAuthServerMetadata(auth)(
+              new Request(`${origin}/.well-known/oauth-authorization-server/auth`),
+            ),
+          catch: () => new EditorialOAuthUnavailable(),
+        }).pipe(
+          Effect.map(HttpServerResponse.fromWeb),
+          Effect.catch(() => Effect.succeed(HttpServerResponse.empty({ status: 503 }))),
+          Effect.map(noStore),
+        )
+
+      const endpoint = yield* Schema.decodeUnknownEffect(EditorialMcpSettings)({
+        readScope: 'posts:read',
+        environment: settings.resourceUrl.includes('.localhost/') ? 'local' : config.app.stage,
+        resourceUrl: settings.resourceUrl,
+        frontendUrl: config.urls.frontend,
+      }).pipe(Effect.mapError(() => new EditorialOAuthUnavailable()))
+
+      const endpointConfig = Layer.succeed(EditorialMcpConfig, endpoint)
+
+      return Layer.mergeAll(
+        admission,
+        HttpRouter.add('GET', '/.well-known/oauth-protected-resource', protectedMetadata),
+        HttpRouter.add('GET', '/.well-known/oauth-protected-resource/mcp', protectedMetadata),
+        HttpRouter.add('GET', '/.well-known/oauth-authorization-server', authorizationMetadata),
+        HttpRouter.add(
+          'GET',
+          '/.well-known/oauth-authorization-server/auth',
+          authorizationMetadata,
+        ),
+        makeMcpLayer(origins, toolkit).pipe(
+          Layer.provide(EditorialToolHandlersLayer),
+          Layer.provide(EditorialDraftServiceLayer),
+          Layer.provide(EditorialReadServiceLayer),
+          Layer.provide(endpointConfig),
+        ),
+      )
+    }),
+  )
+
+export const EditorialMcpRoutesLive = makeMcpRoutes(composeMcpToolkits(EditorialToolkit))
 
 export function privateEditorialResponse(request: Request, response: Response): Response {
   const path = new URL(request.url).pathname

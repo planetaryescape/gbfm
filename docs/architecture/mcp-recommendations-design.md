@@ -1,6 +1,6 @@
 # P3: Explainable music recommendations and sequencing
 
-Status: **design approved by Guide Fari on 2026-11-07; ready for local delivery**. Design only for
+Status: **design approved by Guide Fari on 2026-11-07; PR #545 awaiting review**. Design only for
 [#516](https://github.com/planetaryescape/gbfm/issues/516), under
 [#512](https://github.com/planetaryescape/gbfm/issues/512). This document neither
 registers tools nor approves R2 implementation, production policy or deployment.
@@ -45,13 +45,14 @@ This is a semantic contract, not new TypeScript exports. P1 owns final shared
 schemas, principal, scope spelling, discovery, error mapping and protocol fixtures.
 Reject unknown fields and unsupported strategy values; never silently reinterpret
 an ID or resolve/import a URL. IDs are nonempty opaque strings, at most 200
-characters. `MusicRef` is `{type: artist|album|track, id}`; narrower cases below
-are intentional. Identity matching uses `(type,id)`, never names or URLs.
+characters. `MusicRef` is `{entityType: artist|album|track, entityId}`; narrower
+cases below are intentional. Identity matching uses `(entityType,entityId)`, never
+names or URLs. These are the canonical P0 wire/fixture key names, not `{type,id}`.
 
 Every success includes:
 
 - `contractVersion: 1`, `algorithmVersion` (specified per tool), endpoint identity,
-  `observedAt` (UTC), and `status: evidence_found|insufficient_evidence`.
+  `observedAt` (UTC), and `status: sufficient|insufficient_evidence`.
 - `inputs`: canonical seed references and their read versions; a `basisDigest`
   over canonical inputs, algorithm version and all evidence used. Use the encoding
   below; it is a content fingerprint, not authorization or a promise of a global
@@ -92,8 +93,13 @@ proposed sequence with its revision. Sort evidence by `(kind, sourceLocator)`
 using code-point comparison of the encoded locator; assign local evidence IDs
 `e1`, `e2`, etc. in that order. Deduplicate identical locators. Sort limits by
 code then affected reference. Exclude observation timestamps, endpoint identity,
-explanation text and the digest itself. Freeze this representation in R2 fixtures;
-P1 may map it to its approved shared wire schema without changing its meaning.
+explanation text and the digest itself. Canonical fixtures use P0's
+`entityType`/`entityId` keys and `sufficient` status; the earlier P3 spelling
+`evidence_found` means exactly `sufficient`, not a different evidence threshold.
+The digest envelope includes this canonical status in `result.status` for both
+outcomes. Freeze this representation in R2 fixtures; do not hash a pre-mapping
+`type`/`id`/`evidence_found` object. Any later wire-name change requires an explicit
+contract version and fixture update, not a transparent digest-preserving rename.
 
 Three distinctions are mandatory:
 
@@ -151,6 +157,12 @@ A playlist-only primary reference is currently unsupported as a music seed:
 return `insufficient_evidence` with `unsupported_seed_relation` and do not expand
 its entire membership implicitly. A post with no structured reference similarly
 returns `insufficient_evidence` with `missing_structured_reference`.
+An eligible `artist` music seed is also unsupported: posts can reference only an
+album, track or playlist. Return empty candidates, `insufficient_evidence` and
+`unsupported_seed_relation`; do not implicitly traverse the artist's releases.
+Keep artist input valid so this outcome is explicit rather than silently dropping
+that input type. Same-type matching is intentional: a track seed does not discover
+posts about its album unless a future approved contract adds cross-type traversal.
 
 Candidates are published editorial posts (`post`, not micro posts), excluding the
 seed post. Rank: (1) same structured music reference, then (2) a structured
@@ -195,7 +207,7 @@ Algorithm `album_blocks_v1`:
 
 With fewer than two members sharing a visible album, return unchanged order and
 `insufficient_evidence`. With a supported album block already in order, return
-`evidence_found` and `changed:false`. A missing track number does not invent one.
+`sufficient` and `changed:false`. A missing track number does not invent one.
 Do not promise harmonic transitions, timing, mood, enjoyment or an optimal order.
 No arbitrary prompt, random seed, BPM, provider playlist or playback operation.
 
@@ -206,11 +218,39 @@ or metadata may change after any read; recompute before relying on stale evidenc
 
 ## Visibility, errors, retries and budgets
 
+All three tools use the stricter P3 evidence rule adopted by approved P0 D3/D5
+([P0 design PR #547](https://github.com/planetaryescape/gbfm/pull/547)). Every
+artist, album, track or music-label used as a music seed, candidate or evidence
+node must be public **and** have non-null `publishedAt` no later than `observedAt`.
+Null/future timestamps do not qualify even when D3's broader public catalogue
+projection permits the record. Genre labels in `labels` have no publication
+field: a `kind: genre` label qualifies only through eligible entities on both
+sides of that relation. Do not confuse these labels with music-label entities.
+
+An explicit missing, inaccessible or non-qualifying music seed returns the same
+`not_found`. A readable post seed with a structured reference to non-qualifying
+music returns empty candidates, `insufficient_evidence` and
+`missing_eligible_reference`, without exposing that music's metadata. The authored
+draft-seed exception applies only to the post, never to its referenced music.
+Related editorial candidates must satisfy the actual published-post predicate
+and their referenced music must qualify too; rank 1 is not an exception.
+
+Sequence proposals require a published public playlist (non-null `publishedAt`
+not in the future), otherwise `not_found`. Any non-qualifying member track makes
+the complete proposal `unavailable`, with no identification of the failing member;
+never omit it or reorder only eligible members. A null/future or otherwise
+non-qualifying album is an unreadable relation: retain its qualifying member track
+as a singleton, omit the album's identity/metadata from evidence and digest, and
+do not sort it using that album. If this leaves no shared eligible album block,
+return unchanged order, `changed:false` and `insufficient_evidence`; otherwise
+sequence only eligible blocks and return `sufficient`. Apply PL1 authorization
+first; none of these rules widens its public-read surface.
+
 | Capability | Required read permissions, subject to approved P0 scope names |
 | --- | --- |
-| Similar music | Catalogue reads; every entity and intermediate evidence node must be public and published at observation time. |
-| Editorial connections | Catalogue + public editorial reads; additional owner-draft permission only for an explicit private post seed. Apply current authored-read rules, never broaden by role or seed ID. |
-| Playlist sequence | Authorized PL1 playlist + public catalogue metadata reads. No private-library or write permission. Hidden album metadata is unknown, not leaked by grouping. |
+| Similar music | `catalogue:read`; eligible published evidence under the common rule above. |
+| Editorial connections | `catalogue:read` + `content:read`; an explicit authored draft seed additionally requires `posts:read` and current authored-read role checks. Published candidates and eligible referenced music only. |
+| Playlist sequence | `catalogue:read`; published public PL1 playlist and qualifying member tracks. Non-qualifying albums remain unknown singleton relations. No private-library or write permission. |
 
 Filter visibility **before** ranking, counting, capping and digesting. Recheck
 authorization on every call, including retries. Missing and inaccessible explicit
@@ -253,15 +293,35 @@ Use migrated disposable D1, real R1/E2/PL1 reads and the composed MCP HTTP bound
   read the explicit draft seed. Revoke its grant between identical calls.
 - Seed post with no reference, playlist-only reference, unresolved body mention,
   empty relation set, exactly 200 and 201 candidates: assert outcomes and notices.
+- Give an eligible artist seed recorded albums/tracks that do have published
+  editorial coverage: still expect empty candidates, `insufficient_evidence` and
+  `unsupported_seed_relation`, not implicit traversal. An eligible album seed
+  pointing directly to that coverage succeeds; a track seed does not match its
+  album's coverage by inheritance.
+- Test null, future, exactly-observedAt and past publication timestamps for music
+  seeds, music candidates and intermediate artists/music-labels across all tools.
+  A genre label with no publication field connects two eligible entities; replacing
+  one endpoint with null/future music must remove that evidence. A post's exact
+  reference to non-qualifying music is not a rank-1 bypass.
 - Sequence input `[a2,b1,a1,u]` with a2/a1 in album A numbered 2/1, b1 in B,
   u unknown yields `[a1,a2,b1,u]`. Add tied/missing/nonpositive track numbers,
   equal stored positions, zero/one members, 100/101 members and an unreadable
   member. Assert exact permutation, stable ties and no claimed sonic properties.
 - Already-ordered album block is unchanged with evidence; unrelated singleton
   tracks are unchanged with insufficient evidence. Stale revision conflicts.
+- A null/future playlist yields `not_found`; a null/future member track makes the
+  entire sequence `unavailable`. For eligible tracks sharing a null/future album,
+  retain their original singleton order with no album ID in evidence/digest;
+  compare with the same album published exactly at observedAt, where recorded
+  numbering may reorder the tracks with `sufficient`. Mixed eligible blocks and
+  unknown-album singletons preserve the complete track set.
 - Repeated calls over a frozen dataset produce the same order, evidence and
   basis digest (observation time may differ). Change relevant metadata and show
   the digest changes; never mistake a playlist revision for a metadata version.
+- Digest fixtures use `entityType`/`entityId` and `result.status: sufficient` (or
+  `insufficient_evidence`). Compare against an otherwise identical object using
+  `type`/`id`/`evidence_found`: its hash must differ and it is not a valid canonical
+  fixture. Renaming a key is not an evidence-strength change or an invisible map.
 - Compare database state before/after success, empty, failure and cancellation:
   no playlist, import, enrichment, post, receipt or policy writes. Assert no
   provider/model requests. Check query count, payload bytes and deadline failures.
@@ -274,9 +334,12 @@ P3 supplies a design, not runtime proof. No D1/protocol/service behavior has cha
 
 P3 session: https://ampcode.com/threads/T-01a1b543-db61-74a4-bfb9-d9d517d99ac3.
 Isolated worktree `/home/user/workspace/gbfm-p3`, branch
-`design/p3-recommendation-contracts`, no stack. Sole reservation: this file; claim
-recorded in #516 before editing. Parent Space coordinates integration and merge
-order. No shared-file, schema or runtime reservations; P0/P2/P4 keep their lanes.
+`design/p3-recommendation-contracts`, independent single-layer gh-stack rooted on
+`prod`, [PR #545](https://github.com/planetaryescape/gbfm/pull/545). Sole reservation:
+this file; claim recorded in #516 before editing. Parent Space coordinates review
+and integration. Leave unmerged with auto-merge disabled for owner overview; a
+separate Claude actual-PR review is required. No shared-file, schema or runtime
+reservations; P0/P2/P4 keep their lanes.
 
 1. Guide Fari approved the deterministic evidence-only/provider-free choice,
    bounded catalogue-related meaning and `album_blocks_v1` strategy on 2026-11-07.

@@ -8,6 +8,7 @@ import { DatabaseError, getErrorMessage } from '@/errors'
 import { omitUndefined } from '@/lib/omit-undefined'
 import { toSlug } from '@/services/to-slug'
 
+import { deleteMusicEntity } from './delete-write'
 import {
   artistNameFanoutCapacity,
   artistNameFanoutStatements,
@@ -16,13 +17,7 @@ import {
   musicParentCas,
   musicParentWinner,
 } from './guarded-statements'
-import {
-  deleteEntityLabels,
-  deleteIdentitiesForEntity,
-  deleteLinksForEntity,
-  requireInserted,
-  requireOne,
-} from './shared'
+import { requireInserted, requireOne } from './shared'
 import { executeMusicWrite, MusicWriteError, type MusicWriteRequest } from './write-intent'
 
 export interface CreateArtistInput {
@@ -171,6 +166,7 @@ export const updateArtistEffect = (
     const result = yield* executeMusicWrite(write.intent, write.context, {
       operation: 'update_music_artist',
       target,
+      disclosure: 'existing',
       normalizedInput,
       prepare: Effect.gen(function* () {
         // Slugs include randomness: allocate only after the shared replay lookup,
@@ -298,35 +294,8 @@ export const updateArtistEffect = (
     return { ...saved, genres: saved.genres?.slice() ?? null }
   }).pipe(Effect.withSpan('musicEntity.updateArtist', { attributes: { id } }))
 
-export const deleteArtistEffect = (id: string) =>
-  Effect.gen(function* () {
-    const db = yield* Database
-
-    const rows = yield* Effect.tryPromise({
-      try: () =>
-        (async () => {
-          const [, , , rows] = await db.batch([
-            deleteIdentitiesForEntity(db, 'artist', id),
-            deleteLinksForEntity(db, 'artist', id),
-            deleteEntityLabels(db, 'artist', id),
-            db
-              .delete(musicArtistsTable)
-              .where(eq(musicArtistsTable.id, id))
-              .returning({ id: musicArtistsTable.id }),
-          ])
-
-          return rows
-        })(),
-      catch: (e) =>
-        new DatabaseError({
-          message: `Failed to delete artist: ${getErrorMessage(e)}`,
-          operation: 'delete',
-          table: 'music_artists',
-        }),
-    })
-
-    yield* requireOne(rows, 'MusicArtist', id)
-  }).pipe(Effect.withSpan('musicEntity.deleteArtist', { attributes: { id } }))
+export const deleteArtistEffect = (id: string, write?: MusicWriteRequest) =>
+  deleteMusicEntity({ entityType: 'artist', entityId: id }, write)
 
 const findArtistByNameCI = (name: string) =>
   Effect.gen(function* () {

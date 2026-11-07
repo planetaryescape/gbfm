@@ -70,6 +70,7 @@ export const createMusicEditExecutor = (
       {
         operation: command.change.operation,
         target,
+        disclosure: 'existing',
         normalizedInput: command,
         prepare: planMusicEdit(command.change).pipe(
           Effect.mapError(

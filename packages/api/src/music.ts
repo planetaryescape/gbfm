@@ -71,6 +71,15 @@ export class MusicWritePreconditionRequired extends Schema.TaggedError<MusicWrit
   { httpApiStatus: 428 },
 ) {}
 
+const musicWriteErrors = [
+  HttpApiError.NotFound,
+  HttpApiError.Forbidden,
+  HttpApiError.BadRequest,
+  HttpApiError.Conflict,
+  MusicWritePreconditionRequired,
+  MusicServiceUnavailableHttpError,
+] as const
+
 // Mirrors apps/server/src/db/music-entity.schema.ts's selectMusicArtistSchema
 // (Zod, DB-facing) -- response fields are nullable to match actual column
 // nullability, not because the API wants to encourage nulls.
@@ -554,21 +563,15 @@ export const MusicGroup = /* @__PURE__ */ (() =>
         params: artistIdParam,
         payload: UpdateArtistInput,
         success: ArtistResponse,
-        error: [
-          HttpApiError.NotFound,
-          HttpApiError.Forbidden,
-          HttpApiError.BadRequest,
-          HttpApiError.Conflict,
-          MusicWritePreconditionRequired,
-          MusicServiceUnavailableHttpError,
-        ],
+        error: musicWriteErrors,
       }).middleware(AuthMiddleware),
     )
     .add(
       HttpApiEndpoint.delete('deleteArtist', '/api/music/artists/:id', {
         params: artistIdParam,
+        headers: MusicWriteHeaders,
         success: HttpApiSchema.NoContent,
-        error: [HttpApiError.NotFound, HttpApiError.Forbidden],
+        error: musicWriteErrors,
       }).middleware(AuthMiddleware),
     )
     .add(
@@ -645,8 +648,9 @@ export const MusicGroup = /* @__PURE__ */ (() =>
     .add(
       HttpApiEndpoint.delete('deleteAlbum', '/api/music/albums/:id', {
         params: albumIdParam,
+        headers: MusicWriteHeaders,
         success: HttpApiSchema.NoContent,
-        error: [HttpApiError.NotFound, HttpApiError.Forbidden],
+        error: musicWriteErrors,
       }).middleware(AuthMiddleware),
     )
     .add(
@@ -685,8 +689,9 @@ export const MusicGroup = /* @__PURE__ */ (() =>
     .add(
       HttpApiEndpoint.delete('deleteTrack', '/api/music/tracks/:id', {
         params: trackIdParam,
+        headers: MusicWriteHeaders,
         success: HttpApiSchema.NoContent,
-        error: [HttpApiError.NotFound, HttpApiError.Forbidden],
+        error: musicWriteErrors,
       }).middleware(AuthMiddleware),
     )
     // ---------------------------------------------------------------------
@@ -765,8 +770,9 @@ export const MusicGroup = /* @__PURE__ */ (() =>
     .add(
       HttpApiEndpoint.delete('deleteLabel', '/api/music/labels/:id', {
         params: labelIdParam,
+        headers: MusicWriteHeaders,
         success: HttpApiSchema.NoContent,
-        error: [HttpApiError.NotFound, HttpApiError.Forbidden],
+        error: musicWriteErrors,
       }).middleware(AuthMiddleware),
     )
     .add(

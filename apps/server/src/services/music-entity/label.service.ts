@@ -20,7 +20,9 @@ import { MdxService, validateCanonicalContent } from '@/lib/mdx'
 import { omitUndefined } from '@/lib/omit-undefined'
 import { toSlug } from '@/services/to-slug'
 
-import { deleteEntityLabels, deleteLinksForEntity, requireInserted, requireOne } from './shared'
+import { deleteMusicEntity } from './delete-write'
+import { requireInserted, requireOne } from './shared'
+import type { MusicWriteRequest } from './write-intent'
 
 export interface CreateLabelInput {
   name: string
@@ -254,33 +256,7 @@ export const updateLabelEffect = (id: string, data: Partial<CreateLabelInput>) =
     })
   }).pipe(Effect.withSpan('musicEntity.updateLabel', { attributes: { id } }))
 
-export const deleteLabelEffect = (id: string) =>
-  Effect.gen(function* () {
-    const db = yield* Database
-
-    const rows = yield* Effect.tryPromise({
-      try: () =>
-        (async () => {
-          const [, , rows] = await db.batch([
-            deleteLinksForEntity(db, 'label', id),
-            deleteEntityLabels(db, 'musicLabel', id),
-            db
-              .delete(musicLabelsTable)
-              .where(eq(musicLabelsTable.id, id))
-              .returning({ id: musicLabelsTable.id }),
-          ])
-
-          return rows
-        })(),
-      catch: (error) =>
-        new DatabaseError({
-          message: `Failed to delete label: ${getErrorMessage(error)}`,
-          operation: 'delete',
-          table: 'music_labels',
-        }),
-    })
-
-    yield* requireOne(rows, 'MusicLabel', id)
-  }).pipe(Effect.withSpan('musicEntity.deleteLabel', { attributes: { id } }))
+export const deleteLabelEffect = (id: string, write?: MusicWriteRequest) =>
+  deleteMusicEntity({ entityType: 'label', entityId: id }, write)
 
 export type { SelectMusicLabel }

@@ -527,6 +527,7 @@ export const PostGroup = /* @__PURE__ */ (() =>
           HttpApiError.BadRequest,
           HttpApiError.NotFound,
           HttpApiError.Unauthorized,
+          HttpApiError.Forbidden,
           HttpApiError.Conflict,
           MusicServiceUnavailableHttpError,
           HttpApiError.InternalServerError,

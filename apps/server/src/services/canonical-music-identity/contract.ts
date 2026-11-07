@@ -8,7 +8,7 @@ import type {
   SelectMusicTrack,
 } from '@/db/music-entity.schema'
 
-import type { MusicIdentityError } from './errors'
+import type { MusicIdentityAuthorizationFailed, MusicIdentityError } from './errors'
 import type { CanonicalMusicEntityType } from './music-source'
 import type { ProviderMusicSnapshot } from './source-result'
 
@@ -29,11 +29,18 @@ export type ResolutionOrigin =
   | 'playlist_enrichment'
   | 'manual'
 
+export type MusicIdentityAuthorization = (
+  entityType?: CanonicalMusicEntityType,
+) => Effect.Effect<void, MusicIdentityAuthorizationFailed>
+
 export type ResolveMusicSource = {
   readonly url: string
   readonly expectedType?: CanonicalMusicEntityType
   readonly origin: ResolutionOrigin
   readonly artworkDelivery: ArtworkDelivery
+  // Existing non-MCP callers retain their owning boundary's authorization.
+  // A receipt-aware caller must supply fresh authority at every checkpoint.
+  readonly authorize?: MusicIdentityAuthorization
 }
 
 export type ImportProviderMusicEntity = {

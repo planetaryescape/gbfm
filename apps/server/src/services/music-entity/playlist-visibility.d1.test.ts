@@ -4,7 +4,12 @@ import { beforeAll, expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
 import { Database } from '@/db/layer'
-import { musicPlaylistsTable } from '@/db/music-entity.schema'
+import {
+  musicAlbumsTable,
+  musicPlaylistsTable,
+  musicPlaylistTracksTable,
+  musicTracksTable,
+} from '@/db/music-entity.schema'
 import {
   RichContentMusicResolver,
   RichContentMusicResolverLayer,
@@ -12,7 +17,12 @@ import {
 import { db } from '@/test/database'
 import { withTestLayer } from '@/test/effect'
 
-import { getPublicPlaylistEffect, getReadablePlaylistsEffect } from './playlist.service'
+import {
+  getPublicPlaylistEffect,
+  getPublicPlaylistSnapshotEffect,
+  getReadablePlaylistsEffect,
+  publicPlaylistPredicate,
+} from './playlist.service'
 
 const database = Layer.succeed(Database, db)
 
@@ -95,4 +105,107 @@ test('real rich-content resolver refuses unpublished/future playlist snapshots',
     entityId: 'pl-public',
     title: 'Public',
   })
+})
+
+test('migrated SQL includes the exact publication instant, not the next millisecond', async () => {
+  await db.insert(musicPlaylistsTable).values([
+    {
+      id: 'boundary-before',
+      slug: 'boundary-before',
+      title: 'Before',
+      publishedAt: new Date(4999),
+    },
+    { id: 'boundary-at', slug: 'boundary-at', title: 'At', publishedAt: new Date(5000) },
+    { id: 'boundary-after', slug: 'boundary-after', title: 'After', publishedAt: new Date(5001) },
+  ])
+
+  const rows = await db
+    .select({ id: musicPlaylistsTable.id })
+    .from(musicPlaylistsTable)
+    .where(publicPlaylistPredicate(new Date(5000)))
+
+  expect(rows.map((row) => row.id).sort()).toEqual(['boundary-at', 'boundary-before', 'pl-public'])
+})
+
+test('complete evidence uses one bounded batch, captured now and caller revision without filtering catalogue timestamps', async () => {
+  await db.insert(musicAlbumsTable).values({
+    id: 'snapshot-album',
+    slug: 'snapshot-album',
+    title: 'Album',
+    publishedAt: new Date(5001),
+  })
+  await db.insert(musicPlaylistsTable).values({
+    id: 'snapshot',
+    slug: 'snapshot',
+    title: 'Snapshot',
+    publishedAt: new Date(5000),
+    revision: 7,
+  })
+
+  for (let offset = 0; offset < 100; offset += 10) {
+    const tracks = Array.from({ length: 10 }, (_, index) => ({
+      id: `snapshot-${offset + index}`,
+      slug: `snapshot-${offset + index}`,
+      title: 'Track',
+      albumId: 'snapshot-album',
+      publishedAt: index === 0 ? null : new Date(5000),
+    }))
+
+    await db.insert(musicTracksTable).values(tracks)
+    await db.insert(musicPlaylistTracksTable).values(
+      tracks.map((track, index) => ({
+        playlistId: 'snapshot',
+        trackId: track.id,
+        position: (offset + index) * 2,
+      })),
+    )
+  }
+
+  const result = await run(
+    getPublicPlaylistSnapshotEffect({
+      playlistId: 'snapshot',
+      now: new Date(5000),
+      expectedRevision: 7,
+    }),
+  )
+
+  expect(result.members).toHaveLength(100)
+  expect(result.members.map((member) => member.position)).toEqual(
+    Array.from({ length: 100 }, (_, index) => index * 2),
+  )
+  expect(result.members[0]?.track?.publishedAt).toBeNull()
+  expect(result.members[1]?.track?.publishedAt).toEqual(new Date(5000))
+  expect(result.members[0]?.album?.publishedAt).toEqual(new Date(5001))
+  expect(result.playlist).not.toHaveProperty('createdById')
+  expect(
+    await run(
+      Effect.result(
+        getPublicPlaylistSnapshotEffect({ playlistId: 'snapshot', now: new Date(4999) }),
+      ),
+    ),
+  ).toMatchObject({ _tag: 'Failure', failure: { _tag: 'NotFoundError' } })
+  expect(
+    await run(
+      Effect.result(
+        getPublicPlaylistSnapshotEffect({
+          playlistId: 'snapshot',
+          now: new Date(5000),
+          expectedRevision: 6,
+        }),
+      ),
+    ),
+  ).toMatchObject({ _tag: 'Failure', failure: { _tag: 'ConflictError' } })
+  await db
+    .insert(musicTracksTable)
+    .values({ id: 'snapshot-overflow', slug: 'snapshot-overflow', title: 'Overflow' })
+  await db
+    .insert(musicPlaylistTracksTable)
+    .values({ playlistId: 'snapshot', trackId: 'snapshot-overflow', position: 201 })
+  expect(
+    await run(
+      Effect.result(
+        getPublicPlaylistSnapshotEffect({ playlistId: 'snapshot', now: new Date(5000) }),
+      ),
+    ),
+  ).toMatchObject({ _tag: 'Failure', failure: { _tag: 'ValidationError' } })
 })

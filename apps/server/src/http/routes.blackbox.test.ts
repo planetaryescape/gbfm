@@ -536,15 +536,14 @@ describe('music albums/tracks/playlists (HttpApiBuilder group, Step 6c)', () => 
     expect(res.status).toBe(404)
   })
 
-  it('GET /api/music/playlists/:id/tracks returns 401-free 200 (public read) with an empty list for an unknown playlist', async () => {
+  it('GET /api/music/playlists/:id/tracks returns 404 for an unknown or unavailable playlist', async () => {
     const res = await webHandler.handler(
       new Request(
         'http://localhost/api/music/playlists/00000000-0000-0000-0000-000000000000/tracks',
       ),
     )
 
-    expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual([])
+    expect(res.status).toBe(404)
   })
 
   it('POST /api/music/playlists/:id/tracks returns 401 without a session cookie', async () => {

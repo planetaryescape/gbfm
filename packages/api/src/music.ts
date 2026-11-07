@@ -751,6 +751,7 @@ export const MusicGroup = /* @__PURE__ */ (() =>
       HttpApiEndpoint.get('getPlaylistTracks', '/api/music/playlists/:id/tracks', {
         params: playlistIdParam,
         success: Schema.Array(PlaylistTrackEntry),
+        error: HttpApiError.NotFound,
       }),
     )
     .add(

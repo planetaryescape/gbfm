@@ -117,6 +117,7 @@ type GetPostWithReferencesResult = typeof GetPostWithReferencesResult.Type
 type DraftReferenceState = {
   readonly postId: typeof PostId.Type
   readonly references: DraftMusicReferences
+  readonly managed: boolean // internal persisted lifecycle state; never inferred from list length
   // Post updatedAt and PostVersion remain on the owning post snapshot.
 }
 ```

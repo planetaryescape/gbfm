@@ -30,6 +30,8 @@ An old `get_post` reader without catalogue scope can still obtain the current op
 
 ## E1 and legacy primary writers
 
+**Managed state:** A post becomes managed only when an explicit browser collection replacement or E3 reference command commits, including an empty replacement. Persist this state in the same atomic transition; do not infer it from row count, primary value or collection equality. Legacy projection/backfill never marks a post managed. Once managed, emptying the list does not reset it, and legacy writers preserve the marker. The schema coordinator must choose its durable representation under separate schema approval; no column is created here. This definition and the published freeze are one proposed compatibility rule under the owner gate.
+
 - Attach selects/adds the named typed target as primary; an existing target keeps its position; a new target appends. At capacity, reject rather than evict another association.
 - Detach primary sets primary null and retains the ordered list. Explicit association removal uses E3 replacement, including explicit null/new primary where needed. Never treat an omitted collection as clear-all.
 - Embeds remain body operations with their own occurrence/position identity. Neither embed insertion nor mention detection adds associations unless a separate deliberate command requests it.

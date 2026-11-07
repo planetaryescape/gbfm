@@ -26,6 +26,7 @@ export const d1MigrationFiles = [
   '0012_personal_access_keys.sql',
   '0013_editorial_oauth.sql',
   '0014_editorial_operations.sql',
+  '0015_music_catalogue_read_indexes.sql',
 ] as const
 
 const splitStatements = (migration: string) =>

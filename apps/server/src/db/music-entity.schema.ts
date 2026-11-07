@@ -111,7 +111,10 @@ export const musicArtistsTable = sqliteTable(
       .notNull()
       .$defaultFn(() => new Date()),
   },
-  (table) => [index('music_artists_slug_idx').on(table.slug)],
+  (table) => [
+    index('music_artists_slug_idx').on(table.slug),
+    index('music_artists_name_id_idx').on(sql`lower(${table.name})`, table.id),
+  ],
 )
 
 export const musicAlbumsTable = sqliteTable(
@@ -136,7 +139,10 @@ export const musicAlbumsTable = sqliteTable(
       .notNull()
       .$defaultFn(() => new Date()),
   },
-  (table) => [index('music_albums_slug_idx').on(table.slug)],
+  (table) => [
+    index('music_albums_slug_idx').on(table.slug),
+    index('music_albums_title_id_idx').on(sql`lower(${table.title})`, table.id),
+  ],
 )
 
 export const musicTracksTable = sqliteTable(
@@ -163,7 +169,17 @@ export const musicTracksTable = sqliteTable(
       .notNull()
       .$defaultFn(() => new Date()),
   },
-  (table) => [index('music_tracks_slug_idx').on(table.slug)],
+  (table) => [
+    index('music_tracks_slug_idx').on(table.slug),
+    index('music_tracks_title_id_idx').on(sql`lower(${table.title})`, table.id),
+    index('music_tracks_album_id_idx').on(table.albumId, table.id),
+    index('music_tracks_album_number_id_idx').on(
+      table.albumId,
+      sql`(${table.trackNumber} is null)`,
+      table.trackNumber,
+      table.id,
+    ),
+  ],
 )
 
 export const musicPlaylistsTable = sqliteTable(
@@ -211,7 +227,10 @@ export const musicLabelsTable = sqliteTable(
       .notNull()
       .$defaultFn(() => new Date()),
   },
-  (table) => [index('music_labels_slug_idx').on(table.slug)],
+  (table) => [
+    index('music_labels_slug_idx').on(table.slug),
+    index('music_labels_name_id_idx').on(sql`lower(${table.name})`, table.id),
+  ],
 )
 
 export const musicLabelCreatorsTable = sqliteTable(
@@ -239,7 +258,7 @@ export const musicLabelArtistsTable = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.labelId, table.artistId] }),
-    index('music_label_artists_artist_id_idx').on(table.artistId),
+    index('music_label_artists_artist_id_idx').on(table.artistId, table.labelId),
   ],
 )
 
@@ -255,7 +274,7 @@ export const musicLabelAlbumsTable = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.labelId, table.albumId] }),
-    index('music_label_albums_album_id_idx').on(table.albumId),
+    index('music_label_albums_album_id_idx').on(table.albumId, table.labelId),
   ],
 )
 
@@ -275,7 +294,10 @@ export const musicAlbumArtistsTable = sqliteTable(
     displayOrder: integer().notNull().default(0),
     role: text(), // 'primary' | 'featured' | 'producer' | null
   },
-  (table) => [primaryKey({ columns: [table.albumId, table.artistId] })],
+  (table) => [
+    primaryKey({ columns: [table.albumId, table.artistId] }),
+    index('music_album_artists_artist_album_idx').on(table.artistId, table.albumId),
+  ],
 )
 
 export const musicTrackArtistsTable = sqliteTable(
@@ -290,7 +312,10 @@ export const musicTrackArtistsTable = sqliteTable(
     displayOrder: integer().notNull().default(0),
     role: text(),
   },
-  (table) => [primaryKey({ columns: [table.trackId, table.artistId] })],
+  (table) => [
+    primaryKey({ columns: [table.trackId, table.artistId] }),
+    index('music_track_artists_artist_track_idx').on(table.artistId, table.trackId),
+  ],
 )
 
 // ---------------------------------------------------------------------------

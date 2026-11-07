@@ -37,10 +37,10 @@ const authorizedClient = (connection: FavoritesConnection) =>
   )
 
 const toFavoriteError = (error: { readonly _tag: string }): FavoriteError => {
-  if (Predicate.isTagged(error, 'NotFound')) return new FavoriteTrackUnavailable()
+  if (Predicate.isTagged(error, 'NotFound') || Predicate.isTagged(error, 'Forbidden'))
+    return new FavoriteTrackUnavailable()
 
-  if (Predicate.isTagged(error, 'Unauthorized') || Predicate.isTagged(error, 'Forbidden'))
-    return new FavoriteSessionExpired()
+  if (Predicate.isTagged(error, 'Unauthorized')) return new FavoriteSessionExpired()
 
   if (Predicate.isTagged(error, 'Conflict') || Predicate.isTagged(error, 'Gone'))
     return new FavoriteConflict()

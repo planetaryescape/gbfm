@@ -104,6 +104,9 @@ HTTP writes return the decoded committed membership result. Conflict→409,
 expired→410, denied/private→403, invalid→400 and uncertain storage failure→503.
 No conflict is treated as success. Clients retain the exact UUID/input after
 uncertain failures; 409/410 reload state but require explicit new user intent.
+Only HTTP 401 establishes expired authentication for the controls. A target-access
+403 preserves the WWW principal and reports failure; mobile reports track
+unavailability, not session expiry. Neither response is mutation success.
 
 ## Exact P1 integration seam
 

@@ -313,7 +313,9 @@ const runMaintenanceSweep = (env: ApiEnv) =>
         Effect.tap((report) =>
           Effect.logInfo('[worker.scheduled] editorial receipt cleanup finished', report),
         ),
-        Effect.catch(() => Effect.logError('[worker.scheduled] editorial receipt cleanup failed')),
+        Effect.catch((error) =>
+          Effect.logError('[worker.scheduled] editorial receipt cleanup failed', { error }),
+        ),
         Effect.asVoid,
       ),
     ),

@@ -107,6 +107,22 @@ test('composed OAuth MCP enforces draft-write consent, saved versions and revoca
     expect(created.status).toBe(200)
     expect(created.headers.get('cache-control')).toBe('private, no-store')
     const saved = Schema.decodeUnknownSync(Saved)(await created.json()).result.structuredContent
+
+    const maximumInput = {
+      requestId: crypto.randomUUID(),
+      title: 'x'.repeat(500),
+      content: '\u0001'.repeat(100_000),
+      description: '\u0001'.repeat(2000),
+    }
+
+    const maximum = await call('create_draft', maximumInput)
+    expect(maximum.status).toBe(200)
+    expect(
+      Schema.decodeUnknownSync(Saved)(await maximum.json()).result.structuredContent.post.content,
+    ).toBe(maximumInput.content)
+    expect((await call('create_draft', { ...input, content: 'x'.repeat(700_000) })).status).toBe(
+      413,
+    )
     expect(saved.post).toMatchObject({ creatorIds: ['owner'], draft: true, title: input.title })
 
     const update = {

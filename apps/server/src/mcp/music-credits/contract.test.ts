@@ -61,10 +61,28 @@ describe('M2 complete collection inputs', () => {
     expect(await errorCode(parseRecordingCredits(credits([])))).toBe('ok')
     expect(await errorCode(parseArtistAliases(aliases([])))).toBe('ok')
     expect(
-      await errorCode(parseRecordingCredits(credits(Array.from({ length: 50 }, () => performer)))),
+      await errorCode(
+        parseRecordingCredits(
+          credits(
+            Array.from({ length: 50 }, (_, index) => ({
+              ...performer,
+              creditedName: `Player ${index}`,
+            })),
+          ),
+        ),
+      ),
     ).toBe('ok')
     expect(
-      await errorCode(parseRecordingCredits(credits(Array.from({ length: 51 }, () => performer)))),
+      await errorCode(
+        parseRecordingCredits(
+          credits(
+            Array.from({ length: 51 }, (_, index) => ({
+              ...performer,
+              creditedName: `Player ${index}`,
+            })),
+          ),
+        ),
+      ),
     ).toBe('invalid_input')
 
     for (const value of [undefined, null]) {
@@ -172,6 +190,22 @@ describe('M2 complete collection inputs', () => {
     )
 
     expect(await errorCode(checkCreditReplacement(input, existing))).toBe('ok')
+    expect(await errorCode(checkCreditReplacement(input, [{ id: rowId, artistId: null }]))).toBe(
+      'invalid_input',
+    )
+    expect(
+      await errorCode(parseRecordingCredits(credits([{ ...performer, artistId: null }]))),
+    ).toBe('invalid_input')
+    expect(
+      await errorCode(
+        parseRecordingCredits(
+          credits([
+            { ...performer, id: rowId },
+            { ...performer, id: rowId, role: 'engineer' },
+          ]),
+        ),
+      ),
+    ).toBe('invalid_input')
   })
 
   it('compares explicit IDs or normalized names, never merges name-only and linked participants', async () => {
@@ -189,7 +223,7 @@ describe('M2 complete collection inputs', () => {
 
     expect(await errorCode(checkCreditReplacement(distinct, []))).toBe('ok')
 
-    const duplicate = await Effect.runPromise(
+    const duplicate = await errorCode(
       parseRecordingCredits(
         credits([
           { ...performer, creditedName: 'Écho' },
@@ -198,7 +232,7 @@ describe('M2 complete collection inputs', () => {
       ),
     )
 
-    expect(await errorCode(checkCreditReplacement(duplicate, []))).toBe('invalid_input')
+    expect(duplicate).toBe('invalid_input')
   })
 
   it('rejects primary-name/duplicate alias collisions but preserves accents', async () => {
@@ -209,7 +243,7 @@ describe('M2 complete collection inputs', () => {
     expect(await errorCode(checkAliasReplacement(input, 'Echo', []))).toBe('ok')
     expect(await errorCode(checkAliasReplacement(input, 'E\u0301CHO', []))).toBe('invalid_input')
 
-    const duplicate = await Effect.runPromise(
+    const duplicate = await errorCode(
       parseArtistAliases(
         aliases([
           { name: 'Other   Name', ...evidence },
@@ -218,6 +252,6 @@ describe('M2 complete collection inputs', () => {
       ),
     )
 
-    expect(await errorCode(checkAliasReplacement(duplicate, 'Echo', []))).toBe('invalid_input')
+    expect(duplicate).toBe('invalid_input')
   })
 })

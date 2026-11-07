@@ -1,6 +1,15 @@
 import type { D1PreparedStatement } from '@cloudflare/workers-types'
 import { type SQL, sql } from 'drizzle-orm'
 
+import { musicArtistAliasesTable } from '@/db/music-credit.schema'
+import { musicFactNameKey } from '@/services/music-entity/name-key'
+
+// A primary-name change never silently removes an alias to resolve a collision.
+export const artistPrimaryNameAvailable = (artistId: string, name: string): SQL => sql`
+  NOT EXISTS (SELECT 1 FROM ${musicArtistAliasesTable}
+    WHERE ${musicArtistAliasesTable.artistId}=${artistId}
+    AND ${musicArtistAliasesTable.nameKey}=${musicFactNameKey(name)})`
+
 // Include in the artist CAS eligibility, before changing its name or revision.
 export const artistNameFanoutCapacity = (artistId: string): SQL => sql`
   NOT EXISTS (SELECT 1 FROM music_albums p JOIN music_album_artists c ON c.albumId=p.id

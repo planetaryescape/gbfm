@@ -4,7 +4,7 @@ import { Effect, Match, Schema } from 'effect'
 import { Database } from '@/db/layer'
 
 import { McpToolError } from '../contracts'
-import { type MusicEditChange, musicEditReference } from './commands'
+import { type MusicEditChange, MusicRevision, musicEditReference } from './commands'
 
 const Credit = Schema.Struct({
   artistId: Schema.String.check(Schema.isMaxLength(200)),
@@ -14,6 +14,8 @@ const Credit = Schema.Struct({
 })
 
 const Snapshot = Schema.Struct({
+  revision: MusicRevision,
+  referenceRevision: Schema.NullOr(MusicRevision),
   metadata: Schema.Record(
     Schema.String,
     Schema.Union([Schema.String.check(Schema.isMaxLength(10_000)), Schema.Number, Schema.Null]),
@@ -114,6 +116,8 @@ export const planMusicEdit = Effect.fn('MusicEdit.plan')(function* (change: Musi
   const row = yield* Effect.tryPromise({
     try: () =>
       db.get<{ snapshot: string }>(sql`SELECT json_object(
+        'revision', e.revision,
+        'referenceRevision', ${reference ? sql`(SELECT revision FROM ${referenceTable} WHERE id = ${reference.entityId})` : sql`NULL`},
         'metadata', json(${metadata}),
         'genres', json((SELECT json_group_array(name) FROM (
           SELECT l.name FROM entity_labels el JOIN labels l ON l.id = el.label_id
@@ -229,6 +233,11 @@ export const planMusicEdit = Effect.fn('MusicEdit.plan')(function* (change: Musi
   return {
     target,
     reference,
+    revision: snapshot.revision,
+    references:
+      reference && snapshot.referenceRevision !== null
+        ? [{ ...reference, expectedRevision: snapshot.referenceRevision }]
+        : [],
     field,
     before,
     after,

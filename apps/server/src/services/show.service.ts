@@ -42,7 +42,17 @@ type ShowWithHosts = SelectShow & {
   hosts: Array<{ id: string; name: string; username: string | null }>
 }
 
+/** Non-rendering public show metadata; no media, host graph or personalized state. */
+export type PublicShowSummary = Pick<
+  SelectShow,
+  'id' | 'slug' | 'title' | 'description' | 'createdAt' | 'updatedAt'
+>
+
 export interface ShowService {
+  /** Missing and draft shows are indistinguishable; never renders or resolves embeds. */
+  readonly getPublicSummaryBySlug: (
+    slug: string,
+  ) => Effect.Effect<PublicShowSummary, DatabaseError | NotFoundError>
   readonly getNavigationShows: Effect.Effect<Array<ShowWithHosts>, DatabaseError>
   readonly getEpisodesForShow: (
     show: SelectMdxCompiledShow,
@@ -570,7 +580,7 @@ const getEpisodesEffect = (
               extras: (audio) => ({ tagsJson: entityTagsProjection('audio', audio.id) }),
               limit,
               offset,
-              orderBy: desc(audioTable.createdAt),
+              orderBy: [desc(audioTable.createdAt), desc(audioTable.id)],
               with: {
                 audioArtists: {
                   orderBy: [asc(audioArtists.position), asc(audioArtists.artistId)],
@@ -641,6 +651,39 @@ export const ShowServiceLayer = Layer.effect(
     const provideDb = Effect.provideService(Database, db)
 
     return {
+      getPublicSummaryBySlug: (slug) =>
+        Effect.gen(function* () {
+          const rows = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .select({
+                  id: showsTable.id,
+                  slug: showsTable.slug,
+                  title: showsTable.title,
+                  description: showsTable.description,
+                  createdAt: showsTable.createdAt,
+                  updatedAt: showsTable.updatedAt,
+                })
+                .from(showsTable)
+                .where(and(eq(showsTable.slug, slug), eq(showsTable.draft, false)))
+                .limit(1),
+            catch: (error) =>
+              new DatabaseError({
+                message: `Failed to read public show metadata: ${getErrorMessage(error)}`,
+                operation: 'select',
+                table: 'shows',
+              }),
+          })
+
+          if (!rows[0])
+            return yield* new NotFoundError({
+              message: 'Show not found',
+              resource: 'show',
+              id: slug,
+            })
+
+          return rows[0]
+        }).pipe(Effect.withSpan('show.getPublicSummaryBySlug')),
       getEpisodesForShow: (show, options, actor) =>
         provideDb(getEpisodesEffect(show.slug, options, actor, show)).pipe(
           Effect.withSpan('show.getEpisodesForShow', { attributes: { showId: show.id } }),

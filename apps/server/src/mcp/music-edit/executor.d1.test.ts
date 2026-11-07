@@ -13,7 +13,9 @@ import { createMusicEditExecutor } from './executor'
 
 const now = 1_800_000_000_000
 
-const fixture = async () => {
+const fixture = async (
+  liveGuard = sql`EXISTS (SELECT 1 FROM m1_fixture_grant WHERE enabled=1)`,
+) => {
   const resource = await createMigratedD1Database()
   const d1 = resource.database
   await d1.batch([
@@ -44,7 +46,6 @@ const fixture = async () => {
     d1.prepare(`INSERT INTO music_artist_aliases(id,artist_id,name,name_key,source_label,evidence_note,asserted_at,created_at)
       VALUES ('alias','z','Stage','stage','Manual','Evidence',1,1)`),
   ])
-  const liveGuard = sql`EXISTS (SELECT 1 FROM m1_fixture_grant WHERE enabled=1)`
 
   const checkpoint = (scopes: ReadonlyArray<McpScope>) =>
     Effect.gen(function* () {
@@ -268,6 +269,80 @@ test('all eight real common-store writes preserve projections, alias facts and o
       (await f.d1.prepare(`SELECT outcome FROM mcp_operations WHERE state='expired'`).all())
         .results,
     ).toEqual([{ outcome: null }])
+  } finally {
+    await f.dispose()
+  }
+})
+
+test('a compound authority predicate cannot bypass a losing root CAS or fanout selectors', async () => {
+  const f = await fixture(sql`1 OR 0`)
+
+  try {
+    await f.d1.prepare(`UPDATE music_albums SET revision=1 WHERE id='x'`).run()
+    expect(
+      (
+        await f.apply({
+          requestId: crypto.randomUUID(),
+          expectedRevision: 0,
+          references: [{ entityType: 'artist', entityId: 'z', expectedRevision: 0 }],
+          change: {
+            operation: 'set_artist_credit',
+            entityType: 'album',
+            entityId: 'x',
+            artistId: 'z',
+            role: null,
+            displayOrder: 1,
+          },
+        })
+      ).status,
+    ).toBe('conflict')
+    expect(
+      await f.d1
+        .prepare(`SELECT artistNames,revision,last_operation_id FROM music_albums WHERE id='x'`)
+        .first(),
+    ).toEqual({ artistNames: '["Ada"]', revision: 1, last_operation_id: null })
+    expect(
+      (await f.d1.prepare(`SELECT artistId FROM music_album_artists WHERE albumId='x'`).all())
+        .results,
+    ).toEqual([{ artistId: 'a' }])
+    expect((await f.d1.prepare('SELECT * FROM mcp_operations').all()).results).toEqual([])
+
+    const rename = {
+      requestId: crypto.randomUUID(),
+      expectedRevision: 0,
+      references: [],
+      change: {
+        operation: 'update_music_metadata',
+        entityType: 'artist',
+        entityId: 'z',
+        metadata: { name: 'Renamed' },
+      },
+    }
+
+    expect((await f.apply(rename)).status).toBe('applied')
+    expect(
+      (await f.d1.prepare(`SELECT id,artistNames,revision FROM music_albums ORDER BY id`).all())
+        .results,
+    ).toEqual([
+      { id: 'x', artistNames: '["Ada"]', revision: 1 },
+      { id: 'y', artistNames: '["Renamed"]', revision: 1 },
+    ])
+    expect(
+      await f.d1.prepare(`SELECT artistNames,revision FROM music_tracks WHERE id='t'`).first(),
+    ).toEqual({ artistNames: '["Renamed"]', revision: 1 })
+    expect(
+      (
+        await f.apply({
+          ...rename,
+          requestId: crypto.randomUUID(),
+          change: { ...rename.change, metadata: { name: 'Stale' } },
+        })
+      ).status,
+    ).toBe('conflict')
+    expect(
+      await f.d1.prepare(`SELECT name,revision FROM music_artists WHERE id='z'`).first(),
+    ).toEqual({ name: 'Renamed', revision: 1 })
+    expect(await f.d1.prepare('SELECT COUNT(*) AS n FROM mcp_operations').first()).toEqual({ n: 1 })
   } finally {
     await f.dispose()
   }

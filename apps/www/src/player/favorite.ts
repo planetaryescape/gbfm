@@ -207,10 +207,7 @@ const Save = Command.define('PlayerFavorite.Save', {
         )
 
         if (!response.ok)
-          return fail(
-            response.status === 401 || response.status === 403,
-            response.status === 409 || response.status === 410,
-          )
+          return fail(response.status === 401, response.status === 409 || response.status === 410)
         const body = yield* Effect.tryPromise(() => response.json())
         const result = yield* Schema.decodeUnknownEffect(MembershipMutationResult)(body)
 

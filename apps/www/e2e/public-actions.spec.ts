@@ -45,6 +45,13 @@ test('favorite and subscription controls persist and mutations do not interrupt 
   await page.getByRole('button', { name: 'Collapse player', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Now playing', exact: true })).toBeHidden()
   const timeOrigin = await page.evaluate(() => performance.timeOrigin)
+  await page.route('**/api/favorites', (route) => route.fulfill({ status: 403, body: 'Forbidden' }))
+  await page.getByRole('button', { name: 'Add to favorites', exact: true }).click()
+  await expect(page.getByText('Action failed. Please try again.', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Add to favorites', exact: true })).toBeEnabled()
+  await expect(page.getByRole('link', { name: 'Sign in to favorite', exact: true })).toHaveCount(0)
+  await page.unroute('**/api/favorites')
+
   await page.route('**/api/favorites', (route) =>
     route.fulfill({ status: 503, body: 'Unavailable' }),
   )
@@ -82,6 +89,11 @@ test('favorite and subscription controls persist and mutations do not interrupt 
   await expect(page.getByRole('button', { name: 'Subscribe', exact: true })).toBeVisible()
   await page.reload()
   await expect(page.getByRole('button', { name: 'Subscribe', exact: true })).toBeVisible()
+  await page.route('**/api/shows/*/subscribe', (route) =>
+    route.fulfill({ status: 401, body: 'Unauthorized' }),
+  )
+  await page.getByRole('button', { name: 'Subscribe', exact: true }).click()
+  await expect(page.getByRole('link', { name: 'Sign in to subscribe', exact: true })).toBeVisible()
 })
 
 test('sign-in never redirects to an external return URL', async ({ page }) => {

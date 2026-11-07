@@ -142,7 +142,7 @@ test.each([
   [409, 'Conflict', 'FavoriteConflict'],
   [410, 'Gone', 'FavoriteConflict'],
   [401, 'Unauthorized', 'FavoriteSessionExpired'],
-  [403, 'Forbidden', 'FavoriteSessionExpired'],
+  [403, 'Forbidden', 'FavoriteTrackUnavailable'],
   [503, 'ServiceUnavailable', 'FavoriteRequestFailed'],
 ])(
   'never treats HTTP %s as mutation success or retries automatically',
@@ -159,6 +159,16 @@ test('missing/private status and invalid revision fail closed', async () => {
   const missing = fakeServer(() => httpError(404, 'NotFound'))
   expect(await outcome(loadFavorite(missing.connection, track))).toEqual({
     failed: 'FavoriteTrackUnavailable',
+  })
+
+  const denied = fakeServer(() => httpError(403, 'Forbidden'))
+  expect(await outcome(loadFavorite(denied.connection, track))).toEqual({
+    failed: 'FavoriteRequestFailed',
+  })
+
+  const expired = fakeServer(() => httpError(401, 'Unauthorized'))
+  expect(await outcome(loadFavorite(expired.connection, track))).toEqual({
+    failed: 'FavoriteSessionExpired',
   })
 
   const malformed = fakeServer(() =>

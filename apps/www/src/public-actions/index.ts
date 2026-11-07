@@ -146,10 +146,7 @@ const Save = Command.define('PublicActions.Save', {
         )
 
         if (!response.ok)
-          return failed(
-            response.status === 401 || response.status === 403,
-            response.status === 409 || response.status === 410,
-          )
+          return failed(response.status === 401, response.status === 409 || response.status === 410)
         const responseBody = yield* Effect.tryPromise(() => response.json())
         const result = yield* Schema.decodeUnknownEffect(MembershipMutationResult)(responseBody)
 

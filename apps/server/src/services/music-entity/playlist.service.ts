@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, isNotNull, lte, or, sql } from 'drizzle-orm'
-import { Clock, Effect } from 'effect'
+import { Clock, Effect, Predicate, Result, Schema } from 'effect'
 
 import { user } from '@/db/auth.schema'
 import { Database } from '@/db/layer'
@@ -11,6 +11,15 @@ import {
   musicTracksTable,
 } from '@/db/music-entity.schema'
 import { ConflictError, DatabaseError, getErrorMessage, ValidationError } from '@/errors'
+import { CommandAuthority } from '@/mcp/command-authority'
+import { McpToolError } from '@/mcp/contracts'
+import { McpOperationStore, type OperationPreparation } from '@/mcp/operations/store'
+import {
+  decodePlaylistCommand,
+  type LocalPlaylistCommand,
+  playlistCommandScopes,
+} from '@/mcp/playlist-edit/contracts'
+import { planPlaylistChanges, type PlaylistState } from '@/mcp/playlist-edit/planner'
 import { toSlug } from '@/services/to-slug'
 
 import {
@@ -262,6 +271,284 @@ export const getPublicPlaylistSnapshotEffect = Effect.fn('playlist.publicSnapsho
     }
   },
 )
+
+/** Shared desired-state observation for preview and the receipt's read-only prepare phase. */
+const observePlaylistCommand = Effect.fn('playlist.observeCommand')(function* (
+  command: LocalPlaylistCommand,
+  now: number,
+) {
+  const db = yield* Database
+  let snapshot: PlaylistState | null = null
+
+  if (command.operation !== 'create_playlist') {
+    const [headers, memberships] = yield* Effect.tryPromise({
+      try: () =>
+        db.batch([
+          db
+            .select()
+            .from(musicPlaylistsTable)
+            .where(eq(musicPlaylistsTable.id, command.playlistId))
+            .limit(1),
+          db
+            .select({
+              trackId: musicPlaylistTracksTable.trackId,
+              position: musicPlaylistTracksTable.position,
+              addedAt: musicPlaylistTracksTable.addedAt,
+            })
+            .from(musicPlaylistTracksTable)
+            .where(eq(musicPlaylistTracksTable.playlistId, command.playlistId))
+            .orderBy(asc(musicPlaylistTracksTable.position), asc(musicPlaylistTracksTable.trackId))
+            .limit(501),
+        ]),
+      catch: () =>
+        new McpToolError({ code: 'unavailable', message: 'Playlist observation unavailable.' }),
+    })
+
+    const header = headers[0]
+
+    if (!header)
+      return yield* new McpToolError({ code: 'not_found', message: 'Playlist not found.' })
+    snapshot = {
+      playlistId: header.id,
+      revision: header.revision,
+      metadata: {
+        title: header.title,
+        slug: header.slug,
+        description: header.description,
+        coverImageUrl: header.coverImageUrl,
+      },
+      publishedAt: header.publishedAt?.getTime() ?? null,
+      members: memberships.map((member) => ({ ...member, addedAt: member.addedAt.getTime() })),
+    }
+  }
+
+  const catalogue =
+    command.operation === 'add_playlist_tracks'
+      ? yield* Effect.tryPromise({
+          try: () =>
+            db
+              .select({ id: musicTracksTable.id })
+              .from(musicTracksTable)
+              .where(
+                sql`${musicTracksTable.id} IN (SELECT value FROM json_each(${JSON.stringify(command.trackIds)}))`,
+              ),
+          catch: () =>
+            new McpToolError({ code: 'unavailable', message: 'Track observation unavailable.' }),
+        })
+      : []
+
+  return yield* planPlaylistChanges({
+    command,
+    snapshot,
+    now,
+    catalogueTrackIds: new Set(catalogue.map((row) => row.id)),
+  }).pipe(
+    Effect.mapError(
+      (error) =>
+        new McpToolError({
+          code: Predicate.isTagged(error, 'ConflictError') ? 'conflict' : 'invalid_input',
+          message: error.message,
+        }),
+    ),
+  )
+})
+
+export const previewPlaylistCommandEffect = Effect.fn('playlist.previewCommand')(function* (
+  command: LocalPlaylistCommand,
+) {
+  const authority = yield* CommandAuthority
+  yield* authority.checkpoint(playlistCommandScopes(command))
+  const result = yield* observePlaylistCommand(command, yield* Clock.currentTimeMillis)
+  // Preview is informational, never a reservation. Apply must repeat both observation and CAS.
+  yield* authority.checkpoint(playlistCommandScopes(command))
+
+  const envelope = JSON.stringify({
+    structuredContent: result,
+    content: [{ type: 'text', text: JSON.stringify(result) }],
+  })
+
+  if (new TextEncoder().encode(envelope).byteLength > 250_000)
+    return yield* new McpToolError({
+      code: 'invalid_input',
+      message: 'Playlist preview exceeds response budget.',
+    })
+
+  return result
+})
+
+/** Shared browser/MCP command persistence. All state observation happens after receipt lookup. */
+export const applyPlaylistCommandEffect = Effect.fn('playlist.applyCommand')(function* (
+  input: LocalPlaylistCommand,
+) {
+  const db = yield* Database
+  const authority = yield* CommandAuthority
+  const store = yield* McpOperationStore
+  const runPromise = Effect.runPromiseWith(yield* Effect.context<Database>())
+
+  const command = yield* decodePlaylistCommand(input).pipe(
+    Effect.mapError(
+      () => new McpToolError({ code: 'invalid_input', message: 'Invalid playlist command.' }),
+    ),
+  )
+
+  if (
+    command.operation === 'add_playlist_track_from_url' ||
+    command.operation === 'sync_playlist_links'
+  )
+    return yield* new McpToolError({
+      code: 'unavailable',
+      message: 'Provider command requires the import status integration.',
+    })
+
+  const scopes = playlistCommandScopes(command)
+  const checkpoint = yield* authority.checkpoint(scopes)
+  const now = yield* Clock.currentTimeMillis
+  const savedAccess = Schema.Struct({ playlistId: Schema.String })
+
+  const result = yield* Effect.tryPromise({
+    try: (signal) =>
+      store.execute({
+        key: {
+          actorId: checkpoint.actorId,
+          clientId: checkpoint.clientId,
+          resource: checkpoint.resource,
+          operation: command.operation,
+          requestId: command.requestId,
+        },
+        normalizedInput: command,
+        now,
+        authorize: async (outcome) => {
+          const current = await runPromise(authority.checkpoint(scopes).pipe(Effect.result), {
+            signal,
+          })
+
+          if (Result.isFailure(current)) {
+            if (current.failure.code === 'access_denied') return false
+            throw current.failure
+          }
+
+          if (!outcome) return true
+          const access = Schema.decodeUnknownSync(savedAccess)(outcome.access)
+
+          const rows = await db
+            .select({ id: musicPlaylistsTable.id })
+            .from(musicPlaylistsTable)
+            .where(eq(musicPlaylistsTable.id, access.playlistId))
+            .limit(1)
+
+          return rows.length === 1
+        },
+        prepare: async (): Promise<OperationPreparation> => {
+          const planned = await runPromise(
+            observePlaylistCommand(command, now).pipe(Effect.result),
+            { signal },
+          )
+
+          if (Result.isFailure(planned)) {
+            const code = planned.failure.code
+
+            return {
+              status:
+                code === 'conflict' || code === 'not_found' || code === 'invalid_input'
+                  ? code
+                  : 'unavailable',
+            }
+          }
+
+          const plan = planned.success
+
+          return {
+            status: 'ready',
+            build: (ctx) => {
+              const playlistId = plan.playlistId ?? crypto.randomUUID()
+
+              const winner = sql`EXISTS (SELECT 1 FROM music_playlists WHERE id = ${playlistId}
+            AND revision = ${plan.revision} AND last_operation_id = ${ctx.attemptId})`
+
+              const guarded = sql`(${ctx.fence}) AND (${checkpoint.liveGuard}) AND (${winner})`
+              const metadata = plan.after.metadata
+
+              const statements = [
+                ctx.prepare(
+                  plan.playlistId === null
+                    ? sql`INSERT INTO music_playlists (id,title,slug,description,coverImageUrl,publishedAt,createdById,createdAt,updatedAt,revision,last_operation_id)
+                SELECT ${playlistId},${metadata.title},${metadata.slug},${metadata.description},${metadata.coverImageUrl},NULL,${checkpoint.actorId},${now},${now},0,${ctx.attemptId}
+                WHERE (${ctx.fence}) AND (${checkpoint.liveGuard})`
+                    : sql`UPDATE music_playlists SET title=${metadata.title},slug=${metadata.slug},description=${metadata.description},coverImageUrl=${metadata.coverImageUrl},
+                publishedAt=${plan.after.publishedAt},revision=${plan.revision},last_operation_id=${ctx.attemptId},
+                updatedAt=CASE WHEN ${plan.changed ? 1 : 0} THEN ${now} ELSE updatedAt END
+                WHERE id=${playlistId} AND revision=${plan.expectedRevision} AND (${ctx.fence}) AND (${checkpoint.liveGuard})`,
+                ),
+              ]
+
+              if (
+                plan.changed &&
+                [
+                  'add_playlist_tracks',
+                  'remove_playlist_tracks',
+                  'reorder_playlist_tracks',
+                ].includes(command.operation)
+              ) {
+                statements.push(
+                  ctx.prepare(
+                    sql`DELETE FROM music_playlist_tracks WHERE playlistId=${playlistId} AND (${guarded})`,
+                  ),
+                )
+
+                if (plan.after.members.length > 0)
+                  statements.push(
+                    ctx.prepare(sql`INSERT INTO music_playlist_tracks (playlistId,trackId,position,addedAt)
+              SELECT ${playlistId},json_extract(value,'$.trackId'),json_extract(value,'$.position'),json_extract(value,'$.addedAt')
+              FROM json_each(${JSON.stringify(plan.after.members)}) WHERE (${guarded})`),
+                  )
+              }
+
+              return {
+                statements,
+                assertApplied: guarded,
+                outcome: {
+                  result: {
+                    playlistId,
+                    revision: plan.revision,
+                    changed: plan.changed,
+                    membershipCount: plan.after.members.length,
+                  },
+                  revision: plan.revision,
+                  access: { playlistId },
+                },
+              }
+            },
+          }
+        },
+      }),
+    catch: () =>
+      new McpToolError({
+        code: 'unavailable',
+        message: 'Playlist command unavailable; retry the same request.',
+      }),
+  })
+
+  if (result.status !== 'applied' && result.status !== 'replayed')
+    return yield* new McpToolError({
+      code: result.status,
+      message: `Playlist command ${result.status}.`,
+    })
+
+  const output = yield* Schema.decodeUnknownEffect(
+    Schema.Struct({
+      playlistId: Schema.String,
+      revision: Schema.Int,
+      changed: Schema.Boolean,
+      membershipCount: Schema.Int,
+    }),
+  )(result.outcome.result).pipe(
+    Effect.mapError(
+      () => new McpToolError({ code: 'unavailable', message: 'Playlist receipt unavailable.' }),
+    ),
+  )
+
+  return { ...output, operationId: result.operationId, replayed: result.status === 'replayed' }
+})
 
 export const createPlaylistEffect = Effect.fn('musicEntity.createPlaylist')(function* (
   data: CreatePlaylistInput,

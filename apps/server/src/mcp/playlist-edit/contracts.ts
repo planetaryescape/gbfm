@@ -147,3 +147,28 @@ export const playlistCommandScopes = (command: PlaylistCommand): ReadonlyArray<M
 export const decodePlaylistCommand = Schema.decodeUnknownEffect(PlaylistCommand, {
   onExcessProperty: 'error',
 })
+
+export const PlaylistCommandResult = Schema.Struct({
+  playlistId: Id,
+  revision: PlaylistRevision,
+  changed: Schema.Boolean,
+  membershipCount: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 500 })),
+  operationId: Schema.String,
+  replayed: Schema.Boolean,
+})
+
+const PlannedState = Schema.Struct({
+  metadata: PlaylistMetadata,
+  publishedAt: Schema.NullOr(Schema.Int),
+  members: Schema.Array(Schema.Struct({ trackId: Id, position: Schema.Int, addedAt: Schema.Int })),
+})
+
+export const PlaylistPreviewResult = Schema.Struct({
+  operation: Schema.String,
+  playlistId: Schema.NullOr(Id),
+  expectedRevision: Schema.NullOr(PlaylistRevision),
+  revision: PlaylistRevision,
+  changed: Schema.Boolean,
+  before: Schema.NullOr(PlannedState),
+  after: PlannedState,
+})

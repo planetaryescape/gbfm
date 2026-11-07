@@ -8,7 +8,7 @@ import { musicArtistsTable } from '@/db/music-entity.schema'
 import { showsTable } from '@/db/show.schema'
 import { DatabaseError, NotFoundError } from '@/errors'
 
-import type { PublicProfile } from './profile.service'
+import type { PublicProfile, PublicProfileMetadata } from './profile.service'
 
 const djArtistIds = (db: Database['Service']) =>
   db
@@ -16,6 +16,45 @@ const djArtistIds = (db: Database['Service']) =>
     .from(audioArtists)
     .innerJoin(audioTable, eq(audioTable.id, audioArtists.audioId))
     .where(eq(audioTable.type, 'mix'))
+
+/** The existing DJ profile predicate without loading its unbounded mix graph. */
+export const getArtistDjProfileMetadata = Effect.fn('artist.getDjProfileMetadata')(function* (
+  slug: string,
+): Effect.fn.Return<PublicProfileMetadata, DatabaseError | NotFoundError, Database> {
+  const db = yield* Database
+
+  const rows = yield* Effect.tryPromise({
+    try: () =>
+      db
+        .select({
+          id: musicArtistsTable.id,
+          name: musicArtistsTable.name,
+          username: musicArtistsTable.slug,
+          bio: musicArtistsTable.bio,
+          createdAt: musicArtistsTable.createdAt,
+        })
+        .from(musicArtistsTable)
+        .where(
+          and(
+            eq(musicArtistsTable.slug, slug),
+            isNotNull(musicArtistsTable.publishedAt),
+            inArray(musicArtistsTable.id, djArtistIds(db)),
+          ),
+        )
+        .limit(1),
+    catch: () =>
+      new DatabaseError({
+        message: 'Could not load DJ profile metadata',
+        operation: 'select',
+        table: 'music_artists',
+      }),
+  })
+
+  if (!rows[0])
+    return yield* new NotFoundError({ message: 'Profile not found', resource: 'profile', id: slug })
+
+  return rows[0]
+})
 
 export const listArtistDjs = Effect.fn('artist.listDjs')(function* () {
   const db = yield* Database

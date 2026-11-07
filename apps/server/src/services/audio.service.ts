@@ -128,6 +128,13 @@ type AudioWithCreators = SelectAudio & {
 }
 
 export interface AudioService {
+  /** Anonymous mix metadata only; never renders bodies or joins related shows. */
+  readonly getPublicMixSummaryBySlug: (
+    slug: string,
+  ) => Effect.Effect<
+    Pick<SelectAudio, 'id' | 'slug' | 'title' | 'description' | 'createdAt' | 'updatedAt'>,
+    DatabaseError | NotFoundError
+  >
   readonly getByType: (
     type: AudioType,
     options: { limit: number; offset: number; tag?: string },
@@ -884,6 +891,45 @@ export const AudioServiceLayer = Layer.effect(
     const provideDb = Effect.provideService(Database, db)
 
     return {
+      getPublicMixSummaryBySlug: (slug) =>
+        Effect.gen(function* () {
+          const rows = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .select({
+                  id: audioTable.id,
+                  slug: audioTable.slug,
+                  title: audioTable.title,
+                  description: audioTable.description,
+                  createdAt: audioTable.createdAt,
+                  updatedAt: audioTable.updatedAt,
+                })
+                .from(audioTable)
+                .where(
+                  and(
+                    eq(audioTable.slug, slug),
+                    eq(audioTable.type, 'mix'),
+                    audioVisibilityCondition(db),
+                  ),
+                )
+                .limit(1),
+            catch: (error) =>
+              new DatabaseError({
+                message: `Public mix read failed: ${getErrorMessage(error)}`,
+                operation: 'select',
+                table: 'audio',
+              }),
+          })
+
+          if (!rows[0])
+            return yield* new NotFoundError({
+              message: 'Mix not found',
+              resource: 'audio',
+              id: slug,
+            })
+
+          return rows[0]
+        }).pipe(Effect.withSpan('audio.getPublicMixSummaryBySlug')),
       getByType: (type, options) =>
         provideDb(getByTypeEffect(type, options)).pipe(
           Effect.withSpan('audio.getByType', { attributes: { type } }),

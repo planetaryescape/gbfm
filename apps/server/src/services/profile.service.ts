@@ -15,7 +15,7 @@ import { postCreators, postsTable } from '@/db/post.schema'
 import { showCreators, showsTable } from '@/db/show.schema'
 import { DatabaseError, getErrorMessage, NotFoundError } from '@/errors'
 
-import { getArtistDjProfile } from './dj-artists'
+import { getArtistDjProfile, getArtistDjProfileMetadata } from './dj-artists'
 
 function isSocialLinkPlatform(value: string): value is SocialLinkPlatform {
   return SOCIAL_LINK_PLATFORMS.some((platform) => platform === value)
@@ -66,7 +66,17 @@ export type PublicProfile = {
   }
 }
 
+/** Public identity metadata without media, social links or personalized content graphs. */
+export type PublicProfileMetadata = Pick<
+  PublicProfile,
+  'id' | 'name' | 'username' | 'bio' | 'createdAt'
+>
+
 export interface ProfileService {
+  /** Preserves user-first lookup, banned-user denial and the existing artist-DJ fallback. */
+  readonly getPublicProfileMetadata: (
+    username: string,
+  ) => Effect.Effect<PublicProfileMetadata, DatabaseError | NotFoundError>
   readonly getPublicProfile: (
     username: string,
     viewer?: AudioViewer,
@@ -74,6 +84,53 @@ export interface ProfileService {
 }
 
 export const ProfileService = Context.Service<ProfileService>('ProfileService')
+
+const getPublicProfileMetadata = Effect.fn('profile.getPublicMetadata')(function* (
+  username: string,
+) {
+  const db = yield* Database
+
+  const rows = yield* Effect.tryPromise({
+    try: () =>
+      db
+        .select({
+          id: userTable.id,
+          name: userTable.name,
+          username: userTable.username,
+          bio: userTable.bio,
+          createdAt: userTable.createdAt,
+          banned: userTable.banned,
+        })
+        .from(userTable)
+        .where(eq(userTable.username, username))
+        .limit(1),
+    catch: (error) =>
+      new DatabaseError({
+        message: `Public profile read failed: ${getErrorMessage(error)}`,
+        operation: 'select',
+        table: 'user',
+      }),
+  })
+
+  const row = rows[0]
+
+  if (!row) return yield* getArtistDjProfileMetadata(username)
+
+  if (row.banned)
+    return yield* new NotFoundError({
+      message: 'Profile not found',
+      resource: 'profile',
+      id: username,
+    })
+
+  return {
+    id: row.id,
+    name: row.name,
+    username: row.username,
+    bio: row.bio,
+    createdAt: row.createdAt,
+  }
+})
 
 export const getPublicProfileEffect = (username: string, viewer?: AudioViewer) =>
   Effect.gen(function* () {
@@ -255,6 +312,8 @@ export const ProfileServiceLayer = Layer.effect(
     const db = yield* Database
 
     return {
+      getPublicProfileMetadata: (username) =>
+        getPublicProfileMetadata(username).pipe(Effect.provideService(Database, db)),
       getPublicProfile: (username, viewer) =>
         getPublicProfileEffect(username, viewer).pipe(
           Effect.provideService(Database, db),

@@ -45,8 +45,13 @@ export interface AtomicOperationPlan {
   readonly outcome: OperationOutcome
 }
 
+/** Read-only domain preparation runs only after an authorized receipt miss. No mutation/network effects. */
+export type OperationPreparation =
+  | { readonly status: 'ready'; readonly build: (context: OperationContext) => AtomicOperationPlan }
+  | { readonly status: 'conflict' | 'not_found' | 'invalid_input' | 'unavailable' }
+
 /** Authorization is fresh both before lookup and before disclosure; receipts never confer authority. */
-export interface ExecuteOperation {
+export type ExecuteOperation = {
   readonly key: OperationKey
   readonly normalizedInput: JsonValue
   readonly now: number
@@ -55,8 +60,10 @@ export interface ExecuteOperation {
    * False means denied; rejection means unavailable, never authority to continue.
    */
   readonly authorize: (outcome?: OperationOutcome) => Promise<boolean>
-  readonly build: (context: OperationContext) => AtomicOperationPlan
-}
+} & (
+  | { readonly build: (context: OperationContext) => AtomicOperationPlan; readonly prepare?: never }
+  | { readonly prepare: () => Promise<OperationPreparation>; readonly build?: never }
+)
 
 /** Unavailable means commit may have happened: retry only the identical key/input. */
 export type OperationResult =
@@ -67,7 +74,15 @@ export type OperationResult =
       readonly createdAt: number
       readonly expiresAt: number
     }
-  | { readonly status: 'conflict' | 'expired' | 'access_denied' | 'invalid_input' | 'unavailable' }
+  | {
+      readonly status:
+        | 'conflict'
+        | 'not_found'
+        | 'expired'
+        | 'access_denied'
+        | 'invalid_input'
+        | 'unavailable'
+    }
 
 /** Fixed adapter diagnostics only: never include errors, SQL, keys, IDs or receipt data. */
 export interface OperationDiagnostic {
@@ -77,8 +92,9 @@ export interface OperationDiagnostic {
     | 'receipt.batch'
     | 'receipt.authorize'
     | 'receipt.prune'
-  readonly dependency: 'database' | 'codec' | 'authorization'
-  readonly code: 'storage_failed' | 'decode_failed' | 'authorization_failed'
+    | 'receipt.prepare'
+  readonly dependency: 'database' | 'codec' | 'authorization' | 'domain'
+  readonly code: 'storage_failed' | 'decode_failed' | 'authorization_failed' | 'preparation_failed'
 }
 
 const reportUnavailable = (diagnostic: OperationDiagnostic) =>
@@ -283,13 +299,28 @@ export const createMcpOperationStore = (
         const previous = await read()
 
         if (previous) return previous
+
+        failure = { operation: 'receipt.prepare', dependency: 'domain', code: 'preparation_failed' }
+
+        const prepared = input.prepare
+          ? await input.prepare()
+          : { status: 'ready' as const, build: input.build }
+
+        if (prepared.status !== 'ready') {
+          if (prepared.status === 'unavailable') diagnostic(failure)
+
+          // Another identical request can commit while read-only preparation awaits.
+          // Its original receipt wins over a newly stale/not-found observation.
+          return (await read()) ?? { status: prepared.status }
+        }
+
         const attemptId = crypto.randomUUID()
         const fence = sql`EXISTS (SELECT 1 FROM mcp_operations WHERE id = ${operationId} AND attempt_id = ${attemptId} AND state = 'pending' AND input_hash = ${inputHash})`
         let plan: AtomicOperationPlan
         let outcome: string
 
         try {
-          plan = input.build({ attemptId, operationId, fence, prepare })
+          plan = prepared.build({ attemptId, operationId, fence, prepare })
           outcome = canonicalJson({
             result: plan.outcome.result,
             revision: plan.outcome.revision,

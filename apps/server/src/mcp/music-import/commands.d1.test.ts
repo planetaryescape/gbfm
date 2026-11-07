@@ -1,4 +1,4 @@
-import { McpPrincipal } from '@gbfm/core/editorial-mcp'
+import { McpPrincipal, McpResourceUrl } from '@gbfm/core/editorial-mcp'
 import { eq } from 'drizzle-orm'
 import { Effect, Layer, Result, Schema } from 'effect'
 import { beforeAll, expect, test } from 'vitest'
@@ -6,12 +6,15 @@ import { beforeAll, expect, test } from 'vitest'
 import { user } from '@/db/auth.schema'
 import { Database } from '@/db/layer'
 import { McpActor, McpAuthorizationLive } from '@/mcp/authorization'
+import { McpToolError } from '@/mcp/contracts'
 import { db } from '@/test/d1'
 import { withTestLayer } from '@/test/effect'
 
 import { type CreateArtistInput, MusicImportCommands, MusicImportCommandsLayer } from './commands'
 
 const actorId = 'i1-admin'
+
+const resource = Schema.decodeUnknownSync(McpResourceUrl)('https://api.example.test/mcp')
 
 const principal = Schema.decodeUnknownSync(McpPrincipal)({
   userId: actorId,
@@ -24,10 +27,10 @@ const layer = MusicImportCommandsLayer.pipe(
   Layer.provide(Layer.succeed(Database, db)),
 )
 
-const prepare = (raw: Schema.Json, actor = principal) =>
+const prepare = (raw: Schema.Json, actor = principal, audience = resource) =>
   Effect.runPromise(
     withTestLayer(
-      Effect.flatMap(MusicImportCommands, (commands) => commands.prepare(raw)),
+      Effect.flatMap(MusicImportCommands, (commands) => commands.prepare(raw, audience)),
       layer,
     ).pipe(Effect.provideService(McpActor, actor), Effect.result),
   )
@@ -92,6 +95,7 @@ test('prepares all five selected commands without creating catalogue rows or rec
     expect(prepared.receiptScope).toMatchObject({
       actorId,
       clientId: 'i1-client',
+      resource,
       operation: command.operation,
     })
     expect(prepared.inputHash).toMatch(/^[a-f0-9]{64}$/)
@@ -136,6 +140,10 @@ test('fingerprints are key-order independent, URL-normalized and sensitive to nu
   )
 
   expect(anotherClient.receiptScope.clientId).not.toBe(original.receiptScope.clientId)
+  const otherResource = Schema.decodeUnknownSync(McpResourceUrl)('https://preview.example.test/mcp')
+  const anotherAudience = success(await prepare(create(), principal, otherResource))
+  expect(anotherAudience.receiptScope.resource).toBe(otherResource)
+  expect(anotherAudience.inputHash).toBe(original.inputHash)
 })
 
 test('rejects excess fields, non-v4 IDs, label URL imports, unsafe URLs and encoded oversized content', async () => {
@@ -186,12 +194,18 @@ test('rejects excess fields, non-v4 IDs, label URL imports, unsafe URLs and enco
 
 test('checks every import scope and inferred playlist authority', async () => {
   for (const scope of ['catalogue:write', 'catalogue:import', 'providers:read']) {
-    expect(
-      await prepare(imported(), {
-        ...principal,
-        scopes: principal.scopes.filter((value) => value !== scope),
-      }),
-    ).toMatchObject({ failure: { code: 'access_denied' } })
+    const denied = await prepare(imported(), {
+      ...principal,
+      scopes: principal.scopes.filter((value) => value !== scope),
+    })
+
+    expect(denied).toMatchObject({ failure: { code: 'access_denied' } })
+
+    if (Result.isSuccess(denied)) throw new Error('Expected authorization denial')
+    const encoded = Schema.encodeSync(Schema.fromJsonString(McpToolError))(denied.failure)
+    expect(Schema.decodeUnknownSync(Schema.fromJsonString(McpToolError))(encoded).code).toBe(
+      'access_denied',
+    )
   }
 
   const noPlaylist = {
@@ -203,6 +217,11 @@ test('checks every import scope and inferred playlist authority', async () => {
     await prepare(imported('https://open.spotify.com/playlist/Abc123'), noPlaylist),
   ).toMatchObject({ failure: { code: 'access_denied' } })
   expect(Result.isSuccess(await prepare(imported(), noPlaylist))).toBe(true)
+  expect(success(await prepare(imported(), noPlaylist)).typeAuthority).toBe('resolved')
+  expect(
+    success(await prepare(imported('https://soundcloud.com/some-artist/sets/some-set'), noPlaylist))
+      .typeAuthority,
+  ).toBe('pending')
 })
 
 test('identical preparation rechecks persisted admin role, ban and deletion; no cached authority', async () => {

@@ -12,8 +12,13 @@ policy, provider access, object storage or email execution is authorized here.
 `commands.ts` exports five bounded Effect schemas and `MusicImportCommandsLayer`.
 Provide P1's `McpAuthorization` (live layer requires `Database`); each `prepare`
 call requires request-scoped `McpActor`. Its only operation accepts
-`{ operation, input }` and returns the parsed command, receipt scope and SHA-256
-payload fingerprint. This is **preparation**, not accepted/applied/replayed work.
+`{ operation, input }` plus the configured, branded `McpResourceUrl` as a separate
+trusted composition argument, never a client-selectable field. P1 must supply the
+same configured audience its persisted OAuth verifier used. Preparation returns
+the parsed command, complete receipt scope (including resource), typeAuthority
+and SHA-256 payload fingerprint. Authorization failures are normalized to the
+same `McpToolError` failure schema as input/dependency failures, so a future tool
+can encode denials without remapping. This is **preparation**, not accepted/applied/replayed work.
 It writes nothing and calls no providers. It must not become a wire preview tool
 (preview import is explicitly deferred). P1 alone owns registration/composition.
 
@@ -23,10 +28,19 @@ It writes nothing and calls no providers. It must not become a wire preview tool
 | `create_artist` | UUIDv4, name/slug, optional bio/image/genres; admin + catalogue:write | music-entity/artist.service.ts createArtistEffect |
 | `create_album` | UUIDv4, title/slug, optional ordered artists/releaseDate/cover/genres/albumType; same authority | album.service.ts createAlbumEffect |
 | `create_track` | UUIDv4, title/slug, optional ordered artists/cover/album/trackNumber; same authority | track.service.ts createTrackEffect |
-| `create_label` | UUIDv4, name/slug/content, optional description/artwork/tags/genres; same authority | label.service.ts createLabelEffect, including canonical-content validation |
+| `create_label` | UUIDv4, name/slug/content, optional description/artwork/tags/genres; same authority | label.service.ts createLabelEffect validation, but requires the approved writer seam to suppress creator association |
 
-Manual creation never asserts ownership: createdById must come from the live
-actor at execution, not input. Publication timestamps are not accepted by this
+MCP manual creation must not assert ownership. The live actor supplies audit
+createdById, never client input. **Existing createLabelEffect does not meet this
+contract**: passing createdById also inserts music_label_creators, which grants
+release-management authority through requireCreatorOrAdmin even after admin
+demotion. The browser path does this today; browser parity is not permission to
+extend that grant through MCP. The approved shared writer must retain actor audit
+attribution but skip that creator association for MCP create_label, while keeping
+browser/PAT behavior unchanged. This required shared-service seam is gated and
+not implemented here; do not call the existing function unchanged. Artist, album
+and track createdById currently have no equivalent authority side effect.
+Publication timestamps are not accepted by this
 initial preparation contract. Label imports are not canonical URL imports:
 `label` is rejected as expectedType; manual label creation remains separate.
 Existing HTTP/PAT/browser schemas and behavior are untouched. Strict unknown-key
@@ -43,6 +57,12 @@ artwork policy changes the fingerprint even for the same canonical source.
 URL normalization reuses the canonical parser rather than inventing identity.
 Generic source URLs may yield a provider-inferred playlist: the future execution
 owner must check playlists:write again after type resolution **before commit**.
+The prepared result exposes `typeAuthority: 'pending'` for source types `url` and
+`video`, versus `resolved` for a known canonical type or manual create. Neither
+value is authority to commit later: every execution/replay still rechecks live
+authorization. Pending imports require a hook in canonical index.ts immediately
+after inferredType and before any identity/metadata commit (including reuse of
+an existing reference); fail closed on a resolved playlist without playlists:write.
 
 `outcome.ts` exports `ImportPersistenceOutcome` and `projectImportPersistence`.
 It projects a **single resolver attempt**, not an exactly-once command result:
@@ -150,10 +170,10 @@ serialized integration (not permission for this branch):
 | --- | --- |
 | services/canonical-music-identity/repository.ts | commit: receipt transition in same D1 batch, no fast-path receipt omission; updateArtwork: guarded revision/receipt association; updateEntityMetadata: guarded refresh and affected relationship revisions |
 | services/canonical-music-identity/repository-statements.ts | entityInsertStatements/newArtistStatements/primaryEntityStatement and relationship/link statements: initial revisions for newly created entities and derived artists; reuse mutations invalidate the same version as M1/U1 |
-| services/canonical-music-identity/index.ts | resolvePrepared/readReference/adoptLegacy reuse and commit paths: carry request context to the ONE approved writer, preserve source lease fencing; no independent import writer |
+| services/canonical-music-identity/index.ts | resolvePrepared/readReference/adoptLegacy reuse and commit paths: carry request context to the ONE approved writer; add resolved-type authorization immediately after inferredType and before commit, also check reused reference type before recording reuse; preserve source lease fencing; no independent import writer |
 | services/canonical-music-identity/entity-operations.ts | refresh/enrich/attach/release coordination with M1/U1/Q2: provider snapshot must not overwrite a newer admin edit; artist rename must fan out parent artistNames/revisions atomically |
 | services/canonical-music-identity/artwork-delivery.ts | deliverMusicArtwork: durably staged effect and guarded association; preserve known-good state; do not treat skipped required fetch as confirmed delivery |
-| services/music-entity/{artist,album,track,label}.service.ts | create methods only: contribute statements to the shared writer; M1 owns proposed update/junction changes, including artist rename fan-out |
+| services/music-entity/{artist,album,track,label}.service.ts | create methods only: contribute statements to the shared writer; label create needs an explicit audit-without-creator-association seam so MCP inserts no music_label_creators row; M1 owns proposed update/junction changes, including artist rename fan-out |
 | db/labels.ts | Genre/tag insertion during creates must participate in the same receipt/revision batch; coordinate M1's genre replacement lane, no separate writer |
 
 Refresh is not one of I1's five commands and is not implemented here. Its raw
@@ -162,7 +182,14 @@ integration. Canonical create initializes revisions; canonical reuse reports
 existing revisions and only increments on actual visible mutation; refresh and
 artwork association compare/increment the same guarded entity revision. Playlist
 revision/visibility remains PL1/PL2-owned and must join the same integration
-before playlist imports become executable. R1/#551 runtime HOLD is unchanged.
+before playlist imports become executable. R1/#551 integration/production HOLD is unchanged.
+
+Narrow reservations already allocated elsewhere: M1 has only the album.service.ts
+`and` import and removeArtistFromAlbumEffect WHERE bug fix; leave both untouched.
+R1 alone has the music-entity.schema.ts index declarations,
+0015_music_catalogue_read_indexes.sql, migrate-d1.ts replay append and conditional
+schema-test parity. Those reservations grant no receipt/revision/canonical-writer
+schema approval. I1 remains disjoint and imports none of R1's code.
 
 Until P1 records storage approval, allocates this method scope to one owner and
 delivers the atomic service seam, all five commands stay unregistered. Required
@@ -170,3 +197,7 @@ post-approval proof: concurrent identical command keys, concurrent differing key
 for one source, changed-payload conflict, discard response then exact receipt
 replay, expired tombstones, revoked replay, browser/MCP revision conflict, and
 upload-success/DB-association-failure recovery on disposable D1.
+The gated label-writer proof must also show no music_label_creators row is added
+by MCP create_label, audit attribution survives, and a demoted creator gains no
+release-management authority from that create. Existing browser/PAT label creation
+must retain its current behavior.

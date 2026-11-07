@@ -222,6 +222,20 @@ test('checks every import scope and inferred playlist authority', async () => {
     success(await prepare(imported('https://soundcloud.com/some-artist/sets/some-set'), noPlaylist))
       .typeAuthority,
   ).toBe('pending')
+  expect(
+    success(
+      await prepare(
+        {
+          operation: 'import_music_url',
+          input: {
+            ...imported('https://soundcloud.com/some-artist/sets/some-set').input,
+            expectedType: 'track',
+          },
+        },
+        noPlaylist,
+      ),
+    ).typeAuthority,
+  ).toBe('pending')
 })
 
 test('identical preparation rechecks persisted admin role, ban and deletion; no cached authority', async () => {

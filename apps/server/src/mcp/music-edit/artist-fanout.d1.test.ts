@@ -18,19 +18,6 @@ test('the production fanout helper fences stale attempts, projects ordered names
   }
 
   try {
-    // Disposable proof against the approved column shape until 0017 is in the
-    // stack. Never adds tracked DDL or asserts existing writer compliance.
-    for (const table of ['music_artists', 'music_albums', 'music_tracks']) {
-      const columns = await d1.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>()
-
-      if (!columns.results.some((column) => column.name === 'revision')) {
-        await d1
-          .prepare(`ALTER TABLE ${table} ADD COLUMN revision INTEGER NOT NULL DEFAULT 0`)
-          .run()
-        await d1.prepare(`ALTER TABLE ${table} ADD COLUMN last_operation_id TEXT`).run()
-      }
-    }
-
     await d1.batch([
       d1.prepare(`INSERT INTO music_artists (id,name,slug,createdAt,updatedAt) VALUES
         ('z','Zed','z',1,1),('a','Ada','a',1,1)`),
@@ -51,14 +38,15 @@ test('the production fanout helper fences stale attempts, projects ordered names
       ...artistNameFanoutStatements({ prepare, artistId: 'z', attemptId, fence }),
     ]
 
-    await d1.batch(rename('winner', 0, 'Renamed'))
+    const winningAttempt = crypto.randomUUID()
+    await d1.batch(rename(winningAttempt, 0, 'Renamed'))
     expect(
       await d1
         .prepare(
           `SELECT artistNames,revision,last_operation_id FROM music_albums WHERE id='linked'`,
         )
         .first(),
-    ).toEqual({ artistNames: '["Ada","Renamed"]', revision: 1, last_operation_id: 'winner' })
+    ).toEqual({ artistNames: '["Ada","Renamed"]', revision: 1, last_operation_id: winningAttempt })
     expect(
       await d1.prepare(`SELECT artistNames,revision FROM music_tracks WHERE id='track'`).first(),
     ).toEqual({ artistNames: '["Renamed"]', revision: 1 })
@@ -66,9 +54,14 @@ test('the production fanout helper fences stale attempts, projects ordered names
       await d1.prepare(`SELECT artistNames,revision FROM music_albums WHERE id='other'`).first(),
     ).toEqual({ artistNames: '["Ada"]', revision: 0 })
 
-    await d1.batch(rename('loser', 0, 'Stale'))
+    await d1.batch(rename(crypto.randomUUID(), 0, 'Stale'))
     await d1.batch([
-      ...artistNameFanoutStatements({ prepare, artistId: 'z', attemptId: 'winner', fence: sql`0` }),
+      ...artistNameFanoutStatements({
+        prepare,
+        artistId: 'z',
+        attemptId: winningAttempt,
+        fence: sql`0`,
+      }),
     ])
     expect(
       await d1.prepare(`SELECT name,revision FROM music_artists WHERE id='z'`).first(),
@@ -80,7 +73,7 @@ test('the production fanout helper fences stale attempts, projects ordered names
     await d1.prepare('CREATE TABLE m1_fanout_abort (n INTEGER CHECK(n=1))').run()
     await expect(
       d1.batch([
-        ...rename('rollback', 1, 'Must roll back'),
+        ...rename(crypto.randomUUID(), 1, 'Must roll back'),
         d1.prepare('INSERT INTO m1_fanout_abort VALUES (0)'),
       ]),
     ).rejects.toThrow()
@@ -96,7 +89,7 @@ test('the production fanout helper fences stale attempts, projects ordered names
       .prepare(`UPDATE music_tracks SET revision=? WHERE id='track'`)
       .bind(Number.MAX_SAFE_INTEGER)
       .run()
-    await expect(d1.batch(rename('overflow-fallback', 1, 'Must not commit'))).rejects.toThrow()
+    await expect(d1.batch(rename(crypto.randomUUID(), 1, 'Must not commit'))).rejects.toThrow()
     expect(
       await d1.prepare(`SELECT name,revision FROM music_artists WHERE id='z'`).first(),
     ).toEqual({ name: 'Renamed', revision: 1 })

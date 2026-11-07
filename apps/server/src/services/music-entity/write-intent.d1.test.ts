@@ -12,6 +12,8 @@ import { createEditorialOAuthFixture } from '@/test/editorial-oauth'
 
 import { deleteArtistEffect } from './artist.service'
 import { musicParentCas, musicParentWinner } from './guarded-statements'
+import { affiliateArtistWithLabelEffect } from './label-affiliation.service'
+import { updateTrackEffect } from './track.service'
 import {
   executeMusicWrite,
   type MusicWriteContext,
@@ -139,8 +141,134 @@ const fixture = async () => {
       },
     }).pipe(Effect.provideService(Database, f.db), Effect.result)
 
-  return { ...f, write, remove }
+  return { ...f, context, write, remove }
 }
+
+test('real metadata preparation cannot substitute late target, artist, album or session observations', async () => {
+  for (const competing of ['target', 'artist', 'album', 'session'] as const) {
+    await using f = await fixture()
+    await f.db.run(
+      sql`INSERT INTO music_albums(id,title,slug,artistNames,createdAt,updatedAt) VALUES ('y','Album','album','[]',1,1)`,
+    )
+    await f.db.run(
+      sql`INSERT INTO music_tracks(id,title,slug,artistNames,createdAt,updatedAt) VALUES ('t','Before','before','[]',1,1)`,
+    )
+
+    const context: MusicWriteContext = {
+      ...f.context,
+      execute: (input) =>
+        f.context.execute({
+          ...input,
+          prepare: async () => {
+            const prepared = await input.prepare()
+
+            if (competing === 'target')
+              await f.db.run(sql`UPDATE music_tracks SET revision=1 WHERE id='t'`)
+
+            if (competing === 'artist')
+              await f.db.run(sql`UPDATE music_artists SET revision=1 WHERE id='a'`)
+
+            if (competing === 'album')
+              await f.db.run(sql`UPDATE music_albums SET revision=1 WHERE id='y'`)
+
+            if (competing === 'session')
+              await f.db.delete(session).where(eq(session.id, 'owner-session'))
+
+            return prepared
+          },
+        }),
+    }
+
+    const result = await Effect.runPromise(
+      updateTrackEffect(
+        't',
+        { title: 'Must not persist', artistIds: ['a'], albumId: 'y' },
+        {
+          intent: { requestId: crypto.randomUUID(), expectedRevision: 0 },
+          context,
+          references: [
+            { entityType: 'artist', entityId: 'a', expectedRevision: 0 },
+            { entityType: 'album', entityId: 'y', expectedRevision: 0 },
+          ],
+        },
+      ).pipe(Effect.provideService(Database, f.db), Effect.result),
+    )
+
+    expect(result).toHaveProperty('failure.code', 'conflict')
+    expect(
+      await f.db.get(
+        sql`SELECT title,artistNames,albumId,revision,last_operation_id FROM music_tracks WHERE id='t'`,
+      ),
+    ).toEqual({
+      title: 'Before',
+      artistNames: '[]',
+      albumId: null,
+      revision: competing === 'target' ? 1 : 0,
+      last_operation_id: null,
+    })
+    expect(await f.db.all(sql`SELECT * FROM music_track_artists WHERE trackId='t'`)).toEqual([])
+    expect(await f.db.get(sql`SELECT count(*) AS total FROM mcp_operations`)).toEqual({ total: 0 })
+  }
+}, 20_000)
+
+test('affiliation preparation preserves both observations, refuses label capacity and rolls back a lost second root', async () => {
+  await using f = await fixture()
+  await f.db.run(
+    sql`INSERT INTO music_labels(id,name,slug,created_at,updated_at) VALUES ('l','Label','label',1,1)`,
+  )
+  const intent = { requestId: crypto.randomUUID(), expectedRevision: 0 }
+  const references = [{ entityType: 'label', entityId: 'l', expectedRevision: 0 }] as const
+
+  const context: MusicWriteContext = {
+    ...f.context,
+    execute: (input) =>
+      f.context.execute({
+        ...input,
+        prepare: async () => {
+          const prepared = await input.prepare()
+          await f.db.run(sql`UPDATE music_labels SET revision=1 WHERE id='l'`)
+
+          return prepared
+        },
+      }),
+  }
+
+  const run = (requestContext: MusicWriteContext, labelRevision: number) =>
+    Effect.runPromise(
+      affiliateArtistWithLabelEffect('l', 'a', {
+        intent,
+        context: requestContext,
+        references: references.map((reference) => ({
+          ...reference,
+          expectedRevision: labelRevision,
+        })),
+      }).pipe(Effect.provideService(Database, f.db), Effect.result),
+    )
+
+  expect(await run(context, 0)).toHaveProperty('failure.code', 'conflict')
+  expect(
+    await f.db.get(sql`SELECT revision,last_operation_id FROM music_artists WHERE id='a'`),
+  ).toEqual({ revision: 0, last_operation_id: null })
+  await f.db.run(sql`UPDATE music_labels SET revision=${Number.MAX_SAFE_INTEGER} WHERE id='l'`)
+  expect(await run(f.context, Number.MAX_SAFE_INTEGER)).toHaveProperty('failure.code', 'conflict')
+  expect(
+    await f.db.get(sql`SELECT revision,last_operation_id FROM music_artists WHERE id='a'`),
+  ).toEqual({ revision: 0, last_operation_id: null })
+  await f.db.run(sql`UPDATE music_labels SET revision=0 WHERE id='l'`)
+  // Force the second CAS to lose after the first physical root was stamped.
+  await f.db
+    .run(sql`CREATE TRIGGER lose_second_root AFTER UPDATE OF last_operation_id ON music_artists
+    WHEN NEW.id='a' BEGIN UPDATE music_labels SET revision=1 WHERE id='l'; END`)
+  expect(await run(f.context, 0)).toHaveProperty('failure.code', 'conflict')
+  expect(
+    await f.db.get(sql`SELECT revision,last_operation_id FROM music_artists WHERE id='a'`),
+  ).toEqual({ revision: 0, last_operation_id: null })
+  expect(
+    await f.db.get(sql`SELECT revision,last_operation_id FROM music_labels WHERE id='l'`),
+  ).toEqual({ revision: 0, last_operation_id: null })
+  expect(await f.db.all(sql`SELECT * FROM music_label_artists`)).toEqual([])
+  expect(await f.db.get(sql`SELECT count(*) AS total FROM mcp_operations`)).toEqual({ total: 0 })
+})
 
 test('domain intent requires the observed version, rejects stale writes and replays before later preparation', async () => {
   await using f = await fixture()

@@ -165,7 +165,8 @@ export interface MusicEntityService {
   readonly updateAlbum: (
     id: string,
     data: Partial<CreateAlbumInput>,
-  ) => Effect.Effect<SelectMusicAlbum, DatabaseError | NotFoundError>
+    write?: MusicWriteRequest,
+  ) => Effect.Effect<SelectMusicAlbum, MusicWriteError>
   readonly deleteAlbum: (
     id: string,
     write?: MusicWriteRequest,
@@ -179,7 +180,8 @@ export interface MusicEntityService {
   readonly updateTrack: (
     id: string,
     data: Partial<CreateTrackInput>,
-  ) => Effect.Effect<SelectMusicTrack, DatabaseError | NotFoundError>
+    write?: MusicWriteRequest,
+  ) => Effect.Effect<SelectMusicTrack, MusicWriteError>
   readonly deleteTrack: (
     id: string,
     write?: MusicWriteRequest,
@@ -219,7 +221,8 @@ export interface MusicEntityService {
   readonly updateLabel: (
     id: string,
     data: Partial<CreateLabelInput>,
-  ) => Effect.Effect<SelectMusicLabel, DatabaseError | NotFoundError | ValidationError>
+    write?: MusicWriteRequest,
+  ) => Effect.Effect<SelectMusicLabel, MusicWriteError>
   readonly deleteLabel: (
     id: string,
     write?: MusicWriteRequest,
@@ -246,19 +249,23 @@ export interface MusicEntityService {
   readonly affiliateArtistWithLabel: (
     labelId: string,
     artistId: string,
-  ) => Effect.Effect<void, DatabaseError | NotFoundError>
+    write?: MusicWriteRequest,
+  ) => Effect.Effect<void, MusicWriteError>
   readonly unaffiliateArtistFromLabel: (
     labelId: string,
     artistId: string,
-  ) => Effect.Effect<void, DatabaseError>
+    write?: MusicWriteRequest,
+  ) => Effect.Effect<void, MusicWriteError>
   readonly affiliateAlbumWithLabel: (
     labelId: string,
     albumId: string,
-  ) => Effect.Effect<void, DatabaseError | NotFoundError>
+    write?: MusicWriteRequest,
+  ) => Effect.Effect<void, MusicWriteError>
   readonly unaffiliateAlbumFromLabel: (
     labelId: string,
     albumId: string,
-  ) => Effect.Effect<void, DatabaseError>
+    write?: MusicWriteRequest,
+  ) => Effect.Effect<void, MusicWriteError>
 
   readonly getPlaylistTracks: (playlistId: string) => Effect.Effect<
     Array<{
@@ -318,20 +325,24 @@ export interface MusicEntityService {
     albumId: string,
     artistId: string,
     opts?: { role?: string; displayOrder?: number },
-  ) => Effect.Effect<void, DatabaseError>
+    write?: MusicWriteRequest,
+  ) => Effect.Effect<void, MusicWriteError>
   readonly removeArtistFromAlbum: (
     albumId: string,
     artistId: string,
-  ) => Effect.Effect<void, DatabaseError>
+    write?: MusicWriteRequest,
+  ) => Effect.Effect<void, MusicWriteError>
   readonly addArtistToTrack: (
     trackId: string,
     artistId: string,
     opts?: { role?: string; displayOrder?: number },
-  ) => Effect.Effect<void, DatabaseError>
+    write?: MusicWriteRequest,
+  ) => Effect.Effect<void, MusicWriteError>
   readonly removeArtistFromTrack: (
     trackId: string,
     artistId: string,
-  ) => Effect.Effect<void, DatabaseError>
+    write?: MusicWriteRequest,
+  ) => Effect.Effect<void, MusicWriteError>
 
   readonly getLinksForEntity: (
     entityType: MusicEntityType,
@@ -510,13 +521,13 @@ export const MusicEntityServiceLayer = Layer.effect(
       createAlbum: (data) => provideDb(createAlbumEffect(data)),
       getAlbums: provideDb(getAlbumsEffect),
       getAlbumById: (id) => provideDb(getAlbumByIdEffect(id)),
-      updateAlbum: (id, data) => provideDb(updateAlbumEffect(id, data)),
+      updateAlbum: (id, data, write) => provideDb(updateAlbumEffect(id, data, write)),
       deleteAlbum: (id, write) => provideDb(deleteAlbumEffect(id, write)),
 
       createTrack: (data) => provideDb(createTrackEffect(data)),
       getTracks: provideDb(getTracksEffect),
       getTrackById: (id) => provideDb(getTrackByIdEffect(id)),
-      updateTrack: (id, data) => provideDb(updateTrackEffect(id, data)),
+      updateTrack: (id, data, write) => provideDb(updateTrackEffect(id, data, write)),
       deleteTrack: (id, write) => provideDb(deleteTrackEffect(id, write)),
 
       createPlaylist: (data) => provideDb(createPlaylistEffect(data)),
@@ -530,7 +541,7 @@ export const MusicEntityServiceLayer = Layer.effect(
       getLabelById: (id) => provideDb(getLabelByIdEffect(id)),
       getLabelBySlug: (slug) =>
         provideDb(getLabelBySlugEffect(slug).pipe(Effect.provideService(MdxService, mdx))),
-      updateLabel: (id, data) => provideDb(updateLabelEffect(id, data)),
+      updateLabel: (id, data, write) => provideDb(updateLabelEffect(id, data, write)),
       deleteLabel: (id, write) => provideDb(deleteLabelEffect(id, write)),
 
       getArtistsForLabel: (labelId) => provideDb(getArtistsForLabelEffect(labelId)),
@@ -540,14 +551,14 @@ export const MusicEntityServiceLayer = Layer.effect(
       getPublishedAlbumsForLabel: (labelId) => provideDb(getPublishedAlbumsForLabelEffect(labelId)),
       getLabelsForArtist: (artistId) => provideDb(getLabelsForArtistEffect(artistId)),
       getLabelsForAlbum: (albumId) => provideDb(getLabelsForAlbumEffect(albumId)),
-      affiliateArtistWithLabel: (labelId, artistId) =>
-        provideDb(affiliateArtistWithLabelEffect(labelId, artistId)),
-      unaffiliateArtistFromLabel: (labelId, artistId) =>
-        provideDb(unaffiliateArtistFromLabelEffect(labelId, artistId)),
-      affiliateAlbumWithLabel: (labelId, albumId) =>
-        provideDb(affiliateAlbumWithLabelEffect(labelId, albumId)),
-      unaffiliateAlbumFromLabel: (labelId, albumId) =>
-        provideDb(unaffiliateAlbumFromLabelEffect(labelId, albumId)),
+      affiliateArtistWithLabel: (labelId, artistId, write) =>
+        provideDb(affiliateArtistWithLabelEffect(labelId, artistId, write)),
+      unaffiliateArtistFromLabel: (labelId, artistId, write) =>
+        provideDb(unaffiliateArtistFromLabelEffect(labelId, artistId, write)),
+      affiliateAlbumWithLabel: (labelId, albumId, write) =>
+        provideDb(affiliateAlbumWithLabelEffect(labelId, albumId, write)),
+      unaffiliateAlbumFromLabel: (labelId, albumId, write) =>
+        provideDb(unaffiliateAlbumFromLabelEffect(labelId, albumId, write)),
 
       getPlaylistTracks: (playlistId) => provideDb(getPlaylistTracksEffect(playlistId)),
       addTrackToPlaylist: (playlistId, trackId, position) =>
@@ -564,14 +575,14 @@ export const MusicEntityServiceLayer = Layer.effect(
         provideDb(enrichPlaylistLinksEffect(identity)(playlistId)),
       syncPlaylistLinks: (playlistId) => provideDb(syncPlaylistLinksEffect(identity)(playlistId)),
 
-      addArtistToAlbum: (albumId, artistId, opts) =>
-        provideDb(addArtistToAlbumEffect(albumId, artistId, opts)),
-      removeArtistFromAlbum: (albumId, artistId) =>
-        provideDb(removeArtistFromAlbumEffect(albumId, artistId)),
-      addArtistToTrack: (trackId, artistId, opts) =>
-        provideDb(addArtistToTrackEffect(trackId, artistId, opts)),
-      removeArtistFromTrack: (trackId, artistId) =>
-        provideDb(removeArtistFromTrackEffect(trackId, artistId)),
+      addArtistToAlbum: (albumId, artistId, opts, write) =>
+        provideDb(addArtistToAlbumEffect(albumId, artistId, opts, write)),
+      removeArtistFromAlbum: (albumId, artistId, write) =>
+        provideDb(removeArtistFromAlbumEffect(albumId, artistId, write)),
+      addArtistToTrack: (trackId, artistId, opts, write) =>
+        provideDb(addArtistToTrackEffect(trackId, artistId, opts, write)),
+      removeArtistFromTrack: (trackId, artistId, write) =>
+        provideDb(removeArtistFromTrackEffect(trackId, artistId, write)),
 
       getLinksForEntity: (entityType, entityId, statusFilter) =>
         provideDb(getLinksForEntityEffect(entityType, entityId, statusFilter)),

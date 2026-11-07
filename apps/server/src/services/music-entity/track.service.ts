@@ -1,14 +1,16 @@
-import { and, asc, desc, eq, sql } from 'drizzle-orm'
-import { Effect } from 'effect'
+import { asc, desc, eq, sql } from 'drizzle-orm'
+import { Effect, Schema } from 'effect'
 
 import { Database } from '@/db/layer'
 import { musicTrackArtistsTable, musicTracksTable } from '@/db/music-entity.schema'
 import { DatabaseError, getErrorMessage } from '@/errors'
-import { toSlug } from '@/services/to-slug'
+import { omitUndefined } from '@/lib/omit-undefined'
 
 import { deleteMusicEntity } from './delete-write'
+import { MusicMetadataRow, writeMusicMetadata } from './metadata-write'
+import { writeMusicRelationship } from './relationship-write'
 import { requireOne } from './shared'
-import type { MusicWriteRequest } from './write-intent'
+import { MusicWriteError, type MusicWriteRequest } from './write-intent'
 
 export interface CreateTrackInput {
   title: string
@@ -110,62 +112,52 @@ export const getTrackByIdEffect = (id: string) =>
     return yield* requireOne(rows, 'MusicTrack', id)
   }).pipe(Effect.withSpan('musicEntity.getTrackById', { attributes: { id } }))
 
-export const updateTrackEffect = (id: string, data: Partial<CreateTrackInput>) =>
+const TrackWriteRow = Schema.Struct({
+  ...MusicMetadataRow.fields,
+  title: Schema.String,
+  artistNames: Schema.NullOr(Schema.Array(Schema.String)),
+  coverImageUrl: Schema.NullOr(Schema.String),
+  albumId: Schema.NullOr(Schema.String),
+  trackNumber: Schema.NullOr(Schema.Number),
+})
+
+const TrackWritePatch = Schema.Struct({
+  title: Schema.optionalKey(TrackWriteRow.fields.title),
+  artistNames: Schema.optionalKey(TrackWriteRow.fields.artistNames),
+  coverImageUrl: Schema.optionalKey(TrackWriteRow.fields.coverImageUrl),
+  albumId: Schema.optionalKey(TrackWriteRow.fields.albumId),
+  trackNumber: Schema.optionalKey(TrackWriteRow.fields.trackNumber),
+  slug: Schema.optionalKey(TrackWriteRow.fields.slug),
+  publishedAt: Schema.optionalKey(TrackWriteRow.fields.publishedAt),
+  createdById: Schema.optionalKey(TrackWriteRow.fields.createdById),
+})
+
+export const updateTrackEffect = (
+  id: string,
+  data: Partial<CreateTrackInput>,
+  write?: MusicWriteRequest,
+) =>
   Effect.gen(function* () {
-    const db = yield* Database
-    const { artistIds, ...trackData } = data
+    const patch = yield* Schema.encodeEffect(TrackWritePatch)(omitUndefined(data)).pipe(
+      Effect.mapError(
+        () => new MusicWriteError({ code: 'invalid_input', message: 'Invalid track edit.' }),
+      ),
+    )
 
-    if (trackData.title && !trackData.slug) {
-      trackData.slug = toSlug(trackData.title)
-    }
-
-    const rows = yield* Effect.tryPromise({
-      try: async () => {
-        await db.batch([
-          db
-            .update(musicTracksTable)
-            .set({ ...trackData, updatedAt: new Date() })
-            .where(eq(musicTracksTable.id, id)),
-          ...(artistIds?.length
-            ? [
-                db
-                  .insert(musicTrackArtistsTable)
-                  .values(
-                    artistIds.map((artistId, displayOrder) => ({
-                      trackId: id,
-                      artistId,
-                      displayOrder,
-                    })),
-                  )
-                  .onConflictDoUpdate({
-                    target: [musicTrackArtistsTable.trackId, musicTrackArtistsTable.artistId],
-                    set: { displayOrder: sql`excluded.displayOrder` },
-                  }),
-              ]
-            : []),
-        ])
-
-        const rows = await db
-          .select()
-          .from(musicTracksTable)
-          .where(eq(musicTracksTable.id, id))
-          .limit(1)
-
-        const track = rows[0]
-
-        if (!track) throw new Error('Track not found')
-
-        return track
+    const saved = yield* writeMusicMetadata({
+      target: { entityType: 'track', entityId: id },
+      write,
+      patch,
+      row: TrackWriteRow,
+      load: getTrackByIdEffect(id),
+      relationships: {
+        artistIds: data.artistIds,
+        artistNames: data.artistNames,
+        albumId: data.albumId,
       },
-      catch: (e) =>
-        new DatabaseError({
-          message: `Failed to update track: ${getErrorMessage(e)}`,
-          operation: 'update',
-          table: 'music_tracks',
-        }),
     })
 
-    return rows
+    return { ...saved, artistNames: saved.artistNames?.slice() ?? null }
   }).pipe(Effect.withSpan('musicEntity.updateTrack', { attributes: { id } }))
 
 export const deleteTrackEffect = (id: string, write?: MusicWriteRequest) =>
@@ -175,58 +167,21 @@ export const addArtistToTrackEffect = (
   trackId: string,
   artistId: string,
   opts?: { role?: string; displayOrder?: number },
+  write?: MusicWriteRequest,
 ) =>
-  Effect.gen(function* () {
-    const db = yield* Database
-    yield* Effect.tryPromise({
-      try: () =>
-        db
-          .insert(musicTrackArtistsTable)
-          .values({
-            trackId,
-            artistId,
-            role: opts?.role,
-            displayOrder: opts?.displayOrder ?? 0,
-          })
-          .onConflictDoUpdate({
-            target: [musicTrackArtistsTable.trackId, musicTrackArtistsTable.artistId],
-            set: { role: opts?.role, displayOrder: opts?.displayOrder ?? 0 },
-          }),
-      catch: (e) =>
-        new DatabaseError({
-          message: `Failed to add artist to track: ${getErrorMessage(e)}`,
-          operation: 'insert',
-          table: 'music_track_artists',
-        }),
-    })
-  }).pipe(
-    Effect.withSpan('musicEntity.addArtistToTrack', {
-      attributes: { trackId, artistId },
-    }),
+  writeMusicRelationship(
+    { entityType: 'track', entityId: trackId },
+    { kind: 'credit', action: 'set', artistId, ...opts },
+    write,
   )
 
-export const removeArtistFromTrackEffect = (trackId: string, artistId: string) =>
-  Effect.gen(function* () {
-    const db = yield* Database
-    yield* Effect.tryPromise({
-      try: () =>
-        db
-          .delete(musicTrackArtistsTable)
-          .where(
-            and(
-              eq(musicTrackArtistsTable.trackId, trackId),
-              eq(musicTrackArtistsTable.artistId, artistId),
-            ),
-          ),
-      catch: (e) =>
-        new DatabaseError({
-          message: `Failed to remove artist from track: ${getErrorMessage(e)}`,
-          operation: 'delete',
-          table: 'music_track_artists',
-        }),
-    })
-  }).pipe(
-    Effect.withSpan('musicEntity.removeArtistFromTrack', {
-      attributes: { trackId, artistId },
-    }),
+export const removeArtistFromTrackEffect = (
+  trackId: string,
+  artistId: string,
+  write?: MusicWriteRequest,
+) =>
+  writeMusicRelationship(
+    { entityType: 'track', entityId: trackId },
+    { kind: 'credit', action: 'remove', artistId },
+    write,
   )

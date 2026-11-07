@@ -1,13 +1,8 @@
 import { and, asc, desc, eq, lte } from 'drizzle-orm'
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
 
 import { user as usersTable } from '@/db/auth.schema'
-import {
-  projectEntityLabels,
-  projectEntityLabelsForRows,
-  readEntityLabels,
-  replaceEntityLabels,
-} from '@/db/labels'
+import { projectEntityLabels, projectEntityLabelsForRows, replaceEntityLabels } from '@/db/labels'
 import { Database } from '@/db/layer'
 import {
   musicLabelCreatorsTable,
@@ -18,11 +13,11 @@ import {
 import { DatabaseError, getErrorMessage } from '@/errors'
 import { MdxService, validateCanonicalContent } from '@/lib/mdx'
 import { omitUndefined } from '@/lib/omit-undefined'
-import { toSlug } from '@/services/to-slug'
 
 import { deleteMusicEntity } from './delete-write'
+import { MusicMetadataRow, writeMusicMetadata } from './metadata-write'
 import { requireInserted, requireOne } from './shared'
-import type { MusicWriteRequest } from './write-intent'
+import { MusicWriteError, type MusicWriteRequest } from './write-intent'
 
 export interface CreateLabelInput {
   name: string
@@ -202,58 +197,57 @@ export const getLabelBySlugEffect = (slug: string) =>
     } satisfies SelectMdxCompiledMusicLabel
   }).pipe(Effect.withSpan('musicEntity.getLabelBySlug', { attributes: { slug } }))
 
-export const updateLabelEffect = (id: string, data: Partial<CreateLabelInput>) =>
+const LabelWriteRow = Schema.Struct({
+  ...MusicMetadataRow.fields,
+  name: Schema.String,
+  description: Schema.NullOr(Schema.String),
+  imageUrl: Schema.NullOr(Schema.String),
+  bannerImageUrl: Schema.NullOr(Schema.String),
+  content: Schema.String,
+  tags: Schema.NullOr(Schema.Array(Schema.String)),
+  genres: Schema.NullOr(Schema.Array(Schema.String)),
+})
+
+const LabelWritePatch = Schema.Struct({
+  name: Schema.optionalKey(LabelWriteRow.fields.name),
+  description: Schema.optionalKey(LabelWriteRow.fields.description),
+  imageUrl: Schema.optionalKey(LabelWriteRow.fields.imageUrl),
+  bannerImageUrl: Schema.optionalKey(LabelWriteRow.fields.bannerImageUrl),
+  content: Schema.optionalKey(LabelWriteRow.fields.content),
+  tags: Schema.optionalKey(LabelWriteRow.fields.tags),
+  genres: Schema.optionalKey(LabelWriteRow.fields.genres),
+  slug: Schema.optionalKey(LabelWriteRow.fields.slug),
+  publishedAt: Schema.optionalKey(LabelWriteRow.fields.publishedAt),
+  createdById: Schema.optionalKey(LabelWriteRow.fields.createdById),
+})
+
+export const updateLabelEffect = (
+  id: string,
+  data: Partial<CreateLabelInput>,
+  write?: MusicWriteRequest,
+) =>
   Effect.gen(function* () {
-    yield* validateCanonicalContent(data.content)
-    const db = yield* Database
-    const { tags, genres, ...updateData } = data
+    const patch = yield* Schema.encodeEffect(LabelWritePatch)(omitUndefined(data)).pipe(
+      Effect.mapError(
+        () => new MusicWriteError({ code: 'invalid_input', message: 'Invalid label edit.' }),
+      ),
+    )
 
-    if (updateData.name && !updateData.slug) updateData.slug = toSlug(updateData.name)
-
-    const rows = yield* Effect.tryPromise({
-      try: () =>
-        db
-          .update(musicLabelsTable)
-          .set({ ...updateData, updatedAt: new Date() })
-          .where(eq(musicLabelsTable.id, id))
-          .returning(),
-      catch: (error) =>
-        new DatabaseError({
-          message: `Failed to update label: ${getErrorMessage(error)}`,
-          operation: 'update',
-          table: 'music_labels',
-        }),
+    const saved = yield* writeMusicMetadata({
+      target: { entityType: 'label', entityId: id },
+      write,
+      patch,
+      row: LabelWriteRow,
+      load: getLabelByIdEffect(id),
+      validate: validateCanonicalContent(data.content).pipe(
+        Effect.mapError(
+          () =>
+            new MusicWriteError({ code: 'invalid_input', message: 'Invalid canonical content.' }),
+        ),
+      ),
     })
 
-    const label = yield* requireOne(rows, 'MusicLabel', id)
-
-    if (tags !== undefined || genres !== undefined) {
-      yield* Effect.tryPromise({
-        try: async () => {
-          const current = await readEntityLabels(db, 'musicLabel', label.id)
-          await replaceEntityLabels(db, 'musicLabel', label.id, {
-            tags: tags === undefined ? current.tags : tags,
-            genres: genres === undefined ? current.genres : genres,
-          })
-        },
-        catch: (error) =>
-          new DatabaseError({
-            message: getErrorMessage(error),
-            operation: 'update',
-            table: 'labels',
-          }),
-      })
-    }
-
-    return yield* Effect.tryPromise({
-      try: () => projectEntityLabels(db, 'musicLabel', label),
-      catch: (error) =>
-        new DatabaseError({
-          message: getErrorMessage(error),
-          operation: 'select',
-          table: 'labels',
-        }),
-    })
+    return { ...saved, tags: saved.tags?.slice() ?? null, genres: saved.genres?.slice() ?? null }
   }).pipe(Effect.withSpan('musicEntity.updateLabel', { attributes: { id } }))
 
 export const deleteLabelEffect = (id: string, write?: MusicWriteRequest) =>

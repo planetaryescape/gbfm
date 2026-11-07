@@ -135,7 +135,9 @@ const artistIdParam = { id: Schema.String }
 const ArtistJunctionInput = Schema.Struct({
   ...musicWriteFields,
   role: Schema.optional(Schema.String),
-  displayOrder: Schema.optional(Schema.Number),
+  displayOrder: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10_000 })),
+  ),
 })
 
 // Mirrors apps/server/src/db/music-entity.schema.ts's selectMusicAlbumSchema.
@@ -586,7 +588,7 @@ export const MusicGroup = /* @__PURE__ */ (() =>
         params: { albumId: Schema.String, artistId: Schema.String },
         payload: ArtistJunctionInput,
         success: HttpApiSchema.NoContent,
-        error: HttpApiError.Forbidden,
+        error: musicWriteErrors,
       }).middleware(AuthMiddleware),
     )
     .add(
@@ -595,8 +597,9 @@ export const MusicGroup = /* @__PURE__ */ (() =>
         '/api/music/albums/:albumId/artists/:artistId',
         {
           params: { albumId: Schema.String, artistId: Schema.String },
+          headers: MusicCreditWriteHeaders,
           success: HttpApiSchema.NoContent,
-          error: HttpApiError.Forbidden,
+          error: musicWriteErrors,
         },
       ).middleware(AuthMiddleware),
     )
@@ -605,7 +608,7 @@ export const MusicGroup = /* @__PURE__ */ (() =>
         params: { trackId: Schema.String, artistId: Schema.String },
         payload: ArtistJunctionInput,
         success: HttpApiSchema.NoContent,
-        error: HttpApiError.Forbidden,
+        error: musicWriteErrors,
       }).middleware(AuthMiddleware),
     )
     .add(
@@ -614,8 +617,9 @@ export const MusicGroup = /* @__PURE__ */ (() =>
         '/api/music/tracks/:trackId/artists/:artistId',
         {
           params: { trackId: Schema.String, artistId: Schema.String },
+          headers: MusicCreditWriteHeaders,
           success: HttpApiSchema.NoContent,
-          error: HttpApiError.Forbidden,
+          error: musicWriteErrors,
         },
       ).middleware(AuthMiddleware),
     )
@@ -642,7 +646,7 @@ export const MusicGroup = /* @__PURE__ */ (() =>
         params: albumIdParam,
         payload: UpdateAlbumInput,
         success: AlbumResponse,
-        error: [HttpApiError.NotFound, HttpApiError.Forbidden],
+        error: musicWriteErrors,
       }).middleware(AuthMiddleware),
     )
     .add(
@@ -683,7 +687,7 @@ export const MusicGroup = /* @__PURE__ */ (() =>
         params: trackIdParam,
         payload: UpdateTrackInput,
         success: TrackResponse,
-        error: [HttpApiError.NotFound, HttpApiError.Forbidden],
+        error: musicWriteErrors,
       }).middleware(AuthMiddleware),
     )
     .add(
@@ -764,7 +768,7 @@ export const MusicGroup = /* @__PURE__ */ (() =>
         params: labelIdParam,
         payload: UpdateLabelInput,
         success: LabelResponse,
-        error: [HttpApiError.NotFound, HttpApiError.Forbidden, ValidationHttpError],
+        error: musicWriteErrors,
       }).middleware(AuthMiddleware),
     )
     .add(
@@ -795,8 +799,9 @@ export const MusicGroup = /* @__PURE__ */ (() =>
         '/api/music/labels/:labelId/artists/:artistId',
         {
           params: { labelId: Schema.String, artistId: Schema.String },
+          headers: MusicAffiliationWriteHeaders,
           success: HttpApiSchema.NoContent,
-          error: [HttpApiError.NotFound, HttpApiError.Forbidden],
+          error: musicWriteErrors,
         },
       ).middleware(AuthMiddleware),
     )
@@ -806,16 +811,18 @@ export const MusicGroup = /* @__PURE__ */ (() =>
         '/api/music/labels/:labelId/artists/:artistId',
         {
           params: { labelId: Schema.String, artistId: Schema.String },
+          headers: MusicAffiliationWriteHeaders,
           success: HttpApiSchema.NoContent,
-          error: HttpApiError.Forbidden,
+          error: musicWriteErrors,
         },
       ).middleware(AuthMiddleware),
     )
     .add(
       HttpApiEndpoint.put('affiliateAlbumWithLabel', '/api/music/labels/:labelId/albums/:albumId', {
         params: { labelId: Schema.String, albumId: Schema.String },
+        headers: MusicAffiliationWriteHeaders,
         success: HttpApiSchema.NoContent,
-        error: [HttpApiError.NotFound, HttpApiError.Forbidden],
+        error: musicWriteErrors,
       }).middleware(AuthMiddleware),
     )
     .add(
@@ -824,8 +831,9 @@ export const MusicGroup = /* @__PURE__ */ (() =>
         '/api/music/labels/:labelId/albums/:albumId',
         {
           params: { labelId: Schema.String, albumId: Schema.String },
+          headers: MusicAffiliationWriteHeaders,
           success: HttpApiSchema.NoContent,
-          error: HttpApiError.Forbidden,
+          error: musicWriteErrors,
         },
       ).middleware(AuthMiddleware),
     )

@@ -68,6 +68,39 @@ export const musicHeaderWriteRequest = (headers: {
     requestId: headers['x-gbfm-request-id'],
   })
 
+export const musicReferenceHeaderWriteRequest = Effect.fn('musicHttp.referenceWriteRequest')(
+  function* (
+    headers: {
+      readonly 'x-gbfm-music-revision'?: string | undefined
+      readonly 'x-gbfm-request-id'?: string | undefined
+      readonly 'x-gbfm-music-artist-revision'?: string | undefined
+      readonly 'x-gbfm-music-label-revision'?: string | undefined
+    },
+    reference: { readonly entityType: 'artist' | 'label'; readonly entityId: string },
+  ) {
+    const revision =
+      headers[
+        reference.entityType === 'artist'
+          ? 'x-gbfm-music-artist-revision'
+          : 'x-gbfm-music-label-revision'
+      ]
+
+    if (revision === undefined)
+      return yield* new MusicWritePreconditionRequired({
+        message: 'The observed reference revision is required.',
+      })
+
+    return yield* musicBodyWriteRequest({
+      expectedRevision:
+        headers['x-gbfm-music-revision'] === undefined
+          ? undefined
+          : Number(headers['x-gbfm-music-revision']),
+      requestId: headers['x-gbfm-request-id'],
+      references: [{ ...reference, expectedRevision: Number(revision) }],
+    })
+  },
+)
+
 export const mapMusicWriteErrors = <A, R>(effect: Effect.Effect<A, MusicWriteError, R>) =>
   effect.pipe(
     Effect.catchTag('MusicWriteError', (error: MusicWriteError) => {

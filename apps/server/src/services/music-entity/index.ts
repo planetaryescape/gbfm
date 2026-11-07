@@ -109,6 +109,7 @@ import {
   removeArtistFromTrackEffect,
   updateTrackEffect,
 } from './track.service'
+import type { MusicWriteError, MusicWriteRequest } from './write-intent'
 
 export type {
   CreateAlbumInput,
@@ -149,7 +150,8 @@ export interface MusicEntityService {
   readonly updateArtist: (
     id: string,
     data: Partial<CreateArtistInput>,
-  ) => Effect.Effect<SelectMusicArtist, DatabaseError | NotFoundError>
+    write?: MusicWriteRequest,
+  ) => Effect.Effect<SelectMusicArtist, MusicWriteError>
   readonly deleteArtist: (id: string) => Effect.Effect<void, DatabaseError | NotFoundError>
 
   readonly createAlbum: (data: CreateAlbumInput) => Effect.Effect<SelectMusicAlbum, DatabaseError>
@@ -490,7 +492,7 @@ export const MusicEntityServiceLayer = Layer.effect(
       createArtist: (data) => provideDb(createArtistEffect(data)),
       getArtists: provideDb(getArtistsEffect),
       getArtistById: (id) => provideDb(getArtistByIdEffect(id)),
-      updateArtist: (id, data) => provideDb(updateArtistEffect(id, data)),
+      updateArtist: (id, data, write) => provideDb(updateArtistEffect(id, data, write)),
       deleteArtist: (id) => provideDb(deleteArtistEffect(id)),
 
       createAlbum: (data) => provideDb(createAlbumEffect(data)),

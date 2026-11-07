@@ -100,3 +100,31 @@ export const artistNameFanoutStatements = (input: {
         WHERE c.trackId = music_tracks.id AND c.artistId = ${input.artistId})`),
   ]
 }
+
+/** Replace only the submitted kind; an omitted genre edit never erases tags.
+ * The caller supplies the receipt, live-authority and physical-parent winner.
+ */
+export const musicLabelReplacementStatements = (input: {
+  readonly target: MusicParent
+  readonly kind: 'genre' | 'tag'
+  readonly names: ReadonlyArray<string>
+  readonly winner: SQL
+  readonly prepare: (statement: SQL) => D1PreparedStatement
+}): ReadonlyArray<D1PreparedStatement> => {
+  const entityType = input.target.entityType === 'label' ? 'musicLabel' : input.target.entityType
+  const { prepare, winner, kind } = input
+
+  return [
+    prepare(sql`DELETE FROM entity_labels WHERE entity_type=${entityType}
+      AND entity_id=${input.target.entityId}
+      AND label_id IN (SELECT id FROM labels WHERE kind=${kind}) AND (${winner})`),
+    ...input.names.flatMap((name, position) => [
+      prepare(sql`INSERT INTO labels (id,kind,name)
+        SELECT lower(hex(randomblob(16))),${kind},${name} WHERE (${winner})
+        ON CONFLICT(kind,name) DO NOTHING`),
+      prepare(sql`INSERT INTO entity_labels (entity_type,entity_id,position,label_id)
+        SELECT ${entityType},${input.target.entityId},${position},id FROM labels
+        WHERE kind=${kind} AND name=${name} AND (${winner})`),
+    ]),
+  ]
+}

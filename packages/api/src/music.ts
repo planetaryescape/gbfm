@@ -8,11 +8,75 @@ import { ValidationHttpError } from './post'
 
 export { MusicServiceUnavailableHttpError, MusicServiceUnavailableResponse } from './errors'
 
+export const MusicRevision = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+)
+
+export const MusicWriteIntent = Schema.Struct({
+  expectedRevision: MusicRevision,
+  requestId: Schema.String.check(Schema.isUUID(4)),
+})
+
+export type MusicWriteIntent = typeof MusicWriteIntent.Type
+
+export const MusicReferenceRevision = Schema.Struct({
+  entityType: Schema.Literals(['artist', 'album', 'track', 'label']),
+  entityId: Schema.NonEmptyString,
+  expectedRevision: MusicRevision,
+})
+
+// Optional at HTTP decode so omission becomes the explicit 428 response, not a
+// generic schema 400. Domain execution requires the complete MusicWriteIntent.
+const musicWriteFields = {
+  expectedRevision: Schema.optional(MusicWriteIntent.fields.expectedRevision),
+  requestId: Schema.optional(MusicWriteIntent.fields.requestId),
+  references: Schema.optional(
+    Schema.Array(MusicReferenceRevision).check(
+      Schema.isMaxLength(200),
+      Schema.makeFilter(
+        (references) =>
+          new Set(references.map((reference) => `${reference.entityType}:${reference.entityId}`))
+            .size === references.length,
+      ),
+    ),
+  ),
+}
+
+const revisionHeader = Schema.String.check(
+  Schema.makeFilter(
+    (value) => /^(?:0|[1-9][0-9]*)$/.test(value) && Number.isSafeInteger(Number(value)),
+  ),
+)
+
+export const MusicWriteHeaders = Schema.Struct({
+  'x-gbfm-music-revision': Schema.optional(revisionHeader),
+  'x-gbfm-request-id': Schema.optional(MusicWriteIntent.fields.requestId),
+})
+
+// Target revision is the artist/album root; the label's observed revision is
+// separate. Both are mandatory at execution, including unlink and no-op writes.
+export const MusicAffiliationWriteHeaders = Schema.Struct({
+  ...MusicWriteHeaders.fields,
+  'x-gbfm-music-label-revision': Schema.optional(revisionHeader),
+})
+
+export const MusicCreditWriteHeaders = Schema.Struct({
+  ...MusicWriteHeaders.fields,
+  'x-gbfm-music-artist-revision': Schema.optional(revisionHeader),
+})
+
+export class MusicWritePreconditionRequired extends Schema.TaggedError<MusicWritePreconditionRequired>()(
+  'MusicWritePreconditionRequired',
+  { message: Schema.String },
+  { httpApiStatus: 428 },
+) {}
+
 // Mirrors apps/server/src/db/music-entity.schema.ts's selectMusicArtistSchema
 // (Zod, DB-facing) -- response fields are nullable to match actual column
 // nullability, not because the API wants to encourage nulls.
 export const ArtistResponse = Schema.Struct({
   id: Schema.String,
+  revision: MusicRevision,
   name: Schema.String,
   bio: Schema.NullOr(Schema.String),
   imageUrl: Schema.NullOr(Schema.String),
@@ -46,6 +110,7 @@ export type CreateArtistInput = typeof CreateArtistInput.Type
 // If name is sent without slug, the handler derives slug from name --
 // asymmetric with create, preserved intentionally from the Hono behavior.
 export const UpdateArtistInput = Schema.Struct({
+  ...musicWriteFields,
   name: Schema.optional(Schema.String),
   bio: Schema.optional(Schema.String),
   imageUrl: Schema.optional(Schema.String),
@@ -59,6 +124,7 @@ export type UpdateArtistInput = typeof UpdateArtistInput.Type
 const artistIdParam = { id: Schema.String }
 
 const ArtistJunctionInput = Schema.Struct({
+  ...musicWriteFields,
   role: Schema.optional(Schema.String),
   displayOrder: Schema.optional(Schema.Number),
 })
@@ -66,6 +132,7 @@ const ArtistJunctionInput = Schema.Struct({
 // Mirrors apps/server/src/db/music-entity.schema.ts's selectMusicAlbumSchema.
 export const AlbumResponse = Schema.Struct({
   id: Schema.String,
+  revision: MusicRevision,
   title: Schema.String,
   artistNames: Schema.NullOr(Schema.Array(Schema.String)),
   releaseDate: Schema.NullOr(Schema.String),
@@ -103,6 +170,7 @@ export type CreateAlbumInput = typeof CreateAlbumInput.Type
 // field arrives as null, not absent -- optional alone (absent-or-value)
 // rejects that. NullOr wrapped in optional accepts absent, value, or null.
 export const UpdateAlbumInput = Schema.Struct({
+  ...musicWriteFields,
   title: Schema.optional(Schema.NullOr(Schema.String)),
   artistNames: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
   artistIds: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
@@ -119,6 +187,7 @@ export type UpdateAlbumInput = typeof UpdateAlbumInput.Type
 // Mirrors selectMusicTrackSchema.
 export const TrackResponse = Schema.Struct({
   id: Schema.String,
+  revision: MusicRevision,
   title: Schema.String,
   artistNames: Schema.NullOr(Schema.Array(Schema.String)),
   coverImageUrl: Schema.NullOr(Schema.String),
@@ -150,6 +219,7 @@ export type CreateTrackInput = typeof CreateTrackInput.Type
 
 // See UpdateAlbumInput for why NullOr wraps every optional field.
 export const UpdateTrackInput = Schema.Struct({
+  ...musicWriteFields,
   title: Schema.optional(Schema.NullOr(Schema.String)),
   artistNames: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
   artistIds: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
@@ -212,6 +282,7 @@ export const LabelCreatorResponse = Schema.Struct({
 
 export const LabelResponse = Schema.Struct({
   id: Schema.String,
+  revision: MusicRevision,
   name: Schema.String,
   description: Schema.NullOr(Schema.String),
   imageUrl: Schema.NullOr(Schema.String),
@@ -250,6 +321,7 @@ export const CreateLabelInput = Schema.Struct({
 export type CreateLabelInput = typeof CreateLabelInput.Type
 
 export const UpdateLabelInput = Schema.Struct({
+  ...musicWriteFields,
   name: Schema.optional(Schema.NullOr(Schema.String)),
   description: Schema.optional(Schema.NullOr(Schema.String)),
   imageUrl: Schema.optional(Schema.NullOr(Schema.String)),
@@ -482,7 +554,14 @@ export const MusicGroup = /* @__PURE__ */ (() =>
         params: artistIdParam,
         payload: UpdateArtistInput,
         success: ArtistResponse,
-        error: [HttpApiError.NotFound, HttpApiError.Forbidden],
+        error: [
+          HttpApiError.NotFound,
+          HttpApiError.Forbidden,
+          HttpApiError.BadRequest,
+          HttpApiError.Conflict,
+          MusicWritePreconditionRequired,
+          MusicServiceUnavailableHttpError,
+        ],
       }).middleware(AuthMiddleware),
     )
     .add(

@@ -96,6 +96,8 @@ describe('bounded reminder recovery on local D1', () => {
       .bind(
         clock.now(),
         0,
+        'open',
+        'fenced',
         REMINDER_STATUS.PENDING,
         REMINDER_STATUS.FAILED,
         REMINDER_STATUS.PROCESSING,
@@ -228,7 +230,9 @@ describe('bounded reminder recovery on local D1', () => {
           }),
         ])
         const [old] = await database.select().from(musicReminder)
-        clock.advance(300_000)
+
+        if (!old) throw new Error('Missing original fence')
+        clock.advance(old.updatedAt.getTime() + 300_000 - clock.now())
 
         const results = await Promise.all(
           Array.from({ length: 5 }, () =>

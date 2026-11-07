@@ -80,7 +80,7 @@ const Envelope = Schema.Struct({
   }),
 })
 
-const call = async (name: string, args: Schema.Json) => {
+const exchange = async (name: string, args: Schema.Json) => {
   const response = await app.handler(
     new Request('https://api.example.test/mcp', {
       method: 'POST',
@@ -119,8 +119,13 @@ const call = async (name: string, args: Schema.Json) => {
 
   if (!data) throw new Error('Missing MCP response')
 
-  return Schema.decodeUnknownSync(Envelope)(JSON.parse(data)).result
+  return {
+    result: Schema.decodeUnknownSync(Envelope)(JSON.parse(data)).result,
+    bytes: new TextEncoder().encode(body).byteLength,
+  }
 }
+
+const call = async (name: string, args: Schema.Json) => (await exchange(name, args)).result
 
 const success = async <A>(name: string, args: Schema.Json, schema: Schema.Codec<A, unknown>) => {
   const result = await call(name, args)
@@ -207,6 +212,17 @@ beforeAll(async () => {
   ])
   await db.insert(musicSourceIdentitiesTable).values([
     {
+      sourceKey: 'spotify:artist:aaa',
+      platform: 'spotify',
+      sourceEntityType: 'artist',
+      externalId: 'aaa',
+      canonicalUrl: 'https://open.spotify.com/artist/aaa',
+      state: 'resolved',
+      entityType: 'artist',
+      entityId: '0-missing',
+      resolvedAt: new Date(1),
+    },
+    {
       sourceKey: 'spotify:artist:abc',
       platform: 'spotify',
       sourceEntityType: 'artist',
@@ -252,6 +268,12 @@ beforeAll(async () => {
   ])
   await db.insert(musicSourceAliasesTable).values({
     normalizedUrl: 'https://alias.example.test/artist',
+    sourceKey: 'spotify:artist:abc',
+    firstSeenAt: new Date(1),
+    lastSeenAt: new Date(2),
+  })
+  await db.insert(musicSourceAliasesTable).values({
+    normalizedUrl: 'https://open.spotify.com/artist/aaa',
     sourceKey: 'spotify:artist:abc',
     firstSeenAt: new Date(1),
     lastSeenAt: new Date(2),
@@ -424,6 +446,7 @@ test('normalized identities and aliases read only; misses/unresolved/orphans/pla
   for (const url of [
     'https://open.spotify.com/intl-za/artist/abc?si=tracking#fragment',
     'https://alias.example.test/artist?utm_source=test',
+    'https://open.spotify.com/artist/aaa',
   ]) {
     const result = await success('lookup_music_url', { url }, LookupMusicUrlResult)
     expect(result.result).toMatchObject({ status: 'found', entity: { entityId: 'artist-a' } })
@@ -551,3 +574,70 @@ test('default/max pages, max batch, invalid bounds and encoded response ceiling 
     await db.delete(musicArtistsTable).where(sql`id like 'bounded-%'`)
   }
 })
+
+test('the duplicated MCP text/structured result stays inside D5 and oversized results retain actionable guidance', async () => {
+  const ids = Array.from({ length: 50 }, (_, i) => `wire-${i}`)
+
+  for (const id of ids)
+    await db.insert(musicArtistsTable).values({ id, name: `Wire ${'x'.repeat(2000)}`, slug: id })
+
+  try {
+    const below = await exchange('search_music', { query: 'Wire ', limit: 50 })
+    expect(below.result.isError).not.toBe(true)
+    expect(
+      Schema.decodeUnknownSync(MusicListResult)(below.result.structuredContent).entities,
+    ).toHaveLength(50)
+    expect(below.bytes).toBeLessThan(256 * 1024)
+
+    // 150KiB structured JSON used to pass the module but exceed 300KiB on the wire.
+    await db
+      .update(musicArtistsTable)
+      .set({ name: `Wire ${'x'.repeat(3000)}` })
+      .where(sql`id like 'wire-%'`)
+    const above = await exchange('search_music', { query: 'Wire ', limit: 50 })
+    expect(above.result.isError).toBe(true)
+    expect(above.result.content.map((item) => item.text).join('')).toContain(
+      'Request a smaller page or batch',
+    )
+    expect(above.bytes).toBeLessThan(256 * 1024)
+
+    // Nested string escaping is larger than merely doubling structured JSON bytes.
+    await db
+      .update(musicArtistsTable)
+      .set({ name: `Wire ${'"'.repeat(2000)}` })
+      .where(sql`id like 'wire-%'`)
+    const escaped = await exchange('search_music', { query: 'Wire ', limit: 50 })
+    expect(escaped.result.isError).toBe(true)
+    expect(escaped.result.content.map((item) => item.text).join('')).toContain(
+      'Request a smaller page or batch',
+    )
+    expect(escaped.bytes).toBeLessThan(256 * 1024)
+    await db
+      .update(musicArtistsTable)
+      .set({ name: `Wire ${'"'.repeat(500)}` })
+      .where(sql`id like 'wire-%'`)
+    const escapedBelow = await exchange('search_music', { query: 'Wire ', limit: 50 })
+    expect(escapedBelow.result.isError).not.toBe(true)
+    expect(escapedBelow.bytes).toBeLessThan(256 * 1024)
+
+    await db
+      .update(musicArtistsTable)
+      .set({ name: `Wire ${'界'.repeat(500)}` })
+      .where(sql`id like 'wire-%'`)
+    const unicodeBelow = await exchange('search_music', { query: 'Wire ', limit: 50 })
+    expect(unicodeBelow.result.isError).not.toBe(true)
+    expect(unicodeBelow.bytes).toBeLessThan(256 * 1024)
+    await db
+      .update(musicArtistsTable)
+      .set({ name: `Wire ${'界'.repeat(1000)}` })
+      .where(sql`id like 'wire-%'`)
+    const unicodeAbove = await exchange('search_music', { query: 'Wire ', limit: 50 })
+    expect(unicodeAbove.result.isError).toBe(true)
+    expect(unicodeAbove.result.content.map((item) => item.text).join('')).toContain(
+      'Request a smaller page or batch',
+    )
+    expect(unicodeAbove.bytes).toBeLessThan(256 * 1024)
+  } finally {
+    await db.delete(musicArtistsTable).where(sql`id like 'wire-%'`)
+  }
+}, 20000)

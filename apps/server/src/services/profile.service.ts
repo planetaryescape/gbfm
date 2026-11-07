@@ -70,7 +70,7 @@ export type PublicProfile = {
 export type PublicProfileMetadata = Pick<
   PublicProfile,
   'id' | 'name' | 'username' | 'bio' | 'createdAt'
->
+> & { readonly kind: 'user' | 'artist' }
 
 export interface ProfileService {
   /** Preserves user-first lookup, banned-user denial and the existing artist-DJ fallback. */
@@ -124,6 +124,7 @@ const getPublicProfileMetadata = Effect.fn('profile.getPublicMetadata')(function
     })
 
   return {
+    kind: 'user' as const,
     id: row.id,
     name: row.name,
     username: row.username,

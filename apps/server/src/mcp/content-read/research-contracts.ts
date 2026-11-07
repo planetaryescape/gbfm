@@ -52,6 +52,7 @@ export const PublicProfileInput = Schema.Struct({
 export const PublicProfileResult = Schema.Struct({
   endpoint: EndpointIdentity,
   profile: Schema.Struct({
+    kind: Schema.Literals(['user', 'artist']),
     id: Schema.String,
     name: Schema.String,
     username: Schema.NullOr(Schema.String),

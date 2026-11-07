@@ -16,7 +16,7 @@ Guide Fari's overview. No production scope activation is included.
 | `list_show_episodes` | Delivered as public **audio** episode metadata by show slug plus limit/offset. Existing `getEpisodes` called without actor/loaded show. Public parent and public children required before counts/pagination. Missing/draft parent both `not_found`; existing empty public show returns an empty page. Audio track IDs are not canonical music track IDs. Misc audio reviews on its show page. No media URLs, body or creators. |
 | `search_catalogue` | Delivered as **metadata search** in one explicit `audio` / `show` / `post` namespace per page. Anonymous draft=false source predicate; no related-show fields/media. Optional limit/offset; createdAt DESC/id DESC (not relevance ranking). Audio track IDs are not canonical music-track IDs. Shared `SearchService.searchPublicPage`. |
 | `get_mix` | Delivered as **published GBFM audio mix metadata** by slug via `AudioService.getPublicMixSummaryBySlug`. Missing/draft/non-mix all `not_found`. Preserves anonymous audio publication predicate independently of show publication; no show fields/links, body or media expansion. Not a playback/detail page. |
-| `get_public_profile` | Delivered as **identity metadata**, not a full profile graph/page. `ProfileService.getPublicProfileMetadata` keeps existing user-first lookup and banned-user denial (no fallback on banned collision); absent users fall back to published artist-DJs using existing mix-credit predicate. That predicate allows a DJ with only draft mixes; no mix identity/count is exposed. No media/social links/graphs. |
+| `get_public_profile` | Delivered as **identity metadata**, not a full profile graph/page. `profile.kind` discriminates `user` (user account ID) from `artist` (canonical music-artist ID), even if ID strings coincide. `ProfileService.getPublicProfileMetadata` keeps existing user-first lookup and banned-user denial (no fallback on banned collision); absent users fall back to published artist-DJs using existing mix-credit predicate. That predicate allows a DJ with only draft mixes; no mix identity/count is exposed. No media/social links/graphs. |
 | `get_public_collection` | Delivered as **published listening collection metadata plus bounded member page**, not playlist revisions or embeds. `publicListeningCollectionPage` filters published collection, published saves and same owner before count/paging, createdAt DESC/id DESC. Notes/status are already public with published saves under the existing API contract. Missing/private parent both `not_found`; public empty parent returns an empty page. No owner IDs/embed URLs. |
 | `read_micro_thread` | **NOT delivered.** Shared `getMicroPostThreadEffect` does not filter draft roots/descendants/counts. A migrated-D1 probe confirmed public focus returned a private root and private descendant. Compiled thread bodies can also resolve PL1 playlists. Needs approved shared thread visibility/pagination and PL1 #533 reconciliation; no MCP-only filter bypass or silent summary replacement. PostService remains unchanged. |
 
@@ -87,6 +87,13 @@ cost estimates; they demonstrate why a one-row page is not a bounded-work promis
   Keep `read_micro_thread` absent, production policy unchanged.
 - `research.d1.test.ts` supplies a runnable isolated transport composition and
   adversarial fixtures, not a replacement for that persisted-OAuth combined proof.
+
+Existing shared behavior is not strengthened by MCP: public collections do not
+exclude banned owners (profile lookup does); search's `post` namespace includes
+published micro replies even under a draft root, but exposes only the matching
+reply's own metadata, never root/parent/body/count/relationship fields. The full
+thread tool remains gated. Integrators must preserve `profile.kind` so user and
+artist IDs are never interpreted as one identity namespace.
 
 Isolated tests in `content-read.d1.test.ts` execute the real MCP 2026-07-28 protocol,
 live account checks and migrated D1 application services. They inject the principal

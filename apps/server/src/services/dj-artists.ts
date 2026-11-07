@@ -53,7 +53,7 @@ export const getArtistDjProfileMetadata = Effect.fn('artist.getDjProfileMetadata
   if (!rows[0])
     return yield* new NotFoundError({ message: 'Profile not found', resource: 'profile', id: slug })
 
-  return rows[0]
+  return { kind: 'artist', ...rows[0] }
 })
 
 export const listArtistDjs = Effect.fn('artist.listDjs')(function* () {

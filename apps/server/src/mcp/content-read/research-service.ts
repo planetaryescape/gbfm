@@ -102,6 +102,7 @@ const makeResearch = Effect.gen(function* () {
     return yield* Schema.decodeUnknownEffect(PublicProfileResult)({
       endpoint,
       profile: {
+        kind: profile.kind,
         id: profile.id,
         name: profile.name,
         username: profile.username,

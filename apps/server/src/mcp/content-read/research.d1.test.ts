@@ -248,7 +248,7 @@ beforeAll(async () => {
   ])
   await db.insert(musicArtistsTable).values(
     ['dj', 'unpublished', 'not-dj', 'banned', 'listener'].map((slug) => ({
-      id: slug,
+      id: slug === 'dj' ? 'research-listener' : slug,
       slug,
       name: `Artist ${slug}`,
       publishedAt: slug === 'unpublished' ? null : new Date(1000),
@@ -257,7 +257,7 @@ beforeAll(async () => {
   await db.insert(audioArtists).values(
     ['dj', 'unpublished', 'banned', 'listener'].map((artistId) => ({
       audioId: 'draft',
-      artistId,
+      artistId: artistId === 'dj' ? 'research-listener' : artistId,
     })),
   )
   await db.insert(collections).values([
@@ -380,14 +380,23 @@ test('mix metadata preserves anonymous audio identity without leaking its privat
 })
 
 test('profile identity keeps user precedence, banned denial and exact published DJ fallback without content expansion', async () => {
-  for (const [username, id] of [
-    ['listener', 'research-listener'],
-    ['dj', 'dj'],
+  // Equal IDs across the two tables must remain distinguishable to callers.
+  for (const [username, kind] of [
+    ['listener', 'user'],
+    ['dj', 'artist'],
   ] as const) {
     const output = await call('get_public_profile', { username })
     const page = Schema.decodeUnknownSync(PublicProfileResult)(output.result?.structuredContent)
-    expect(page.profile.id).toBe(id)
-    expect(Object.keys(page.profile).sort()).toEqual(['bio', 'createdAt', 'id', 'name', 'username'])
+    expect(page.profile.id).toBe('research-listener')
+    expect(page.profile.kind).toBe(kind)
+    expect(Object.keys(page.profile).sort()).toEqual([
+      'bio',
+      'createdAt',
+      'id',
+      'kind',
+      'name',
+      'username',
+    ])
   }
 
   for (const username of ['banned', 'unpublished', 'not-dj', 'missing'])

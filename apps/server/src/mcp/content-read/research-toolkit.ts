@@ -61,7 +61,7 @@ export const PublicResearchToolkit = Toolkit.make(
     .annotate(Tool.Strict, true),
   Tool.make('get_public_collection', {
     description:
-      'Read a published listening collection and a bounded page of its published same-owner saves, including their public notes/status. Not a playlist revision or compiled embed. Missing/private collection returns not_found; empty public collection returns an empty page. Newest-first with ID tie-break; default20/max50, offset max10000. Read-only; content:read required.',
+      'Read a published listening collection and a bounded page of its published same-owner saves, including their public notes/status. Not a playlist revision or compiled embed. Missing/private collection returns not_found; empty public collection returns an empty page. Newest-first with ID tie-break; default 20/max 50, offset max 10000. Read-only; content:read required.',
     parameters: PublicCollectionInput,
     success: PublicCollectionResult,
     failure: EditorialToolError,

@@ -8,7 +8,11 @@ import {
   CreatePlaylistInput,
   CreateTrackInput,
   EntityType,
+  MusicAffiliationWriteHeaders,
+  MusicCreditWriteHeaders,
   MusicPlatform,
+  MusicWriteHeaders,
+  MusicWriteIntent,
   ResolveMusicEntityInput,
   ResolvedMusicEntityResponse,
   ScrapeEntityLinksResponse,
@@ -21,6 +25,92 @@ import {
 } from './music'
 
 describe('music API contract', () => {
+  it('requires a safe observed revision and UUIDv4 in a complete write intent', () => {
+    const valid = { expectedRevision: 7, requestId: 'a9fc2be4-f514-43f4-b2eb-d64cd65c3371' }
+    expect(Schema.decodeUnknownSync(MusicWriteIntent)(valid)).toEqual(valid)
+
+    for (const expectedRevision of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, '7', null]) {
+      expect(
+        Exit.isFailure(Schema.decodeUnknownExit(MusicWriteIntent)({ ...valid, expectedRevision })),
+      ).toBe(true)
+    }
+
+    for (const requestId of ['', 'a9fc2be4-f514-13f4-b2eb-d64cd65c3371', undefined]) {
+      expect(
+        Exit.isFailure(Schema.decodeUnknownExit(MusicWriteIntent)({ ...valid, requestId })),
+      ).toBe(true)
+    }
+
+    expect(
+      Exit.isFailure(Schema.decodeUnknownExit(MusicWriteIntent)({ requestId: valid.requestId })),
+    ).toBe(true)
+    expect(
+      Schema.decodeUnknownSync(MusicWriteIntent)({
+        ...valid,
+        expectedRevision: Number.MAX_SAFE_INTEGER,
+      }).expectedRevision,
+    ).toBe(Number.MAX_SAFE_INTEGER)
+  })
+
+  it('preserves both observed affiliation roots and rejects noncanonical revision headers', () => {
+    const headers = {
+      'x-gbfm-music-revision': '3',
+      'x-gbfm-request-id': 'a9fc2be4-f514-43f4-b2eb-d64cd65c3371',
+      'x-gbfm-music-label-revision': '11',
+    }
+
+    expect(Schema.decodeUnknownSync(MusicAffiliationWriteHeaders)(headers)).toEqual(headers)
+    expect(
+      Schema.decodeUnknownSync(MusicCreditWriteHeaders)({
+        ...headers,
+        'x-gbfm-music-artist-revision': '5',
+      })['x-gbfm-music-artist-revision'],
+    ).toBe('5')
+
+    for (const value of ['-1', '01', '1e2', '1.0', ' 1', '1\u0000', '9007199254740992']) {
+      expect(
+        Exit.isFailure(
+          Schema.decodeUnknownExit(MusicWriteHeaders)({
+            ...headers,
+            'x-gbfm-music-revision': value,
+          }),
+        ),
+      ).toBe(true)
+      expect(
+        Exit.isFailure(
+          Schema.decodeUnknownExit(MusicAffiliationWriteHeaders)({
+            ...headers,
+            'x-gbfm-music-label-revision': value,
+          }),
+        ),
+      ).toBe(true)
+    }
+
+    // Transport omission decodes so the handler can give the explicit 428.
+    expect(Schema.decodeUnknownSync(MusicWriteHeaders)({})).toEqual({})
+  })
+
+  it('retains explicit related revisions alongside browser metadata without accepting duplicates', () => {
+    const input = {
+      expectedRevision: 8,
+      requestId: 'a9fc2be4-f514-43f4-b2eb-d64cd65c3371',
+      artistIds: ['a'],
+      references: [{ entityType: 'artist', entityId: 'a', expectedRevision: 2 }],
+      coverImageUrl: 'https://example.test/cover.jpg',
+      publishedAt: null,
+    }
+
+    expect(Schema.decodeUnknownSync(UpdateAlbumInput)(input)).toEqual(input)
+    expect(
+      Exit.isFailure(
+        Schema.decodeUnknownExit(UpdateAlbumInput)({
+          ...input,
+          references: [...input.references, ...input.references],
+        }),
+      ),
+    ).toBe(true)
+  })
+
   // Adversarial review found that a plain Schema.String for title/slug let an
   // empty slug through to the DB (varchar NOT NULL accepts ''), unlike the
   // old Zod schemas' .min(1).
@@ -108,6 +198,7 @@ describe('music API contract', () => {
 
     const artist = {
       id: 'artist-1',
+      revision: 2,
       name: 'Artist',
       bio: null,
       imageUrl: 'https://cdn.example.com/artist.jpg',
@@ -118,6 +209,7 @@ describe('music API contract', () => {
 
     const album = {
       id: 'album-1',
+      revision: 3,
       title: 'Album',
       artistNames: ['Artist'],
       releaseDate: null,
@@ -130,6 +222,7 @@ describe('music API contract', () => {
 
     const track = {
       id: 'track-1',
+      revision: 4,
       title: 'Track',
       artistNames: ['Artist'],
       coverImageUrl: null,
@@ -197,6 +290,7 @@ describe('music API contract', () => {
       const labelResult = Schema.decodeUnknownExit(ScrapeEntityLinksResponse)({
         entity: {
           id: 'label-1',
+          revision: 0,
           name: 'Label',
           description: null,
           imageUrl: null,

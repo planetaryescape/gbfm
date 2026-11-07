@@ -41,6 +41,7 @@ import {
   mapSpotifyTrackImportErrors,
   PROVIDER_UNAVAILABLE_RETRY_AFTER_SECONDS,
 } from '@/http/music-identity-http'
+import { mapMusicWriteErrors, musicBodyWriteRequest } from '@/http/music-write-http'
 import { omitUndefined } from '@/lib/omit-undefined'
 import {
   CanonicalMusicIdentity,
@@ -183,7 +184,10 @@ function toServiceFields(
   input: CreateArtistInput | UpdateArtistInput,
 ): Partial<ArtistServiceCreateInput> {
   return omitUndefined({
-    ...input,
+    name: input.name,
+    bio: input.bio,
+    imageUrl: input.imageUrl,
+    slug: input.slug,
     genres: input.genres ? [...input.genres] : undefined,
     publishedAt: input.publishedAt ? new Date(input.publishedAt) : undefined,
   })
@@ -342,11 +346,10 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
+        const write = yield* musicBodyWriteRequest(payload)
 
-        const row = yield* dieOnDatabaseError(
-          svc
-            .updateArtist(params.id, omitUndefined(toServiceFields(payload)))
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
+        const row = yield* mapMusicWriteErrors(
+          svc.updateArtist(params.id, omitUndefined(toServiceFields(payload)), write),
         )
 
         return toArtistResponse(row)

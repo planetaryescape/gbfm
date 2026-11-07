@@ -36,7 +36,9 @@ for missing grants. Retrieval performs its own live authorization regardless.
 `prompt.d1.test.ts` demonstrates official MCP 2026-07-28 `prompts/list/get`,
 current framework/client request envelopes (including `mcp-name` for get), sourced
 guidance, missing-grant denial, unknown-source failure and absence of a mutating
-tool. It uses migrated D1 and an injected actor, not persisted OAuth tokens.
+tool. It uses migrated D1, an injected actor and an explicit domain authority, not
+persisted OAuth tokens. Production retrieval now also requires the actual request
+CommandAuthority via its evidence reads; there is no actor-only fallback.
 The response is bounded to 64 KiB with transport headroom and a five-second
 deadline. Real target-client UI discovery and composed persisted-OAuth/list
 policy remain integration checks, not claims made by this slice.

@@ -1,8 +1,11 @@
 import { Clock, Context, Effect, Layer, Schema } from 'effect'
 
+import { Database } from '@/db/layer'
+
 import { McpAuthorization, McpAuthorizationLive } from '../authorization'
 import { EndpointIdentity } from '../contracts'
 import { EditorialMcpConfig } from '../editorial'
+import { checkpointEditorialCommand } from '../editorial-music/save'
 import {
   EditorialEvidenceStore,
   EditorialEvidenceStoreLayer,
@@ -10,6 +13,7 @@ import {
 } from '../editorial-research/evidence'
 import { compareEvidenceKeys, evidenceFingerprint } from '../editorial-research/fingerprint'
 import { boundEvidenceResult, withinEvidenceBudget } from '../editorial-research/service'
+import { suggestEditorialConnections } from './connections'
 import {
   MusicRef,
   RankingEvidence,
@@ -17,8 +21,10 @@ import {
   type SimilarInput,
   SimilarResult,
 } from './contracts'
+import { suggestPlaylistSequence } from './playlist'
 
 const makeRecommendations = Effect.gen(function* () {
+  const db = yield* Database
   const authorization = yield* McpAuthorization
   const store = yield* EditorialEvidenceStore
   const config = yield* EditorialMcpConfig
@@ -151,7 +157,7 @@ const makeRecommendations = Effect.gen(function* () {
       limits,
     })
 
-    return yield* Schema.decodeUnknownEffect(SimilarResult)({
+    const output = yield* Schema.decodeUnknownEffect(SimilarResult)({
       contractVersion: 1,
       algorithmVersion: 'catalogue_relations_v1',
       endpoint,
@@ -164,9 +170,29 @@ const makeRecommendations = Effect.gen(function* () {
       basisDigest,
       candidateWindow: { examined: window.length, cap: 200, truncated: rows.length > 200 },
     }).pipe(Effect.mapError(researchUnavailable), Effect.flatMap(boundEvidenceResult))
+
+    const actor = yield* authorization.requireScopes(['catalogue:read'])
+    yield* checkpointEditorialCommand(['catalogue:read'], actor.userId)
+
+    return output
   }, withinEvidenceBudget)
 
-  return { findSimilarMusic }
+  return {
+    findSimilarMusic,
+    suggestEditorialConnections: (input: Parameters<typeof suggestEditorialConnections>[0]) =>
+      suggestEditorialConnections(input).pipe(
+        Effect.provideService(Database, db),
+        Effect.provideService(McpAuthorization, authorization),
+        Effect.provideService(EditorialMcpConfig, config),
+        Effect.provideService(EditorialEvidenceStore, store),
+      ),
+    suggestPlaylistSequence: (input: Parameters<typeof suggestPlaylistSequence>[0]) =>
+      suggestPlaylistSequence(input).pipe(
+        Effect.provideService(Database, db),
+        Effect.provideService(McpAuthorization, authorization),
+        Effect.provideService(EditorialMcpConfig, config),
+      ),
+  }
 })
 
 export class MusicRecommendationService extends Context.Service<

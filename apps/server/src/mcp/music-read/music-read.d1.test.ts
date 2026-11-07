@@ -135,6 +135,17 @@ const success = async <A>(name: string, args: Schema.Json, schema: Schema.Codec<
   return Schema.decodeUnknownSync(schema)(result.structuredContent)
 }
 
+const search = async (args: Schema.Json) =>
+  (await success('search_music', args, SearchMusicResult)).result
+
+const completeSearch = async (args: Schema.Json) => {
+  const result = await search(args)
+
+  if (result.status !== 'complete') throw new Error('Expected proved search page')
+
+  return result
+}
+
 beforeAll(async () => {
   await seedMusicLookups(db)
   await db
@@ -283,31 +294,77 @@ beforeAll(async () => {
 
 afterAll(() => app.dispose())
 
+test('tool discovery publishes object-root output schemas for every catalogue tool', async () => {
+  const response = await app.handler(
+    new Request('https://api.example.test/mcp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        'mcp-protocol-version': '2026-07-28',
+        'mcp-method': 'tools/list',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/list',
+        params: {
+          _meta: {
+            'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+            'io.modelcontextprotocol/clientCapabilities': {},
+          },
+        },
+      }),
+    }),
+  )
+
+  expect(response.status).toBe(200)
+  const body = await response.text()
+
+  const data =
+    body.startsWith('event:') || body.startsWith('data:')
+      ? body
+          .split('\n')
+          .find((line) => line.startsWith('data:'))
+          ?.slice(5)
+      : body
+
+  if (!data) throw new Error('Missing MCP discovery response')
+
+  const discovery = Schema.decodeUnknownSync(
+    Schema.Struct({
+      result: Schema.Struct({
+        tools: Schema.Array(
+          Schema.Struct({
+            name: Schema.String,
+            outputSchema: Schema.Struct({ type: Schema.Literal('object') }),
+          }),
+        ),
+      }),
+    }),
+  )(JSON.parse(data))
+
+  expect(discovery.result.tools).toHaveLength(9)
+  expect(discovery.result.tools.map((tool) => tool.name)).toContain('search_music')
+})
+
 test('search/filter/get expose all four kinds with safe null/future catalogue projections and literal search', async () => {
-  const first = await success('search_music', { query: 'r1 shared', limit: 2 }, MusicListResult)
+  const first = await completeSearch({ query: 'r1 shared', limit: 2 })
   expect(first.entities.map((row) => [row.entityType, row.entityId])).toEqual([
     ['album', 'album-a'],
     ['artist', 'artist-a'],
   ])
   expect(first.pagination).toEqual({ limit: 2, offset: 0, hasMore: true })
 
-  const second = await success(
-    'search_music',
-    { query: 'r1 shared', limit: 2, offset: 2 },
-    MusicListResult,
-  )
+  const second = await completeSearch({ query: 'r1 shared', limit: 2, offset: 2 })
 
   expect(second.entities.map((row) => row.entityId)).toEqual(['artist-z', 'label-a'])
 
-  const last = await success(
-    'search_music',
-    { query: 'r1 shared', limit: 2, offset: 4 },
-    MusicListResult,
-  )
+  const last = await completeSearch({ query: 'r1 shared', limit: 2, offset: 4 })
 
   expect(last.entities.map((row) => row.entityId)).toEqual(['track-a'])
   expect(last.pagination.hasMore).toBe(false)
-  expect((await success('search_music', { query: '%' }, MusicListResult)).entities).toEqual([])
+  expect((await completeSearch({ query: '%' })).entities).toEqual([])
   expect(
     (await success('filter_music', { entityType: 'artist', name: 'R1' }, MusicListResult)).entities,
   ).toEqual([])
@@ -373,8 +430,6 @@ test('search proves pages or explicitly exhausts without partial results, preser
   ) insert into music_artists(id,name,slug,createdAt,updatedAt)
     select printf('budget-%05d',i),'Needle',printf('budget-%05d',i),0,0 from n`)
 
-  const search = (args: Schema.Json) => success('search_music', args, SearchMusicResult)
-
   try {
     const page = await search({ entityType: 'artist', query: 'nEeDlE', limit: 2, offset: 3 })
     expect(page.status).toBe('complete')
@@ -391,7 +446,6 @@ test('search proves pages or explicitly exhausts without partial results, preser
       const exhausted = await search(args)
       expect(exhausted).toEqual({
         status: 'budget_exhausted',
-        endpoint: page.endpoint,
         requestedPage: {
           limit: 'limit' in args ? args.limit : 20,
           offset: 'offset' in args ? args.offset : 0,
@@ -409,12 +463,23 @@ test('search proves pages or explicitly exhausts without partial results, preser
       pagination: { hasMore: false },
     })
 
-    // No matching album in its quota: later artist matches cannot bridge that gap.
+    // With the two fixture albums, 2045 more proves album EOF at 2047.
     await db.run(sql`with recursive n(i) as (
-      select 0 union all select i+1 from n where i<2047
+      select 0 union all select i+1 from n where i<2044
     ) insert into music_albums(id,title,slug,createdAt,updatedAt)
       select printf('budget-%05d',i),'Other',printf('budget-%05d',i),0,0 from n`)
+    expect((await completeSearch({ query: 'Needle', limit: 1 })).entities[0]?.entityType).toBe(
+      'artist',
+    )
+    await db
+      .insert(musicAlbumsTable)
+      .values({ id: 'budget-edge', title: 'Other', slug: 'budget-edge' })
+    // At 2048 albums, later artist matches cannot bridge the unproved album gap.
     expect((await search({ query: 'Needle', limit: 1 })).status).toBe('budget_exhausted')
+    expect(
+      (await completeSearch({ entityType: 'artist', query: 'Needle', limit: 1 })).entities[0]
+        ?.entityType,
+    ).toBe('artist')
 
     // UTF-8 bytes, not characters: 65536 emoji exceed the admitted byte allowance.
     await db.insert(musicArtistsTable).values({
@@ -593,10 +658,10 @@ test('default/max pages, max batch, invalid bounds and encoded response ceiling 
   for (const row of rows) await db.insert(musicArtistsTable).values(row)
 
   try {
-    const first = await success('search_music', { query: 'Boundary' }, MusicListResult)
+    const first = await completeSearch({ query: 'Boundary' })
     expect(first.entities).toHaveLength(20)
     expect(first.pagination).toEqual({ limit: 20, offset: 0, hasMore: true })
-    const max = await success('search_music', { query: 'Boundary', limit: 50 }, MusicListResult)
+    const max = await completeSearch({ query: 'Boundary', limit: 50 })
     expect(max.entities).toHaveLength(50)
     expect(max.pagination.hasMore).toBe(true)
 
@@ -649,9 +714,11 @@ test('the duplicated MCP text/structured result stays inside D5 and oversized re
   try {
     const below = await exchange('search_music', { query: 'Wire ', limit: 50 }, 'x'.repeat(15500))
     expect(below.result.isError).not.toBe(true)
-    expect(
-      Schema.decodeUnknownSync(MusicListResult)(below.result.structuredContent).entities,
-    ).toHaveLength(50)
+    const decoded = Schema.decodeUnknownSync(SearchMusicResult)(below.result.structuredContent)
+    expect(decoded.endpoint.environment).toBe('disposable-r1')
+
+    if (decoded.result.status !== 'complete') throw new Error('Expected proved search page')
+    expect(decoded.result.entities).toHaveLength(50)
     expect(below.bytes).toBeLessThan(256 * 1024)
 
     // 150KiB structured JSON used to pass the module but exceed 300KiB on the wire.

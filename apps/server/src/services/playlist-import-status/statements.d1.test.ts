@@ -132,7 +132,11 @@ const deletePlaylist = (
               }),
               ctx.prepare(sql`DELETE FROM music_playlists WHERE id='playlist' AND (${guard})`),
             ],
+            // The guarded DELETE is immediately before common receipt finalization.
+            // Only at this adjacency does changes() prove this physical deletion;
+            // absence alone also holds when the parent never existed.
             assertApplied: sql`(${ctx.fence}) AND (${liveGuard})
+              AND changes()=1
               AND NOT EXISTS (SELECT 1 FROM music_playlists WHERE id='playlist')
               AND NOT EXISTS (SELECT 1 FROM playlist_import_statuses WHERE playlist_id='playlist')`,
             outcome: { result: { deleted: true }, revision: 1, access: 'playlist' },
@@ -141,6 +145,14 @@ const deletePlaylist = (
       }
     },
   })
+
+test('a fresh delete key cannot claim a physical winner when the parent is already absent', async () => {
+  await db.delete(mcpOperations)
+  await db.delete(musicPlaylistsTable).where(eq(musicPlaylistsTable.id, 'playlist'))
+  expect((await deletePlaylist()).status).toBe('conflict')
+  expect(await db.select().from(mcpOperations)).toEqual([])
+  expect(await db.select().from(playlistImportStatusesTable)).toEqual([])
+})
 
 test('coupled delete retires actual worker state, retains safe aggregates and replays a lost response', async () => {
   // Concurrent same-key invocations race on the real common receipt, not a JS lock.

@@ -1,7 +1,8 @@
 import type { RichContentDocument } from '@gbfm/rich-content/schema'
-import { type InferInsertModel, type InferSelectModel, relations } from 'drizzle-orm'
+import { type InferInsertModel, type InferSelectModel, relations, sql } from 'drizzle-orm'
 import {
   type AnySQLiteColumn,
+  check,
   index,
   integer,
   sqliteTable,
@@ -32,6 +33,10 @@ export const postsTable = sqliteTable(
     type: text({ enum: postTypeEnum }),
     musicEntityType: text('music_entity_type'),
     musicEntityId: text('music_entity_id'),
+    lastOperationId: text('last_operation_id'),
+    musicReferencesManaged: integer('music_references_managed', { mode: 'boolean' })
+      .notNull()
+      .default(false),
     parentPostId: text('parent_post_id').references((): AnySQLiteColumn => postsTable.id, {
       onDelete: 'set null',
     }),
@@ -50,6 +55,11 @@ export const postsTable = sqliteTable(
     index('posts_parent_created_idx').on(table.parentPostId, table.createdAt),
     index('posts_root_created_idx').on(table.rootPostId, table.createdAt),
     index('posts_quoted_post_idx').on(table.quotedPostId),
+    check(
+      'posts_operation_check',
+      sql`${table.lastOperationId} IS NULL OR length(${table.lastOperationId}) = 36`,
+    ),
+    check('posts_music_references_managed_check', sql`${table.musicReferencesManaged} IN (0, 1)`),
   ],
 )
 

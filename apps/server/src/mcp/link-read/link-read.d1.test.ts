@@ -9,10 +9,20 @@ import {
   musicArtistsTable,
   musicEntityLinksTable,
   musicSourceIdentitiesTable,
+  musicTracksTable,
 } from '@/db/music-entity.schema'
 import { seedMusicLookups } from '@/db/seed-music-lookups'
+import {
+  CanonicalMusicIdentity,
+  CanonicalMusicIdentityLayer,
+} from '@/services/canonical-music-identity'
+import { MusicCoverImageFetcher } from '@/services/canonical-music-identity/artwork-delivery'
+import { ConfigService, createConfig } from '@/services/config.service'
+import { MusicLinkScraperService } from '@/services/music-link-scraper.service'
+import { S3Service } from '@/services/s3.service'
 import { DatabaseTestLayer, db } from '@/test/database'
 import { withTestLayer } from '@/test/effect'
+import { makeTestS3Service } from '@/test/s3'
 
 import { McpActor } from '../authorization'
 import { EditorialMcpConfig } from '../editorial'
@@ -422,4 +432,95 @@ test('oversize link IDs fail explicitly and typed provider mismatches are not eq
   } finally {
     await db.delete(musicEntityLinksTable).where(eq(musicEntityLinksTable.id, id))
   }
+})
+
+test('canonical writer display aliases remain readable without widening health destinations', async () => {
+  const target = { entityType: 'track', entityId: 'r4-display' } as const
+  await db
+    .insert(musicTracksTable)
+    .values({ id: target.entityId, title: 'Display', slug: target.entityId })
+
+  const platforms = [
+    'youtube_music',
+    'discord',
+    'website',
+    'instagram',
+    'twitter',
+    'musicbrainz',
+    'discogs',
+    'other',
+  ] as const
+
+  const dependencies = Layer.mergeAll(
+    DatabaseTestLayer,
+    Layer.succeed(ConfigService, createConfig()),
+    Layer.succeed(MusicLinkScraperService, {
+      scrape: () => Effect.die('No provider call during attachment'),
+      discoverCrossPlatformLinks: () => Effect.die('No provider call during attachment'),
+    }),
+    Layer.succeed(
+      S3Service,
+      makeTestS3Service(() => Effect.die('No artwork write during attachment')),
+    ),
+    Layer.succeed(MusicCoverImageFetcher, () =>
+      Promise.reject(new Error('No artwork fetch during attachment')),
+    ),
+  )
+
+  const attached = await Effect.runPromise(
+    withTestLayer(
+      Effect.gen(function* () {
+        const canonical = yield* CanonicalMusicIdentity
+
+        return yield* Effect.forEach(platforms, (platform) =>
+          canonical.attachLink({
+            ...target,
+            platform,
+            origin: 'manual',
+            url:
+              platform === 'youtube_music'
+                ? 'https://music.youtube.com/watch?v=abcdefghijk'
+                : `https://example.test/display/${platform}`,
+          }),
+        )
+      }),
+      CanonicalMusicIdentityLayer.pipe(Layer.provide(dependencies)),
+    ),
+  )
+
+  const page = await call('get_music_links', target, LinksResult)
+  expect(page.scanned).toBe(8)
+  expect(page.links.map((link) => link.platform)).toEqual([...platforms].sort())
+  expect(page.links.map((link) => link.linkId).sort()).toEqual(
+    attached.map((link) => link.id).sort(),
+  )
+
+  for (const platform of platforms) {
+    expect(
+      (await call('find_platform_equivalent', { ...target, platform }, EquivalentResult)).result
+        .status,
+    ).toBe('stored_link')
+    expect(
+      (
+        await call(
+          'find_missing_platform_links',
+          { entityType: 'track', platform },
+          MissingLinksResult,
+        )
+      ).missing,
+    ).toEqual([])
+    const health = await call('check_music_link_health', { ...target, platform }, HealthResult)
+    expect(health.link?.platform).toBe(platform)
+    expect(health.observation?.status).toBe(
+      platform === 'youtube_music' ? 'provider_unavailable' : 'blocked',
+    )
+  }
+
+  await db
+    .insert(musicEntityLinksTable)
+    .values({ ...target, platform: 'deezer', url: 'https://open.spotify.com/track/abc' })
+  expect(
+    (await call('find_platform_equivalent', { ...target, platform: 'deezer' }, EquivalentResult))
+      .result.status,
+  ).toBe('insufficient_evidence')
 })

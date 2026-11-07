@@ -21,6 +21,9 @@ Four kinds only: artist, album, track, label. R1's D3 visibility applies, includ
 publication timestamps. No playlists or private editorial bodies. Stored link metadata,
 verification actor, identity source/lease tokens and creator IDs are never projected.
 Rejected/unsafe URLs, wrong typed provider sources and platform mismatches are omitted.
+Canonical-writer display aliases are retained: YouTube → YouTube Music, and generic
+sources → discord/website/instagram/twitter/musicbrainz/discogs/other. These are stored
+display mappings, not provider equivalence inference; they do not widen health destinations.
 Dates are observations, not write concurrency tokens. HTTP success never verifies a link.
 Generic safe HTTPS links can be returned but are never fetched by this module.
 

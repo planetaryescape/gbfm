@@ -1,7 +1,8 @@
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types'
 import { sql, type SQL } from 'drizzle-orm'
-import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core'
 import { Context, Effect, Layer, Schema } from 'effect'
+
+import { canonicalJson, operationIdentity, prepareOperationStatement } from './persistence'
 
 /** JSON-only normalized command and bounded receipt data; omission differs from null. */
 export type JsonValue =
@@ -84,11 +85,7 @@ export interface OperationDiagnostic {
 const reportUnavailable = (diagnostic: OperationDiagnostic) =>
   Effect.runSync(Effect.logError('mcp.operation.unavailable', diagnostic))
 
-const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
 const windowMs = 86_400_000
-
-const dialect = new SQLiteSyncDialect()
 
 const encoder = new TextEncoder()
 
@@ -111,30 +108,6 @@ const decodeRow = Schema.decodeUnknownSync(
   }),
 )
 
-const decodeJson = Schema.decodeUnknownSync(Schema.Json)
-
-const decodeBindings = Schema.decodeUnknownSync(
-  Schema.Array(Schema.Union([Schema.Null, Schema.String, Schema.Number, Schema.Boolean])),
-)
-
-// Schema parses external values; canonicalization preserves JSON object ordering rules.
-const canonicalJson = (value: JsonValue): string => {
-  if (Array.isArray(value)) return `[${Array.from(value, canonicalJson).join(',')}]`
-
-  if (Schema.is(Schema.JsonObject)(value))
-    return `{${Object.entries(value)
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
-      .join(',')}}`
-
-  return JSON.stringify(decodeJson(value))
-}
-
-const digest = async (value: string) =>
-  Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value))), (byte) =>
-    byte.toString(16).padStart(2, '0'),
-  ).join('')
-
 /** One shared D1 adapter, not a dispatcher or a transaction spanning provider calls. */
 export const createMcpOperationStore = (
   database: D1Database,
@@ -149,15 +122,7 @@ export const createMcpOperationStore = (
     }
   }
 
-  const prepare = (statement: SQL) => {
-    const query = dialect.sqlToQuery(statement)
-
-    const bindings = decodeBindings(query.params).map((value) =>
-      Schema.is(Schema.Boolean)(value) ? Number(value) : value,
-    )
-
-    return database.prepare(query.sql).bind(...bindings)
-  }
+  const prepare = (statement: SQL) => prepareOperationStatement(database, statement)
 
   const redact = sql`actor_id = NULL, client_id = NULL, attempt_id = NULL, outcome = NULL, state = 'expired'`
 
@@ -185,34 +150,16 @@ export const createMcpOperationStore = (
     async execute(input: ExecuteOperation): Promise<OperationResult> {
       const { key, now } = input
 
-      if (
-        !Number.isSafeInteger(now) ||
-        now < 0 ||
-        !Number.isSafeInteger(now + windowMs) ||
-        !uuidV4.test(key.requestId) ||
-        [key.actorId, key.clientId, key.resource, key.operation].some(
-          (part) => !Schema.is(Schema.String)(part) || part.length === 0 || part.length > 2048,
-        )
-      )
+      if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + windowMs))
         return { status: 'invalid_input' }
 
       let operationId: string
       let inputHash: string
 
       try {
-        const normalized = canonicalJson(input.normalizedInput)
-
-        if (encoder.encode(normalized).length > 262144) return { status: 'invalid_input' }
-        operationId = await digest(
-          canonicalJson([
-            key.actorId,
-            key.clientId,
-            key.resource,
-            key.operation,
-            key.requestId.toLowerCase(),
-          ]),
-        )
-        inputHash = await digest(normalized)
+        const identity = await operationIdentity(key, input.normalizedInput)
+        operationId = identity.operationId
+        inputHash = identity.inputHash
       } catch {
         return { status: 'invalid_input' }
       }

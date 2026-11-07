@@ -1,11 +1,8 @@
-import { readFileSync } from 'node:fs'
-import { URL } from 'node:url'
-
 import type { D1Database } from '@cloudflare/workers-types'
 import { drizzle } from 'drizzle-orm/d1'
 import { expect, test } from 'vitest'
 
-import { createMigratedD1Database } from '@/test/migrate-d1'
+import { applyD1Migrations, createMigratedD1Database, d1MigrationFiles } from '@/test/migrate-d1'
 
 import { user } from './auth.schema'
 import {
@@ -25,17 +22,7 @@ const domainMigrations = [
   '0019_post_music_references.sql',
 ] as const
 
-const applyDomain = async (d1: D1Database) => {
-  for (const filename of domainMigrations) {
-    const sql = readFileSync(new URL(`../../drizzle-d1/${filename}`, import.meta.url), 'utf8')
-    await d1.batch(
-      sql
-        .split('--> statement-breakpoint')
-        .filter((s) => s.trim())
-        .map((s) => d1.prepare(s)),
-    )
-  }
-}
+const beforeDomain = d1MigrationFiles.filter((filename) => filename < '0017')
 
 const seed = async (d1: D1Database) => {
   const db = drizzle(d1)
@@ -52,7 +39,6 @@ const seed = async (d1: D1Database) => {
 
 test('fresh domain schema round-trips typed defaults, safe revisions and persistent empty-library guard', async () => {
   await using resource = await createMigratedD1Database()
-  await applyDomain(resource.database)
   const db = await seed(resource.database)
   await db.insert(savedMixesTable).values({
     id: 'mix',
@@ -134,7 +120,7 @@ test('fresh domain schema round-trips typed defaults, safe revisions and persist
 })
 
 test('populated replay preserves legacy primary and notes; all coherent historical reminders are non-editable', async () => {
-  await using resource = await createMigratedD1Database()
+  await using resource = await createMigratedD1Database(beforeDomain)
   const d1 = resource.database
   await d1
     .prepare(
@@ -166,7 +152,7 @@ test('populated replay preserves legacy primary and notes; all coherent historic
       .run()
   }
 
-  await applyDomain(d1)
+  await applyD1Migrations(d1, domainMigrations)
   expect(
     await d1.prepare('SELECT notes,revision,last_operation_id FROM saved_mixes').first(),
   ).toEqual({ notes: 'private note', revision: 1, last_operation_id: null })
@@ -195,7 +181,7 @@ test('populated replay preserves legacy primary and notes; all coherent historic
 })
 
 test('inconsistent historical reminder aborts migration and rolls back preceding columns', async () => {
-  await using resource = await createMigratedD1Database()
+  await using resource = await createMigratedD1Database(beforeDomain)
   const d1 = resource.database
   await d1
     .prepare(
@@ -207,7 +193,7 @@ test('inconsistent historical reminder aborts migration and rolls back preceding
       "INSERT INTO music_reminder(id,user_id,music_title,artist_name,music_url,reminder_date,status,is_sent,created_at,updated_at) VALUES('bad','owner','Track','Artist','https://example.test',0,'sent',0,0,0)",
     )
     .run()
-  await expect(applyDomain(d1)).rejects.toThrow()
+  await expect(applyD1Migrations(d1, domainMigrations)).rejects.toThrow()
   expect(
     (await d1.prepare('PRAGMA table_info(music_artists)').all<{ name: string }>()).results.map(
       (r) => r.name,
@@ -221,7 +207,6 @@ test('inconsistent historical reminder aborts migration and rolls back preceding
 
 test('credit constraints distinguish instruments, explicit identities, evidence and deletion policies', async () => {
   await using resource = await createMigratedD1Database()
-  await applyDomain(resource.database)
   const db = await seed(resource.database)
 
   const fact = {
@@ -304,7 +289,6 @@ test('credit constraints distinguish instruments, explicit identities, evidence 
 
 test('alias uniqueness is per artist and assertion deletion never deletes public facts', async () => {
   await using resource = await createMigratedD1Database()
-  await applyDomain(resource.database)
   const db = await seed(resource.database)
 
   const alias = {
@@ -335,7 +319,6 @@ test('alias uniqueness is per artist and assertion deletion never deletes public
 
 test('ordered references enforce typed targets, distinctness and optional primary without inferred managed state', async () => {
   await using resource = await createMigratedD1Database()
-  await applyDomain(resource.database)
   const db = await seed(resource.database)
   await db.insert(postsTable).values({ id: 'post', title: 'Post', slug: 'post', content: 'Body' })
   await db.insert(postMusicReferencesTable).values([
@@ -377,7 +360,6 @@ test('ordered references enforce typed targets, distinctness and optional primar
 
 test('reminder defaults permit new work, while invalid revisions/states/attempt markers reject', async () => {
   await using resource = await createMigratedD1Database()
-  await applyDomain(resource.database)
   const db = await seed(resource.database)
   await db.insert(musicReminder).values({
     id: 'new',

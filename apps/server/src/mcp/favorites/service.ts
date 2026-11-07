@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema } from 'effect'
+import { Context, Effect, Layer, Option, Schema } from 'effect'
 
 import { FavoriteService } from '@/services/favorite.service'
 import { ShowSubscriptionService } from '@/services/show-subscription.service'
@@ -6,13 +6,28 @@ import { ShowSubscriptionService } from '@/services/show-subscription.service'
 import { McpAuthorization } from '../authorization'
 import { EndpointIdentity, McpToolError } from '../contracts'
 import { EditorialMcpConfig } from '../editorial'
-import { ListFavoritesResult, ListOwnedInput, ListShowSubscriptionsResult } from './contracts'
+import {
+  ListFavoritesResult,
+  ListOwnedInput,
+  ListShowSubscriptionsResult,
+  SavedItemSummary,
+} from './contracts'
 
 const unavailable = () =>
   new McpToolError({ code: 'unavailable', message: 'Saved items are unavailable.' })
 
 const invalidInput = () =>
   new McpToolError({ code: 'invalid_input', message: 'Invalid pagination.' })
+
+const projectSummary = (target: typeof SavedItemSummary.Type) =>
+  Schema.decodeUnknownOption(SavedItemSummary)({
+    id: target.id,
+    title:
+      target.title.length > 500
+        ? `${target.title.slice(0, 499).replace(/[\uD800-\uDBFF]$/u, '')}…`
+        : target.title,
+    slug: target.slug,
+  })
 
 const make = Effect.gen(function* () {
   const authorization = yield* McpAuthorization
@@ -40,17 +55,28 @@ const make = Effect.gen(function* () {
       .getFavorites(actor.userId, limit + 1, offset)
       .pipe(Effect.mapError(unavailable))
 
+    const window = rows.slice(0, limit)
+
+    const items = window.flatMap((row) => {
+      const target = row.audio ?? row.show
+
+      if (!target) return []
+      const summary = projectSummary(target)
+
+      return Option.isSome(summary)
+        ? [{ kind: row.audio?.type ?? 'show', target: summary.value }]
+        : []
+    })
+
     return yield* Schema.decodeUnknownEffect(ListFavoritesResult)({
       endpoint,
-      favorites: rows.slice(0, limit).map((row) => ({
-        kind: row.audio?.type ?? 'show',
-        target: row.audio
-          ? { id: row.audio.id, title: row.audio.title, slug: row.audio.slug }
-          : row.show
-            ? { id: row.show.id, title: row.show.title, slug: row.show.slug }
-            : null,
-      })),
-      pagination: { limit, offset, hasMore: rows.length > limit },
+      favorites: items,
+      pagination: {
+        limit,
+        offset,
+        hasMore: rows.length > limit,
+        omitted: window.length - items.length,
+      },
     }).pipe(Effect.mapError(unavailable))
   })
 
@@ -70,12 +96,23 @@ const make = Effect.gen(function* () {
       .getUserSubscriptions(actor.userId, { limit: limit + 1, offset })
       .pipe(Effect.mapError(unavailable))
 
+    const window = result.data.slice(0, limit)
+
+    const items = window.flatMap(({ show }) => {
+      const summary = projectSummary(show)
+
+      return Option.isSome(summary) ? [{ show: summary.value }] : []
+    })
+
     return yield* Schema.decodeUnknownEffect(ListShowSubscriptionsResult)({
       endpoint,
-      subscriptions: result.data.slice(0, limit).map(({ show }) => ({
-        show: { id: show.id, title: show.title, slug: show.slug },
-      })),
-      pagination: { limit, offset, hasMore: result.data.length > limit },
+      subscriptions: items,
+      pagination: {
+        limit,
+        offset,
+        hasMore: result.data.length > limit,
+        omitted: window.length - items.length,
+      },
     }).pipe(Effect.mapError(unavailable))
   })
 

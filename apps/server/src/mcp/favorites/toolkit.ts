@@ -11,7 +11,7 @@ const Failure = Schema.Union([EditorialToolError, McpToolError])
 export const FavoritesToolkit = Toolkit.make(
   Tool.make('list_favorites', {
     description:
-      'List your own favorites: public mixes, tracks, miscellaneous audio and shows only. Requires favorites:read. Read only; default 20, maximum 50. Private references do not grant visibility. No content bodies, media URLs or other owners’ records.',
+      'List your own favorites: public mixes, tracks, miscellaneous audio and shows only. Requires favorites:read. Read only; default 20, maximum 50. Private references do not grant visibility. No content bodies, media URLs or other owners’ records. Long titles are truncated; invalid public summaries are counted in pagination.omitted. Advance offset by limit, not returned count, while hasMore is true.',
     parameters: ListOwnedInput,
     success: ListFavoritesResult,
     failure: Failure,
@@ -25,7 +25,7 @@ export const FavoritesToolkit = Toolkit.make(
     .annotate(Tool.Strict, true),
   Tool.make('list_show_subscriptions', {
     description:
-      'List your own subscriptions to public shows. Requires subscriptions:read. Read only; default 20, maximum 50. Does not subscribe, queue or send notifications. No subscriber identities, private shows or content bodies.',
+      'List your own subscriptions to public shows. Requires subscriptions:read. Read only; default 20, maximum 50. Does not subscribe, queue or send notifications. No subscriber identities, private shows or content bodies. Long titles are truncated; invalid public summaries are counted in pagination.omitted. Advance offset by limit, not returned count, while hasMore is true.',
     parameters: ListOwnedInput,
     success: ListShowSubscriptionsResult,
     failure: Failure,

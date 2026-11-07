@@ -267,7 +267,7 @@ test('persisted OAuth → composed MCP → real services: bounded owner-only pub
     expect(subscriptions.subscriptions).toEqual([
       { show: { id: 'public', title: 'public', slug: 'public' } },
     ])
-    expect(subscriptions.pagination).toEqual({ limit: 20, offset: 0, hasMore: false })
+    expect(subscriptions.pagination).toEqual({ limit: 20, offset: 0, hasMore: false, omitted: 0 })
 
     for (const args of [
       { limit: 0 },
@@ -316,7 +316,7 @@ test('persisted OAuth → composed MCP → real services: bounded owner-only pub
   } finally {
     await app.dispose()
   }
-})
+}, 30_000)
 
 test('service checks scopes and live account, rejects caller-selected owner and bounds', async () => {
   await using fixture = await createEditorialOAuthFixture()
@@ -361,6 +361,72 @@ test('service checks scopes and live account, rejects caller-selected owner and 
     await app.dispose()
   }
 })
+
+test('oversized public summaries do not poison either page or stall pagination', async () => {
+  await using fixture = await createEditorialOAuthFixture()
+  const { app, reads } = setup(fixture)
+  const longTitle = `${'😀'.repeat(250)}x`
+
+  const targets = [
+    { id: 'good-1', title: 'a'.repeat(500), slug: 'good-1' },
+    { id: 'long', title: longTitle, slug: 'long' },
+    { id: 'i'.repeat(201), title: 'Invalid ID', slug: 'bad-id' },
+    { id: 'bad-slug', title: 'Invalid slug', slug: 's'.repeat(501) },
+    { id: 'good-2', title: 'Last good show', slug: 'good-2' },
+  ]
+
+  for (const [index, target] of targets.entries()) {
+    await fixture.db.insert(showsTable).values({ ...target, content: '' })
+    await fixture.db
+      .insert(favoritesTable)
+      .values({ userId: 'reader', showId: target.id, createdAt: new Date(10000 - index) })
+    await fixture.db
+      .insert(showSubscriptionsTable)
+      .values({ userId: 'reader', showId: target.id, createdAt: new Date(10000 - index) })
+  }
+
+  const run = (offset: number, limit: number) =>
+    Effect.runPromise(
+      withTestLayer(
+        Effect.gen(function* () {
+          const service = yield* FavoritesMcpService
+
+          return {
+            favorites: yield* service.listFavorites({ offset, limit }),
+            subscriptions: yield* service.listShowSubscriptions({ offset, limit }),
+          }
+        }).pipe(
+          Effect.provideService(McpActor, {
+            userId: Schema.decodeUnknownSync(UserId)('reader'),
+            clientId: Schema.decodeUnknownSync(OAuthClientId)('fixture-client'),
+            scopes: ['favorites:read', 'subscriptions:read'],
+          }),
+        ),
+        reads,
+      ),
+    )
+
+  try {
+    const first = await run(0, 4)
+    const expected = [targets[0], { id: 'long', title: `${'😀'.repeat(249)}…`, slug: 'long' }]
+    expect(first.favorites.favorites.map((item) => item.target)).toEqual(expected)
+    expect(first.subscriptions.subscriptions.map((item) => item.show)).toEqual(expected)
+    expect(first.favorites.pagination).toMatchObject({ omitted: 2, hasMore: true })
+    expect(first.subscriptions.pagination).toMatchObject({ omitted: 2, hasMore: true })
+    const omittedOnly = await run(2, 2)
+    expect(omittedOnly.favorites.favorites).toEqual([])
+    expect(omittedOnly.subscriptions.subscriptions).toEqual([])
+    expect(omittedOnly.favorites.pagination).toMatchObject({ omitted: 2, hasMore: true })
+    expect(omittedOnly.subscriptions.pagination).toMatchObject({ omitted: 2, hasMore: true })
+    const last = await run(4, 4)
+    expect(last.favorites.favorites.map((item) => item.target)).toEqual([targets[4]])
+    expect(last.subscriptions.subscriptions.map((item) => item.show)).toEqual([targets[4]])
+    expect(last.favorites.pagination).toMatchObject({ omitted: 0, hasMore: false })
+    expect(last.subscriptions.pagination).toMatchObject({ omitted: 0, hasMore: false })
+  } finally {
+    await app.dispose()
+  }
+}, 30_000)
 
 test('both lists enforce defaults, maximum page, stable ties and visibility before pagination', async () => {
   await using fixture = await createEditorialOAuthFixture()

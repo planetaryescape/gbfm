@@ -27,10 +27,12 @@ revocation, client/resource policy and discovery admission remain P1's boundary.
 Admins have no cross-owner bypass. No target identifiers are accepted as filters.
 
 Results contain endpoint identity, target ID/title/slug (plus audio kind for
-favorites), and `{ limit, offset, hasMore }`. They exclude raw content, artwork,
+favorites), and `{ limit, offset, hasMore, omitted }`. They exclude raw content, artwork,
 media URLs, membership IDs, user IDs and subscriber data. IDs are bounded to 200
-characters, titles to 500, slugs to 500; invalid persisted output fails safely as
-`unavailable`, rather than returning an unbounded value. P1 enforces the encoded
+characters, titles to 500, slugs to 500. Long display titles are truncated with an
+ellipsis without splitting a surrogate pair. A public item with an invalid ID or
+slug is omitted and counted in `pagination.omitted`, never allowed to fail the
+other items in the page. P1 enforces the encoded
 256 KiB response ceiling as well. No fabricated revision or receipt is returned.
 These are current-state projections, not mutation preconditions or snapshots.
 Canonical target IDs/slugs are supplied without inventing web routes for legacy
@@ -39,7 +41,11 @@ track/misc audio; endpoint frontend URL is the review starting point.
 Queries filter drafts before pagination, fetch at most 51 membership rows, and
 sort created time descending with membership ID descending as a deterministic
 tie-breaker. `hasMore` uses one lookahead, not hidden-reference totals. Offset
-pagination can shift between calls when the library changes; no snapshot promise.
+pagination scans a fixed `limit`-sized source window: advance by `limit`, not by
+returned item count, even when all items were omitted. No refill query is made;
+an empty page can have `hasMore: true`. `omitted` counts only invalid public
+summaries in that window, not private references. Pagination can shift between
+calls when the library changes; no snapshot promise.
 Existing subscription service still counts matching memberships and loads show
 labels/content internally; MCP projects only summaries and starts no extra work.
 Malformed favorites referencing both audio and show are omitted. Public audio

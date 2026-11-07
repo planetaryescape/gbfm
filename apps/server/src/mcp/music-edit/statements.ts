@@ -128,7 +128,7 @@ export const musicEditStatements = (input: {
       break
   }
 
-  const winner = sql`${fence} AND ${input.liveGuard} AND ${musicParentWinner(target, attemptId)}`
+  const winner = sql`(${fence}) AND (${input.liveGuard}) AND (${musicParentWinner(target, attemptId)})`
 
   const statements = [
     prepare(
@@ -235,7 +235,7 @@ export const musicEditStatements = (input: {
         prepare,
         artistId: target.entityId,
         attemptId,
-        fence: sql`${fence} AND ${input.liveGuard}`,
+        fence: sql`(${fence}) AND (${input.liveGuard})`,
       }),
     )
   }

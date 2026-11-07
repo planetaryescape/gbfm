@@ -169,3 +169,97 @@ live authorization denial, exact expiry, cleanup and deletion/recreation safety,
 bounds and schema/export parity. Domain caller cutovers and final persisted OAuth
 composition remain each owning lane/P1's integration checks, not claims of this
 storage adapter's fixture.
+
+## Staged artwork extension (0021, not activation)
+
+Import from `@/mcp/operations/staged-store`:
+
+- `createArtworkStageStatement(ctx, seed)` joins the original catalogue
+  `AtomicOperationPlan.statements`. Seed contains disposition, entity type/ID,
+  observed catalogue revision, freshly parsed canonical `sourceIdentityKey`, and
+  `artworkPolicy: 'required'|'best_effort'`. `preserve` never creates a stage.
+- `createMcpArtworkStore(env.DB)`, `McpArtworkStore`, `McpArtworkStoreLayer(env.DB)`
+  use the **same** binding/receipt as the atomic store, not a second request ledger.
+- Exported types: `ArtworkStageSeed`, `ArtworkArtifact`, `ArtworkLease`,
+  `ArtworkStage`, `ArtworkRequest`, `ArtworkResult`, `ArtworkTransition`,
+  `ArtworkAssociationContext`, `ArtworkAssociationPlan`, `ArtworkDiagnostic`.
+
+All `read/acquire/renew/transition/associate` inputs include the same scoped
+`key`, normalized input, trusted epoch-millisecond `now`, fresh
+`authorize(stage?)` callback, and `liveGuard: SQL`. Authorization runs before
+lookup, with stored target evidence before action, and before successful result
+disclosure. Keep current authority/visibility in `liveGuard`; put revision CAS
+in the domain statements, not a predicate invalidated by that CAS itself.
+
+`read` returns `{status:'ready',stage}`; `acquire` returns
+`{status:'leased',stage,lease:{attemptId,generation}}` or `busy`. Other methods
+return `ready` or a status-only `conflict/expired/not_found/access_denied/
+invalid_input/unavailable`. A terminal phase can be read/replayed but never
+reopened. Ambiguous storage outcomes require reading the same operation, not
+creating a new request. The original receipt outcome is never enriched in place.
+
+`pending → uploading → association_pending → delivered`, or a definitive
+`failed`, is durable. Acquire/takeover uses a fresh UUID physical attempt,
+monotonically increasing generation and a 60,000ms lease. The owner renews every
+20,000ms; expiry permits takeover at `leaseExpiresAt <= now`, not resurrection
+of the old attempt. Renewal, transition and association check the complete
+operation/attempt/generation/unexpired lease plus live authority fence.
+
+`transition({...request,lease,transition:{phase:'uploading',artifact}})` freezes
+SHA256 lowercase hex, allowlisted JPEG/PNG/WebP content type and 1..10MiB length.
+The store derives `music/<type>/<id>/imports/<operationId>/<sha256>/cover`.
+Descriptor immutability survives takeover: an old uploader can at worst PUT the
+same frozen bytes to the same key, never overwrite a different snapshot.
+The orchestrator must verify bytes/digest and remote existence; only then may it
+request `association_pending`. PUT timeouts do not imply success or terminal
+failure. This adapter does no network work and cannot attest object existence.
+
+`associate({...request,lease,build})` supplies `ArtworkAssociationContext`
+(`OperationContext` plus `stage`) to a sync builder returning domain statements
+and `assertApplied`. CAS the entity's original observed catalogue revision,
+associate the frozen key, increment revision and save the physical attempt
+marker. Coupled statements also require that marker. Final delivered evidence
+and domain writes share **one** D1 batch. Its CHECK assertion executes even when
+the lease fence is lost; a zero-row CAS or lost fence aborts all coupled writes,
+not just post-hoc result classification. `associatedRevision` is exactly original
+catalogue revision + 1; there is deliberately no implicit rebase/checkpoint API.
+After a lost response, delivered evidence is replayed; otherwise read/resume the
+same phase/key and let the original revision guard reject later administrator
+edits. A definitive failure uses only bounded allowlisted failure codes, never
+remote messages; transient/ambiguous errors leave the durable phase unchanged.
+
+Source identity accepts only `url:sha256:<64 lowercase hex>`, Spotify's four
+entity types with bounded alphanumeric IDs, Deezer's four types with numeric IDs,
+and YouTube video/playlist with bounded alphanumeric/underscore/hyphen IDs.
+Never store candidate/signed/provider URLs, tokens or provider payloads. I1 owns
+authorized canonical source lookup and reproducible bytes outside the database.
+
+### Staged retention and retirement
+
+Receipt `pruneExpired(now)` still redacts the original bounded result at 24h and
+leaves a non-reapplying tombstone. It does **not** age out in-flight work, reset a
+lease/phase, or delete an object. Active stages retain minimal source/ref/revision
+and frozen descriptor needed for recovery, even after the original result TTL.
+Terminal stage reads after that TTL return `expired`, not the saved result.
+
+`pruneTerminal(now)` retires only delivered/failed stages whose receipt TTL has
+elapsed: it clears disposition, actor/client, source identity and lease. It
+retains opaque receipt linkage, entity/ref/revision, terminal phase, frozen
+descriptor and association evidence solely to prevent unsafe artifact cleanup.
+No asset deletion/GC is implemented or authorized. Future GC must separately
+prove terminal **unassociated** artifacts after reconciliation; age alone is
+never proof, and associated assets must never be deleted by this maintenance.
+
+Account and OAuth-client deletion retire stages immediately, including when
+receipt expiry already cleared the receipt's actor/client columns. Independent
+stage lifecycle identifiers make those triggers effective after expiry. Trusted
+non-OAuth credential-deletion composition may call `retireClient(namespace)` to
+redact receipt and retire stage arguments in one batch; this is not a tool/user
+input endpoint. Do not globally retire the shared `gbfm:session` namespace for
+one session/user deletion. P1 owns concrete first-party cleanup integration.
+
+Activation still requires P1 to compose the services, wire both retention hooks
+to existing maintenance, and prove each domain's authority/CAS and I1's real
+fetch/PUT/verification/recovery flow. The fixture proves the shared D1 boundary,
+not remote delivery or combined lane readiness. Fixed safe diagnostic categories
+cover staged authorization/storage/cleanup failures without raw SQL/errors/data.

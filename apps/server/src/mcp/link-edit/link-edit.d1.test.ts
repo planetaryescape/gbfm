@@ -1,6 +1,5 @@
 import { AuthSession } from '@gbfm/api/middleware/auth'
 import { sql } from 'drizzle-orm'
-import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core'
 import { Effect, Layer, Schema } from 'effect'
 import { HttpRouter, HttpServer } from 'effect/http'
 import { expect, test } from 'vitest'
@@ -554,8 +553,6 @@ test('all manual commands compile and commit dense16-platform observations under
     ),
   )
 
-  const dialect = new SQLiteSyncDialect()
-
   for (const [entityId, authority] of [
     ['browser', browser],
     ['oauth', oauth],
@@ -580,36 +577,13 @@ test('all manual commands compile and commit dense16-platform observations under
           .bind(link.id, entityId, link.platform, link.url),
       ),
     )
-    const checkpoint = await Effect.runPromise(authority.checkpoint(['catalogue:write']))
 
     const source = await Effect.runPromise(
       parseMusicSource('https://example.test/website', 'track'),
     )
 
-    const parameterCounts: Array<number> = []
-    const target = { entityType: 'track', entityId } as const
-    musicLinkStatements({
-      context: {
-        attemptId: crypto.randomUUID(),
-        operationId: 'a'.repeat(64),
-        fence: sql`EXISTS (SELECT 1 FROM mcp_operations WHERE id=${'a'.repeat(64)} AND attempt_id=${crypto.randomUUID()} AND state=${'pending'})`,
-        prepare: (statement) => {
-          const query = dialect.sqlToQuery(statement)
-          parameterCounts.push(query.params.length)
-
-          return f.database.prepare(query.sql).bind(...query.params)
-        },
-      },
-      target,
-      expectedRevision: 0,
-      liveGuard: checkpoint.liveGuard,
-      now: Date.now(),
-      observed,
-      attach: [{ platform: 'website', url: source.canonicalUrl, source }],
-      release: undefined,
-    })
-    expect(Math.max(...parameterCounts)).toBeLessThanOrEqual(100)
-
+    // Exercise the real receipt context, including its current fence/assert contract.
+    // D1 itself rejects any statement exceeding its 100-binding limit.
     const layer = Layer.mergeAll(
       DatabaseLayer(f.database),
       Layer.succeed(CommandAuthority, authority),

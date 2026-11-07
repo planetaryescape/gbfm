@@ -672,7 +672,7 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
       slug: 'r3-public',
       title: 'Public editorial',
       type: 'post',
-      content: 'Public source',
+      content: 'Public source\n\nhttps://public.bandcamp.com/album/not-fetched',
     },
     {
       id: 'r3-private',
@@ -700,7 +700,7 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
       slug: 'r3-episode-a',
       title: 'Older ID',
       type: 'mix',
-      content: 'DO NOT RENDER',
+      content: 'DO NOT RENDER\n\nhttps://public.bandcamp.com/album/not-fetched',
       url: 'https://example.test/a.mp3',
       showId: 'r3-show',
       createdAt: new Date(1000),
@@ -731,7 +731,7 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
       slug: 'r3-hidden-parent',
       title: 'SECRET PARENT CHILD',
       type: 'mix',
-      content: 'SECRET BODY',
+      content: 'SECRET BODY\n\nhttps://private.bandcamp.com/album/not-fetched',
       url: 'https://example.test/parent.mp3',
       showId: 'r3-hidden-show',
     },
@@ -739,13 +739,34 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
 
   // User and canonical artist identifiers deliberately collide across namespaces.
   await fixture.db.update(user).set({ username: 'r3-user' }).where(eq(user.id, 'reader'))
-  await fixture.db.insert(musicArtistsTable).values({
-    id: 'reader',
-    name: 'Artist fallback',
-    slug: 'r3-artist',
-    publishedAt: new Date(1000),
+  await fixture.db.insert(user).values({
+    id: 'r3-banned-user',
+    name: 'Banned user',
+    username: 'r3-banned',
+    email: 'banned-profile@disposable.test',
+    banned: true,
   })
-  await fixture.db.insert(audioArtists).values({ audioId: 'r3-episode-a', artistId: 'reader' })
+  await fixture.db.insert(musicArtistsTable).values([
+    { id: 'reader', name: 'Artist fallback', slug: 'r3-artist', publishedAt: new Date(1000) },
+    {
+      id: 'r3-user-shadow',
+      name: 'Must not shadow user',
+      slug: 'r3-user',
+      publishedAt: new Date(1000),
+    },
+    {
+      id: 'r3-banned-shadow',
+      name: 'Must not bypass ban',
+      slug: 'r3-banned',
+      publishedAt: new Date(1000),
+    },
+  ])
+  await fixture.db.insert(audioArtists).values(
+    ['reader', 'r3-user-shadow', 'r3-banned-shadow'].map((artistId) => ({
+      audioId: 'r3-episode-a',
+      artistId,
+    })),
+  )
   await fixture.db.insert(listeningCollectionsTable).values([
     { id: 'r3-collection', userId: 'reader', title: 'Public collection', published: true },
     { id: 'r3-private-collection', userId: 'reader', title: 'SECRET COLLECTION' },
@@ -958,16 +979,27 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
     expect(mix.result.structuredContent.mix.audioId).toBe('r3-hidden-parent')
     expect(JSON.stringify(mix)).not.toMatch(/r3-hidden-show|showId|showSlug|SECRET BODY|\.mp3/)
 
-    for (const [username, kind] of [
-      ['r3-user', 'user'],
-      ['r3-artist', 'artist'],
+    for (const [username, expected] of [
+      ['r3-user', { kind: 'user', id: 'reader', name: 'reader', username: 'r3-user' }],
+      [
+        'r3-artist',
+        { kind: 'artist', id: 'reader', name: 'Artist fallback', username: 'r3-artist' },
+      ],
     ] as const) {
       const profile = Schema.decodeUnknownSync(
         Schema.Struct({ result: Schema.Struct({ structuredContent: PublicProfileResult }) }),
       )(await (await rpc(listener.access_token, 'get_public_profile', { username })).json())
 
-      expect(profile.result.structuredContent.profile).toMatchObject({ id: 'reader', kind })
+      expect(profile.result.structuredContent.profile).toMatchObject(expected)
     }
+
+    expect(
+      await (
+        await rpc(listener.access_token, 'get_public_profile', { username: 'r3-banned' })
+      ).json(),
+    ).toMatchObject({
+      result: { isError: true, content: [{ text: expect.stringContaining('not_found') }] },
+    })
 
     const collectionBody = await (
       await rpc(listener.access_token, 'get_public_collection', newCalls[3][1])

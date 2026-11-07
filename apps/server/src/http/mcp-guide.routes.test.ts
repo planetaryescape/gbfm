@@ -54,6 +54,17 @@ test.each([
     expect(text).toContain('list_published_posts')
     expect(text).toContain('get_show')
     expect(text).toContain('list_show_episodes')
+
+    for (const name of [
+      'search_catalogue',
+      'get_mix',
+      'get_public_profile',
+      'get_public_collection',
+    ]) {
+      expect(text).toContain(`- ${name}:`)
+    }
+
+    expect(text).toContain('tools and read_micro_thread are not registered')
     expect(text).toContain('Production allowedScopes is unchanged')
     expect(text).toContain('Existing connections remain read-only')
     expect(text).toContain(

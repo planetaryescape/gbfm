@@ -15,7 +15,6 @@ import { EmailDeliveryLive } from '@/services/email-delivery.service'
 import { RecordingEmailTransportLayer } from '@/services/email-transport.service'
 import { getArtistByIdEffect } from '@/services/music-entity/artist.service'
 import { PostServiceLayer } from '@/services/post.service'
-import { ShowServiceLayer } from '@/services/show.service'
 import { UnavailableObjectStoreClientLayer } from '@/services/storage/object-store-client'
 import { UploadAssetServiceLayer } from '@/services/upload-asset.service'
 
@@ -93,7 +92,6 @@ export const createComposedMcpFixture = (
   const services = Layer.mergeAll(
     base,
     PostServiceLayer.pipe(Layer.provide(base)),
-    ShowServiceLayer.pipe(Layer.provide(base)),
     EditorialOAuthLive.pipe(Layer.provide(base)),
     AuthLive.pipe(Layer.provide(email), Layer.provide(base)),
   )

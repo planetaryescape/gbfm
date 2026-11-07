@@ -100,20 +100,28 @@ They do not control playback or access your private listening library.
 Review and publishing stay in GBFM.
 
 Tool discovery reflects the connection's current scopes and role on each request.
-Remembered tool names do not authorize calls. Three public-content reads are also
+Remembered tool names do not authorize calls. Seven public-content reads are also
 registered, but require content:read and a resource policy explicitly allowing it:
 - list_published_posts: public editorial summaries only, never source bodies or micro posts.
 - get_show: public show metadata by slug, without body rendering or media URLs.
 - list_show_episodes: public audio metadata under a public show; private parents and
   children remain excluded from pages and counts. Audio IDs are not music-track IDs.
+- search_catalogue: metadata search in one published audio/show/post namespace;
+  page limits do not bound database matching, counting or sorting work.
+- get_mix: published audio mix metadata, without body, media or related-show expansion.
+- get_public_profile: public user or artist-DJ identity metadata with an explicit kind;
+  user lookup takes precedence and banned users do not fall back to an artist.
+- get_public_collection: published collection metadata and published same-owner saves;
+  individual private saves stay excluded from pages and counts.
 Lists default to 20 items, maximum 50, with offset up to 10,000. Reads are safe to
 retry but pages are not snapshots across concurrent edits. A missing or private
 show returns not_found. These reads perform no playback, seen-state or subscription writes.
 Eligible listeners can authorize content:read without posts:read only where enabled.
 Production allowedScopes is unchanged; registering these tools does not activate
 content:read on a resource or add it to existing grants. Fresh consent and explicit
-resource-policy authorization are separate requirements. No catalogue toolkit or
-other public-content reads are registered by this slice.
+resource-policy authorization are separate requirements. Canonical-music catalogue
+tools and read_micro_thread are not registered; thread privacy and playlist rendering
+remain gated.
 
 ## Other clients, including Claude Code
 

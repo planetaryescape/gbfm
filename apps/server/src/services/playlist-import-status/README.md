@@ -12,6 +12,13 @@ authority, the physical command winner, parent deletion, and no status still
 referencing the deleted playlist. There is deliberately no playlist FK or
 standalone retirement call.
 
+Absence is not evidence of a physical DELETE: a fresh request against an already
+absent parent must not save `deleted: true`. The test composition keeps its
+guarded single-parent DELETE immediately before receipt finalization and asserts
+`changes()=1` there. This proof depends on that exact adjacency; inserting another
+statement between DELETE and finalization invalidates it. Other compositions
+must provide their own durable physical-delete witness.
+
 Retirement applies across all namespaces attached to the deleted playlist. It
 sets `phase=retired`, timestamps and the physical marker; increments revision;
 clears target/revision, cursor, worker attempt/lease and dispatch timestamps; and

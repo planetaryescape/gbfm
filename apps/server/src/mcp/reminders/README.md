@@ -8,7 +8,7 @@ OAuth policy, schema or scheduler changes are included. #538 stays open.
 
 | Selected capability | Scope | Delivery |
 | --- | --- | --- |
-| `list_music_reminders` | `reminders:read` | Owner-only summary page; default 20, max 50, offset 0–10,000, UTC dates, date/ID order, sentinel `hasMore`, 256 KiB JSON ceiling. Listener accounts eligible; admin cannot read others. |
+| `list_music_reminders` | `reminders:read` | Owner-only summary page; default 20, max 50, offset 0–10,000, UTC dates, date/ID order, sentinel `hasMore`, 64 KiB result-payload budget. Listener accounts eligible; admin cannot read others. |
 | `create_music_reminder` | `reminders:write` | Withheld pending durable create identity and atomic receipt/mutation. Not a registered placeholder. |
 | `reschedule_music_reminder` | `reminders:write` | Withheld pending expected-revision CAS, durable replay and send arbitration. |
 | `cancel_music_reminder` | `reminders:write` | Withheld pending expected-revision CAS, cancellation tombstone/replay and send arbitration. |
@@ -24,6 +24,12 @@ The read summary intentionally has no writable version until that seam exists.
 Offset pages are not snapshots during concurrent changes. Notes, URLs, recipients,
 owner IDs and provider internals are not projected.
 
+The inner 64 KiB UTF-8 JSON result budget is separate from P1's final 256 KiB
+transport cap. MCP sends the result twice, once as structured content and once
+as escaped text; at most three times the result bytes plus small fixed framing
+fits below the outer cap. Oversized pages return typed `unavailable` with a
+smaller-page instruction rather than reaching the outer untyped HTTP 413.
+
 ## P1 composition recipe
 
 - Import `ReminderToolkit` and `ReminderToolHandlersLayer` from `./toolkit`.
@@ -33,10 +39,12 @@ owner IDs and provider internals are not projected.
   `Database`. `McpActor` remains request-local and belongs to P1's transport.
 - Compose the toolkit with `composeMcpToolkits` and provide the handler/read
   layers. Central registry, OAuth, consent and persisted-grant fixtures stay P1.
-- Local HTTP tests use an injected parsed principal, not a persisted OAuth grant.
-  P1 must prove the reminder toolkit through persisted OAuth/discovery/revocation
-  at its final combined head before activation. Existing protocol tests are not
-  evidence of this new toolkit's persisted OAuth integration.
+- `protocol.d1.test.ts` uses persisted OAuth and the real `makeMcpRoutes` path
+  with lane-local composition: discovery names/hints/private-field exclusion,
+  owner-only reads, write-only denial, and escape-heavy multibyte results near
+  and above the inner budget. Shared fixtures and production policy are unchanged.
+  P1 must still prove final combined registration/discovery/revocation at its
+  integration head before activation.
 
 ## Consolidated persistence gate: evidence and required decision
 
@@ -123,6 +131,10 @@ for newly created rows. Conservative historical classification recommendation:
   No existing durable negative evidence proves that no provider attempt began.
   This deliberately denies later cancel/reschedule on historical unsent rows;
   existing recovery can still deliver their current schedule at least once.
+- With this proposed classification, the dashboard's DELETE returns HTTP 409
+  for **every existing reminder**, including future reminders never processed:
+  sent rows are `accepted`, and all historical unsent rows are `fenced`. This is
+  an owner-gated loss of deletion, not a shipped behavior change.
 - Inconsistent sent/status combinations or unknown states → stop that migration
   decision for those rows and require explicit classification, not silent repair.
 

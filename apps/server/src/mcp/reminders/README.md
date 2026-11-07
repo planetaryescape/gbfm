@@ -97,13 +97,14 @@ updated-head CI remain required before command activation.
 | `cancel_music_reminder` | `reminders:write` | Withheld pending expected-revision CAS, cancellation tombstone/replay and send arbitration. |
 
 Writes must derive recipient from the actor; never accept an arbitrary recipient.
-Read authority is independent of write authority. Future UTC input should accept
-an explicit RFC 3339 UTC `Z` instant, reject local/offsetless dates and invalid
-calendar values, and normalize to a millisecond UTC instant before hashing.
+Read authority is independent of write authority. Command UTC input accepts
+an explicit RFC 3339 UTC `Z` instant, rejects local/offsetless dates and invalid
+calendar values, and normalizes to a millisecond UTC instant before hashing.
 Reschedule/cancel require current command revision; missing →
 `precondition_required`, stale → `conflict`, hidden/other-owner → `not_found`.
 Do not pretend the current processor claim generation is a command revision.
-The read summary intentionally has no writable version until that seam exists.
+The command follow-up adds observed `commandRevision` and `dispatchState` to the
+bounded summary; the earlier read-only PR's projection remains unchanged.
 Offset pages are not snapshots during concurrent changes. Notes, URLs, recipients,
 owner IDs and provider internals are not projected.
 

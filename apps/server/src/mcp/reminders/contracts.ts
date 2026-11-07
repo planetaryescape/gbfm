@@ -1,6 +1,11 @@
 import { REMINDER_STATUSES } from '@gbfm/core/status'
 import { Schema } from 'effect'
 
+/** Independent of the processor's updatedAt claim generation. */
+export const ReminderCommandRevision = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+)
+
 /** Owner-only summary query; no caller-selected owner or recipient. */
 export const ListMusicRemindersInput = Schema.Struct({
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))),
@@ -15,6 +20,8 @@ export const MusicReminderSummary = Schema.Struct({
   reminderDate: Schema.String,
   status: Schema.Literals(REMINDER_STATUSES),
   isSent: Schema.Boolean,
+  commandRevision: ReminderCommandRevision,
+  dispatchState: Schema.Literals(['open', 'fenced', 'accepted', 'cancelled']),
 })
 
 /** Bounded page, ordered by UTC reminder time then stable ID. */
@@ -30,11 +37,6 @@ export const ListMusicRemindersResult = Schema.Struct({
 const ReminderRequestId = Schema.String.check(Schema.isUUID(4))
 
 const ReminderId = Schema.String.check(Schema.isUUID(4))
-
-/** Independent of the processor's updatedAt claim generation. */
-export const ReminderCommandRevision = Schema.Int.check(
-  Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
-)
 
 const ReminderText = Schema.NonEmptyString.check(
   Schema.isMaxLength(500),

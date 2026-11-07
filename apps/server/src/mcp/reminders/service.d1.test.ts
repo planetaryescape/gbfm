@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm'
-import { Effect, Layer, type Schema } from 'effect'
+import { Effect, Layer, Logger, type Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
@@ -8,6 +8,7 @@ import { musicReminder } from '@/db/music-reminder.schema'
 import { McpToolError } from '@/mcp/contracts'
 import { McpOperationStoreLayer } from '@/mcp/operations/store'
 import { EmailDelivery } from '@/services/email-delivery.service'
+import { MusicReminderService, MusicReminderServiceLayer } from '@/services/music-reminder.service'
 import {
   processReminderJob,
   queryDueReminders,
@@ -48,11 +49,14 @@ const fixture = async () => {
     { id: 'other', name: 'Other', email: 'other@example.test', role: 'user' },
   ])
   const clock = reminderClock(1_800_000_000_000)
+  const logs: Array<unknown> = []
+  const logging = Logger.layer([Logger.make(({ message }) => logs.push(message))])
   const base = Layer.mergeAll(database, McpOperationStoreLayer(resource.database), clock.layer)
 
   const layer = ReminderCommandServiceLayer.pipe(
     Layer.provide(base),
     Layer.provideMerge(clock.layer),
+    Layer.provideMerge(logging),
   )
 
   // Disposable request authority over real persisted account state. Production
@@ -94,10 +98,64 @@ const fixture = async () => {
       ),
     )
 
-  return { ...resource, db, run, fail, clock, authority }
+  const page = () =>
+    Effect.runPromise(
+      withTestLayer(
+        Effect.flatMap(MusicReminderService, (service) =>
+          service.getPageByUserId('owner', { limit: 20, offset: 0 }),
+        ),
+        MusicReminderServiceLayer.pipe(Layer.provide(database)),
+      ),
+    )
+
+  return { ...resource, db, run, fail, clock, authority, page, logs }
 }
 
 describe('atomic reminder commands on fully migrated D1', () => {
+  test('dependency and persisted-row failures emit coarse diagnostics without private data', async () => {
+    await using f = await fixture()
+    const created = await f.run(create())
+    await f.database
+      .prepare('UPDATE music_reminder SET reminder_date=9000000000000000 WHERE id=?')
+      .bind(created.reminderId)
+      .run()
+
+    const cancel = {
+      operation: 'cancel_music_reminder',
+      input: {
+        requestId: crypto.randomUUID(),
+        reminderId: created.reminderId,
+        expectedRevision: 1,
+      },
+    }
+
+    expect(await f.fail(cancel)).toMatchObject({ code: 'unavailable' })
+    await f.database.prepare('DROP TABLE music_reminder').run()
+    expect(await f.fail(cancel)).toMatchObject({ code: 'unavailable' })
+    expect(await f.fail(create())).toMatchObject({ code: 'unavailable' })
+    expect(f.logs).toHaveLength(3)
+    const logged = JSON.stringify(f.logs)
+
+    for (const code of ['invalid_persisted_row', 'database_error', 'operation_unavailable'])
+      expect(logged).toContain(code)
+
+    for (const privateValue of [
+      'owner',
+      created.reminderId,
+      cancel.input.requestId,
+      'Night Mix',
+      'Private notes',
+      'private.example.test',
+      '9000000000000000',
+      'DROP TABLE',
+      'SELECT',
+    ])
+      expect(logged).not.toContain(privateValue)
+    expect(await f.database.prepare('SELECT count(*) AS n FROM mcp_operations').first()).toEqual({
+      n: 1,
+    })
+  })
+
   test('two senders holding the same claim cannot both cross its dispatch fence', async () => {
     await using f = await fixture()
     const created = await f.run(create())
@@ -261,19 +319,27 @@ describe('atomic reminder commands on fully migrated D1', () => {
     await using f = await fixture()
     const input = create()
     const created = await f.run(input)
+    const observed = (await f.page()).reminders[0]
+
+    if (!observed) throw new Error('Missing observed reminder')
+    expect(observed).toMatchObject({ commandRevision: 1, dispatchState: 'open' })
 
     const edit = {
       operation: 'reschedule_music_reminder',
       input: {
         requestId: crypto.randomUUID(),
         reminderId: created.reminderId,
-        expectedRevision: 1,
+        expectedRevision: observed.commandRevision,
         reminderDate: '2028-02-29T01:02:03Z',
       },
     }
 
     const edited = await f.run(edit)
     expect(edited.commandRevision).toBe(2)
+    expect((await f.page()).reminders[0]).toMatchObject({
+      commandRevision: 2,
+      dispatchState: 'open',
+    })
     expect(
       await f.fail({ ...edit, input: { ...edit.input, requestId: crypto.randomUUID() } }),
     ).toMatchObject({ code: 'conflict' })
@@ -293,6 +359,10 @@ describe('atomic reminder commands on fully migrated D1', () => {
       commandRevision: 3,
       dispatchState: 'cancelled',
       isSent: false,
+    })
+    expect((await f.page()).reminders[0]).toMatchObject({
+      commandRevision: 3,
+      dispatchState: 'cancelled',
     })
     expect(await f.run(cancel)).toEqual(cancelled)
     expect(await f.run(edit)).toEqual(edited)

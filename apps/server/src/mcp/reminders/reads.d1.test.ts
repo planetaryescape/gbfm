@@ -80,6 +80,8 @@ describe('owner-only reminder reads on migrated D1', () => {
       reminderDate: '1970-01-01T00:00:00.000Z',
       status: 'pending',
       isSent: false,
+      commandRevision: 1,
+      dispatchState: 'open',
     })
     const last = await f.run(f.list({ limit: 2, offset: 50 }))
     expect(last.reminders.map((row) => row.id)).toEqual(['own-50', 'own-51'])

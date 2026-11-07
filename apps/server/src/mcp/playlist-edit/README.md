@@ -1,19 +1,21 @@
-# PL2 #534 — contracts and desired-state planner only
+# PL2 #534 — guarded local commands; cutover incomplete
 
-This is **not a delivered command runtime**. No tool is registered, no SQL is
-executed, and no browser/PAT writer has been cut over. PL1 PR #577 remains
-unchanged for its assigned independent Sol review.
+This is **not full PL2 delivery**. Seven local mutation handlers plus preview
+execute through the common receipt store and existing playlist service. The
+toolkit is composed in isolated real OAuth/MCP tests, not centrally registered.
+Browser/API writers and provider commands have not been cut over. PL1 PR #577
+remains unchanged and its reviewed delta is included in the named base once.
 
-Branch `feat/534-playlist-curation` starts from P1's named PR #575 prerequisite
-`695bb12d2149bcbe123f0b6e7661909c4c3ea5ee`, then carries the two owned PL1 commits
-once. No sibling schema/provider code is incorporated. Schema 0020 must arrive
-through a later named P1 combination; this lane does not edit DDL.
+Branch `feat/534-playlist-commands` starts from P1's named PR #575 prerequisite
+`b1b3345d92bb1455f1e942c21e9b361d7a394073`, then adds only new PL2 changes.
+No sibling schema/provider code is incorporated. Schemas 0020–25 are already in
+that base; this lane does not edit DDL.
 
 ## All selected capabilities retained
 
 Every mutation carries UUIDv4 `requestId`; every existing-target mutation carries
 GBFM `playlistId` and safe nonnegative integer `expectedRevision`. Scope mapping
-does not confer authority: the future service must enforce current persisted
+does not confer authority: the service enforces current persisted
 grants, admin role, target access and SQL-time authority, including on receipt
 replay. Curator attribution is not a role. No Spotify-account authority exists.
 
@@ -71,25 +73,56 @@ overflow or truncate. A no-op at MAX_SAFE_INTEGER is permitted at the planner
 level, but the executor must still acquire the physical winning marker without
 incrementing revision. Inputs and snapshots are not mutated.
 
+## Runtime seam
+
+`services/music-entity/playlist.service.ts` exports
+`applyPlaylistCommandEffect(LocalPlaylistCommand)` requiring `Database`,
+`CommandAuthority`, and `McpOperationStore`. Its bounded acknowledgment contains
+`playlistId`, `revision`, `changed`, `membershipCount`, `operationId`, `replayed`.
+Receipt lookup precedes observation, so an exact retry returns the original
+committed result even after later edits. Replays still require current authority
+and target existence. Observation reads at most 501 members; >500 fails closed.
+The target CAS saves the physical attempt marker even for a no-op. Each dependent
+membership statement and final assertion checks that marker, resulting revision,
+common receipt fence, and live SQL authority. No `changes()` carryover is used.
+
+`previewPlaylistCommandEffect(LocalPlaylistCommand)` requires `Database` and
+`CommandAuthority`, shares the desired-state observation, rechecks authority,
+and limits the duplicated MCP envelope to 250000 UTF-8 bytes. It writes no
+receipt or domain data. Applying a preview repeats observation and CAS; preview
+is never a reservation. `toolkit.ts` exports `PlaylistEditToolkit` and
+`PlaylistEditHandlersLayer`; authority is resolved per call, not at construction.
+
+Migrated-D1 tests exercise the service with a persisted browser session authority
+and the toolkit through actual OAuth grants plus `makeMcpRoutes`: create/replay,
+changed-input conflict, concurrent revision contenders, original replay after
+later edits, preview without writes, rejection of hidden publication fields,
+separate publish consent, no-op publication and ban denial. These are not proof
+of browser route cutover or canonical/provider writer safety.
+
 ## Exact runtime closure gaps
 
-- P1 named combined prerequisite containing schema 0020's physical
-  `last_operation_id` marker and revision CHECK, live SQL authority, plus frozen
-  trusted browser/PAT receipt namespaces and deletion cleanup. Never consume a
-  schema sibling directly; no trigger/rebuild/second ledger is introduced here.
-- Existing playlist service owns persistence. Build common receipt plans with
-  `ctx.fence`, caller CAS, `ctx.attemptId` marker and winning revision on **every**
-  fanout statement; `assertApplied` must prove the physical winner. No `changes()`
-  carryover shortcut. Saved results require wire/outcome budgets before execution.
+- Named serial adoption of I1's reviewed retirement statement helper, then
+  deletion inside the guarded parent/relations batch: parent physical CAS,
+  retirement, child cleanup and parent DELETE, with final no-referencing-status
+  assertion AND a physical-delete witness. The single-parent guarded DELETE must
+  immediately precede common finalization so `changes() = 1` refers to that
+  DELETE; no intervening statement is permitted. Absence alone is insufficient.
+  Capacity exhaustion must abort the entire batch. PR #595 is not
+  adopted by this branch and no nonexistent helper is imported.
 - Browser/PAT/API payloads and all playlist writers need the same request/revision
   contract, explicit publication route and guarded backend; current optional-free
   legacy payloads are not safe cross-channel fencing. Imports, link enrichment,
   deletion and membership edits must participate in revision invalidation too.
+- Existing PAT policy deliberately excludes playlist commands; do not expand it.
+  I1 owns canonical `updateArtwork`/`updateEntityMetadata` and refresh/enrichment
+  fences. Their raw writers remain an explicit all-writer gap pending reviewed
+  named adoption; this local command path cannot compensate for them.
 - URL-add and sync require the import/status owner's actual checkpoint/fencing/
   accepted-versus-completed contract. No providers or queues are invoked here.
-- Central registration, actual receipt/replay/concurrent browser-MCP proof on
-  migrated D1, integration tests at the final composed head, full checks and
-  independent actual-PR Sol review remain. Planner tests prove only the pure
-  transition contract, not SQL atomicity, permission enforcement or completion.
+- P1 owns central registration and per-tool request budgets (500 IDs may exceed
+  the existing 16 KiB non-draft admission limit). Actual concurrent browser-route
+  versus MCP proof, final integrated full checks, and independent actual-PR Sol
+  review remain.
 
 No production/provider operations, deployment, merge or auto-merge is authorized.

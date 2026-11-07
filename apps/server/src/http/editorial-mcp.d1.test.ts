@@ -196,8 +196,16 @@ test('composed OAuth MCP enforces draft-write consent, saved versions and revoca
       .set({ content: '\u0001'.repeat(100_000) })
       .where(eq(postsTable.id, saved.post.postId))
     const oversizedResponse = await call('get_post', { postId: saved.post.postId })
-    expect(oversizedResponse.status).toBe(413)
-    expect(await oversizedResponse.text()).toBe('MCP response exceeds the supported byte limit.')
+    expect(oversizedResponse.status).toBe(200)
+    const refusedSource = await oversizedResponse.text()
+    expect(JSON.parse(refusedSource)).toMatchObject({ result: { isError: true } })
+    expect(refusedSource).toContain('invalid_input')
+    expect(refusedSource).not.toContain('\\u0001')
+    expect(new TextEncoder().encode(refusedSource).byteLength).toBeLessThanOrEqual(256 * 1024)
+    expect(
+      (await fixture.db.select().from(postsTable).where(eq(postsTable.id, saved.post.postId)))[0]
+        ?.content,
+    ).toBe('\u0001'.repeat(100_000))
     await fixture.db
       .update(postsTable)
       .set({ content: input.content })

@@ -6,12 +6,13 @@ import {
   type UnresolvedBlock,
   type EmbedReference,
 } from '@gbfm/rich-content/source'
-import { Effect, Schema } from 'effect'
+import { Effect, Option, Schema } from 'effect'
 
 import { renderRichContent } from '@/lib/mdx'
 import { parseMusicSource } from '@/services/canonical-music-identity/music-source'
 
 import { EditorialToolError } from '../contracts'
+import { MAX_MCP_RESPONSE_BYTES, McpWireResponse } from '../wire-response'
 
 /** Supplied source only; no post lookup, catalogue import or provider request. */
 export const EditorialSourceInput = Schema.Struct({
@@ -46,6 +47,32 @@ export const boundEditorialResult = <A>(value: A) =>
   new TextEncoder().encode(JSON.stringify(value)).byteLength > 256 * 1024
     ? Effect.fail(invalid())
     : Effect.succeed(value)
+
+/** The admitted request's actual full success envelope must fit before any save or disclosure. */
+export const boundEditorialWireResult = <A>(value: A) =>
+  Effect.gen(function* () {
+    const wire = yield* Effect.serviceOption(McpWireResponse)
+
+    if (Option.isNone(wire))
+      return yield* new EditorialToolError({
+        code: 'unavailable',
+        message: 'Editorial response budget is unavailable.',
+      })
+
+    const overflow = () =>
+      new EditorialToolError({
+        code: 'invalid_input',
+        message: 'Editorial response exceeds the supported wire limit.',
+      })
+
+    const json = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))(
+      JSON.stringify(value),
+    ).pipe(Effect.mapError(overflow))
+
+    if (wire.value.successBytes(json) > MAX_MCP_RESPONSE_BYTES) return yield* overflow()
+
+    return value
+  })
 
 const references = (blocks: ReadonlyArray<UnresolvedBlock>): ReadonlyArray<EmbedReference> =>
   blocks.flatMap((block) => {

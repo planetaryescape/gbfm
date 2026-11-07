@@ -15,7 +15,7 @@ import { EditorialToolError, GetPostResult } from '../contracts'
 import { EditorialMcpConfig } from '../editorial'
 import { projectPost, unavailable } from '../model'
 import {
-  boundEditorialResult,
+  boundEditorialWireResult,
   findMusicMentions,
   insertMusicEmbedSource,
   previewEditorialContent,
@@ -157,7 +157,7 @@ const makeEditorialMusic = Effect.gen(function* () {
       const result = yield* project(next).pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(resultSchema)),
         Effect.mapError(unavailable),
-        Effect.flatMap(boundEditorialResult),
+        Effect.flatMap(boundEditorialWireResult),
       )
 
       const current = yield* authorize
@@ -317,7 +317,7 @@ const makeEditorialMusic = Effect.gen(function* () {
   ) {
     yield* command(['posts:read'])
 
-    return yield* findMusicMentions(input)
+    return yield* findMusicMentions(input).pipe(Effect.flatMap(boundEditorialWireResult))
   })
 
   const preview = Effect.fn('EditorialMusic.preview')(function* (
@@ -325,7 +325,7 @@ const makeEditorialMusic = Effect.gen(function* () {
   ) {
     yield* command(['posts:read'])
 
-    return yield* previewEditorialContent(input)
+    return yield* previewEditorialContent(input).pipe(Effect.flatMap(boundEditorialWireResult))
   })
 
   return { attachMusic, detachMusic, insertMusicEmbed, setDraftTags, findMentions, preview }

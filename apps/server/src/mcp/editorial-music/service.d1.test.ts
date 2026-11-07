@@ -21,6 +21,7 @@ import { McpActor } from '../authorization'
 import { CommandAuthority } from '../command-authority'
 import { EditorialMcpConfig } from '../editorial'
 import { EditorialMcpSettings, projectPost } from '../model'
+import { makeMcpWireResponse, McpWireResponse } from '../wire-response'
 import { DraftReferenceDisplay } from './contracts'
 import { saveEditorialChange } from './save'
 import { EditorialMusicService, EditorialMusicServiceLayer } from './service'
@@ -81,6 +82,7 @@ const harness = async () => {
         ),
       ).pipe(
         Effect.provideService(McpActor, actor),
+        Effect.provideService(McpWireResponse, makeMcpWireResponse(1, 'json')),
         // Domain tests deliberately use an explicit predicate, not persisted credential proof.
         Effect.provideService(
           CommandAuthority,
@@ -255,7 +257,7 @@ test.each(['content', 'tags', 'refs', 'public', 'owner', 'role', 'target'] as co
         .where(eq(musicPlaylistsTable.id, h.playlist.entityId))
     const before = await h.state()
     expect(
-      await Effect.runPromise(
+      await h.run(
         saveEditorialChange(
           h.db,
           ownerId,
@@ -301,7 +303,7 @@ test.each(['ABORT', 'IGNORE'] as const)(
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
     expect(
-      await Effect.runPromise(
+      await h.run(
         saveEditorialChange(
           h.db,
           ownerId,
@@ -338,7 +340,7 @@ test.each(['ABORT', 'IGNORE'] as const)(
       )
       .run()
     await expect(
-      Effect.runPromise(
+      h.run(
         saveEditorialChange(
           h.db,
           ownerId,
@@ -375,7 +377,7 @@ test('a live account predicate revoked during coupled writes aborts the full bat
     )
     .run()
   await expect(
-    Effect.runPromise(
+    h.run(
       saveEditorialChange(
         h.db,
         ownerId,
@@ -618,7 +620,7 @@ test('fresh Unicode tag snapshots save successfully while same-cardinality membe
   }
 
   expect(
-    await Effect.runPromise(
+    await h.run(
       saveEditorialChange(
         h.db,
         ownerId,
@@ -634,7 +636,7 @@ test('fresh Unicode tag snapshots save successfully while same-cardinality membe
   await h.db.update(labelsTable).set({ name: 'different' }).where(eq(labelsTable.name, '😀'))
   const before = await h.state()
   expect(
-    await Effect.runPromise(
+    await h.run(
       saveEditorialChange(
         h.db,
         ownerId,

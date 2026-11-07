@@ -101,9 +101,48 @@ state from one coherent snapshot; published managed reference state is frozen.
 
 Account deletion cascades private listening/reminder state and owner revision;
 public fact attribution becomes null without deleting facts. Client deletion has
-no domain FK effect. The common receipt owner handles 24-hour result redaction,
+no FK effect on those tables. The common receipt owner handles 24-hour result redaction,
 fresh replay authorization and actor/client deletion scrubbing while preserving
 opaque anti-replay tombstones. Domain rows are not pruned with receipts.
+
+## Creator, metadata review and merge extensions
+
+0022 adds revision (integer 0..9007199254740991, default 0) and nullable
+length-36 lastOperationId to the existing audioTable/showsTable exports.
+Populated rows become 0/NULL without invented receipt evidence. No dependencies,
+cascades or timestamps change. Creator writers own shared browser/PAT/MCP CAS,
+increment, overflow refusal and coupled-write fencing; these columns alone do
+not establish writer coverage or permit deletion of dependent content.
+
+0023 exports musicMetadataProposalsTable from metadata-review.schema.ts.
+currentValue/proposedValue are raw, nonnull canonical JSON scalar TEXT: JSON null
+is the string `null`, never SQL NULL. Storage checks target/field correspondence,
+scalar types and field bounds, distinct encoded values, top-level evidence array
+size 1..5, lowercase hash, status, safe revisions/times and physical marker.
+The backend parses canonical scalars and strict evidence objects {linkId,reason},
+enforces their bounds and same-target public/non-rejected stored-link evidence,
+and compares current target revision/value in the fenced insert/reuse batch.
+Creation does not increment target revision. The partial pending uniqueness key
+includes actor/client/resource/target/revision/field/hash; multiple common receipts
+may reuse one proposal. There is no receipt FK or independent operation ledger.
+The required client/resource FKs limit this slice to real persisted OAuth clients
+and resources. Browser/session and automatic re-scrape ingestion remain unsupported;
+they must not synthesize client/resource rows to bypass this ownership contract.
+Actor/client/resource deletion cascades private proposal content. No expiry job,
+acceptance/rejection tool or catalogue mutation is added. Terminal immutability
+and no-reopen rules belong to future backend transitions, not a static CHECK.
+
+0024 exports musicEntityMergesTable from music-merge.schema.ts. The common digest
+is its operationId, without an expiring receipt FK. Active source IDs are unique
+within entity type; source-slug and image-expiry indexes support lookup/cleanup.
+Undo images are nullable valid JSON, at most 262144 UTF8 bytes. createdAt and
+undoExpiresAt are safe integers exactly 24 hours apart; restoredAt is nullable.
+No account, entity or client FK can erase minimal redirects. The owning backend
+clears beforeImage at now >= undoExpiresAt while retaining the redirect, rejects
+expired or afterDigest-mismatched restores, and never exposes images over MCP.
+Images may contain moved/deleted domain rows only, not post bodies or provider/
+account payloads. Attribution privacy/existing-account checks are backend policy;
+this schema does not silently invent exact-restore guarantees for deleted actors.
 
 The migration D1 tests prove schema/defaults, fresh and populated replay,
 historical classification failure, constraints and FK policies. They do not prove

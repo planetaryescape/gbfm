@@ -1233,6 +1233,7 @@ test('independent catalogue module composes with live OAuth and owned draft serv
       'list_drafts',
       'get_post',
       'fixture_catalogue_artist',
+      'fixture_command_checkpoint',
     ])
     expect(listedOwner).toMatchObject({
       jsonrpc: '2.0',
@@ -1247,6 +1248,7 @@ test('independent catalogue module composes with live OAuth and owned draft serv
           expect.anything(),
           expect.anything(),
           expect.anything(),
+          expect.objectContaining({ name: 'fixture_command_checkpoint' }),
         ],
       },
     })

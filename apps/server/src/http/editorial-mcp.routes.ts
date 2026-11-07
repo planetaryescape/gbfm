@@ -1,7 +1,7 @@
 import { oauthProviderAuthServerMetadata } from '@better-auth/oauth-provider'
 import { McpScope } from '@gbfm/core/editorial-mcp'
 import { eq } from 'drizzle-orm'
-import { Context, Effect, Layer, Match, Option, Redacted, Schema, Stream } from 'effect'
+import { Context, Effect, Layer, Match, Option, Predicate, Redacted, Schema, Stream } from 'effect'
 import { McpSchema, type Tool, type Toolkit } from 'effect/ai'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
 
@@ -14,6 +14,7 @@ import {
   AdminReadToolkit,
 } from '@/mcp/admin-read'
 import { McpAuthorizationLive, McpPermission } from '@/mcp/authorization'
+import { CommandAuthority, makeOAuthCommandAuthority } from '@/mcp/command-authority'
 import { PublicResearchServiceLayer } from '@/mcp/content-read/research-service'
 import {
   PublicResearchHandlersLayer,
@@ -182,6 +183,16 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
                       ),
                     onSuccess: (principal) =>
                       Effect.gen(function* () {
+                        const authority = yield* makeOAuthCommandAuthority(token, principal).pipe(
+                          Effect.provideService(Database, db),
+                          Effect.provideService(EditorialOAuth, oauth),
+                          Effect.provideService(ConfigService, config),
+                          Effect.result,
+                        )
+
+                        if (Predicate.isTagged(authority, 'Failure'))
+                          return noStore(HttpServerResponse.empty({ status: 503 }))
+
                         const bounded =
                           request.method === 'POST'
                             ? yield* boundMcpBody(
@@ -244,6 +255,7 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
                               }).pipe(Effect.map(noStore), Effect.orDie)
                             : yield* httpEffect.pipe(
                                 Effect.provideService(EditorialActor, principal),
+                                Effect.provideService(CommandAuthority, authority.success),
                                 Effect.provideService(
                                   HttpServerRequest.HttpServerRequest,
                                   request.method === 'POST'

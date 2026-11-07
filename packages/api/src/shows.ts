@@ -29,6 +29,9 @@ const ShowResponse = Schema.Struct({
   tags: Schema.NullOr(Schema.Array(Schema.String)),
   createdAt: Schema.String,
   updatedAt: Schema.String,
+  revision: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+  ),
 })
 
 const ShowWithHostsResponse = Schema.Struct({
@@ -126,6 +129,9 @@ export const CreateShowInput = Schema.Struct({
 export type CreateShowInput = typeof CreateShowInput.Type
 
 export const UpdateShowInput = Schema.Struct({
+  expectedRevision: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+  ),
   title: Schema.optional(Schema.NonEmptyString),
   description: Schema.optional(Schema.String),
   thumbnailUrl: Schema.optional(Schema.String),
@@ -207,6 +213,7 @@ export const ShowsGroup = /* @__PURE__ */ (() =>
         payload: UpdateShowInput,
         success: CompiledShowResponse,
         error: [
+          HttpApiError.Conflict,
           HttpApiError.NotFound,
           HttpApiError.Unauthorized,
           ValidationHttpError,
@@ -217,7 +224,12 @@ export const ShowsGroup = /* @__PURE__ */ (() =>
     .add(
       HttpApiEndpoint.delete('deleteShowBySlug', '/api/shows/:slug', {
         params: { slug: Schema.String },
-        error: [HttpApiError.NotFound, HttpApiError.Unauthorized, HttpApiError.InternalServerError],
+        error: [
+          HttpApiError.Conflict,
+          HttpApiError.NotFound,
+          HttpApiError.Unauthorized,
+          HttpApiError.InternalServerError,
+        ],
       }).middleware(AuthMiddleware),
     )
     .add(

@@ -9,6 +9,7 @@ import {
   getOptionalActor,
 } from '@/http/handler-utils'
 import { omitUndefined } from '@/lib/omit-undefined'
+import { CommandAuthority, makeSessionCommandAuthority } from '@/mcp/command-authority'
 import { QRCodeService } from '@/services/qrcode.service'
 import { loadShowPage } from '@/services/show-page'
 import { ShowService, ShowSubscriptionService } from '@/services/show.service'
@@ -140,6 +141,7 @@ export const ShowsHandlersLive = HttpApiBuilder.group(Api, 'shows', (handlers) =
       Effect.gen(function* () {
         const { user } = yield* AuthSession
         const { hostIds, tags, ...updateData } = payload
+        const authority = yield* makeSessionCommandAuthority
         const svc = yield* ShowService
 
         const show = yield* dieOnDatabaseError(
@@ -155,6 +157,8 @@ export const ShowsHandlersLive = HttpApiBuilder.group(Api, 'shows', (handlers) =
               }),
             )
             .pipe(
+              Effect.provideService(CommandAuthority, authority),
+              Effect.catchTag('ConflictError', () => new HttpApiError.Conflict()),
               Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
               Effect.catchTag('UnauthorizedError', () => new HttpApiError.Unauthorized()),
               Effect.catchTag('S3Error', () => new HttpApiError.InternalServerError()),
@@ -173,8 +177,11 @@ export const ShowsHandlersLive = HttpApiBuilder.group(Api, 'shows', (handlers) =
       Effect.gen(function* () {
         const { user } = yield* AuthSession
         const svc = yield* ShowService
+        const authority = yield* makeSessionCommandAuthority
         yield* dieOnDatabaseError(
           svc.delete(params.slug, user.id, user.role ?? 'user').pipe(
+            Effect.provideService(CommandAuthority, authority),
+            Effect.catchTag('ConflictError', () => new HttpApiError.Conflict()),
             Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
             Effect.catchTag('UnauthorizedError', () => new HttpApiError.Unauthorized()),
           ),

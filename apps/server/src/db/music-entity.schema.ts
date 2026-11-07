@@ -100,6 +100,8 @@ export const musicArtistsTable = sqliteTable(
       .$defaultFn(() => crypto.randomUUID()),
     name: text().notNull(),
     bio: text(),
+    revision: integer('revision').notNull().default(0),
+    lastOperationId: text('last_operation_id'),
     imageUrl: text(),
     slug: text().notNull().unique(),
     publishedAt: integer({ mode: 'timestamp_ms' }),
@@ -114,6 +116,14 @@ export const musicArtistsTable = sqliteTable(
   (table) => [
     index('music_artists_slug_idx').on(table.slug),
     index('music_artists_name_id_idx').on(sql`lower(${table.name})`, table.id),
+    check(
+      'music_artists_revision_check',
+      sql`typeof(${table.revision}) = 'integer' AND ${table.revision} BETWEEN 0 AND 9007199254740991`,
+    ),
+    check(
+      'music_artists_operation_check',
+      sql`${table.lastOperationId} IS NULL OR length(${table.lastOperationId}) = 36`,
+    ),
   ],
 )
 
@@ -124,6 +134,8 @@ export const musicAlbumsTable = sqliteTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     title: text().notNull(),
+    revision: integer('revision').notNull().default(0),
+    lastOperationId: text('last_operation_id'),
     // Denormalized artist names for fast display without joins
     artistNames: text({ mode: 'json' }).$type<Array<string>>(),
     releaseDate: integer({ mode: 'timestamp_ms' }),
@@ -142,6 +154,14 @@ export const musicAlbumsTable = sqliteTable(
   (table) => [
     index('music_albums_slug_idx').on(table.slug),
     index('music_albums_title_id_idx').on(sql`lower(${table.title})`, table.id),
+    check(
+      'music_albums_revision_check',
+      sql`typeof(${table.revision}) = 'integer' AND ${table.revision} BETWEEN 0 AND 9007199254740991`,
+    ),
+    check(
+      'music_albums_operation_check',
+      sql`${table.lastOperationId} IS NULL OR length(${table.lastOperationId}) = 36`,
+    ),
   ],
 )
 
@@ -152,6 +172,8 @@ export const musicTracksTable = sqliteTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     title: text().notNull(),
+    revision: integer('revision').notNull().default(0),
+    lastOperationId: text('last_operation_id'),
     // Denormalized artist names for fast display without joins
     artistNames: text({ mode: 'json' }).$type<Array<string>>(),
     coverImageUrl: text(),
@@ -178,6 +200,14 @@ export const musicTracksTable = sqliteTable(
       sql`(${table.trackNumber} is null)`,
       table.trackNumber,
       table.id,
+    ),
+    check(
+      'music_tracks_revision_check',
+      sql`typeof(${table.revision}) = 'integer' AND ${table.revision} BETWEEN 0 AND 9007199254740991`,
+    ),
+    check(
+      'music_tracks_operation_check',
+      sql`${table.lastOperationId} IS NULL OR length(${table.lastOperationId}) = 36`,
     ),
   ],
 )
@@ -213,6 +243,8 @@ export const musicLabelsTable = sqliteTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     name: text().notNull(),
+    revision: integer('revision').notNull().default(0),
+    lastOperationId: text('last_operation_id'),
     description: text(),
     imageUrl: text('image_url'),
     bannerImageUrl: text('banner_image_url'),
@@ -230,6 +262,14 @@ export const musicLabelsTable = sqliteTable(
   (table) => [
     index('music_labels_slug_idx').on(table.slug),
     index('music_labels_name_id_idx').on(sql`lower(${table.name})`, table.id),
+    check(
+      'music_labels_revision_check',
+      sql`typeof(${table.revision}) = 'integer' AND ${table.revision} BETWEEN 0 AND 9007199254740991`,
+    ),
+    check(
+      'music_labels_operation_check',
+      sql`${table.lastOperationId} IS NULL OR length(${table.lastOperationId}) = 36`,
+    ),
   ],
 )
 

@@ -242,6 +242,7 @@ describe('makePlayerCore', () => {
       )
 
       yield* core.requestPlayOnReady(track.id)
+      // Unloaded statuses are ignored; the refused-playback test covers the started gate.
       yield* recording.setStatus({ isLoaded: false, duration: 0, didJustFinish: true })
       yield* core.setSource(track)
       yield* Effect.yieldNow
@@ -634,17 +635,11 @@ describe('makePlayerCore', () => {
       yield* setStatus({ isLoaded: true, duration: 300 })
       yield* core.setSource(track)
       yield* Effect.yieldNow
+      const beforeClear = calls.length
       yield* core.setSource(null)
       yield* Effect.yieldNow
       expect(yield* core.currentTrackId).toBeNull()
-      expect(calls).toContain('nowPlaying:null')
-      expect(calls).toContain('pause')
-      expect(calls).toContain('clearSource')
-      expect(calls.lastIndexOf('pause')).toBeLessThan(calls.indexOf('clearSource'))
-      expect(calls.indexOf('clearSource')).toBeLessThan(calls.indexOf('nowPlaying:null'))
-      expect(calls.lastIndexOf('clearSource')).toBeGreaterThan(
-        calls.indexOf('replace:' + track.url),
-      )
+      expect(calls.slice(beforeClear)).toEqual(['pause', 'clearSource', 'nowPlaying:null'])
       const beforeLateStatus = observed.length
 
       yield* emit({

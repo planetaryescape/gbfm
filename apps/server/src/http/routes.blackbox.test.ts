@@ -2910,6 +2910,7 @@ describe('GET /api/content/posts/micro/:slug/screen', () => {
         title: 'Quote Playlist',
         slug: `quote-playlist-${suffix}`,
         coverImageUrl: 'https://cdn.goosebumps.fm/user-content/quote-playlist.png',
+        publishedAt: new Date(0),
       }),
     ])
     await db.insert(musicEntityLinksTable).values([
@@ -3048,6 +3049,23 @@ describe('GET /api/content/posts/micro/:slug/screen', () => {
       expect(repliesResponse.status).toBe(200)
       const replies = await decodeResponseBody(MicroPostScreenRepliesResponse, repliesResponse)
       expect(replies).toEqual(body.replies)
+
+      for (const publishedAt of [null, new Date(Date.now() + 60_000)]) {
+        await db
+          .update(musicPlaylistsTable)
+          .set({ publishedAt })
+          .where(eq(musicPlaylistsTable.id, quotePlaylistId))
+
+        const hiddenResponse = await webHandler.handler(
+          new Request(`http://localhost/api/content/posts/micro/${rootSlug}/screen`),
+        )
+
+        expect(hiddenResponse.status).toBe(200)
+        const hidden = await decodeResponseBody(MicroPostScreenResponse, hiddenResponse)
+        expect(hidden.quote?.music).toBeNull()
+        expect(JSON.stringify(hidden)).not.toContain('Quote Playlist')
+        expect(JSON.stringify(hidden)).not.toContain('https://open.spotify.com/playlist/quote')
+      }
     } finally {
       await db.delete(postCreators).where(eq(postCreators.creatorId, authorId))
       await db.delete(postsTable).where(eq(postsTable.id, reply.id))

@@ -25,7 +25,8 @@ import { GetPostResult, ListDraftsResult } from './contracts'
 import { insertEditorialDraft, updateEditorialDraft } from './draft-store'
 import { EditorialDraftServiceLayer } from './drafts'
 import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from './editorial'
-import { EditorialMcpSettings, PersistedPost } from './model'
+import { loadEditorialSnapshot } from './editorial-music/snapshot'
+import { EditorialMcpSettings } from './model'
 import { composeMcpToolkits, EditorialToolkit, makeEditorialMcpLayer } from './server'
 
 const ownerId = Schema.decodeUnknownSync(UserId)('mcp-owner')
@@ -673,24 +674,7 @@ describe('draft-only MCP writes', () => {
     for (const drift of ['content', 'tags', 'creators', 'published']) {
       const { result } = await createDraft()
 
-      const previous = await Effect.runPromise(
-        withTestLayer(
-          Effect.gen(function* () {
-            const posts = yield* PostService
-
-            return yield* posts.getSourceById(
-              result.post.postId,
-              PostSourceAccess.cases.Authored.make({
-                userId: ownerId,
-                userRole: Role.make('admin'),
-              }),
-            )
-          }),
-          postLayer,
-        ),
-      )
-
-      const snapshot = Schema.decodeUnknownSync(PersistedPost)(previous)
+      const snapshot = await Effect.runPromise(loadEditorialSnapshot(db, result.post.postId))
 
       if (drift === 'content')
         await db
@@ -728,7 +712,7 @@ describe('draft-only MCP writes', () => {
         },
       )
 
-      expect(changed[0]).toEqual([])
+      expect(changed).toBe(false)
       const [persisted] = await db.select().from(postsTable).where(eq(postsTable.id, snapshot.id))
       expect(persisted?.title).toBe(snapshot.title)
     }

@@ -1,5 +1,6 @@
 import { McpResourceUrl, PostId, PostVersion } from '@gbfm/core/editorial-mcp'
 import { UserId } from '@gbfm/core/identity'
+import { DraftMusicReferences } from '@gbfm/core/post-music-references'
 import { Effect, Match, Schema } from 'effect'
 
 import {
@@ -45,6 +46,8 @@ export const PersistedPost = Schema.Struct({
   createdAt: Schema.Date,
   musicEntityType: Schema.NullOr(Schema.String),
   musicEntityId: Schema.NullOr(Schema.String),
+  musicReferencesManaged: Schema.Boolean,
+  musicReferences: DraftMusicReferences,
   parentPostId: Schema.NullOr(PostId),
   rootPostId: Schema.NullOr(PostId),
   depth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -98,6 +101,8 @@ export const projectPost = Effect.fn('EditorialMcp.projectPost')(function* (
             bannerImageUrl: post.bannerImageUrl,
             musicEntityType: post.musicEntityType,
             musicEntityId: post.musicEntityId,
+            musicReferencesManaged: post.musicReferencesManaged,
+            musicReferences: post.musicReferences,
             parentPostId: post.parentPostId,
             rootPostId: post.rootPostId,
             depth: post.depth,

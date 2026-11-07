@@ -521,4 +521,93 @@ describe('playlist Spotify caller migration', () => {
         .where(eq(musicEntityLinksTable.url, playlistUrl)),
     ).toEqual([])
   })
+
+  test.each(['importing', 'enriching'] as const)(
+    '%s dependency interruption never advances tracked outcome counters',
+    async (phase) => {
+      const playlistId = crypto.randomUUID()
+      const spotifyPlaylistId = externalId()
+      const first = { trackId: crypto.randomUUID(), spotifyTrackId: externalId() }
+      const second = { trackId: crypto.randomUUID(), spotifyTrackId: externalId() }
+      await seedPreBackfillPlaylist(playlistId, spotifyPlaylistId, [first, second])
+      const progress: Array<PlaylistExecutionProgress> = []
+      const providerInputs: Array<MusicScrapeInput> = []
+
+      const scraper: MusicLinkScraperService = {
+        scrape: () => Effect.die('No metadata scrape in this fixture'),
+        discoverCrossPlatformLinks: (input) => {
+          providerInputs.push(input)
+
+          return Effect.succeed({
+            links: [
+              {
+                platform: 'deezer',
+                url: `https://www.deezer.com/track/${deezerId()}`,
+                scrapedAt: new Date(),
+              },
+            ],
+          })
+        },
+      }
+
+      const playlistUrl = `https://open.spotify.com/playlist/${spotifyPlaylistId}`
+
+      const hooks = {
+        checkpoint: Effect.void,
+        progress: (value: PlaylistExecutionProgress) =>
+          Effect.sync(() => {
+            progress.push(value)
+          }),
+      }
+
+      const exit = await runWithIdentity(scraper, (identity) => {
+        // The production service interface is the controlled dependency seam;
+        // all non-interrupted work still uses the real canonical writer and D1.
+        const controlled: CanonicalMusicIdentityService = {
+          ...identity,
+          enrichEntity: (input) =>
+            input.entityId === first.trackId ? Effect.interrupt : identity.enrichEntity(input),
+          importProviderEntity: (input) =>
+            input.snapshot.sourceUrl === trackFixture(second.spotifyTrackId).trackUrl
+              ? Effect.interrupt
+              : identity.importProviderEntity(input),
+        }
+
+        return Effect.exit(
+          phase === 'enriching'
+            ? enrichPlaylistLinksEffect(controlled)(playlistId, hooks).pipe(Effect.asVoid)
+            : importSpotifyPlaylistEffect(
+                {
+                  getPlaylistForImport: () =>
+                    Effect.succeed({
+                      spotifyPlaylistId,
+                      playlistUrl,
+                      title: 'Interrupted import',
+                      description: null,
+                      coverImageUrl: null,
+                      ownerName: null,
+                      tracks: [
+                        trackFixture(first.spotifyTrackId),
+                        trackFixture(second.spotifyTrackId),
+                      ],
+                    }),
+                },
+                controlled,
+              )(`${playlistUrl}?si=fixture`, undefined, hooks).pipe(Effect.asVoid),
+        )
+      })
+
+      expect(Exit.hasInterrupts(exit)).toBe(true)
+      expect(progress).toEqual(
+        phase === 'enriching'
+          ? [{ phase, processed: 0, total: 2, failed: 0 }]
+          : [
+              { phase, processed: 0, total: null, failed: 0 },
+              { phase, processed: 0, total: 2, failed: 0 },
+              { phase, processed: 1, total: 2, failed: 0 },
+            ],
+      )
+      expect(providerInputs).toEqual([])
+    },
+  )
 })

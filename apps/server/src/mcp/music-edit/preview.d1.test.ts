@@ -5,7 +5,7 @@ import { Effect, Layer, Schema } from 'effect'
 import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 
-import { user } from '@/db/auth.schema'
+import { session, user } from '@/db/auth.schema'
 import {
   musicAlbumArtistsTable,
   musicAlbumsTable,
@@ -15,8 +15,9 @@ import {
   musicTracksTable,
 } from '@/db/music-entity.schema'
 import { entityLabelsTable, labelsTable } from '@/db/tags.schema'
-import { DatabaseTestLayer, db } from '@/test/database'
+import { DatabaseTestLayer, d1, db } from '@/test/database'
 import { withTestLayer } from '@/test/effect'
+import { createTestWebHandler } from '@/test/http-handler'
 
 import { McpActor, McpAuthorizationLive } from '../authorization'
 import { EditorialMcpConfig } from '../editorial'
@@ -121,10 +122,34 @@ test('preview observes a real browser-service edit, supports clearing, and never
   expect(await db.select().from(musicAlbumsTable)).toEqual(beforeAlbums)
   expect(await db.select().from(musicTracksTable)).toEqual(beforeTracks)
 
-  const { updateAlbumEffect } = await import('@/services/music-entity/album.service')
-  await Effect.runPromise(
-    withTestLayer(updateAlbumEffect('m1-album', { albumType: 'single' }), DatabaseTestLayer),
-  )
+  await db.insert(session).values({
+    id: 'm1-session',
+    userId: actorId,
+    token: 'm1-session-token',
+    expiresAt: new Date(Date.now() + 60_000),
+  })
+  const observed = beforeAlbums.find((album) => album.id === 'm1-album')
+  expect(observed).toBeDefined()
+  const web = createTestWebHandler(d1)
+
+  try {
+    const response = await web.handler(
+      new Request('http://localhost/api/music/albums/m1-album', {
+        method: 'PATCH',
+        headers: { authorization: 'Bearer m1-session-token', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          albumType: 'single',
+          expectedRevision: observed?.revision,
+          requestId: crypto.randomUUID(),
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+  } finally {
+    await web.dispose()
+  }
+
   expect(
     await preview({ operation: 'set_album_type', entityId: 'm1-album', albumType: null }),
   ).toMatchObject({ before: 'single', after: null, changed: true })

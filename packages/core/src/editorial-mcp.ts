@@ -28,6 +28,8 @@ export const PostVersion = Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9
 
 export type PostVersion = typeof PostVersion.Type
 
+export const EDITORIAL_DRAFT_RETRY_WINDOW_MS = 24 * 60 * 60 * 1000
+
 const HttpsEndpoint = Schema.String.check(
   Schema.isMaxLength(2048),
   Schema.makeFilter((value) => {

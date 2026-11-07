@@ -6,7 +6,14 @@ export class EditorialToolError extends Schema.TaggedError<
   EditorialToolError,
   { readonly brand: unique symbol }
 >()('EditorialToolError', {
-  code: Schema.Literals(['access_denied', 'not_found', 'unavailable', 'conflict', 'invalid_input']),
+  code: Schema.Literals([
+    'access_denied',
+    'not_found',
+    'unavailable',
+    'conflict',
+    'invalid_input',
+    'expired',
+  ]),
   message: Schema.String,
 }) {}
 

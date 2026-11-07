@@ -16,7 +16,7 @@ import { EditorialReadService } from './editorial'
 export const EditorialToolkit = Toolkit.make(
   Tool.make('create_draft', {
     description:
-      'Create your own unpublished editorial draft. Requires drafts:write. Generate a UUIDv4 requestId once and reuse it after a timeout. Identical retries return the original saved result, even after later edits. Changed payloads conflict. Never publishes.',
+      'Create your own unpublished editorial draft. Requires drafts:write. Generate a UUIDv4 requestId once and reuse it after a timeout. For 24 hours, identical retries return the original saved result, even after later edits. Changed payloads conflict; expired retries never create another draft. Never publishes.',
     parameters: CreateDraftInput,
     success: GetPostResult,
     failure: EditorialToolError,
@@ -29,7 +29,7 @@ export const EditorialToolkit = Toolkit.make(
     .annotate(Tool.Strict, true),
   Tool.make('update_draft', {
     description:
-      'Edit title, content or description of your own unpublished editorial draft. Requires drafts:write, a new UUIDv4 requestId per edit and the latest get_post version as expectedVersion. Reuse the exact request after a timeout to replay the original saved result. Stale versions and changed retry payloads conflict. Never publishes.',
+      'Edit title, content or description of your own unpublished editorial draft. Requires drafts:write, a new UUIDv4 requestId per edit and the latest get_post version as expectedVersion. Reuse the exact request within 24 hours after a timeout to replay the original saved result. Stale versions and changed retry payloads conflict; expired retries never repeat a mutation. Never publishes.',
     parameters: UpdateDraftInput,
     success: GetPostResult,
     failure: EditorialToolError,

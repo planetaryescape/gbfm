@@ -1,7 +1,7 @@
 import { EditorialPrincipal, PostId } from '@gbfm/core/editorial-mcp'
 import { UserId } from '@gbfm/core/identity'
 import { Role } from '@gbfm/core/roles'
-import { eq, inArray, like } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { Effect, Exit, Layer, Match, Option, Schema } from 'effect'
 import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http'
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest'
@@ -245,12 +245,9 @@ afterAll(() => app.dispose())
 
 describe('draft-only MCP writes', () => {
   afterEach(async () => {
-    const ids = db
-      .select({ id: postsTable.id })
-      .from(postsTable)
-      .where(like(postsTable.id, 'mcp-%'))
-
-    const created = (await ids).map((post) => post.id).filter((id) => id.length === 68)
+    const created = (
+      await db.select({ id: editorialOperations.postId }).from(editorialOperations)
+    ).map((row) => row.id)
 
     if (created.length === 0) return
     await db.batch([
@@ -275,6 +272,9 @@ describe('draft-only MCP writes', () => {
 
   test('creates an owned unpublished draft and replays without duplicating', async () => {
     const { input, result } = await createDraft()
+    expect(
+      Schema.decodeUnknownSync(Schema.String.check(Schema.isUUID(4)))(result.post.postId),
+    ).toBe(result.post.postId)
     expect(result.post).toMatchObject({
       title: input.title,
       content: input.content,
@@ -297,6 +297,25 @@ describe('draft-only MCP writes', () => {
     expect(
       await db.select().from(postCreators).where(eq(postCreators.postId, result.post.postId)),
     ).toEqual([{ postId: result.post.postId, creatorId: ownerId }])
+  })
+
+  test('expired receipts reject retries without recreating posts or replaying old bodies', async () => {
+    const { input, result } = await createDraft()
+    await db
+      .update(editorialOperations)
+      .set({ createdAt: new Date(0) })
+      .where(eq(editorialOperations.postId, result.post.postId))
+    const expired = await call('create_draft', input, ownerId, 'drafts:write')
+    expect(expired.isError).toBe(true)
+    expect(expired.content[0]?.text).toContain('expired')
+    await db
+      .update(editorialOperations)
+      .set({ result: null })
+      .where(eq(editorialOperations.postId, result.post.postId))
+    expect((await call('create_draft', input, ownerId, 'drafts:write')).isError).toBe(true)
+    expect(
+      await db.select().from(postsTable).where(eq(postsTable.id, result.post.postId)),
+    ).toHaveLength(1)
   })
 
   test('isolates retry keys by approving account and serializes simultaneous creates', async () => {

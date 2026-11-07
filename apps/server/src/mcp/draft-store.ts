@@ -10,7 +10,7 @@ import { entityLabelsTable, labelsTable } from '@/db/tags.schema'
 import type { CreateDraftInput, UpdateDraftInput } from './contracts'
 import type { PersistedPost } from './model'
 
-type Receipt = typeof editorialOperations.$inferInsert
+type Receipt = typeof editorialOperations.$inferInsert & { readonly result: string }
 
 const insertReceipt = (db: DatabaseClient, receipt: Receipt) =>
   db.insert(editorialOperations).select(

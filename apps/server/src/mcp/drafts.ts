@@ -1,5 +1,6 @@
 import {
   canReadEditorial,
+  EDITORIAL_DRAFT_RETRY_WINDOW_MS,
   EditorialAccount,
   EditorialPrincipal,
   PostId,
@@ -134,14 +135,30 @@ export const EditorialDraftServiceLayer = Layer.effect(
       const receipt = yield* Schema.decodeUnknownEffect(
         Schema.Struct({
           postId: PostId,
-          result: Schema.fromJsonString(GetPostResult),
+          result: Schema.NullOr(Schema.String),
+          createdAt: Schema.Date,
         }),
       )(row).pipe(Effect.mapError(unavailable))
 
-      if (receipt.postId !== receipt.result.post.postId) return yield* unavailable()
+      if (
+        receipt.result === null ||
+        (yield* Clock.currentTimeMillis) >=
+          receipt.createdAt.getTime() + EDITORIAL_DRAFT_RETRY_WINDOW_MS
+      )
+        return yield* new EditorialToolError({
+          code: 'expired',
+          message:
+            'The 24-hour retry window expired. Read the current draft and use a new requestId for a new edit.',
+        })
+
+      const result = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(GetPostResult))(
+        receipt.result,
+      ).pipe(Effect.mapError(unavailable))
+
+      if (receipt.postId !== result.post.postId) return yield* unavailable()
       yield* loadDraft(receipt.postId, actor)
 
-      return Option.some(receipt.result)
+      return Option.some(result)
     })
 
     const createDraft = Effect.fn('EditorialDraftService.createDraft')(function* (
@@ -167,7 +184,7 @@ export const EditorialDraftServiceLayer = Layer.effect(
 
       if (Option.isSome(existing)) return existing.value
 
-      const postId = yield* Schema.decodeUnknownEffect(PostId)(`mcp-${id}`).pipe(
+      const postId = yield* Schema.decodeUnknownEffect(PostId)(crypto.randomUUID()).pipe(
         Effect.mapError(unavailable),
       )
 

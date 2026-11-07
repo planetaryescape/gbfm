@@ -13,6 +13,7 @@ import {
   type OperationContext,
   type OperationDiagnostic,
   type OperationOutcome,
+  type OperationPreparation,
 } from './store'
 
 const resource = await createMigratedD1Database()
@@ -95,32 +96,29 @@ const authorize = async (outcome?: OperationOutcome) => {
   )
 }
 
-const command = (
-  expectedRevision = 0,
-  value = 'first',
-  requestId = key.requestId,
-): ExecuteOperation => ({
-  key: { ...key, requestId },
-  now,
-  normalizedInput: { targetId, expectedRevision, value },
-  authorize,
-  build: ({ attemptId, fence, prepare }: OperationContext) => {
-    const winner = sql`EXISTS (SELECT 1 FROM operation_test_target WHERE id = ${targetId} AND revision = ${expectedRevision + 1} AND marker = ${attemptId})`
+const command = (expectedRevision = 0, value = 'first', requestId = key.requestId) =>
+  ({
+    key: { ...key, requestId },
+    now,
+    normalizedInput: { targetId, expectedRevision, value },
+    authorize,
+    build: ({ attemptId, fence, prepare }: OperationContext) => {
+      const winner = sql`EXISTS (SELECT 1 FROM operation_test_target WHERE id = ${targetId} AND revision = ${expectedRevision + 1} AND marker = ${attemptId})`
 
-    return {
-      statements: [
-        prepare(sql`UPDATE operation_test_target SET revision = revision + 1, marker = ${attemptId}, value = ${value}
+      return {
+        statements: [
+          prepare(sql`UPDATE operation_test_target SET revision = revision + 1, marker = ${attemptId}, value = ${value}
           WHERE id = ${targetId} AND owner_id = ${actorId} AND visible = 1 AND revision = ${expectedRevision} AND ${fence}
           AND EXISTS (SELECT 1 FROM user WHERE id = ${actorId} AND banned = 0 AND role = 'admin')
           AND EXISTS (SELECT 1 FROM oauth_client WHERE client_id = ${clientId} AND coalesce(disabled,0) = 0)`),
-        prepare(sql`INSERT INTO operation_test_coupled SELECT ${targetId}, ${value} WHERE ${fence} AND ${winner}
+          prepare(sql`INSERT INTO operation_test_coupled SELECT ${targetId}, ${value} WHERE ${fence} AND ${winner}
           ON CONFLICT(target_id) DO UPDATE SET value = excluded.value`),
-      ],
-      assertApplied: winner,
-      outcome: { result: { targetId, value }, revision: expectedRevision + 1, access: targetId },
-    }
-  },
-})
+        ],
+        assertApplied: winner,
+        outcome: { result: { targetId, value }, revision: expectedRevision + 1, access: targetId },
+      }
+    },
+  }) satisfies ExecuteOperation
 
 const target = () =>
   database
@@ -135,6 +133,101 @@ const coupled = () =>
     .first()
 
 describe('shared durable atomic operations', () => {
+  test('prepares current state only after receipt miss; original replay bypasses later stale state', async () => {
+    const { build, ...base } = command()
+
+    const prepared: ExecuteOperation = {
+      ...base,
+      prepare: async () => {
+        const current = await target()
+
+        return current?.revision === 0 ? { status: 'ready', build } : { status: 'conflict' }
+      },
+    }
+
+    expect(await store.execute(prepared)).toMatchObject({
+      status: 'applied',
+      outcome: { revision: 1, result: { value: 'first' } },
+    })
+    expect((await store.execute(command(1, 'later', crypto.randomUUID()))).status).toBe('applied')
+    expect(
+      await createMcpOperationStore(database).execute({
+        ...prepared,
+        prepare: async () => {
+          throw new Error('Preparation MUST be bypassed')
+        },
+      }),
+    ).toMatchObject({ status: 'replayed', outcome: { revision: 1, result: { value: 'first' } } })
+    expect(await store.execute({ ...prepared, normalizedInput: { changed: true } })).toEqual({
+      status: 'conflict',
+    })
+    expect(await store.execute({ ...prepared, now: now + 86400000 })).toEqual({ status: 'expired' })
+  })
+
+  test('typed preparation rejection and observation failure never claim a receipt or mutate domain', async () => {
+    const { build: _build, ...base } = command()
+    const events: Array<OperationDiagnostic> = []
+    const observed = createMcpOperationStore(database, (event) => events.push(event))
+
+    for (const status of ['conflict', 'not_found', 'invalid_input', 'unavailable'] as const) {
+      expect(
+        await observed.execute({
+          ...base,
+          prepare: async (): Promise<OperationPreparation> => ({ status }),
+        }),
+      ).toEqual({ status })
+    }
+
+    expect(
+      await observed.execute({
+        ...base,
+        prepare: async () => {
+          throw new Error('PRIVATE_SQL_KEY_OUTCOME')
+        },
+      }),
+    ).toEqual({ status: 'unavailable' })
+    expect(events).toEqual([
+      { operation: 'receipt.prepare', dependency: 'domain', code: 'preparation_failed' },
+      { operation: 'receipt.prepare', dependency: 'domain', code: 'preparation_failed' },
+    ])
+    expect(await database.prepare('SELECT count(*) AS n FROM mcp_operations').first()).toEqual({
+      n: 0,
+    })
+    expect(await target()).toMatchObject({ revision: 0, value: 'initial' })
+    expect(await coupled()).toBeNull()
+    expect(
+      await store.execute({
+        ...base,
+        authorize: async () => false,
+        prepare: async () => {
+          throw new Error('No authority')
+        },
+      }),
+    ).toEqual({ status: 'access_denied' })
+  })
+
+  test('identical winner committed during preparation takes precedence over stale observation rejection', async () => {
+    const { build: _build, ...base } = command()
+    const started = Promise.withResolvers<void>()
+    const resume = Promise.withResolvers<void>()
+
+    const concurrent = store.execute({
+      ...base,
+      prepare: async () => {
+        started.resolve()
+        await resume.promise
+
+        return { status: 'conflict' }
+      },
+    })
+
+    await started.promise
+    expect((await store.execute(command())).status).toBe('applied')
+    resume.resolve()
+    expect(await concurrent).toMatchObject({ status: 'replayed', outcome: { revision: 1 } })
+    expect(await target()).toMatchObject({ revision: 1 })
+  })
+
   test('replays the saved original after later edits, from a new store instance', async () => {
     const first = await store.execute(command())
     expect(first.status).toBe('applied')

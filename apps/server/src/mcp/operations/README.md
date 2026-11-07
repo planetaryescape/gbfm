@@ -14,7 +14,7 @@ Import from `@/mcp/operations/store`:
   P1 provides the layer alongside `DatabaseLayer` with the **same** raw binding;
   domain layers consume the service, never reach into Drizzle internals.
 - Types `JsonValue`, `OperationKey`, `OperationOutcome`, `OperationContext`,
-  `AtomicOperationPlan`, `ExecuteOperation`, `OperationResult`.
+  `AtomicOperationPlan`, `ExecuteOperation`, `OperationPreparation`, `OperationResult`.
 
 `execute({ key, normalizedInput, now, authorize, build })`:
 
@@ -29,11 +29,32 @@ build: ({ attemptId, operationId, fence, prepare }) => ({
 ```
 
 Success is `{status: 'applied'|'replayed', operationId, outcome, createdAt,
-expiresAt}`. Failures contain only `status`: `conflict`, `expired`,
+expiresAt}`. Failures contain only `status`: `conflict`, `not_found`, `expired`,
 `access_denied`, `invalid_input`, `unavailable`. Times are epoch milliseconds.
 `unavailable` is ambiguous, **not** proof of rollback; retry the same key/input.
 Postcommit access loss can return denial after a successful mutation. A later
 authorized same-key retry recovers the saved result.
+
+For effectful **read-only** current-state observation/preflight, supply `prepare`
+instead of `build` (exactly one). The store first authorizes and reads the receipt;
+an exact replay, mismatch, expiry or access denial bypasses preparation entirely.
+`prepare: () => Promise<OperationPreparation>` returns
+`{status:'ready', build:(ctx)=>AtomicOperationPlan}` or a status-only
+`conflict/not_found/invalid_input/unavailable`. A rejected promise returns
+`unavailable` with fixed safe `receipt.prepare/domain/preparation_failed`
+diagnostics, never an input-validation error. Typed `unavailable` is also reported.
+No receipt is reserved for a preparation rejection; a corrected request can retry.
+The store internally rechecks a receipt before returning a preparation rejection,
+so an identical concurrent winner takes precedence over a newly stale observation.
+Callers do not perform their own receipt lookup or maintain another ledger.
+
+Preparation may read persisted state and compute a snapshot/no-op projection;
+it must not write, reserve domain state or call a provider. Its returned builder
+is still synchronous and side-effect-free. Observations are not locks: all current
+authority, revisions, no-op markers and coupled writes must still be guarded and
+asserted inside the one physical-attempt-fenced batch. Sync build exceptions retain
+the existing invalid-input behavior; expected observation failures use the typed
+preparation result instead of throwing from build.
 
 Unavailable paths emit `mcp.operation.unavailable` through the Effect logger,
 with fixed operation/dependency/coarse-code fields for lookup, decoding, batch,

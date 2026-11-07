@@ -121,7 +121,7 @@ const command = (
     return {
       statements: [
         context.prepare(
-          sql`UPDATE ${parent} SET revision=revision+1,last_operation_id=${context.attemptId} WHERE id=${target.id} AND revision=${expectedRevision} AND ${context.fence} AND EXISTS(SELECT 1 FROM user WHERE id=${actorId} AND role='admin' AND banned=0)`,
+          sql`UPDATE ${parent} SET revision=revision+1,last_operation_id=${context.attemptId} WHERE id=${target.id} AND revision=${expectedRevision} AND (${context.fence}) AND EXISTS(SELECT 1 FROM user WHERE id=${actorId} AND role='admin' AND banned=0)`,
         ),
         ...recordingCreditStatements(context, winner, target, rows),
       ],
@@ -136,6 +136,83 @@ const command = (
 })
 
 describe('M2 fact statements on migrated D1 with shared receipts', () => {
+  test('opaque OR predicates cannot bypass either guard or widen target deletion', async () => {
+    await using resource = await createMigratedD1Database()
+    const db = await seed(resource.database)
+    const otherTrackId = '00000000-0000-4000-8000-000000000004'
+    const otherArtistId = '00000000-0000-4000-8000-000000000005'
+    await db.insert(musicTracksTable).values({ id: otherTrackId, title: 'Other', slug: 'other' })
+    await db.insert(musicArtistsTable).values({ id: otherArtistId, name: 'Other', slug: 'other' })
+    const originalCredit = credit('Bass')
+    const otherCredit = { ...credit('Piano'), trackId: otherTrackId }
+    const originalAlias = alias('Original')
+    const otherAlias = { ...alias('Other'), artistId: otherArtistId }
+    await db.insert(musicRecordingCreditsTable).values([originalCredit, otherCredit])
+    await db.insert(musicArtistAliasesTable).values([originalAlias, otherAlias])
+    const replacementCredit = credit('Organ')
+    const replacementAlias = alias('Replacement')
+    const store = createMcpOperationStore(resource.database)
+
+    for (const { fence, winner } of [
+      { fence: sql`1 OR 0`, winner: sql`0` },
+      { fence: sql`0`, winner: sql`0 OR 1` },
+    ]) {
+      const result = await store.execute({
+        ...command(resource.database, 0, []),
+        build: (context) => ({
+          statements: [
+            ...recordingCreditStatements(
+              { ...context, fence },
+              winner,
+              { type: 'track', id: trackId },
+              [replacementCredit],
+            ),
+            ...artistAliasStatements({ ...context, fence }, winner, artistId, [replacementAlias]),
+          ],
+          // Isolate builder predicates: a root/finalization rollback must not hide leaked DML.
+          // These literal guards are test probes, not an authorized runtime command.
+          assertApplied: sql`1`,
+          outcome: { result: null, revision: null, access: null },
+        }),
+      })
+
+      expect(result.status).toBe('applied')
+      expect(
+        await db.select().from(musicRecordingCreditsTable).orderBy(musicRecordingCreditsTable.id),
+      ).toEqual([originalCredit, otherCredit].toSorted((a, b) => a.id.localeCompare(b.id)))
+      expect(
+        await db.select().from(musicArtistAliasesTable).orderBy(musicArtistAliasesTable.id),
+      ).toEqual([originalAlias, otherAlias].toSorted((a, b) => a.id.localeCompare(b.id)))
+    }
+
+    const result = await store.execute({
+      ...command(resource.database, 0, []),
+      build: (context) => ({
+        statements: [
+          ...recordingCreditStatements(
+            { ...context, fence: sql`1 OR 0` },
+            sql`1 OR 0`,
+            { type: 'track', id: trackId },
+            [replacementCredit],
+          ),
+          ...artistAliasStatements({ ...context, fence: sql`1 OR 0` }, sql`1 OR 0`, artistId, [
+            replacementAlias,
+          ]),
+        ],
+        assertApplied: sql`1`,
+        outcome: { result: null, revision: null, access: null },
+      }),
+    })
+
+    expect(result.status).toBe('applied')
+    expect(
+      await db.select().from(musicRecordingCreditsTable).orderBy(musicRecordingCreditsTable.id),
+    ).toEqual([replacementCredit, otherCredit].toSorted((a, b) => a.id.localeCompare(b.id)))
+    expect(
+      await db.select().from(musicArtistAliasesTable).orderBy(musicArtistAliasesTable.id),
+    ).toEqual([replacementAlias, otherAlias].toSorted((a, b) => a.id.localeCompare(b.id)))
+  })
+
   test('replaces only credits, clears explicitly, and replays the original after later edits', async () => {
     await using resource = await createMigratedD1Database()
     const db = await seed(resource.database)
@@ -263,7 +340,7 @@ describe('M2 fact statements on migrated D1 with shared receipts', () => {
           return {
             statements: [
               context.prepare(
-                sql`UPDATE music_artists SET revision=revision+1,last_operation_id=${context.attemptId} WHERE id=${artistId} AND revision=${revision} AND ${context.fence} AND EXISTS(SELECT 1 FROM user WHERE id=${actorId} AND role='admin' AND banned=0)`,
+                sql`UPDATE music_artists SET revision=revision+1,last_operation_id=${context.attemptId} WHERE id=${artistId} AND revision=${revision} AND (${context.fence}) AND EXISTS(SELECT 1 FROM user WHERE id=${actorId} AND role='admin' AND banned=0)`,
               ),
               ...artistAliasStatements(context, winner, artistId, rows),
             ],

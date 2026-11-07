@@ -3,6 +3,7 @@ import { expect, test } from 'vitest'
 
 import {
   MusicIdentityAliasCollision,
+  MusicIdentityAuthorizationFailed,
   MusicIdentityBusy,
   MusicIdentityConflict,
   MusicIdentityEntityNotFound,
@@ -20,6 +21,8 @@ test('maps typed failures without leaking provider messages or conflict internal
   const secret = 'provider-private-payload'
 
   const cases = [
+    { error: new MusicIdentityAuthorizationFailed({ reason: 'denied' }), code: 'access_denied' },
+    { error: new MusicIdentityAuthorizationFailed({ reason: 'unavailable' }), code: 'unavailable' },
     {
       error: new MusicSourceInvalid({ reason: 'invalid_url', message: secret }),
       code: 'invalid_input',

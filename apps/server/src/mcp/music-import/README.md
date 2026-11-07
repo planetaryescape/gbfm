@@ -1,11 +1,44 @@
-# I1 #521: schema-free preparation and durability handoff
+# I1 #521: import execution and durability integration
 
 This lane depends on P1 #548 at remote commit
 `2d1b5592826e66e3a198dc117c153e062264fc5c`, not coordinator-local changes.
 P0 D1–D6 in `docs/architecture/mcp-expanded-contracts.md` governs the design.
-**No tools are registered or executable by this change. #521 remains blocked
-on the consolidated storage/guarded-writer decision.** No migration, production
-policy, provider access, object storage or email execution is authorized here.
+**No tools are registered yet.** Implementation approval is recorded below;
+the atomic receipt runtime is published at `e01bc5547713b8d3d1680c3eb5cf03a467b8c6fa`
+([PR #573](https://github.com/planetaryescape/gbfm/pull/573)), but is not integrated
+into this head. Domain revisions and staged artwork remain prerequisites.
+These are technical integration dependencies, not another owner-approval wait.
+No production operations or provider-account writes are authorized here.
+
+## Superseding implementation approval and allocation
+
+At 17:30 on 2026-11-07 Guide Fari approved the surfaced implementation gates:
+
+> everything that needs my approval, you have my thumbs up; the claude threads that got stuck because of limits, you can take that wrok over as a medium sol thing instead
+
+Source: [P1 coordination thread](https://ampcode.com/threads/T-01a1b54f-7ac1-7503-9b0f-ffaf3fbc6c3e),
+relayed to I1 and recorded in [#521](https://github.com/planetaryescape/gbfm/issues/521#issuecomment-6710735486).
+This supersedes the earlier receipt/revision/canonical-writer/staged-artwork
+approval wait, including MCP label audit without creator association. It does
+not establish technical correctness, production access or merge permission.
+
+P1 allocated I1 the four manual createEffect methods; canonical index
+resolvePrepared/readReference/adoptLegacy and reuse/type authorization; repository
+commit/updateArtwork/updateEntityMetadata; statement batching and artwork recovery.
+M1 retains update/junction/affiliation/rename/delete methods. P1 serializes shared
+physical integration. The common receipt owner alone owns mcp/operations and
+migration 0016; the domain schema owner owns entity revision schema. I1 edits no
+schema, migration/replay list or db exports. All MCP PRs stay OPEN, unmerged and
+auto-merge off. Controlled providers and disposable D1 remain the proof environment.
+
+`execution-authority.ts` supplies a required live-grant checkpoint service for
+admission, provider work, guarded mutation and replay. P1 must provide fresh
+persisted OAuth verification for the configured audience on every check; there
+is no cached-principal fallback. The checkpoint rejects actor/client substitution,
+rechecks live account/scopes, and checks playlists:write for the actual inferred
+or reused type even when the URL input claimed track. Its D1 tests use controlled
+grant verification plus real account persistence, not a claimed composed OAuth
+proof. No in-memory receipt or pretend writer is provided.
 
 ## Delivered module boundary
 
@@ -37,13 +70,15 @@ release-management authority through requireCreatorOrAdmin even after admin
 demotion. The browser path does this today; browser parity is not permission to
 extend that grant through MCP. The approved shared writer must retain actor audit
 attribution but skip that creator association for MCP create_label, while keeping
-browser/PAT behavior unchanged. This required shared-service seam is gated and
-not implemented here; do not call the existing function unchanged. Artist, album
+browser/PAT behavior unchanged. This approved shared-service seam is not
+implemented here yet; do not call the existing function unchanged. Artist, album
 and track createdById currently have no equivalent authority side effect.
 Publication timestamps are not accepted by this
 initial preparation contract. Label imports are not canonical URL imports:
 `label` is rejected as expectedType; manual label creation remains separate.
-Existing HTTP/PAT/browser schemas and behavior are untouched. Strict unknown-key
+Existing HTTP/PAT/browser inputs and success behavior are unchanged; the shared
+HTTP error mapper now exposes typed authorization denial as 403 Forbidden,
+including the resolvePostMusic endpoint's declared error schema. Strict unknown-key
 rejection prevents silently accepting unsupported options. Fields are bounded,
 arrays max 50, decoded encoded JSON max 256 KiB; transport must separately enforce
 the original raw request/response JSON ceiling before parsing. Canonical ISO UTC
@@ -107,7 +142,7 @@ do not prove persisted OAuth revocation: P1 owns that composed fixture and must
 run it again at final integration. No durable command replay, expired tombstone
 or command-level changed-payload conflict is claimed proven before storage exists.
 
-## One consolidated storage decision requested (not a migration allocation)
+## Approved shared storage requirements (integration pending)
 
 Use M1/P1's **one shared receipt and guarded writer**, not a lane-specific ledger.
 Relevant existing schema: `apps/server/src/db/music-entity.schema.ts`
@@ -163,12 +198,44 @@ Reliable background acceptance requires the existing import-status owner #200
 and approved delivery/outbox semantics; do not implement an in-memory worker or
 infer durable delivery from a live request. Original command outcome and latest
 enrichment status need distinct fields; retries must not rewrite the original
-created/reused fact. Provider/storage execution remains separately gated.
+created/reused fact. Only controlled provider/storage adapters are used here;
+production execution and provider-account writes remain prohibited.
 
-## Shared-writer collision map: allocation needed before edits
+### Staged artwork protocol sent to the common receipt owner
 
-No shared edits or reservations are taken by I1. Proposed exact scope for P1's
-serialized integration (not permission for this branch):
+The atomic v1 runtime is catalogue-only. The common receipt owner owns the
+approved 0021 extension; this branch does not create a second stage table.
+The recovery contract submitted for that extension is:
+
+- Phases: pending → uploading → association_pending → delivered, with failed
+  reserved for known terminal failures. Preserve mode creates no stage or remote
+  effect. Catalogue reference, observed revision and original created/reused
+  disposition are saved atomically with pending, before upload.
+- Freeze SHA-256 content digest, MIME type, bounded size (1 byte–10 MiB) and stable
+  object key before upload. Key identity is
+  `music/type/id/imports/operationId/sha256/cover`; never overwrite a shared cover.
+  A retry may upload only matching content. Persist a source key, never signed
+  URLs, candidate/provider URLs, credentials or provider payloads.
+- Lease duration is 60 seconds, renewal every 20 seconds, takeover only after
+  expiry. Every transition checks an unexpired lease, physical UUID attempt and
+  monotonic generation. Upload remains outside D1; a lease is not a network
+  transaction and cannot undo an object-store effect.
+- Association checks the saved expected entity revision and increments the
+  revision with the same attempt marker and delivered phase in one atomic batch.
+  It must not silently rebase over a later administrator edit.
+- Upload success followed by association failure retains association_pending;
+  reconcile the same immutable key and descriptor. Ambiguous timeouts remain
+  recoverable, not proof of absence or terminal failure. Fresh authorization is
+  mandatory before provider work, upload, association and result disclosure.
+- Redacting the original outcome after 24 hours never expires in-flight recovery
+  or deletes an asset. I1 provides no garbage collector; cleanup must never
+  delete an associated asset.
+
+## Allocated shared-writer collision map
+
+P1 allocated the create/canonical methods below to I1 and serializes physical
+integration with M1. Shared schema, migration/replay lists and db exports remain
+outside this branch's allocation.
 
 | Path | Methods / required coordination |
 | --- | --- |
@@ -188,20 +255,18 @@ artwork association compare/increment the same guarded entity revision. Playlist
 revision/visibility remains PL1/PL2-owned and must join the same integration
 before playlist imports become executable. R1/#551 integration/production HOLD is unchanged.
 
-Narrow reservations already allocated elsewhere: M1 has only the album.service.ts
-`and` import and removeArtistFromAlbumEffect WHERE bug fix; leave both untouched.
-R1 alone has the music-entity.schema.ts index declarations,
-0015_music_catalogue_read_indexes.sql, migrate-d1.ts replay append and conditional
-schema-test parity. Those reservations grant no receipt/revision/canonical-writer
-schema approval. I1 remains disjoint and imports none of R1's code.
+M1 owns update/junction/affiliation/rename/delete methods and the shared
+artist-fanout/name-key helpers, not creates or canonical writes. Domain revision
+DDL (0017, no triggers) is separately owned. R1 owns its read indexes; neither
+allocation grants I1 schema, migration or replay-list ownership.
 
-Until P1 records storage approval, allocates this method scope to one owner and
-delivers the atomic service seam, all five commands stay unregistered. Required
-post-approval proof: concurrent identical command keys, concurrent differing keys
+Until the approved shared prerequisites are integrated and proved, all five
+commands stay unregistered. Required integration proof: concurrent identical
+command keys, concurrent differing keys
 for one source, changed-payload conflict, discard response then exact receipt
 replay, expired tombstones, revoked replay, browser/MCP revision conflict, and
 upload-success/DB-association-failure recovery on disposable D1.
-The gated label-writer proof must also show no music_label_creators row is added
+The label-writer proof must also show no music_label_creators row is added
 by MCP create_label, audit attribution survives, and a demoted creator gains no
 release-management authority from that create. Existing browser/PAT label creation
 must retain its current behavior.

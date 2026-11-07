@@ -92,8 +92,14 @@ export class MusicIdentityStorageError extends Schema.TaggedError<MusicIdentityS
   { operation: Schema.String, message: Schema.String },
 ) {}
 
+export class MusicIdentityAuthorizationFailed extends Schema.TaggedError<MusicIdentityAuthorizationFailed>()(
+  'MusicIdentityAuthorizationFailed',
+  { reason: Schema.Literals(['denied', 'unavailable']) },
+) {}
+
 export type MusicIdentityError =
   | MusicSourceInvalid
+  | MusicIdentityAuthorizationFailed
   | MusicIdentityBusy
   | MusicIdentityAliasCollision
   | MusicIdentityArtworkDeliveryFailed

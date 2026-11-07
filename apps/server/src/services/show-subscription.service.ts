@@ -193,7 +193,7 @@ const getUserSubscriptionsEffect = (userId: string, options: { limit: number; of
           .where(whereCondition)
           .limit(limit)
           .offset(offset)
-          .orderBy(desc(showSubscriptionsTable.createdAt)),
+          .orderBy(desc(showSubscriptionsTable.createdAt), desc(showSubscriptionsTable.id)),
       catch: (error) =>
         new DatabaseError({
           message: `Failed to fetch subscriptions: ${getErrorMessage(error)}`,

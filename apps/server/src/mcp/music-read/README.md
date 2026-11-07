@@ -68,13 +68,21 @@ and **262144 UTF-8 matching-input bytes**. For all kinds, each receives 2048 slo
 a single kind receives 8192. Materialized ID prefixes precede matching. Count below
 quota proves EOF; equality does not. Only the contiguous global prefix through the
 first unproved kind can prove a page; later-kind matches cannot bypass an earlier gap.
+In particular, at **2048 or more albums**, every all-kind search is restricted to the
+admitted album prefix or exhausts: it cannot return artists, labels or tracks. An
+artist-only match returns complete with 2047 nonmatching albums but exhausts at 2048.
+Specify `entityType` to search a later kind independently (with its own 8192-row cap).
+The same prefix barrier applies to later kinds in album < artist < label < track order.
+This is an explicit availability limitation, not a claim that all-kind search is
+adequate for production catalogue sizes; no production-size acceptance is implied.
 Running name+query bytes stop admission before the first over-budget record, without
 truncation/skipping. The guarded matcher runs only on admitted rows. Temporary sorts
 and materialization operate on these capped stages, not unrestricted name matches.
 
-`status: complete` adds the existing entities/pagination payload. A matching sentinel
+The object-root response is `{ endpoint, result }`; branch on `result.status`.
+`result.status: complete` adds the existing entities/pagination payload. A matching sentinel
 proves `hasMore: true`; full EOF with no admission gap proves final/empty output.
-Otherwise `status: budget_exhausted` returns endpoint, resolved requestedPage and fixed
+Otherwise `result.status: budget_exhausted` returns resolved requestedPage and fixed
 guidance only: no entities, pagination, count, query echo or continuation cursor.
 Exactly limit apparent matches without sentinel/EOF still exhaust. No automatic retry,
 cap increase, scan fallback, provider work or hidden progress state exists. Rare/missing

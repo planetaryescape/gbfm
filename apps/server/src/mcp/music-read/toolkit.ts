@@ -47,7 +47,7 @@ export const MusicReadToolkit = Toolkit.make(
   read(
     Tool.make('search_music', {
       description:
-        'Search artist, album, track and label names by literal case-insensitive substring. Branch on status: complete proves the requested page; budget_exhausted contains no partial results and unchanged retries may exhaust again. No mixes, episodes, playlists, imports or provider fetches. Default 20/max 50; stable kind/ID order; offset max 10000.',
+        'Search artist, album, track and label names by literal case-insensitive substring. Response is { endpoint, result }; branch on result.status: complete proves the requested page; budget_exhausted contains no partial results and unchanged retries may exhaust again. At 2048 or more albums, all-kind search can return only album-prefix matches or exhaust; specify entityType for artists, labels or tracks. Each single kind has an 8192-candidate cap. No mixes, episodes, playlists, imports or provider fetches. Default 20/max 50; stable kind/ID order; offset max 10000.',
       parameters: SearchMusicInput,
       success: SearchMusicResult,
       failure: EditorialToolError,

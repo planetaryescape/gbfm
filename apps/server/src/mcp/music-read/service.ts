@@ -277,19 +277,17 @@ const makeService = Effect.gen(function* () {
       selection.status === 'budget_exhausted'
         ? {
             status: 'budget_exhausted' as const,
-            endpoint,
             requestedPage: { limit, offset },
             guidance:
               'Search budget exhausted; refine query, specify a kind, or lower the offset. Unchanged retries may exhaust again.' as const,
           }
         : {
             status: 'complete' as const,
-            endpoint,
             entities: yield* Effect.forEach(selection.rows, project),
             pagination: { limit, offset, hasMore: selection.hasMore === 1 },
           }
 
-    return yield* Schema.decodeUnknownEffect(SearchMusicResult)(result).pipe(
+    return yield* Schema.decodeUnknownEffect(SearchMusicResult)({ endpoint, result }).pipe(
       Effect.mapError(unavailable),
       Effect.flatMap(bounded),
     )

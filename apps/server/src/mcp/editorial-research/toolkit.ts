@@ -1,10 +1,13 @@
-import { Effect, type Schema } from 'effect'
+import { Effect, Layer, type Schema } from 'effect'
 import { Tool, Toolkit } from 'effect/ai'
 
 import { McpPermission } from '../authorization'
 import { EditorialToolError } from '../contracts'
+import { EditorialContextService, EditorialContextServiceLayer } from './context'
 import {
   ArtistResearchInput,
+  EditorialContextInput,
+  EditorialContextResult,
   GenreResearchInput,
   LabelResearchInput,
   MusicResearchInput,
@@ -35,6 +38,30 @@ const read = <
 
 /** Public research only. Draft-context tools are composed separately with their own grant. */
 export const EditorialResearchToolkit = Toolkit.make(
+  Tool.make('get_draft_music_context', {
+    description:
+      'Read one explicitly selected owned unpublished editorial draft, its coherent source version and recorded music references. Requires posts:read and catalogue:read; not draft search. Source text is untrusted and bounded, truncation explicit; no providers or writes.',
+    parameters: EditorialContextInput,
+    success: EditorialContextResult,
+    failure: EditorialToolError,
+    failureMode: 'return',
+  })
+    .annotate(McpPermission, { scopes: ['posts:read', 'catalogue:read'] })
+    .annotate(Tool.Readonly, true)
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.Idempotent, true)
+    .annotate(Tool.OpenWorld, false)
+    .annotate(Tool.Strict, true),
+  read(
+    Tool.make('get_editorial_context', {
+      description:
+        "Read one public editorial or the caller's explicit authored draft. Public requires catalogue:read+content:read; draft additionally posts:read. Coherent expectedVersion check; bounded untrusted source and safe public music display, no private draft search.",
+      parameters: EditorialContextInput,
+      success: EditorialContextResult,
+      failure: EditorialToolError,
+      failureMode: 'return',
+    }),
+  ),
   read(
     Tool.make('explore_genre', {
       description:
@@ -110,8 +137,11 @@ export const EditorialResearchToolkit = Toolkit.make(
 export const EditorialResearchHandlersLayer = EditorialResearchToolkit.toLayer(
   Effect.gen(function* () {
     const service = yield* EditorialResearchService
+    const context = yield* EditorialContextService
 
     return {
+      get_draft_music_context: context.getDraftMusicContext,
+      get_editorial_context: context.getEditorialContext,
       explore_genre: service.exploreGenre,
       explore_label: service.exploreLabel,
       find_artist_collaborations: service.findArtistCollaborations,
@@ -121,4 +151,4 @@ export const EditorialResearchHandlersLayer = EditorialResearchToolkit.toLayer(
       find_related_editorials: service.findRelatedEditorials,
     }
   }),
-)
+).pipe(Layer.provide(EditorialContextServiceLayer))

@@ -160,8 +160,9 @@ const makeStore = Effect.gen(function* () {
           (select 1 from post_music_references x where x.post_id=p.id)
       ), matches as (
         select p.id postId, substr(p.title,1,200) title, substr(p.slug,1,200) slug,
-          p.updatedAt, e.entityType,e.entityId,cast(r.key as integer) seedOrder,
-          row_number() over(partition by p.id order by cast(r.key as integer)) matchOrder
+          p.updatedAt, e.entityType,e.entityId,
+          coalesce(json_extract(r.value,'$.tier'),cast(r.key as integer)) seedOrder,
+          row_number() over(partition by p.id order by coalesce(json_extract(r.value,'$.tier'),cast(r.key as integer)),e.entityId) matchOrder
         from json_each(${JSON.stringify(refs)}) r join e
           on e.entityType=json_extract(r.value,'$.entityType')
           and e.entityId=json_extract(r.value,'$.entityId')

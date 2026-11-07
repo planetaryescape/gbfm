@@ -3,6 +3,7 @@ import { Clock, Context, Effect, Layer, Schema } from 'effect'
 import { McpAuthorization, McpAuthorizationLive } from '../authorization'
 import { type EditorialToolError, EndpointIdentity } from '../contracts'
 import { EditorialMcpConfig } from '../editorial'
+import { checkpointEditorialCommand } from '../editorial-music/save'
 import {
   type ArtistResearchInput,
   type GenreResearchInput,
@@ -91,7 +92,7 @@ const makeResearch = Effect.gen(function* () {
         ),
       )
 
-      return yield* Schema.decodeUnknownEffect(ResearchResult)({
+      const output = yield* Schema.decodeUnknownEffect(ResearchResult)({
         endpoint,
         observedAt,
         ...data,
@@ -105,6 +106,11 @@ const makeResearch = Effect.gen(function* () {
           ...(data.hasMore ? ['Visible evidence window truncated.'] : []),
         ],
       }).pipe(Effect.mapError(researchUnavailable), Effect.flatMap(boundEvidenceResult))
+
+      const actor = yield* authorization.requireScopes(['catalogue:read', 'content:read'])
+      yield* checkpointEditorialCommand(['catalogue:read', 'content:read'], actor.userId)
+
+      return output
     })
 
   const empty = {

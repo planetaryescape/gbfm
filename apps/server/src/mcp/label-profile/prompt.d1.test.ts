@@ -9,7 +9,9 @@ import { musicAlbumsTable, musicLabelAlbumsTable, musicLabelsTable } from '@/db/
 import { db, DatabaseTestLayer } from '@/test/database'
 
 import { McpActor } from '../authorization'
+import { CommandAuthority } from '../command-authority'
 import { EditorialMcpConfig } from '../editorial'
+import { domainReadAuthority } from '../editorial-research/authority.test-support'
 import { EditorialMcpSettings } from '../model'
 import { makeMcpLayer } from '../server'
 import { LabelProfilePromptLayer } from './prompt'
@@ -43,7 +45,10 @@ const app = HttpRouter.toWebHandler(
           ],
         })
 
-        return yield* effect.pipe(Effect.provideService(McpActor, actor))
+        return yield* effect.pipe(
+          Effect.provideService(McpActor, actor),
+          Effect.provideService(CommandAuthority, domainReadAuthority(actor)),
+        )
       }),
   },
 )

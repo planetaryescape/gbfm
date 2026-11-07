@@ -1,3 +1,4 @@
+import { PostId, PostVersion } from '@gbfm/core/editorial-mcp'
 import { Schema } from 'effect'
 
 import { EndpointIdentity } from '../contracts'
@@ -37,6 +38,39 @@ export const ArtistResearchInput = Schema.Struct({
 export const UndercoveredInput = Schema.Struct({
   entities: Schema.Array(ResearchRef).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
 }).annotate({ parseOptions: { onExcessProperty: 'error' } })
+
+export const EditorialContextInput = Schema.Struct({
+  postId: PostId,
+  expectedVersion: Schema.optionalKey(PostVersion),
+}).annotate({ parseOptions: { onExcessProperty: 'error' } })
+
+export const EditorialContextResult = Schema.Struct({
+  endpoint: EndpointIdentity,
+  observedAt: Schema.String,
+  post: Schema.Struct({
+    postId: PostId,
+    version: PostVersion,
+    draft: Schema.Boolean,
+    title: Schema.NullOr(Schema.String),
+    description: Schema.NullOr(Schema.String),
+    source: Schema.String,
+    sourceTruncated: Schema.Boolean,
+    tags: Schema.Array(Schema.String),
+    tagsTruncated: Schema.Boolean,
+  }),
+  references: Schema.Array(
+    Schema.Struct({
+      entityType: Schema.Literals(['album', 'track', 'playlist']),
+      entityId: EvidenceId,
+      primary: Schema.Boolean,
+      availability: Schema.Literals(['eligible', 'unavailable']),
+      name: Schema.NullOr(Schema.String),
+    }),
+  ),
+  sourceLocator: Schema.String,
+  sourceFingerprint: Schema.String,
+  limitations: Schema.Array(Schema.String),
+})
 
 /** Published projection only. An album identity is included only when it also qualifies. */
 const EvidenceTimestamp = Schema.Int.check(

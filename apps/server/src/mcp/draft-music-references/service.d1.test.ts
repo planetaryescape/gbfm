@@ -4,7 +4,7 @@ import { DraftMusicTarget } from '@gbfm/core/post-music-references'
 import { eq } from 'drizzle-orm'
 import { Effect, Layer, Redacted, Schema } from 'effect'
 import { HttpRouter, HttpServer } from 'effect/http'
-import { expect, test } from 'vitest'
+import { beforeEach, expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
 import { editorialOperations } from '@/db/editorial-operation.schema'
@@ -222,8 +222,18 @@ const harness = async () => {
   }
 }
 
-test('replacement persists ordered references and non-first primary, preserves source, and clears explicitly', async () => {
-  await using h = await harness()
+type DraftMusicFixture = { h: Awaited<ReturnType<typeof harness>> }
+
+// Fresh migrated D1/OAuth setup and disposal have their own deadlines, not the test body's 5s.
+beforeEach<DraftMusicFixture>(async (context) => {
+  const h = await harness()
+  context.h = h
+  context.onTestFinished(() => h[Symbol.asyncDispose](), 15_000)
+}, 15_000)
+
+test<DraftMusicFixture>('replacement persists ordered references and non-first primary, preserves source, and clears explicitly', async ({
+  h,
+}) => {
   const input = await h.mutation()
 
   const result = await h.run(
@@ -266,8 +276,9 @@ test('replacement persists ordered references and non-first primary, preserves s
   expect((await h.state()).refs).toEqual([])
 })
 
-test('original-result replay preserves metadata/version and only removes now-private display', async () => {
-  await using h = await harness()
+test<DraftMusicFixture>('original-result replay preserves metadata/version and only removes now-private display', async ({
+  h,
+}) => {
   const input = await h.mutation()
 
   const call = () =>
@@ -301,8 +312,9 @@ test('original-result replay preserves metadata/version and only removes now-pri
   expect(await h.state()).toEqual(before)
 })
 
-test('replacement hash distinguishes order, primary, version and operation while normalizing UUID case', async () => {
-  await using h = await harness()
+test<DraftMusicFixture>('replacement hash distinguishes order, primary, version and operation while normalizing UUID case', async ({
+  h,
+}) => {
   const input = await h.mutation()
 
   const first = await h.run(
@@ -365,8 +377,9 @@ test('replacement hash distinguishes order, primary, version and operation while
   expect(await h.state()).toEqual(before)
 })
 
-test('invalid replacements and hidden targets leave all state untouched', async () => {
-  await using h = await harness()
+test<DraftMusicFixture>('invalid replacements and hidden targets leave all state untouched', async ({
+  h,
+}) => {
   const input = await h.mutation()
   const before = await h.state()
   const tooMany = Array.from({ length: 51 }, () => ({ ...h.track, entityId: crypto.randomUUID() }))
@@ -400,8 +413,9 @@ test('invalid replacements and hidden targets leave all state untouched', async 
   }
 })
 
-test('stale/concurrent replacements cannot overwrite a committed collection', async () => {
-  await using h = await harness()
+test<DraftMusicFixture>('stale/concurrent replacements cannot overwrite a committed collection', async ({
+  h,
+}) => {
   const input = await h.mutation()
 
   const results = await Promise.allSettled([
@@ -424,8 +438,9 @@ test('stale/concurrent replacements cannot overwrite a committed collection', as
   expect((await h.state()).receipts).toHaveLength(1)
 })
 
-test('all three scopes and current authored draft access apply to invocation and replay', async () => {
-  await using h = await harness()
+test<DraftMusicFixture>('all three scopes and current authored draft access apply to invocation and replay', async ({
+  h,
+}) => {
   const input = await h.mutation()
   await h.run(Effect.flatMap(DraftMusicReferencesService, (s) => s.setDraftMusicReferences(input)))
   const before = await h.state()
@@ -460,8 +475,9 @@ test('all three scopes and current authored draft access apply to invocation and
   expect(await h.state()).toEqual(published)
 })
 
-test('case-equivalent submitted IDs persist canonical stored spelling, not caller spelling', async () => {
-  await using h = await harness()
+test<DraftMusicFixture>('case-equivalent submitted IDs persist canonical stored spelling, not caller spelling', async ({
+  h,
+}) => {
   const stored = { ...h.track, entityId: h.track.entityId.toUpperCase() }
   await h.db
     .update(musicTracksTable)
@@ -481,8 +497,9 @@ test('case-equivalent submitted IDs persist canonical stored spelling, not calle
   expect((await h.snapshot()).musicReferences).toEqual({ references: [stored], primary: stored })
 })
 
-test('receipt failure rolls the whole replacement back; expired replay never reapplies it', async () => {
-  await using h = await harness()
+test<DraftMusicFixture>('receipt failure rolls the whole replacement back; expired replay never reapplies it', async ({
+  h,
+}) => {
   const input = await h.mutation()
 
   const call = () =>
@@ -504,8 +521,9 @@ test('receipt failure rolls the whole replacement back; expired replay never rea
   expect(await h.state()).toEqual(expired)
 })
 
-test('missing authority and revoked persisted OAuth grants deny writes and saved-result disclosure', async () => {
-  await using h = await harness()
+test<DraftMusicFixture>('missing authority and revoked persisted OAuth grants deny writes and saved-result disclosure', async ({
+  h,
+}) => {
   const input = await h.mutation()
 
   const effect = Effect.flatMap(DraftMusicReferencesService, (s) =>
@@ -536,8 +554,9 @@ test('missing authority and revoked persisted OAuth grants deny writes and saved
   expect(await h.state()).toEqual(before)
 })
 
-test('persisted OAuth revocation inside reference writes rolls back the post, references and receipt', async () => {
-  await using h = await harness()
+test<DraftMusicFixture>('persisted OAuth revocation inside reference writes rolls back the post, references and receipt', async ({
+  h,
+}) => {
   const input = await h.mutation()
   const before = await h.state()
   await h.db.$client
@@ -552,8 +571,9 @@ test('persisted OAuth revocation inside reference writes rolls back the post, re
   expect((await h.db.select().from(oauthAccessToken))[0]?.revoked).toBeNull()
 })
 
-test('real OAuth MCP wire preserves the reference codec, rejects missing precondition and denies revoked retries', async () => {
-  await using h = await harness()
+test<DraftMusicFixture>('real OAuth MCP wire preserves the reference codec, rejects missing precondition and denies revoked retries', async ({
+  h,
+}) => {
   await using app = h.http()
   const input = await h.mutation()
   const before = await h.state()
@@ -598,9 +618,9 @@ test('real OAuth MCP wire preserves the reference codec, rejects missing precond
   expect(await h.state()).toEqual(revoked)
 }, 15_000)
 
-test('all 50 mixed public targets fit one atomic replacement; 51 rejects without writes', async () => {
-  await using h = await harness()
-
+test<DraftMusicFixture>('all 50 mixed public targets fit one atomic replacement; 51 rejects without writes', async ({
+  h,
+}) => {
   const targets = Array.from({ length: 50 }, (_, index) => ({
     entityType: ['album', 'track', 'playlist'][index % 3],
     entityId: `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`,
@@ -647,8 +667,9 @@ test('all 50 mixed public targets fit one atomic replacement; 51 rejects without
   expect(await h.state()).toEqual(before)
 }, 15_000)
 
-test('escaped MCP acknowledgements fit before commit or reject without writes, including identical retry', async () => {
-  await using h = await harness()
+test<DraftMusicFixture>('escaped MCP acknowledgements fit before commit or reject without writes, including identical retry', async ({
+  h,
+}) => {
   await using app = h.http()
   await h.db
     .update(postsTable)

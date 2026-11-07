@@ -2,11 +2,16 @@ import { Effect, Result } from 'effect'
 import { expect, test } from 'vitest'
 
 import {
+  MusicIdentityAliasCollision,
   MusicIdentityBusy,
   MusicIdentityConflict,
+  MusicIdentityEntityNotFound,
+  MusicIdentityInvalidSnapshot,
   MusicIdentityProviderRejected,
   MusicIdentityProviderUnavailable,
+  MusicIdentitySourceLinkNotFound,
   MusicIdentityStorageError,
+  MusicSourceInvalid,
 } from '@/services/canonical-music-identity/errors'
 
 import { projectImportPersistence } from './outcome'
@@ -15,6 +20,30 @@ test('maps typed failures without leaking provider messages or conflict internal
   const secret = 'provider-private-payload'
 
   const cases = [
+    {
+      error: new MusicSourceInvalid({ reason: 'invalid_url', message: secret }),
+      code: 'invalid_input',
+    },
+    {
+      error: new MusicIdentityInvalidSnapshot({ message: secret }),
+      code: 'invalid_input',
+    },
+    {
+      error: new MusicIdentityAliasCollision({
+        normalizedUrl: secret,
+        expectedSourceKey: secret,
+        storedSourceKey: secret,
+      }),
+      code: 'conflict',
+    },
+    {
+      error: new MusicIdentityEntityNotFound({ entityType: secret, entityId: secret }),
+      code: 'not_found',
+    },
+    {
+      error: new MusicIdentitySourceLinkNotFound({ entityType: secret, entityId: secret }),
+      code: 'not_found',
+    },
     {
       error: new MusicIdentityProviderUnavailable({ provider: secret, message: secret }),
       code: 'unavailable',
@@ -30,6 +59,14 @@ test('maps typed failures without leaking provider messages or conflict internal
         message: secret,
       }),
       code: 'not_found',
+    },
+    {
+      error: new MusicIdentityProviderRejected({
+        provider: secret,
+        reason: 'invalid_request',
+        message: secret,
+      }),
+      code: 'invalid_input',
     },
     {
       error: new MusicIdentityConflict({

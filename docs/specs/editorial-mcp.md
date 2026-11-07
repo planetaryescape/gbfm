@@ -66,15 +66,23 @@ update_draft(requestId, postId, expectedVersion, title?, content?, description?)
   -> saved result(endpoint, post(postId, version, reviewUrl, ...))
 ```
 
-Persist operation identity and a canonical input fingerprint at the authoritative database boundary. Identical retries return the original committed receipt; reuse with different input is a conflict. Do not use a transport request ID as the sole operation identity.
+Persist operation identity and a canonical input fingerprint at the authoritative database boundary. Identical retries within 24 hours return the original committed receipt; reuse with different input is a conflict. Do not use a transport request ID as the sole operation identity.
 
 `editorial_operations` stores the result with the mutation in one atomic D1 batch.
-Create also inserts the sole creator membership in that batch. Receipts remain
+Create also inserts the sole creator membership in that batch and uses the same
+UUID post identities as the normal editor. Receipt IDs and fingerprints remain
 after post deletion to prevent a delayed create retry from recreating a deleted
 draft. They are removed with account deletion. Replay verifies current account
 eligibility and authored draft access before returning the historical saved result.
 It does not restore old content. Use `get_post` to read the current version before
 starting another edit. Each distinct edit needs a new request ID.
+
+Replay stops exactly 24 hours after the save and returns `expired`; it never
+creates another post or repeats a mutation. The existing hourly maintenance job
+clears expired response bodies in indexed batches of 100, up to 1,000 per run.
+A backlog resumes on subsequent runs. Physical removal therefore follows the
+next successful maintenance run, not the exact replay deadline. Empty receipt
+tombstones retain no title, description or draft body.
 
 Writes only accept unpublished `post` content, not micro posts. Title is nonblank
 and at most 500 characters, content is nonblank and at most 100,000, and description at most 2,000.
@@ -85,6 +93,12 @@ creator assignment, publication state, slug and post type are not accepted.
 Commit the draft and all related database writes together with the receipt. A disconnected caller may have a committed write, so a timeout is not evidence of failure. Replay checks current authorization before exposing a private result.
 
 Updates compare the caller's original version and atomically require that the post remains a draft and the actor remains authorized. A freshly loaded server version is not a substitute. Browser edits and other writers must preserve the chosen version invariant. A stale edit changes neither the post nor its related labels and attachments.
+
+The web editorial editor submits its loaded `expectedUpdatedAt` on saves and
+saved-post music resolution. Stale saves receive HTTP 409, retain local text and
+ask the user to copy their edits before reloading. Successful saves and music
+attachments advance the editor's revision. The API field is optional so existing
+clients retain their current contract; clients omitting it still use last-save-wins.
 
 Ordinary D1 atomic writes should own these saves. A workflow engine or `waitUntil` does not improve this single-database boundary. Future long-running imports need a separate durable-job contract.
 
@@ -102,6 +116,9 @@ fields. No code path silently updates existing client scopes, consents or tokens
 New client registrations have the supported permission ceiling; older read-only
 registrations may need replacement. Each write grant requires fresh consent,
 and refreshing a read-only grant cannot add write access.
+The pinned provider intersects new token scopes with the stored resource policy;
+a write request against an existing read-only policy receives read-only tokens,
+not an unusable write token. Clients must inspect the scopes actually granted.
 
 ## Verification and operational safety
 

@@ -95,6 +95,14 @@ test('composed OAuth MCP enforces draft-write consent, saved versions and revoca
     expect(await denied.json()).toMatchObject({
       result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
     })
+
+    const oversizedRead = await call(
+      'get_post',
+      { postId: 'x'.repeat(20_000) },
+      readTokens.access_token,
+    )
+
+    expect(oversizedRead.status).toBe(413)
     const created = await call('create_draft', input)
     expect(created.status).toBe(200)
     expect(created.headers.get('cache-control')).toBe('private, no-store')
@@ -112,6 +120,31 @@ test('composed OAuth MCP enforces draft-write consent, saved versions and revoca
     expect(updated.status).toBe(200)
     const next = Schema.decodeUnknownSync(Saved)(await updated.json()).result.structuredContent
     expect(next.post.content).toBe(update.content)
+
+    const saveFromBrowser = (expectedUpdatedAt: string, content: string) =>
+      handler.handler(
+        new Request(`https://editorial-test.localhost/api/content/posts/${next.post.slug}`, {
+          method: 'PATCH',
+          headers: {
+            'content-type': 'application/json',
+            authorization: 'Bearer owner-session-token',
+          },
+          body: JSON.stringify({ expectedUpdatedAt, content }),
+        }),
+      )
+
+    const staleBrowser = await saveFromBrowser(saved.post.updatedAt, 'Stale browser text')
+    expect(staleBrowser.status).toBe(409)
+
+    const concurrentBrowser = await Promise.all(
+      ['Browser edit one', 'Browser edit two'].map((content) =>
+        saveFromBrowser(next.post.updatedAt, content),
+      ),
+    )
+
+    expect(concurrentBrowser.map((response) => response.status).toSorted((a, b) => a - b)).toEqual([
+      200, 409,
+    ])
     const replay = await call('update_draft', update)
     expect(Schema.decodeUnknownSync(Saved)(await replay.json()).result.structuredContent).toEqual(
       next,
@@ -119,7 +152,12 @@ test('composed OAuth MCP enforces draft-write consent, saved versions and revoca
 
     const deniedUpdate = await call(
       'update_draft',
-      { ...update, requestId: crypto.randomUUID(), expectedVersion: next.post.version },
+      {
+        ...update,
+        content: 'Denied write',
+        requestId: crypto.randomUUID(),
+        expectedVersion: next.post.version,
+      },
       readTokens.access_token,
     )
 
@@ -138,7 +176,8 @@ test('composed OAuth MCP enforces draft-write consent, saved versions and revoca
       .from(postsTable)
       .where(eq(postsTable.id, next.post.postId))
 
-    expect(persisted).toMatchObject({ draft: true, content: update.content })
+    expect(persisted?.draft).toBe(true)
+    expect(['Browser edit one', 'Browser edit two']).toContain(persisted?.content)
   } finally {
     await handler.dispose()
   }

@@ -72,11 +72,12 @@ No restart is required. To verify, ask: "List my GBFM editorial drafts."
 - get_post: read a post by stable postId, subject to existing visibility rules.
 - create_draft: create your own unpublished editorial draft with title, content and optional description.
   Requires drafts:write. Supply a new UUIDv4 requestId per draft and reuse it after a timeout.
-  Identical retries replay the original saved result, even after later edits. Changed payloads conflict.
+  Identical retries within 24 hours replay the original saved result, even after later edits.
+  Changed payloads conflict. Expired retries return expired and never create another draft.
 - update_draft: change title, content or description of your own unpublished editorial draft.
   Requires drafts:write, a new UUIDv4 requestId per edit and the latest get_post version in
   expectedVersion. Omitted fields are preserved; description: null clears it. After a timeout,
-  reuse the exact request to replay its saved result. A new edit requires a new requestId.
+  reuse the exact request within 24 hours to replay its saved result. A new edit requires a new requestId.
   Conflicts require rereading, not blind retries. Replayed results describe the original save,
   not the current draft; use get_post before starting another edit.
 
@@ -85,6 +86,8 @@ posts:read drafts:write offline_access during authorization and approve fresh co
 New registrations support that permission; an older read-only registration may need
 to be replaced with a separate client registration. Refreshing a read-only token
 does not add write access.
+The token's granted scopes are authoritative: an environment whose resource policy
+is still read-only can reduce a write request to read-only access.
 Draft title and content must be nonblank. Content is limited to 100,000 characters,
 title to 500 and description to 2,000.
 Draft tools never publish, delete, change creators, change media or edit published posts.

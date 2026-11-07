@@ -19,6 +19,29 @@ import { createEditorialOAuthFixture, OAuthTokens } from '@/test/editorial-oauth
 import { withTestLayer } from '@/test/effect'
 
 describe('editorial OAuth provider on migrated D1', () => {
+  test('the provider downscopes issuance to an existing read-only resource policy', async () => {
+    await using fixture = await createEditorialOAuthFixture()
+    const clientId = await fixture.register()
+    await fixture.db
+      .update(oauthResource)
+      .set({ allowedScopes: JSON.stringify(['posts:read', 'offline_access']) })
+      .where(eq(oauthResource.identifier, fixture.config.mcp.resourceUrl))
+    fixture.recreateAuth()
+
+    const code = await fixture.authorize(
+      clientId,
+      'owner',
+      'posts:read offline_access drafts:write',
+    )
+
+    const exchange = await fixture.exchange(clientId, code)
+    expect(exchange.status).toBe(200)
+    const tokens = Schema.decodeUnknownSync(OAuthTokens)(await exchange.json())
+    expect((await Effect.runPromise(fixture.service.verify(tokens.access_token))).scopes).toEqual([
+      'posts:read',
+      'offline_access',
+    ])
+  })
   test('draft-write scope is explicit, requires new consent and never expands existing tokens', async () => {
     await using fixture = await createEditorialOAuthFixture()
     const scope = 'posts:read offline_access drafts:write'

@@ -204,6 +204,7 @@ export const createEditorialOAuthFixture = async () => {
 
   return {
     db,
+    database: resource.database,
     userId: Schema.decodeUnknownSync(UserId)('owner'),
     config,
     service,

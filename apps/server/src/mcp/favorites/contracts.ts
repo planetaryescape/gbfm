@@ -7,7 +7,7 @@ export const ListOwnedInput = Schema.Struct({
   offset: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10_000 }))),
 })
 
-const Summary = Schema.Struct({
+export const SavedItemSummary = Schema.Struct({
   id: Schema.NonEmptyString.check(Schema.isMaxLength(200)),
   title: Schema.String.check(Schema.isMaxLength(500)),
   slug: Schema.NonEmptyString.check(Schema.isMaxLength(500)),
@@ -17,6 +17,7 @@ const Pagination = Schema.Struct({
   limit: Schema.Int,
   offset: Schema.Int,
   hasMore: Schema.Boolean,
+  omitted: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 50 })),
 })
 
 export const ListFavoritesResult = Schema.Struct({
@@ -24,7 +25,7 @@ export const ListFavoritesResult = Schema.Struct({
   favorites: Schema.Array(
     Schema.Struct({
       kind: Schema.Literals(['mix', 'track', 'misc', 'show']),
-      target: Summary,
+      target: SavedItemSummary,
     }),
   ).check(Schema.isMaxLength(50)),
   pagination: Pagination,
@@ -32,6 +33,8 @@ export const ListFavoritesResult = Schema.Struct({
 
 export const ListShowSubscriptionsResult = Schema.Struct({
   endpoint: EndpointIdentity,
-  subscriptions: Schema.Array(Schema.Struct({ show: Summary })).check(Schema.isMaxLength(50)),
+  subscriptions: Schema.Array(Schema.Struct({ show: SavedItemSummary })).check(
+    Schema.isMaxLength(50),
+  ),
   pagination: Pagination,
 })

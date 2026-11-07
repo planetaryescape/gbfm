@@ -34,6 +34,35 @@ const errorCode = <A, E extends { readonly code: string }>(effect: Effect.Effect
   )
 
 describe('M2 complete collection inputs', () => {
+  it('uses shared bounded catalogue IDs without weakening row UUID identity', async () => {
+    for (const entityId of ['catalogue-id', 'x'.repeat(200)]) {
+      expect(
+        await errorCode(
+          parseRecordingCredits({
+            ...credits([{ ...performer, artistId: entityId }]),
+            target: { type: 'album', id: entityId },
+          }),
+        ),
+      ).toBe('ok')
+      expect(await errorCode(parseArtistAliases({ ...aliases([]), artistId: entityId }))).toBe('ok')
+    }
+
+    for (const entityId of ['', 'x'.repeat(201)]) {
+      expect(
+        await errorCode(
+          parseRecordingCredits({ ...credits([]), target: { type: 'track', id: entityId } }),
+        ),
+      ).toBe('invalid_input')
+      expect(await errorCode(parseArtistAliases({ ...aliases([]), artistId: entityId }))).toBe(
+        'invalid_input',
+      )
+    }
+
+    expect(
+      await errorCode(parseRecordingCredits(credits([{ ...performer, id: 'not-a-row-uuid' }]))),
+    ).toBe('invalid_input')
+  })
+
   it('trims display values, preserves names and separates instruments from other roles', async () => {
     const input = await Effect.runPromise(
       parseRecordingCredits(

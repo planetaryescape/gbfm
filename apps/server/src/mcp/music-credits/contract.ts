@@ -1,6 +1,10 @@
 import { Effect, Schema } from 'effect'
 
+import { musicFactNameKey } from '../../services/music-entity/name-key'
 import { McpToolError } from '../contracts'
+import { MusicEditId } from '../music-edit/commands'
+
+export { musicFactNameKey } from '../../services/music-entity/name-key'
 
 const id = Schema.String.check(Schema.isUUID())
 
@@ -69,7 +73,7 @@ const hasEvidence = (item: { readonly sourceUrl?: string; readonly evidenceNote?
 
 const credit = Schema.Struct({
   id: Schema.optionalKey(id),
-  artistId: Schema.optionalKey(Schema.NullOr(id)),
+  artistId: Schema.optionalKey(Schema.NullOr(MusicEditId)),
   creditedName: text(200),
   role: Schema.Literals(['performer', 'instrument', 'producer', 'engineer']),
   instrument: Schema.optionalKey(text(200)),
@@ -94,7 +98,7 @@ const common = {
 /** Complete replacement input. Decode through parseRecordingCredits to enforce byte limits. */
 export const SetRecordingCreditsInput = Schema.Struct({
   ...common,
-  target: Schema.Struct({ type: Schema.Literals(['track', 'album']), id }),
+  target: Schema.Struct({ type: Schema.Literals(['track', 'album']), id: MusicEditId }),
   credits: Schema.Array(credit).check(
     Schema.isMaxLength(50),
     Schema.makeFilter((items) => {
@@ -129,7 +133,7 @@ export const SetRecordingCreditsInput = Schema.Struct({
 /** Complete alias replacement. Decode through parseArtistAliases to enforce byte limits. */
 export const SetArtistAliasesInput = Schema.Struct({
   ...common,
-  artistId: id,
+  artistId: MusicEditId,
   aliases: Schema.Array(alias).check(
     Schema.isMaxLength(50),
     Schema.makeFilter((items) => {
@@ -203,10 +207,6 @@ export const parseArtistAliases = Effect.fn('MusicCredits.parseArtistAliases')(f
     raw,
   ).pipe(Effect.mapError(invalid))
 })
-
-/** Version-1 duplicate comparison key; never use this to resolve an artist identity. */
-export const musicFactNameKey = (value: string) =>
-  value.normalize('NFC').trim().replace(/\s+/gu, ' ').toLowerCase().normalize('NFC')
 
 /** After receipt lookup, check row ownership and explicit unlink intent against current state. */
 export const checkCreditReplacement = Effect.fn('MusicCredits.checkCreditReplacement')(function* (

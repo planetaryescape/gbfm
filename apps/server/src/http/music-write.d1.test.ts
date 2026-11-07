@@ -209,6 +209,16 @@ test('all four session deletes enforce strict headers, atomically invalidate fan
   await db.run(
     sql`INSERT INTO music_playlist_tracks(playlistId,trackId,position,addedAt) VALUES ('p','t',0,1),('p','u',1,1)`,
   )
+  await db.run(sql`INSERT INTO posts(id,slug,content,createdAt,updatedAt)
+    VALUES ('post','post','Keep authored content',1,1)`)
+  await db.run(sql`INSERT INTO post_music_references(post_id,position,album_id,track_id)
+    VALUES ('post',0,'x',NULL),('post',1,NULL,'t')`)
+  await db.run(sql`INSERT INTO releases(id,title,slug,content,labelId,createdAt,updatedAt)
+    VALUES ('release','Release','release','Keep release content','l',1,1)`)
+  await db.run(sql`INSERT INTO music_recording_credits
+    (id,album_id,artist_id,credited_name,credited_name_key,role,instrument_key,participant_key,
+      display_order,source_label,evidence_note,asserted_at,created_at)
+    VALUES ('fact','x','a','A','a','producer','','artist:a',0,'Manual','Keep fact',1,1)`)
   const web = createTestWebHandler(resource.database)
 
   const remove = (collection: string, id: string, headers: Readonly<Record<string, string>>) =>
@@ -220,11 +230,11 @@ test('all four session deletes enforce strict headers, atomically invalidate fan
     )
 
   try {
-    for (const [collection, id, revision] of [
-      ['artists', 'a', 0],
-      ['albums', 'x', 1],
-      ['tracks', 't', 2],
-      ['labels', 'l', 2],
+    for (const [collection, id, revision, unlink] of [
+      ['artists', 'a', 0, sql`DELETE FROM music_recording_credits WHERE id='fact'`],
+      ['albums', 'x', 1, sql`DELETE FROM post_music_references WHERE album_id='x'`],
+      ['tracks', 't', 2, sql`DELETE FROM post_music_references WHERE track_id='t'`],
+      ['labels', 'l', 2, sql`DELETE FROM releases WHERE id='release'`],
     ] as const) {
       const headers = {
         'x-gbfm-music-revision': String(revision),
@@ -243,6 +253,14 @@ test('all four session deletes enforce strict headers, atomically invalidate fan
           })
         ).status,
       ).toBe(409)
+      // Known protecting facts are conflicts, not retryable storage outages.
+      // Removing just that fact permits the very same request and observation.
+      expect((await remove(collection, id, headers)).status).toBe(409)
+      expect((await remove(collection, id, headers)).status).toBe(409)
+      expect(await db.get(sql`SELECT content FROM posts WHERE id='post'`)).toEqual({
+        content: 'Keep authored content',
+      })
+      await db.run(unlink)
       expect((await remove(collection, id, headers)).status).toBe(204)
       expect((await remove(collection, id, headers)).status).toBe(204)
       expect(

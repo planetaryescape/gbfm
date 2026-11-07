@@ -165,6 +165,15 @@ export const deleteMusicEntity = Effect.fn('musicEntity.delete')(function* (
             eligibility.push(sql`NOT EXISTS (
           SELECT 1 FROM music_recording_credits WHERE artist_id=${target.entityId})`)
 
+          if (target.entityType === 'album' || target.entityType === 'track')
+            eligibility.push(sql`NOT EXISTS (
+          SELECT 1 FROM post_music_references
+          WHERE ${sql.identifier(target.entityType === 'album' ? 'album_id' : 'track_id')}=${target.entityId})`)
+
+          if (target.entityType === 'label')
+            eligibility.push(sql`NOT EXISTS (
+          SELECT 1 FROM releases WHERE labelId=${target.entityId})`)
+
           return {
             statements: [
               attempt.prepare(

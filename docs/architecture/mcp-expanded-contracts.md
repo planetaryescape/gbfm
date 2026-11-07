@@ -169,8 +169,19 @@ require `posts:read` for a future listener-only grant or repurpose it for public
 content. P1 must add a separate expanded scope-set validation path while retaining
 existing editorial scope semantics. `offline_access` only permits refresh.
 Mixed editorial/expanded grants are eligible only while the account satisfies
-every granted capability's admission requirements. Preserve fail-closed whole-token
-validation: if a creator is downgraded to listener and its token includes
+its scope-set admission requirements, at consent/exchange and again during live
+persisted-token verification. Preserve strict admission in P1's `canAuthorizeMcp`:
+`catalogue:write`, `catalogue:import`, `catalogue:inspect`, `catalogue:repair`,
+`playlists:write`, `playlists:publish` and `admin:read` require admin; editorial
+and other creator-class scopes require creator or above. Listener-only grants
+remain limited to eligible U-row scopes under D1. A creator therefore cannot
+obtain a `catalogue:write` grant through real OAuth, and a token containing that
+scope becomes wholly invalid if its account loses admin status. This preserves
+admin-only authority under D2; no relaxed admission is inferred from a synthetic
+service test or the per-call denial contract. Per-call scope/role/target checks
+remain defense in depth even when OAuth already excludes that principal.
+Preserve fail-closed whole-token validation: if a creator is downgraded to
+listener and its token includes
 `posts:read` plus `catalogue:read`, reject the entire token at the HTTP OAuth
 boundary. Do not silently downscope it or serve catalogue calls under that token.
 A separately consented catalogue-only listener grant remains eligible, provided
@@ -243,9 +254,15 @@ are the only external-read exception. `lookup_music_url` is stored lookup only.
   expected versions and explicit null/omitted semantics. Identical retries replay
   the original authorized result; changed payload conflicts. Parallel retries
   apply once. Recheck current actor, grant, role and receipt actor/client/operation
-  ownership before replay; a stored receipt never substitutes for current
-  authority. Existing create/update draft replay still rechecks current authored
-  draft access; its receipt key and response behavior are unchanged.
+  ownership before replay, plus current target access for non-lifecycle commands
+  whose target must still exist. This includes current ownership/authorship, not
+  merely possession of a read scope: an E1 attach/tag retry after removal of the
+  actor from the draft's co-authors must deny access and not replay private draft
+  state. A missing non-lifecycle target does not gain the lifecycle exception.
+  A stored receipt never substitutes for current authority. Existing create/update
+  draft replay still rechecks current authored draft access; its receipt key and
+  response behavior are unchanged. Only the lifecycle commands below use the
+  post-transition replay rule, and that exception grants no private-read bypass.
 - Future delete/publish/unpublish commands need post-transition replay
   authorization, not a copied unpublished-only `loadDraft` check. After delete,
   the row may be gone; after publish, the row is no longer a draft. Verify the
@@ -348,6 +365,12 @@ with registry metadata or domain mocks alone. Required distinguishing cases:
    catalogue-only grant remains eligible. No silent token downscoping.
 2. Creator with catalogue write scope still denied shared mutation under D2;
    admin with missing scope denied; admin cannot fetch someone else's private ID.
+   Distinguish test seams: an injected creator principal with `catalogue:write`
+   must fail with service `access_denied`; this is not proof that real OAuth can
+   issue such a token. Real OAuth must refuse the role-ineligible scope set, and
+   persisted-token verification must invalidate the whole high-trust grant after
+   admin-role loss. Test admission and service defenses separately; do not relax
+   consent/token validation merely to make the synthetic principal reachable.
 3. Null/future playlist versus published playlist; public collection with private
    mix; hidden child/source omitted from counts, links and joins.
 4. Public recommendation cannot read private listening; explicit authored draft
@@ -361,6 +384,9 @@ with registry metadata or domain mocks alone. Required distinguishing cases:
    its draft state changes, the owned authorized receipt acknowledges the same
    completed operation without repeating it. Revoked/downgraded actors and
    other-owner/operation receipts fail; private payload access is checked anew.
+   For non-lifecycle E1 attach/tag replay, remove the actor from draft co-authors
+   after commit: the identical owned-receipt retry denies access and returns no
+   private draft state, despite unchanged read/write scopes and unexpired receipt.
 7. Accepted import/provider failure remains honest; bounded work, cancellation,
    no private-network fetch and no public URL before draft-byte privacy gates.
 8. Read-only grants omit registered write tools from discovery; valid guessed

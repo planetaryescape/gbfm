@@ -79,12 +79,25 @@ const make = Effect.gen(function* () {
         row.entityType === 'label' ? undefined : row.entityType,
       ).pipe(Effect.result)
 
+      if (Result.isFailure(parsed)) return null
+
+      const compatiblePlatform =
+        parsed.success.platform === row.platform ||
+        (parsed.success.platform === 'youtube' && row.platform === 'youtube_music') ||
+        (parsed.success.platform === 'other' &&
+          [
+            'discord',
+            'website',
+            'instagram',
+            'twitter',
+            'musicbrainz',
+            'discogs',
+            'other',
+          ].includes(row.platform))
+
       if (
-        Result.isFailure(parsed) ||
         (row.entityType === 'label' && parsed.success.sourceEntityType !== 'url') ||
-        (row.platform !== 'website' &&
-          row.platform !== 'other' &&
-          parsed.success.platform !== row.platform)
+        !compatiblePlatform
       )
         return null
 

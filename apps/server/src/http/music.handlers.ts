@@ -56,10 +56,16 @@ import {
   type ScrapedMusicEntity,
 } from '@/services/music-entity'
 import {
+  getReadablePlaylistsEffect,
+  getReadablePlaylistByIdEffect,
+} from '@/services/music-entity/playlist.service'
+import {
   PlaylistEnrichmentJob,
   PlaylistEnrichmentQueue,
 } from '@/services/playlist-enrichment-queue'
 import { getIdFromSpotifyUrl } from '@/services/url-utils'
+
+import { resolvePageSession } from './page-session'
 
 const decodeMusicEntityMetadata = Schema.decodeUnknownSync(Schema.JsonObject)
 
@@ -536,8 +542,8 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
     // -----------------------------------------------------------------
     .handle('listPlaylists', () =>
       Effect.gen(function* () {
-        const svc = yield* MusicEntityService
-        const rows = yield* dieOnDatabaseError(svc.getPlaylists)
+        const reader = yield* resolvePageSession()
+        const rows = yield* dieOnDatabaseError(getReadablePlaylistsEffect(reader ?? undefined))
 
         return rows.map(toPlaylistResponse)
       }),
@@ -557,12 +563,12 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
     )
     .handle('getPlaylist', ({ params }) =>
       Effect.gen(function* () {
-        const svc = yield* MusicEntityService
+        const reader = yield* resolvePageSession()
 
         const row = yield* dieOnDatabaseError(
-          svc
-            .getPlaylistById(params.id)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
+          getReadablePlaylistByIdEffect(params.id, reader ?? undefined).pipe(
+            Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
+          ),
         )
 
         return toPlaylistResponse(row)
@@ -749,13 +755,19 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
     .handle('getPlaylistTracks', ({ params }) =>
       Effect.gen(function* () {
         const svc = yield* MusicEntityService
+        const reader = yield* resolvePageSession()
+        yield* dieOnDatabaseError(
+          getReadablePlaylistByIdEffect(params.id, reader ?? undefined).pipe(
+            Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
+          ),
+        )
         const rows = yield* dieOnDatabaseError(svc.getPlaylistTracks(params.id))
 
         return rows.map((entry) => ({
           track: toTrackResponse(entry.track),
           position: entry.position,
           addedAt: entry.addedAt.toISOString(),
-          links: entry.links,
+          links: entry.links.map(toEntityLinkResponse),
         }))
       }),
     )

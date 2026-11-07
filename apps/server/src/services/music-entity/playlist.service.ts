@@ -1,10 +1,16 @@
-import { and, asc, desc, eq, isNotNull, lte, or } from 'drizzle-orm'
+import { and, asc, desc, eq, isNotNull, lte, or, sql } from 'drizzle-orm'
 import { Clock, Effect } from 'effect'
 
 import { user } from '@/db/auth.schema'
 import { Database } from '@/db/layer'
-import { musicEntityLinksTable, musicPlaylistsTable } from '@/db/music-entity.schema'
-import { DatabaseError, getErrorMessage } from '@/errors'
+import {
+  musicAlbumsTable,
+  musicEntityLinksTable,
+  musicPlaylistsTable,
+  musicPlaylistTracksTable,
+  musicTracksTable,
+} from '@/db/music-entity.schema'
+import { ConflictError, DatabaseError, getErrorMessage, ValidationError } from '@/errors'
 import { toSlug } from '@/services/to-slug'
 
 import {
@@ -42,10 +48,14 @@ export const readablePlaylistPredicate = (now: Date, reader?: PlaylistReader) =>
       : publicPlaylistPredicate(now)
 
 /** Shared anonymous/browser read policy. Never pass an MCP principal as reader. */
-export const getReadablePlaylistsEffect = (reader?: PlaylistReader, id?: string) =>
+export const getReadablePlaylistsEffect = (
+  reader?: PlaylistReader,
+  id?: string,
+  capturedNow?: Date,
+) =>
   Effect.gen(function* () {
     const db = yield* Database
-    const now = new Date(yield* Clock.currentTimeMillis)
+    const now = capturedNow ?? new Date(yield* Clock.currentTimeMillis)
 
     return yield* Effect.tryPromise({
       try: async () => {
@@ -82,7 +92,21 @@ export const getReadablePlaylistsEffect = (reader?: PlaylistReader, id?: string)
           )
           .orderBy(desc(musicPlaylistsTable.createdAt), asc(musicPlaylistsTable.id))
 
-        return rows.map(({ playlist, spotifyUrl }) => ({ ...playlist, spotifyUrl }))
+        return rows.map(({ playlist, spotifyUrl }) => ({
+          ...playlist,
+          // Keep the browser DTO shape without disclosing actor IDs to public readers.
+          createdById:
+            currentReader &&
+            (currentReader.role === 'admin' || currentReader.id === playlist.createdById)
+              ? playlist.createdById
+              : null,
+          curatorId:
+            currentReader &&
+            (currentReader.role === 'admin' || currentReader.id === playlist.createdById)
+              ? playlist.curatorId
+              : null,
+          spotifyUrl,
+        }))
       },
       catch: () =>
         new DatabaseError({
@@ -93,14 +117,18 @@ export const getReadablePlaylistsEffect = (reader?: PlaylistReader, id?: string)
     })
   })
 
-export const getReadablePlaylistByIdEffect = (id: string, reader?: PlaylistReader) =>
-  getReadablePlaylistsEffect(reader, id).pipe(
+export const getReadablePlaylistByIdEffect = (
+  id: string,
+  reader?: PlaylistReader,
+  capturedNow?: Date,
+) =>
+  getReadablePlaylistsEffect(reader, id, capturedNow).pipe(
     Effect.flatMap((rows) => requireOne(rows, 'MusicPlaylist', id)),
   )
 
 /** Explicit public projection, reusable by editorial validation and public MCP reads. */
-export const getPublicPlaylistEffect = (id: string) =>
-  getReadablePlaylistByIdEffect(id).pipe(
+export const getPublicPlaylistEffect = (id: string, capturedNow?: Date) =>
+  getReadablePlaylistByIdEffect(id, undefined, capturedNow).pipe(
     Effect.map((row) => ({
       id: row.id,
       title: row.title,
@@ -113,6 +141,127 @@ export const getPublicPlaylistEffect = (id: string) =>
       revision: row.revision,
     })),
   )
+
+/** Complete bounded R2 evidence at a trusted captured instant; no actor override or provider work.
+ * Track/album timestamps are returned, NOT filtered: evidence qualification belongs to R2.
+ * D1 batch gives the header and memberships one transaction snapshot; 101 detects overflow.
+ */
+export const getPublicPlaylistSnapshotEffect = Effect.fn('playlist.publicSnapshot')(
+  function* (input: {
+    readonly playlistId: string
+    readonly now: Date
+    readonly expectedRevision?: number
+  }) {
+    const db = yield* Database
+
+    const [headers, members] = yield* Effect.tryPromise({
+      try: () =>
+        db.batch([
+          db
+            .select({
+              id: musicPlaylistsTable.id,
+              title: musicPlaylistsTable.title,
+              slug: musicPlaylistsTable.slug,
+              description: musicPlaylistsTable.description,
+              coverImageUrl: musicPlaylistsTable.coverImageUrl,
+              publishedAt: musicPlaylistsTable.publishedAt,
+              createdAt: musicPlaylistsTable.createdAt,
+              updatedAt: musicPlaylistsTable.updatedAt,
+              revision: musicPlaylistsTable.revision,
+            })
+            .from(musicPlaylistsTable)
+            .where(
+              and(eq(musicPlaylistsTable.id, input.playlistId), publicPlaylistPredicate(input.now)),
+            )
+            .limit(1),
+          db
+            .select({
+              trackId: musicPlaylistTracksTable.trackId,
+              position: musicPlaylistTracksTable.position,
+              addedAt: musicPlaylistTracksTable.addedAt,
+              // D1 batch returns objects keyed by SQL column name: unique aliases prevent
+              // track/album fields from colliding before Drizzle maps their positions.
+              track: {
+                id: sql`${musicTracksTable.id}`.mapWith(musicTracksTable.id).as('track_id'),
+                title: sql`${musicTracksTable.title}`
+                  .mapWith(musicTracksTable.title)
+                  .as('track_title'),
+                artistNames: sql`${musicTracksTable.artistNames}`
+                  .mapWith(musicTracksTable.artistNames)
+                  .as('track_artists'),
+                albumId: sql`${musicTracksTable.albumId}`
+                  .mapWith(musicTracksTable.albumId)
+                  .as('track_album_id'),
+                trackNumber: sql`${musicTracksTable.trackNumber}`
+                  .mapWith(musicTracksTable.trackNumber)
+                  .as('track_number'),
+                slug: sql`${musicTracksTable.slug}`.mapWith(musicTracksTable.slug).as('track_slug'),
+                coverImageUrl: sql`${musicTracksTable.coverImageUrl}`
+                  .mapWith(musicTracksTable.coverImageUrl)
+                  .as('track_cover'),
+                publishedAt: sql`${musicTracksTable.publishedAt}`
+                  .mapWith(musicTracksTable.publishedAt)
+                  .as('track_published_at'),
+              },
+              album: {
+                id: sql`${musicAlbumsTable.id}`.mapWith(musicAlbumsTable.id).as('album_id'),
+                title: sql`${musicAlbumsTable.title}`
+                  .mapWith(musicAlbumsTable.title)
+                  .as('album_title'),
+                artistNames: sql`${musicAlbumsTable.artistNames}`
+                  .mapWith(musicAlbumsTable.artistNames)
+                  .as('album_artists'),
+                slug: sql`${musicAlbumsTable.slug}`.mapWith(musicAlbumsTable.slug).as('album_slug'),
+                coverImageUrl: sql`${musicAlbumsTable.coverImageUrl}`
+                  .mapWith(musicAlbumsTable.coverImageUrl)
+                  .as('album_cover'),
+                publishedAt: sql`${musicAlbumsTable.publishedAt}`
+                  .mapWith(musicAlbumsTable.publishedAt)
+                  .as('album_published_at'),
+              },
+            })
+            .from(musicPlaylistTracksTable)
+            .innerJoin(
+              musicPlaylistsTable,
+              eq(musicPlaylistsTable.id, musicPlaylistTracksTable.playlistId),
+            )
+            .leftJoin(musicTracksTable, eq(musicTracksTable.id, musicPlaylistTracksTable.trackId))
+            .leftJoin(musicAlbumsTable, eq(musicAlbumsTable.id, musicTracksTable.albumId))
+            .where(
+              and(eq(musicPlaylistsTable.id, input.playlistId), publicPlaylistPredicate(input.now)),
+            )
+            .orderBy(asc(musicPlaylistTracksTable.position), asc(musicPlaylistTracksTable.trackId))
+            .limit(101),
+        ]),
+      catch: () =>
+        new DatabaseError({
+          message: 'Could not read playlist snapshot',
+          operation: 'select',
+          table: 'music_playlists',
+        }),
+    })
+
+    const playlist = yield* requireOne(headers, 'MusicPlaylist', input.playlistId)
+
+    if (input.expectedRevision !== undefined && input.expectedRevision !== playlist.revision)
+      return yield* new ConflictError({ message: 'Playlist revision changed.' })
+
+    if (members.length > 100)
+      return yield* new ValidationError({
+        message: 'Complete playlist snapshot supports at most 100 memberships.',
+      })
+
+    return {
+      playlist,
+      members: members.map((member) => ({
+        ...member,
+        track: member.track.id === null ? null : member.track,
+        album: member.album.id === null ? null : member.album,
+      })),
+      snapshotTime: input.now,
+    }
+  },
+)
 
 export const createPlaylistEffect = Effect.fn('musicEntity.createPlaylist')(function* (
   data: CreatePlaylistInput,

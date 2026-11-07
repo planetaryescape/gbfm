@@ -9,7 +9,7 @@ import { expect, test } from 'vitest'
 import { user } from '@/db/auth.schema'
 import { editorialOperations } from '@/db/editorial-operation.schema'
 import { Database, DatabaseLayer } from '@/db/layer'
-import { musicPlaylistsTable, musicTracksTable } from '@/db/music-entity.schema'
+import { musicAlbumsTable, musicPlaylistsTable, musicTracksTable } from '@/db/music-entity.schema'
 import { oauthAccessToken, oauthClient, oauthResource } from '@/db/oauth.schema'
 import { postMusicReferencesTable } from '@/db/post-music-reference.schema'
 import { postCreators, postsTable } from '@/db/post.schema'
@@ -34,6 +34,7 @@ import { EditorialMusicService, EditorialMusicServiceLayer } from '../editorial-
 import { loadEditorialSnapshot } from '../editorial-music/snapshot'
 import { EditorialMcpSettings, projectPost } from '../model'
 import { composeMcpToolkits, EditorialToolkit } from '../server'
+import { makeMcpWireResponse, McpWireResponse } from '../wire-response'
 import { DraftMusicReferencesService, DraftMusicReferencesServiceLayer } from './service'
 import { DraftMusicReferencesToolkit, DraftMusicReferencesToolHandlersLayer } from './toolkit'
 
@@ -114,7 +115,10 @@ const harness = async () => {
     actor = principal,
     trusted = true,
   ) => {
-    const program = withTestLayer(effect, layer).pipe(Effect.provideService(McpActor, actor))
+    const program = withTestLayer(effect, layer).pipe(
+      Effect.provideService(McpActor, actor),
+      Effect.provideService(McpWireResponse, makeMcpWireResponse(1, 'json')),
+    )
 
     return Effect.runPromise(
       trusted ? program.pipe(Effect.provideService(CommandAuthority, authority)) : program,
@@ -172,7 +176,7 @@ const harness = async () => {
     )
 
     return {
-      call: (args: Schema.Json) =>
+      call: (args: Schema.Json, id: string | number = 1) =>
         app.handler(
           new Request(resource.config.mcp.resourceUrl, {
             method: 'POST',
@@ -186,7 +190,7 @@ const harness = async () => {
             },
             body: JSON.stringify({
               jsonrpc: '2.0',
-              id: 1,
+              id,
               method: 'tools/call',
               params: {
                 name: 'set_draft_music_references',
@@ -592,4 +596,94 @@ test('real OAuth MCP wire preserves the reference codec, rejects missing precond
   const revoked = await h.state()
   expect((await app.call(input)).status).toBe(401)
   expect(await h.state()).toEqual(revoked)
+}, 15_000)
+
+test('all 50 mixed public targets fit one atomic replacement; 51 rejects without writes', async () => {
+  await using h = await harness()
+
+  const targets = Array.from({ length: 50 }, (_, index) => ({
+    entityType: ['album', 'track', 'playlist'][index % 3],
+    entityId: `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`,
+  })).map((target) => Schema.decodeUnknownSync(DraftMusicTarget)(target))
+
+  for (const target of targets) {
+    const row = {
+      id: target.entityId,
+      slug: target.entityId,
+      title: `Full collection ${target.entityId}`,
+      publishedAt: new Date(0),
+    }
+
+    if (target.entityType === 'album') await h.db.insert(musicAlbumsTable).values(row)
+    else if (target.entityType === 'track') await h.db.insert(musicTracksTable).values(row)
+    else await h.db.insert(musicPlaylistsTable).values(row)
+  }
+
+  const primary = targets[37]
+
+  if (!primary) throw new Error('Missing full-collection primary fixture')
+  const input = { ...(await h.mutation()), musicReferences: { references: targets, primary } }
+
+  const result = await h.run(
+    Effect.flatMap(DraftMusicReferencesService, (s) => s.setDraftMusicReferences(input)),
+  )
+
+  expect(result.post.musicReferences.references).toEqual(targets)
+  expect(result.post.musicReferences.primary).toEqual(primary)
+  expect((await h.state()).refs).toHaveLength(50)
+  const before = await h.state()
+  await expect(
+    h.run(
+      Effect.flatMap(DraftMusicReferencesService, (s) =>
+        s.setDraftMusicReferences({
+          ...input,
+          requestId: crypto.randomUUID(),
+          expectedVersion: result.post.version,
+          musicReferences: { references: [...targets, h.track], primary },
+        }),
+      ),
+    ),
+  ).rejects.toMatchObject({ code: 'invalid_input' })
+  expect(await h.state()).toEqual(before)
+}, 15_000)
+
+test('escaped MCP acknowledgements fit before commit or reject without writes, including identical retry', async () => {
+  await using h = await harness()
+  await using app = h.http()
+  await h.db
+    .update(postsTable)
+    .set({ content: String.fromCharCode(92).repeat(20_000) })
+    .where(eq(postsTable.id, h.postId))
+  const control = await app.call(await h.mutation())
+  expect(control.status).toBe(200)
+  expect(await control.json()).toMatchObject({
+    result: {
+      structuredContent: { post: { musicReferences: { references: [h.track, h.playlist] } } },
+    },
+  })
+  const longIdInput = await h.mutation()
+  const beforeLongId = await h.state()
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await app.call(longIdInput, String.fromCharCode(92).repeat(100_000))
+    expect((await h.state()).receipts).toHaveLength(beforeLongId.receipts.length)
+    expect(await h.state()).toEqual(beforeLongId)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ result: { isError: true } })
+  }
+
+  await h.db
+    .update(postsTable)
+    .set({ content: String.fromCharCode(92).repeat(60_000) })
+    .where(eq(postsTable.id, h.postId))
+  const input = await h.mutation()
+  const before = await h.state()
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await app.call(input)
+    expect((await h.state()).receipts).toHaveLength(before.receipts.length)
+    expect(await h.state()).toEqual(before)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ result: { isError: true } })
+  }
 }, 15_000)

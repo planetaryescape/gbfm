@@ -51,6 +51,10 @@ test.each([
     expect(text).toContain('create_draft')
     expect(text).toContain('update_draft')
     expect(text).toContain('drafts:write')
+    expect(text).toContain('list_published_posts')
+    expect(text).toContain('get_show')
+    expect(text).toContain('list_show_episodes')
+    expect(text).toContain('Production allowedScopes is unchanged')
     expect(text).toContain('Existing connections remain read-only')
     expect(text).toContain(
       'never publish, delete, change creators, change media or edit published posts',

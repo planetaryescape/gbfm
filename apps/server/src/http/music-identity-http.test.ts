@@ -8,7 +8,10 @@ import {
   MusicProviderNotFound,
   MusicProviderRequestFailed,
 } from '@/errors'
-import { MusicIdentityProviderUnavailable } from '@/services/canonical-music-identity/errors'
+import {
+  MusicIdentityAuthorizationFailed,
+  MusicIdentityProviderUnavailable,
+} from '@/services/canonical-music-identity/errors'
 
 import {
   mapMusicIdentityErrors,
@@ -17,6 +20,27 @@ import {
 } from './music-identity-http'
 
 describe('music identity HTTP errors', () => {
+  test('maps invalid live authority to 403 and verification outage to 503', async () => {
+    const denied = await Effect.runPromise(
+      Effect.flip(
+        mapMusicIdentityErrors(
+          Effect.fail(new MusicIdentityAuthorizationFailed({ reason: 'denied' })),
+        ),
+      ),
+    )
+
+    const unavailable = await Effect.runPromise(
+      Effect.flip(
+        mapMusicIdentityErrors(
+          Effect.fail(new MusicIdentityAuthorizationFailed({ reason: 'unavailable' })),
+        ),
+      ),
+    )
+
+    expect(denied).toBeInstanceOf(HttpApiError.Forbidden)
+    expect(unavailable).toBeInstanceOf(MusicServiceUnavailableResponse)
+  })
+
   test('maps provider outages to a retry-bearing 503 response', async () => {
     const response = await Effect.runPromise(
       Effect.flip(

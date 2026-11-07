@@ -16,6 +16,7 @@ import type {
   CanonicalMusicIdentityService,
   ImportProviderMusicEntity,
   ImportProviderMusicEntityLazy,
+  MusicIdentityAuthorization,
   ResolveMusicSource,
 } from './contract'
 import { buildEntityOperations } from './entity-operations'
@@ -134,6 +135,11 @@ const legacyFallbackType = (source: ParsedMusicSource, expectedType?: CanonicalM
 const persistedArtwork = (resolved: AnyResolvedMusicEntity) =>
   resolved.entityType === 'artist' ? resolved.entity.imageUrl : resolved.entity.coverImageUrl
 
+const checkAuthorization = (
+  authorize: MusicIdentityAuthorization | undefined,
+  entityType?: CanonicalMusicEntityType,
+) => (authorize ? authorize(entityType) : Effect.void)
+
 export const CanonicalMusicIdentityLayer = Layer.effect(
   CanonicalMusicIdentity,
   Effect.gen(function* () {
@@ -156,7 +162,7 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
         loadResolvedEntity(repository, reference, created).pipe(provideDb),
     })
 
-    const readReference = (source: ParsedMusicSource) =>
+    const readReference = (source: ParsedMusicSource, authorize?: MusicIdentityAuthorization) =>
       Effect.gen(function* () {
         yield* annotateSource(source)
         const identity = yield* repository.lookup(source)
@@ -175,12 +181,15 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
           return undefined
         }
 
+        yield* checkAuthorization(authorize, reference.entityType)
+
         const entity = yield* loadEntity(reference).pipe(
           provideDb,
           Effect.catchTag('MusicIdentityEntityNotFound', () => Effect.succeed(undefined)),
         )
 
         if (entity) {
+          yield* checkAuthorization(authorize, reference.entityType)
           yield* repository.touchAlias(source, reference, new Date())
           yield* annotateEntity(reference)
           yield* Effect.annotateCurrentSpan({ result: 'hit', outcome: 'success' })
@@ -225,10 +234,12 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
       source: ParsedMusicSource,
       ownerToken: string,
       retryCount: number,
+      authorize?: MusicIdentityAuthorization,
     ): Effect.Effect<ClaimResult, MusicIdentityError> =>
       Effect.gen(function* () {
         yield* annotateSource(source)
         yield* Effect.annotateCurrentSpan('retryCount', retryCount)
+        yield* checkAuthorization(authorize)
         const claim = yield* repository.claim(source, ownerToken, new Date(), leaseTiming.leaseMs)
 
         if (Predicate.isTagged(claim, 'owned')) {
@@ -238,6 +249,7 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
             yield* Effect.annotateCurrentSpan('claimAgeMs', claim.claimAgeMs)
           }
         } else if (Predicate.isTagged(claim, 'resolved')) {
+          yield* checkAuthorization(authorize, claim.reference.entityType)
           yield* annotateEntity(claim.reference)
           yield* Effect.annotateCurrentSpan('result', 'hit')
         } else {
@@ -257,32 +269,38 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
       ownerToken: string,
       attempt = 0,
       observedClaim?: ClaimResult,
+      authorize?: MusicIdentityAuthorization,
     ): Effect.Effect<SettledClaim, MusicIdentityError> =>
       Effect.gen(function* () {
-        const claim = observedClaim ?? (yield* claimSource(source, ownerToken, attempt))
+        const claim = observedClaim ?? (yield* claimSource(source, ownerToken, attempt, authorize))
 
         if (ClaimResult.$is('owned')(claim)) return claim
 
-        if (ClaimResult.$is('resolved')(claim)) return claim
+        if (ClaimResult.$is('resolved')(claim)) {
+          yield* checkAuthorization(authorize, claim.reference.entityType)
+
+          return claim
+        }
 
         if (attempt >= leaseTiming.waitAttempts) {
           return yield* new MusicIdentityBusy({ retryAfterMs: claim.retryAfterMs })
         }
 
         yield* Effect.sleep(`${leaseTiming.waitMs} millis`)
-        const reference = yield* readReference(source)
+        const reference = yield* readReference(source, authorize)
 
         if (reference) return ClaimResult.resolved({ reference })
 
-        return yield* claimWithWait(source, ownerToken, attempt + 1)
+        return yield* claimWithWait(source, ownerToken, attempt + 1, undefined, authorize)
       })
 
     const waitForResolved = (
       source: ParsedMusicSource,
       attempt = 0,
+      authorize?: MusicIdentityAuthorization,
     ): Effect.Effect<EntityReference, MusicIdentityError> =>
       Effect.gen(function* () {
-        const reference = yield* readReference(source)
+        const reference = yield* readReference(source, authorize)
 
         if (reference) return reference
 
@@ -292,23 +310,29 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
 
         yield* Effect.sleep(`${leaseTiming.waitMs} millis`)
 
-        return yield* waitForResolved(source, attempt + 1)
+        return yield* waitForResolved(source, attempt + 1, authorize)
       })
 
     const adoptLegacy = (
       source: ParsedMusicSource,
       entityType: CanonicalMusicEntityType,
+      authorize?: MusicIdentityAuthorization,
     ): Effect.Effect<AnyResolvedMusicEntity | undefined, MusicIdentityError> =>
       Effect.gen(function* () {
         const legacy = yield* findLegacyReference(source, entityType)
 
         if (!legacy) return undefined
+        yield* checkAuthorization(authorize, legacy.entityType)
         const ownerToken = crypto.randomUUID()
-        const claim = yield* claimWithWait(source, ownerToken)
+        const claim = yield* claimWithWait(source, ownerToken, 0, undefined, authorize)
 
         if (ClaimResult.$is('resolved')(claim)) {
           return yield* loadResolvedEntity(repository, claim.reference, false).pipe(provideDb)
         }
+
+        yield* checkAuthorization(authorize, legacy.entityType).pipe(
+          Effect.tapError(() => repository.release([source.sourceKey], ownerToken)),
+        )
 
         const adopted = yield* repository
           .commit({
@@ -328,6 +352,7 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
             now: new Date(),
           })
           .pipe(
+            Effect.tapError(() => repository.release([source.sourceKey], ownerToken)),
             Effect.tap((committed) =>
               Effect.gen(function* () {
                 yield* annotateSource(source)
@@ -344,7 +369,7 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
 
         if (adopted) return yield* loadResolvedEntity(repository, legacy, false).pipe(provideDb)
         yield* repository.release([source.sourceKey], ownerToken)
-        const winner = yield* readReference(source)
+        const winner = yield* readReference(source, authorize)
 
         if (winner) return yield* loadResolvedEntity(repository, winner, false).pipe(provideDb)
 
@@ -355,12 +380,15 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
       ownedSources: ReadonlyArray<ParsedMusicSource>,
       ownerToken: string,
       effect: Effect.Effect<A, E, R>,
+      authorize?: MusicIdentityAuthorization,
     ): Effect.Effect<A, MusicIdentityError | E, R> =>
       Effect.scoped(
         Effect.gen(function* () {
           const heartbeat = Effect.gen(function* () {
             yield* Effect.sleep(`${heartbeatMs} millis`)
             const sourceKeys = ownedSources.map((source) => source.sourceKey)
+
+            yield* checkAuthorization(authorize)
 
             const renewed = yield* repository.renew(
               sourceKeys,
@@ -391,20 +419,22 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
         readonly curatorId?: string | null | undefined
       },
       fallbackType?: CanonicalMusicEntityType,
+      authorize?: MusicIdentityAuthorization,
     ): Effect.Effect<AnyResolvedMusicEntity, MusicIdentityError | E, R> =>
       Effect.gen(function* () {
-        const hit = yield* readReference(initial)
+        yield* checkAuthorization(authorize)
+        const hit = yield* readReference(initial, authorize)
 
         if (hit) return yield* loadResolvedEntity(repository, hit, false).pipe(provideDb)
 
         if (fallbackType) {
-          const adopted = yield* adoptLegacy(initial, fallbackType)
+          const adopted = yield* adoptLegacy(initial, fallbackType, authorize)
 
           if (adopted) return adopted
         }
 
         const ownerToken = crypto.randomUUID()
-        const firstClaim = yield* claimWithWait(initial, ownerToken)
+        const firstClaim = yield* claimWithWait(initial, ownerToken, 0, undefined, authorize)
 
         if (ClaimResult.$is('resolved')(firstClaim)) {
           return yield* loadResolvedEntity(repository, firstClaim.reference, false).pipe(provideDb)
@@ -413,7 +443,14 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
         const ownedSources: Array<ParsedMusicSource> = [initial]
 
         return yield* Effect.gen(function* () {
-          const result = yield* withClaimHeartbeat(ownedSources, ownerToken, resultEffect)
+          yield* checkAuthorization(authorize)
+
+          const result = yield* withClaimHeartbeat(
+            ownedSources,
+            ownerToken,
+            resultEffect,
+            authorize,
+          )
 
           if (!hasUsableResult(result)) {
             return yield* new MusicIdentityInvalidSnapshot({
@@ -429,6 +466,7 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
             })
           }
 
+          yield* checkAuthorization(authorize, entityType)
           const scrapedAt = new Date()
           const links = uniqueLinks(initial, result, scrapedAt)
           const sources = yield* parseDiscoveredSources(initial, links, entityType)
@@ -436,14 +474,14 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
 
           for (const source of sources) {
             if (source.sourceKey === initial.sourceKey) continue
-            const existing = yield* readReference(source)
+            const existing = yield* readReference(source, authorize)
 
             if (existing) {
               incumbents.set(referenceKey(existing), existing)
               continue
             }
 
-            const attempted = yield* claimSource(source, ownerToken, 0)
+            const attempted = yield* claimSource(source, ownerToken, 0, authorize)
 
             if (Predicate.isTagged(attempted, 'owned')) {
               ownedSources.push(source)
@@ -460,12 +498,12 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
                 ownedSources.map((owned) => owned.sourceKey),
                 ownerToken,
               )
-              const winner = yield* waitForResolved(initial)
+              const winner = yield* waitForResolved(initial, 0, authorize)
 
               return yield* loadResolvedEntity(repository, winner, false).pipe(provideDb)
             }
 
-            const claim = yield* claimWithWait(source, ownerToken, 0, attempted)
+            const claim = yield* claimWithWait(source, ownerToken, 0, attempted, authorize)
 
             if (ClaimResult.$is('owned')(claim)) ownedSources.push(source)
             else incumbents.set(referenceKey(claim.reference), claim.reference)
@@ -516,6 +554,8 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
             entityId: crypto.randomUUID(),
           }
 
+          yield* checkAuthorization(authorize, reference.entityType)
+
           const entity = incumbent
             ? undefined
             : yield* prepareEntityRecord(db, entityType, reference.entityId, result, entityDetails)
@@ -531,6 +571,8 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
               })
             : undefined
 
+          yield* checkAuthorization(authorize, reference.entityType)
+
           const renewed = yield* repository.renew(
             ownedSources.map((source) => source.sourceKey),
             ownerToken,
@@ -541,6 +583,8 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
           if (renewed.length !== ownedSources.length) {
             return yield* new MusicIdentityBusy({ retryAfterMs: leaseTiming.leaseMs })
           }
+
+          yield* checkAuthorization(authorize, reference.entityType)
 
           const committed = yield* repository
             .commit(
@@ -572,7 +616,7 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
             )
 
           if (!committed) {
-            const winner = yield* readReference(initial)
+            const winner = yield* readReference(initial, authorize)
 
             if (winner) return yield* loadResolvedEntity(repository, winner, false).pipe(provideDb)
 
@@ -622,12 +666,16 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
           ),
           undefined,
           legacyFallbackType(source, input.expectedType),
+          input.authorize,
         )
+
+        yield* checkAuthorization(input.authorize, resolved.entityType)
 
         const delivered = yield* deliverMusicArtwork({
           resolved,
           candidateUrl: candidateArtworkUrl ?? persistedArtwork(resolved),
           delivery: input.artworkDelivery,
+          authorize: input.authorize,
         })
 
         yield* annotateEntity({ entityType: delivered.entityType, entityId: delivered.entity.id })

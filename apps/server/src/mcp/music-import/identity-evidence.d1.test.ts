@@ -6,15 +6,19 @@ import { Database } from '@/db/layer'
 import {
   musicEntityTypesTable,
   musicPlatformsTable,
+  musicSourceAliasesTable,
   musicSourceIdentitiesTable,
   musicTracksTable,
 } from '@/db/music-entity.schema'
 import { S3Error } from '@/errors'
+import { omitUndefined } from '@/lib/omit-undefined'
 import {
   CanonicalMusicIdentity,
   CanonicalMusicIdentityLayer,
 } from '@/services/canonical-music-identity'
 import { MusicCoverImageFetcher } from '@/services/canonical-music-identity/artwork-delivery'
+import type { MusicIdentityAuthorization } from '@/services/canonical-music-identity/contract'
+import { MusicIdentityAuthorizationFailed } from '@/services/canonical-music-identity/errors'
 import { ConfigService, createConfig } from '@/services/config.service'
 import { MusicLinkScraperService, MusicScraperError } from '@/services/music-link-scraper.service'
 import { S3Service } from '@/services/s3.service'
@@ -46,16 +50,21 @@ const resolve = (
   url: string,
   title = 'Controlled track',
   artworkDelivery: 'preserve' | 'required' = 'preserve',
+  authorize?: MusicIdentityAuthorization,
+  expectedType: 'track' | 'playlist' = 'track',
 ) =>
   Effect.runPromise(
     withTestLayer(
       Effect.flatMap(CanonicalMusicIdentity, (identity) =>
-        identity.resolveSource({
-          url,
-          expectedType: 'track',
-          origin: 'manual',
-          artworkDelivery,
-        }),
+        identity.resolveSource(
+          omitUndefined({
+            url,
+            expectedType,
+            origin: 'manual' as const,
+            artworkDelivery,
+            authorize,
+          }),
+        ),
       ),
       CanonicalMusicIdentityLayer.pipe(
         Layer.provide(
@@ -153,6 +162,63 @@ test('canonical source identity is not a changed-command-payload conflict receip
   expect(changed).toMatchObject({
     success: { created: false, entity: { title: 'Original title' } },
   })
+})
+
+test('canonical authorization denies reused playlist before alias touch despite a track hint', async () => {
+  await db
+    .insert(musicPlatformsTable)
+    .values({ id: 'soundcloud', displayName: 'SoundCloud' })
+    .onConflictDoNothing()
+  const url = `https://soundcloud.com/controlled/sets/${crypto.randomUUID()}`
+  expect(
+    await resolve(url, 'Controlled playlist', 'preserve', undefined, 'playlist'),
+  ).toMatchObject({
+    success: { entityType: 'playlist', created: true },
+  })
+
+  const aliases = await db
+    .select()
+    .from(musicSourceAliasesTable)
+    .where(eq(musicSourceAliasesTable.normalizedUrl, url))
+
+  const denied = await resolve(url, 'Misleading track', 'preserve', (type) =>
+    type === 'playlist'
+      ? Effect.fail(new MusicIdentityAuthorizationFailed({ reason: 'denied' }))
+      : Effect.void,
+  )
+
+  expect(denied).toMatchObject({ failure: { reason: 'denied' } })
+  expect(
+    await db
+      .select()
+      .from(musicSourceAliasesTable)
+      .where(eq(musicSourceAliasesTable.normalizedUrl, url)),
+  ).toEqual(aliases)
+})
+
+test('authorization after provider inference prevents catalogue commit and releases its source claim', async () => {
+  const externalId = crypto.randomUUID().replaceAll('-', '')
+
+  const denied = await resolve(
+    `https://open.spotify.com/track/${externalId}`,
+    'Denied track',
+    'preserve',
+    (type) =>
+      type === undefined
+        ? Effect.void
+        : Effect.fail(new MusicIdentityAuthorizationFailed({ reason: 'denied' })),
+  )
+
+  expect(denied).toMatchObject({ failure: { reason: 'denied' } })
+  expect(
+    await db
+      .select()
+      .from(musicSourceIdentitiesTable)
+      .where(eq(musicSourceIdentitiesTable.sourceKey, `spotify:track:${externalId}`)),
+  ).toEqual([])
+  expect(
+    await db.select().from(musicTracksTable).where(eq(musicTracksTable.title, 'Denied track')),
+  ).toEqual([])
 })
 
 test('artwork upload failure occurs after catalogue commit and leaves a recoverable entity', async () => {

@@ -1,8 +1,10 @@
-# R3 first public-content slice (#519)
+# R3 public-content reads (#519)
 
-This is a partial delivery, not completion of R3. It depends on P1 PR #548 at
-`2d1b5592826e66e3a198dc117c153e062264fc5c`, not `origin/prod` or sibling R1.
-P0 → P1 → this PR is the prerequisite order. Leave every MCP PR unmerged for
+This is a partial delivery, not completion of R3. The four-tool continuation
+depends on central PR #552 at `2fa6712689521ab8d48085873c845b63ea4c2ffa`,
+which incorporates the original three-tool PR #550 and P1 #548, not `origin/prod`
+or sibling R1. P0 → P1 → R3 first slice → central #552 → continuation is the order.
+Leave every MCP PR unmerged for
 Guide Fari's overview. No production scope activation is included.
 
 ## Selected capability mapping
@@ -12,11 +14,11 @@ Guide Fari's overview. No production scope activation is included.
 | `list_published_posts` | Delivered as editorial **summary metadata**, not source or micro posts. Optional limit/offset; existing anonymous `getEditorialSummaries` seam. Stable post IDs, observed updatedAt and public review URLs. Blank title/body source rows may yield a short/empty page: advance by pagination.limit, not returned length. Total describes the public source window before blank-row omission, never drafts. |
 | `get_show` | Delivered as small public show metadata by slug. Stable show ID, observed updatedAt and public review URL. Additive `ShowService.getPublicSummaryBySlug`; no rendering, source body, media URLs or host expansion. Missing/draft both `not_found`. |
 | `list_show_episodes` | Delivered as public **audio** episode metadata by show slug plus limit/offset. Existing `getEpisodes` called without actor/loaded show. Public parent and public children required before counts/pagination. Missing/draft parent both `not_found`; existing empty public show returns an empty page. Audio track IDs are not canonical music track IDs. Misc audio reviews on its show page. No media URLs, body or creators. |
-| `search_catalogue` | **NOT delivered.** Shared SearchService needs a bounded paging contract and public-parent-safe audio/show joins. Do not filter/truncate after materializing results or invent MCP-only visibility. |
-| `get_mix` | **NOT delivered.** Existing audio detail renders content and inherits show fields without proving public show visibility. Needs an approved non-rendering shared public seam and parent-safe projection. |
-| `get_public_profile` | **NOT delivered.** Existing profile service materializes unbounded content and can inherit draft show thumbnails. Needs a reserved bounded public service projection. |
-| `get_public_collection` | **NOT delivered.** Existing public listening collection read materializes unbounded members. Needs a reserved paged shared projection, preserving collection/member publication and same-owner predicates; do not confuse listening collections with canonical playlists. |
-| `read_micro_thread` | **NOT delivered.** Compiled thread reads render source and can resolve playlist embeds. Needs an approved bounded non-rendering thread contract preserving focus/root/parent visibility. PL1 #533 shared playlist privacy reconciliation is unapproved, not bypassed here. |
+| `search_catalogue` | Delivered as **metadata search** in one explicit `audio` / `show` / `post` namespace per page. Anonymous draft=false source predicate; no related-show fields/media. Optional limit/offset; createdAt DESC/id DESC (not relevance ranking). Audio track IDs are not canonical music-track IDs. Shared `SearchService.searchPublicPage`. |
+| `get_mix` | Delivered as **published GBFM audio mix metadata** by slug via `AudioService.getPublicMixSummaryBySlug`. Missing/draft/non-mix all `not_found`. Preserves anonymous audio publication predicate independently of show publication; no show fields/links, body or media expansion. Not a playback/detail page. |
+| `get_public_profile` | Delivered as **identity metadata**, not a full profile graph/page. `profile.kind` discriminates `user` (user account ID) from `artist` (canonical music-artist ID), even if ID strings coincide. `ProfileService.getPublicProfileMetadata` keeps existing user-first lookup and banned-user denial (no fallback on banned collision); absent users fall back to published artist-DJs using existing mix-credit predicate. That predicate allows a DJ with only draft mixes; no mix identity/count is exposed. No media/social links/graphs. |
+| `get_public_collection` | Delivered as **published listening collection metadata plus bounded member page**, not playlist revisions or embeds. `publicListeningCollectionPage` filters published collection, published saves and same owner before count/paging, createdAt DESC/id DESC. Notes/status are already public with published saves under the existing API contract. Missing/private parent both `not_found`; public empty parent returns an empty page. No owner IDs/embed URLs. |
+| `read_micro_thread` | **NOT delivered.** Shared `getMicroPostThreadEffect` does not filter draft roots/descendants/counts. A migrated-D1 probe confirmed public focus returned a private root and private descendant. Compiled thread bodies can also resolve PL1 playlists. Needs approved shared thread visibility/pagination and PL1 #533 reconciliation; no MCP-only filter bypass or silent summary replacement. PostService remains unchanged. |
 
 All delivered operations require `content:read`, work for eligible active listener
 accounts, recheck scope/account in each handler, and do not require `posts:read`.
@@ -26,6 +28,24 @@ The central transport also enforces its response ceiling and lower request limit
 Reads are safe to retry but pagination is not a snapshot across concurrent edits.
 No writes, playback, seen markers, subscriptions, notifications, provider requests,
 schema changes or production policy changes are introduced.
+
+## Search work limits
+
+Search reuses the existing matching behavior: fewer than three characters uses
+case-insensitive LIKE across title, description, body and labels; longer queries
+use a quoted FTS phrase. Results never return matched body text. SQL LIMIT bounds
+materialized output rows, **not database work**. Exact totals require a separate
+count; matching, label subqueries and createdAt/id sorting may inspect many rows.
+Deep offsets also do work proportional to skipped matches. This slice introduces
+no relevance ranking, index/schema change or false bounded-work guarantee.
+
+A disposable migrated-Miniflare D1 probe captured and executed the actual shared
+service SQL with 1,000 matching audio rows and limit=1. LIKE's count used `SCAN audio`;
+the page also used `USE TEMP B-TREE FOR ORDER BY`. FTS used its virtual index plus
+rowid lookups, but its page still used a temp sort. Local D1 reported rows_read
+1,000/2,000 for LIKE count/page and 3,000/4,000 for FTS count/page, with zero writes
+and a single output row each. These are local runtime counters, not production
+cost estimates; they demonstrate why a one-row page is not a bounded-work promise.
 
 ## P1 integration recipe (not applied to reserved files)
 
@@ -46,6 +66,34 @@ schema changes or production policy changes are introduced.
   denial, public parent/private child paging, and legacy + R1 independence.
 - Keep production allowedScopes unchanged. P1 owns the registry/shared fixture
   edits and final persisted-OAuth + R1 + R3 + legacy integrated-head proof.
+
+### Four-tool continuation (separate proposed registration, not applied here)
+
+- Import `PublicResearchToolkit`, `PublicResearchHandlersLayer` from
+  `@/mcp/content-read/research-toolkit`; `PublicResearchServiceLayer` from
+  `@/mcp/content-read/research-service`. Contracts live in `research-contracts.ts`.
+- Compose `PublicResearchToolkit` alongside `ContentReadToolkit`, R1 and legacy.
+  Provide its handlers then service layer, with real `SearchService`, `AudioService`,
+  `ProfileService`, `Database`, `EditorialMcpConfig`. Use their updated production
+  layers (AudioServiceLayer still needs its normal renderer/storage/config/crypto
+  construction dependencies, but metadata reads never invoke them).
+- In the P1 persisted-OAuth fixture grant only `content:read` to an active listener;
+  discover all seven R3 tools, call all four new tools using real service layers.
+  Seed public audio attached to a draft show and assert no show fields leak;
+  private collection/member and cross-owner member fixtures must be excluded from
+  count and pages. Include banned profile/user-first artist collision and absent
+  user → published artist-DJ fallback. Verify wrong-scope grants, live ban and
+  revocation denial, no provider calls/writes, and independent legacy/R1 discovery.
+  Keep `read_micro_thread` absent, production policy unchanged.
+- `research.d1.test.ts` supplies a runnable isolated transport composition and
+  adversarial fixtures, not a replacement for that persisted-OAuth combined proof.
+
+Existing shared behavior is not strengthened by MCP: public collections do not
+exclude banned owners (profile lookup does); search's `post` namespace includes
+published micro replies even under a draft root, but exposes only the matching
+reply's own metadata, never root/parent/body/count/relationship fields. The full
+thread tool remains gated. Integrators must preserve `profile.kind` so user and
+artist IDs are never interpreted as one identity namespace.
 
 Isolated tests in `content-read.d1.test.ts` execute the real MCP 2026-07-28 protocol,
 live account checks and migrated D1 application services. They inject the principal

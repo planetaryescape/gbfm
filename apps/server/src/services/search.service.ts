@@ -1,4 +1,4 @@
-import { and, eq, like, or, sql, type SQLWrapper } from 'drizzle-orm'
+import { and, count, desc, eq, like, or, sql, type SQLWrapper } from 'drizzle-orm'
 import { Context, Effect, Layer } from 'effect'
 
 import { audioTable } from '@/db/audio.schema'
@@ -7,6 +7,7 @@ import { Database } from '@/db/layer'
 import { postsTable } from '@/db/post.schema'
 import { showsTable } from '@/db/show.schema'
 import { DatabaseError, getErrorMessage } from '@/errors'
+import { createPaginationMetadata, type PaginationMetadata } from '@/lib/pagination'
 
 const shortQueryMatches = (
   entityType: 'audio' | 'show' | 'post',
@@ -47,6 +48,23 @@ export type SearchResults = {
 }
 
 export interface SearchService {
+  /** One published content namespace per page; no related-show or media expansion. */
+  readonly searchPublicPage: (
+    query: string,
+    options: { kind: 'audio' | 'show' | 'post'; limit: number; offset: number },
+  ) => Effect.Effect<
+    {
+      data: Array<{
+        id: string
+        slug: string
+        title: string | null
+        description: string | null
+        type: string
+      }>
+      pagination: PaginationMetadata
+    },
+    DatabaseError
+  >
   readonly search: (query: string, limit: number) => Effect.Effect<SearchResults, DatabaseError>
 }
 
@@ -153,6 +171,53 @@ export const SearchServiceLayer = Layer.effect(
     const provideDb = Effect.provideService(Database, db)
 
     return {
+      searchPublicPage: (query, { kind, limit, offset }) =>
+        Effect.gen(function* () {
+          const table = { audio: audioTable, show: showsTable, post: postsTable }[kind]
+          const index = ({ audio: 'audio', show: 'shows', post: 'posts' } as const)[kind]
+
+          const matches =
+            query.length < 3 ? shortQueryMatches(kind, query, table) : ftsMatches(index, query)
+
+          const where = and(eq(table.draft, false), matches)
+
+          const result = yield* Effect.tryPromise({
+            try: async () => {
+              const totals = await db.select({ total: count() }).from(table).where(where)
+
+              const rows = await db
+                .select({
+                  id: table.id,
+                  slug: table.slug,
+                  title: table.title,
+                  description: table.description,
+                  type: {
+                    show: sql<string>`'show'`,
+                    audio: audioTable.type,
+                    post: postsTable.type,
+                  }[kind],
+                })
+                .from(table)
+                .where(where)
+                .orderBy(desc(table.createdAt), desc(table.id))
+                .limit(limit)
+                .offset(offset)
+
+              return { rows, total: totals[0]?.total ?? 0 }
+            },
+            catch: (error) =>
+              new DatabaseError({
+                message: `Public search failed: ${getErrorMessage(error)}`,
+                operation: 'select',
+                table: index,
+              }),
+          })
+
+          return {
+            data: result.rows.map((row) => ({ ...row, type: row.type ?? 'post' })),
+            pagination: createPaginationMetadata(result.total, limit, offset),
+          }
+        }).pipe(Effect.withSpan('search.publicPage', { attributes: { kind, limit, offset } })),
       search: (query, limit) =>
         provideDb(searchEffect(query, limit)).pipe(
           Effect.withSpan('search.search', { attributes: { limit } }),

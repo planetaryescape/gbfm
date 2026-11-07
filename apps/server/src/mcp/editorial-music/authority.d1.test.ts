@@ -1,11 +1,13 @@
 import { PostId } from '@gbfm/core/editorial-mcp'
-import { eq } from 'drizzle-orm'
+import { DraftMusicTarget } from '@gbfm/core/post-music-references'
+import { eq, sql } from 'drizzle-orm'
 import { Effect, Layer, Redacted, Schema } from 'effect'
 import { HttpRouter, HttpServer } from 'effect/http'
 import { expect, test } from 'vitest'
 
 import { editorialOperations } from '@/db/editorial-operation.schema'
 import { Database, DatabaseLayer } from '@/db/layer'
+import { musicAlbumsTable, musicPlaylistsTable, musicTracksTable } from '@/db/music-entity.schema'
 import { oauthAccessToken, oauthClient } from '@/db/oauth.schema'
 import { postCreators, postsTable } from '@/db/post.schema'
 import { makeMcpRoutes } from '@/http/editorial-mcp.routes'
@@ -27,9 +29,11 @@ import { GetPostResult } from '../contracts'
 import { EditorialMcpConfig } from '../editorial'
 import { EditorialMcpSettings, projectPost } from '../model'
 import { composeMcpToolkits, EditorialToolkit } from '../server'
+import { makeMcpWireResponse, McpWireResponse } from '../wire-response'
 import { saveEditorialChange } from './save'
 import { EditorialMusicService, EditorialMusicServiceLayer } from './service'
 import { loadEditorialSnapshot } from './snapshot'
+import { draftMusicTargetsGuard } from './targets'
 import { EditorialMusicToolkit, EditorialMusicToolHandlersLayer } from './toolkit'
 
 const harness = async () => {
@@ -68,7 +72,10 @@ const harness = async () => {
   )
 
   const run = <A, E>(effect: Effect.Effect<A, E, EditorialMusicService>, trusted = true) => {
-    const program = withTestLayer(effect, service).pipe(Effect.provideService(McpActor, principal))
+    const program = withTestLayer(effect, service).pipe(
+      Effect.provideService(McpActor, principal),
+      Effect.provideService(McpWireResponse, makeMcpWireResponse(1, 'json')),
+    )
 
     return Effect.runPromise(
       trusted ? program.pipe(Effect.provideService(CommandAuthority, authority)) : program,
@@ -142,7 +149,11 @@ const harness = async () => {
 
     const text = await response.text()
 
-    return { status: response.status, body: text.length === 0 ? null : JSON.parse(text) }
+    return {
+      status: response.status,
+      body: text.length === 0 ? null : JSON.parse(text),
+      bytes: new TextEncoder().encode(text).byteLength,
+    }
   }
 
   return {
@@ -279,8 +290,21 @@ test('actual persisted OAuth revocation after preflight refuses CAS, mid-batch r
     createdAt: new Date(),
   }
 
+  await expect(
+    Effect.runPromise(
+      saveEditorialChange(
+        h.fixture.db,
+        h.fixture.userId,
+        previous,
+        { title: 'Missing wire context' },
+        receipt,
+        undefined,
+        checkpoint.liveGuard,
+      ),
+    ),
+  ).rejects.toMatchObject({ code: 'unavailable' })
   expect(
-    await Effect.runPromise(
+    await h.run(
       saveEditorialChange(
         h.fixture.db,
         h.fixture.userId,
@@ -322,4 +346,164 @@ test('actual persisted OAuth revocation after preflight refuses CAS, mid-batch r
     h.run(Effect.flatMap(EditorialMusicService, (s) => s.setDraftTags(input))),
   ).rejects.toMatchObject({ code: 'access_denied' })
   expect(await h.fixture.db.select().from(editorialOperations)).toHaveLength(1)
+}, 20_000)
+
+test('one guarded atomic save supports fifty mixed targets with a full prior snapshot and live OAuth fence', async () => {
+  await using h = await harness()
+  const db = h.fixture.db
+  const postId = PostId.make(crypto.randomUUID())
+  await db.insert(postsTable).values({
+    id: postId,
+    slug: postId,
+    title: 'Full set',
+    content: 'Source',
+    type: 'post',
+    draft: true,
+  })
+  await db.insert(postCreators).values({ postId, creatorId: h.fixture.userId })
+
+  const types = ['playlist', 'track', 'album'] as const
+
+  const targets = Array.from({ length: 50 }, (_, index) =>
+    DraftMusicTarget.make({
+      entityType: types[index % 3] ?? 'album',
+      entityId: index === 7 ? crypto.randomUUID().toUpperCase() : crypto.randomUUID(),
+    }),
+  )
+
+  for (const target of targets) {
+    if (target.entityType === 'playlist')
+      await db.insert(musicPlaylistsTable).values({
+        id: target.entityId,
+        slug: target.entityId,
+        title: 'Public',
+        publishedAt: new Date(0),
+      })
+    else
+      await db
+        .insert(target.entityType === 'track' ? musicTracksTable : musicAlbumsTable)
+        .values({ id: target.entityId, slug: target.entityId, title: 'Catalogue' })
+  }
+
+  const primary = targets[38]
+
+  if (!primary) throw new Error('Missing primary fixture')
+  const references = { references: targets, primary }
+  const now = new Date()
+  const checkpoint = await Effect.runPromise(h.authority.checkpoint(['posts:read', 'drafts:write']))
+
+  for (const title of ['First full set', 'Second full set']) {
+    const previous = await Effect.runPromise(loadEditorialSnapshot(db, postId))
+    expect(
+      await h.run(
+        saveEditorialChange(
+          db,
+          h.fixture.userId,
+          previous,
+          {
+            title,
+            tags: Array.from({ length: 20 }, (_, index) => `tag-${index}`),
+            musicReferences: references,
+          },
+          {
+            id: crypto.randomUUID(),
+            actorId: h.fixture.userId,
+            postId,
+            inputHash: title,
+            result: '{}',
+            createdAt: new Date(),
+          },
+          draftMusicTargetsGuard(db, targets, now),
+          checkpoint.liveGuard,
+        ),
+      ),
+    ).toBe(true)
+    expect((await Effect.runPromise(loadEditorialSnapshot(db, postId))).musicReferences).toEqual(
+      references,
+    )
+  }
+
+  const allowed = (collection: ReadonlyArray<typeof DraftMusicTarget.Type>) =>
+    db.get(
+      sql`SELECT CASE WHEN ${draftMusicTargetsGuard(db, collection, now)} THEN 1 ELSE 0 END AS allowed`,
+    )
+
+  expect(await allowed([])).toEqual({ allowed: 1 })
+  const playlist = targets[0]
+  const mixed = targets[7]
+
+  if (!playlist || !mixed) throw new Error('Missing guard fixtures')
+  await db
+    .update(musicPlaylistsTable)
+    .set({ publishedAt: null })
+    .where(eq(musicPlaylistsTable.id, playlist.entityId))
+  expect(await allowed(targets)).toEqual({ allowed: 0 })
+  await db
+    .update(musicPlaylistsTable)
+    .set({ publishedAt: new Date(now.getTime() + 1) })
+    .where(eq(musicPlaylistsTable.id, playlist.entityId))
+  expect(await allowed(targets)).toEqual({ allowed: 0 })
+  await db
+    .update(musicPlaylistsTable)
+    .set({ publishedAt: now })
+    .where(eq(musicPlaylistsTable.id, playlist.entityId))
+  expect(await allowed(targets)).toEqual({ allowed: 1 })
+  expect(await allowed([{ ...mixed, entityId: mixed.entityId.toLowerCase() }])).toEqual({
+    allowed: 0,
+  })
+  await db
+    .insert(musicTracksTable)
+    .values({ id: mixed.entityId.toLowerCase(), slug: 'case-collision', title: 'Collision' })
+  expect(await allowed(targets)).toEqual({ allowed: 0 })
+  expect(await allowed([{ entityType: 'album', entityId: crypto.randomUUID() }])).toEqual({
+    allowed: 0,
+  })
+}, 20_000)
+
+test('legacy draft create/update and source reads reject escaped wire overflow without saving or truncating', async () => {
+  await using h = await harness()
+
+  const input = {
+    requestId: crypto.randomUUID(),
+    title: 'Wire budget',
+    content: '\\'.repeat(60_000),
+  }
+
+  for (const attempt of [1, 2]) {
+    const response = await h.call('create_draft', input)
+    expect(response.status, `attempt ${attempt}`).toBe(200)
+    expect(response.body).toMatchObject({ result: { isError: true } })
+    expect(JSON.stringify(response.body)).toContain('invalid_input')
+    expect(response.bytes).toBeLessThanOrEqual(256 * 1024)
+    expect(await h.fixture.db.select().from(postsTable)).toEqual([])
+    expect(await h.fixture.db.select().from(editorialOperations)).toEqual([])
+  }
+
+  const postId = PostId.make(crypto.randomUUID())
+  await h.fixture.db.insert(postsTable).values({
+    id: postId,
+    slug: postId,
+    type: 'post',
+    title: 'Existing',
+    content: input.content,
+    draft: true,
+  })
+  await h.fixture.db.insert(postCreators).values({ postId, creatorId: h.fixture.userId })
+  const previous = await Effect.runPromise(loadEditorialSnapshot(h.fixture.db, postId))
+  const expectedVersion = (await Effect.runPromise(projectPost(previous, h.settings))).version
+  const read = await h.call('get_post', { postId })
+  expect(read.body).toMatchObject({ result: { isError: true } })
+  expect(JSON.stringify(read.body)).toContain('invalid_input')
+
+  const changed = await h.call('update_draft', {
+    postId,
+    expectedVersion,
+    requestId: crypto.randomUUID(),
+    title: 'Must not commit',
+  })
+
+  expect(changed.body).toMatchObject({ result: { isError: true } })
+  expect(JSON.stringify(changed.body)).toContain('invalid_input')
+  expect(await Effect.runPromise(loadEditorialSnapshot(h.fixture.db, postId))).toEqual(previous)
+  expect(await h.fixture.db.select().from(editorialOperations)).toEqual([])
 }, 20_000)

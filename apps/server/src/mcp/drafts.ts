@@ -9,6 +9,7 @@ import { McpAuthorization, McpAuthorizationLive } from './authorization'
 import { CreateDraftInput, EditorialToolError, GetPostResult, UpdateDraftInput } from './contracts'
 import { insertEditorialDraft, readEditorialReceipt, updateEditorialDraft } from './draft-store'
 import { EditorialMcpConfig } from './editorial'
+import { boundEditorialWireResult } from './editorial-music/content'
 import { checkpointEditorialCommand } from './editorial-music/save'
 import { loadEditorialSnapshot } from './editorial-music/snapshot'
 import { PersistedPost, projectPost, unavailable, notFound } from './model'
@@ -132,7 +133,7 @@ export const EditorialDraftServiceLayer = Layer.effect(
       yield* loadDraft(receipt.postId, actor)
       yield* authorize
 
-      return Option.some(result)
+      return Option.some(yield* boundEditorialWireResult(result))
     })
 
     const createDraft = Effect.fn('EditorialDraftService.createDraft')(function* (
@@ -196,6 +197,8 @@ export const EditorialDraftServiceLayer = Layer.effect(
         },
         post: yield* projectPost(post, config),
       }
+
+      yield* boundEditorialWireResult(result)
 
       const receipt = {
         id,
@@ -284,6 +287,8 @@ export const EditorialDraftServiceLayer = Layer.effect(
         post: yield* projectPost(next, config),
       }
 
+      yield* boundEditorialWireResult(result)
+
       const receipt = {
         id,
         actorId: actor.userId,
@@ -294,11 +299,15 @@ export const EditorialDraftServiceLayer = Layer.effect(
       }
 
       const current = yield* authorize
-      yield* Effect.tryPromise({
-        try: () =>
-          updateEditorialDraft(db, actor.userId, previous, input, now, receipt, current.liveGuard),
-        catch: unavailable,
-      })
+      yield* updateEditorialDraft(
+        db,
+        actor.userId,
+        previous,
+        input,
+        now,
+        receipt,
+        current.liveGuard,
+      )
       const committed = yield* replay(id, inputHash, actor)
 
       if (Option.isNone(committed)) return yield* conflict()

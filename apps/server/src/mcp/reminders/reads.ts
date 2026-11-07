@@ -70,7 +70,17 @@ export const ReminderReadServiceLayer = Layer.effect(
 
       const persisted = yield* Schema.decodeUnknownEffect(Schema.Array(PersistedSummary))(
         page.reminders,
-      ).pipe(Effect.mapError(unavailable))
+      ).pipe(
+        Effect.tapError(() =>
+          Effect.logError('mcp.reminders.unavailable', {
+            operation: 'reminders.page',
+            table: 'music_reminder',
+            dependency: 'database',
+            code: 'invalid_persisted_row',
+          }),
+        ),
+        Effect.mapError(unavailable),
+      )
 
       const result = yield* Schema.decodeUnknownEffect(ListMusicRemindersResult)({
         reminders: persisted.map((reminder) => ({
@@ -78,7 +88,17 @@ export const ReminderReadServiceLayer = Layer.effect(
           reminderDate: reminder.reminderDate.toISOString(),
         })),
         pagination: { limit, offset, hasMore: page.hasMore },
-      }).pipe(Effect.mapError(unavailable))
+      }).pipe(
+        Effect.tapError(() =>
+          Effect.logError('mcp.reminders.unavailable', {
+            operation: 'reminders.page',
+            table: 'music_reminder',
+            dependency: 'database',
+            code: 'invalid_persisted_row',
+          }),
+        ),
+        Effect.mapError(unavailable),
+      )
 
       // MCP repeats this JSON as structured content and escaped text. A 64 KiB
       // result budget leaves room for both copies and framing under P1's final

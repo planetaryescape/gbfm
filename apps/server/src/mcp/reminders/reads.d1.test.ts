@@ -158,9 +158,22 @@ describe('owner-only reminder reads on migrated D1', () => {
       .prepare('UPDATE music_reminder SET reminder_date = 9000000000000000 WHERE id = ?')
       .bind('own-00')
       .run()
-    expect(await f.run(Effect.flip(f.list({ offset: 51, limit: 1 })))).toMatchObject({
+    const logs: Array<unknown> = []
+    const logging = Logger.layer([Logger.make(({ message }) => logs.push(message))])
+
+    const result = await Effect.runPromise(
+      withTestLayer(
+        Effect.flip(f.list({ offset: 51, limit: 1 })),
+        Layer.merge(f.reads, logging),
+      ).pipe(Effect.provideService(McpActor, principal())),
+    )
+
+    expect(result).toMatchObject({
       code: 'unavailable',
     })
+    expect(JSON.stringify(logs)).toContain('invalid_persisted_row')
+    expect(JSON.stringify(logs)).not.toContain('listener')
+    expect(JSON.stringify(logs)).not.toContain('9000000000000000')
   })
 
   test('D1 failures emit a safe diagnostic without query parameters or raw causes', async () => {
@@ -191,7 +204,7 @@ describe('owner-only reminder reads on migrated D1', () => {
     expect(JSON.stringify(result)).not.toContain('no such table')
   })
 
-  test('real MCP HTTP call projects D1 summaries and exposes no placeholder scheduling tools', async () => {
+  test('real MCP HTTP call projects an owner-only D1 summary page', async () => {
     await using f = await fixture()
 
     const app = HttpRouter.toWebHandler(

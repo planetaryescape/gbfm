@@ -43,6 +43,7 @@ test('reminder discovery, owner reads, denial and byte budget through persisted 
 
   const reader = await tokens('reader', 'reminders:read offline_access')
   const writer = await tokens('other', 'reminders:write offline_access')
+  const full = await tokens('owner', 'reminders:read reminders:write offline_access')
   await fixture.db.insert(musicReminder).values([
     {
       id: 'own',
@@ -164,14 +165,24 @@ test('reminder discovery, owner reads, denial and byte budget through persisted 
                 readOnlyHint: Schema.Boolean,
                 destructiveHint: Schema.Boolean,
               }),
-              outputSchema: Schema.Unknown,
+              outputSchema: Schema.Json,
             }),
           ),
         }),
       }),
-    )(await rpc('tools/list'))
+    )(await rpc('tools/list', {}, full.access_token))
 
     expect(listing.result.tools.map((tool) => tool.name)).toEqual(['list_music_reminders'])
+
+    const writeOnly = Schema.decodeUnknownSync(
+      Schema.Struct({
+        result: Schema.Struct({
+          tools: Schema.Array(Schema.Json),
+        }),
+      }),
+    )(await rpc('tools/list', {}, writer.access_token))
+
+    expect(writeOnly.result.tools).toEqual([])
     expect(listing.result.tools[0]?.annotations).toEqual({
       readOnlyHint: true,
       destructiveHint: false,

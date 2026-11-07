@@ -3,10 +3,12 @@
 This lane depends on P1 #548 at remote commit
 `2d1b5592826e66e3a198dc117c153e062264fc5c`, not coordinator-local changes.
 P0 D1–D6 in `docs/architecture/mcp-expanded-contracts.md` governs the design.
-**No tools are registered yet.** Implementation approval is recorded below;
-the atomic receipt runtime is published at `e01bc5547713b8d3d1680c3eb5cf03a467b8c6fa`
-([PR #573](https://github.com/planetaryescape/gbfm/pull/573)), but is not integrated
-into this head. Domain revisions and staged artwork remain prerequisites.
+**No tools are registered yet.** This execution follow-up is rooted on P1's
+named combined prerequisite `695bb12d2149bcbe123f0b6e7661909c4c3ea5ee`
+([PR #575](https://github.com/planetaryescape/gbfm/pull/575)), with I1's reviewed
+preparation history applied once. The common atomic receipt runtime and domain
+revisions are integrated for manual creation. P1's SQL authority provider,
+canonical import receipt integration and staged artwork remain prerequisites.
 These are technical integration dependencies, not another owner-approval wait.
 No production operations or provider-account writes are authorized here.
 
@@ -64,14 +66,13 @@ It writes nothing and calls no providers. It must not become a wire preview tool
 | `create_label` | UUIDv4, name/slug/content, optional description/artwork/tags/genres; same authority | label.service.ts createLabelEffect validation, but requires the approved writer seam to suppress creator association |
 
 MCP manual creation must not assert ownership. The live actor supplies audit
-createdById, never client input. **Existing createLabelEffect does not meet this
-contract**: passing createdById also inserts music_label_creators, which grants
+createdById, never client input. Passing createdById to the ordinary browser
+createLabelEffect also inserts music_label_creators, which grants
 release-management authority through requireCreatorOrAdmin even after admin
 demotion. The browser path does this today; browser parity is not permission to
-extend that grant through MCP. The approved shared writer must retain actor audit
-attribution but skip that creator association for MCP create_label, while keeping
-browser/PAT behavior unchanged. This approved shared-service seam is not
-implemented here yet; do not call the existing function unchanged. Artist, album
+extend that grant through MCP. The shared writer now retains actor audit
+attribution but skips that creator association for MCP create_label, while keeping
+browser/PAT creator attribution unchanged. Artist, album
 and track createdById currently have no equivalent authority side effect.
 Publication timestamps are not accepted by this
 initial preparation contract. Label imports are not canonical URL imports:
@@ -142,7 +143,30 @@ do not prove persisted OAuth revocation: P1 owns that composed fixture and must
 run it again at final integration. No durable command replay, expired tombstone
 or command-level changed-payload conflict is claimed proven before storage exists.
 
-## Approved shared storage requirements (integration pending)
+## Atomic manual creation
+
+`manual-create.ts` consumes the common operation store, not a second ledger.
+`services/music-entity/create-statements.ts` is the domain-owned SQL plan used by
+all four ordinary createEffect functions and this MCP adapter. Entity, ordered
+credits, derived artistNames, tags/genres, revision zero, physical attempt marker
+and original created outcome commit in the same receipt-fenced batch. Label
+attribution is explicit: browser `creator`, MCP `audit_only`.
+
+The adapter requires an injected SQL liveGuard and a fresh authorization callback;
+it has no permissive default. Both the domain statements and assertApplied include
+that guard. Replay rechecks authority and saved target existence/type before
+disclosing the original result. Controlled guards prove this composition seam,
+not persisted OAuth/session/PAT TOCTOU protection: P1's actual command-authority
+provider must replace the provisional adapter before registration.
+
+`manual-create.d1.test.ts` proves six concurrent requests create one entity and
+replay one original created outcome, changed-payload conflict, discarded-response
+retry, expiry without reapplication, revoked-client disclosure denial, ordered
+credits, label audit versus creator authority, SQL-time denial rollback and
+coupled FK failure followed by successful same-key retry. These manual-create
+proofs do not establish URL-import or remote artwork recovery correctness.
+
+## Approved shared storage requirements (remaining integration)
 
 Use M1/P1's **one shared receipt and guarded writer**, not a lane-specific ledger.
 Relevant existing schema: `apps/server/src/db/music-entity.schema.ts`

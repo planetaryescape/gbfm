@@ -8,6 +8,7 @@ import { DatabaseError, getErrorMessage } from '@/errors'
 import { omitUndefined } from '@/lib/omit-undefined'
 import { toSlug } from '@/services/to-slug'
 
+import { insertMusicEntity } from './create-statements'
 import {
   deleteEntityLabels,
   deleteIdentitiesForEntity,
@@ -30,17 +31,13 @@ export const createArtistEffect = Effect.fn('musicEntity.createArtist')(function
   data: CreateArtistInput,
 ) {
   const db = yield* Database
-  const { genres, ...artistData } = data
+  const id = crypto.randomUUID()
 
   const rows = yield* Effect.tryPromise({
     try: async () => {
-      const rows = await db.insert(musicArtistsTable).values(artistData).returning()
-      const artist = rows[0]
+      await insertMusicEntity(db, { entityType: 'artist', data }, id)
 
-      if (artist && genres !== undefined)
-        await replaceEntityLabels(db, 'artist', artist.id, { genres })
-
-      return rows
+      return db.select().from(musicArtistsTable).where(eq(musicArtistsTable.id, id)).limit(1)
     },
     catch: (e) =>
       new DatabaseError({

@@ -6,6 +6,7 @@ import { musicTrackArtistsTable, musicTracksTable } from '@/db/music-entity.sche
 import { DatabaseError, getErrorMessage } from '@/errors'
 import { toSlug } from '@/services/to-slug'
 
+import { insertMusicEntity } from './create-statements'
 import {
   deleteEntityLabels,
   deleteIdentitiesForEntity,
@@ -29,31 +30,11 @@ export const createTrackEffect = Effect.fn('musicEntity.createTrack')(function* 
   data: CreateTrackInput,
 ) {
   const db = yield* Database
-  const { artistIds, ...trackData } = data
   const id = crypto.randomUUID()
 
   const rows = yield* Effect.tryPromise({
     try: async () => {
-      await db.batch([
-        db.insert(musicTracksTable).values({ ...trackData, id }),
-        ...(artistIds?.length
-          ? [
-              db
-                .insert(musicTrackArtistsTable)
-                .values(
-                  artistIds.map((artistId, displayOrder) => ({
-                    trackId: id,
-                    artistId,
-                    displayOrder,
-                  })),
-                )
-                .onConflictDoUpdate({
-                  target: [musicTrackArtistsTable.trackId, musicTrackArtistsTable.artistId],
-                  set: { displayOrder: sql`excluded.displayOrder` },
-                }),
-            ]
-          : []),
-      ])
+      await insertMusicEntity(db, { entityType: 'track', data }, id)
 
       const rows = await db
         .select()

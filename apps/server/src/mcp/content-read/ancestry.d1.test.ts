@@ -3,12 +3,14 @@ import { Schema } from 'effect'
 import { expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
+import { makeDatabaseClient } from '@/db/layer'
 import { postCreators, postsTable } from '@/db/post.schema'
 import {
   publicMicroAncestorPredicate,
   publicMicroAncestorQuery,
 } from '@/services/public-micro-ancestry'
 import { db } from '@/test/database'
+import { createMigratedD1Database } from '@/test/migrate-d1'
 
 const Projection = Schema.Array(
   Schema.Struct({
@@ -77,6 +79,40 @@ test('query projects computed public ancestry, supports SQL lookup expressions a
   ).toEqual(await read(leafId))
   expect(await read("' OR 1=1 --")).toEqual([])
   expect(await read('missing')).toEqual([])
+})
+
+test('SQL-valued IDs retain the outer candidate scope even when caller aliases match helper aliases', async () => {
+  await using resource = await createMigratedD1Database()
+  const database = makeDatabaseClient(resource.database)
+  await database.insert(postsTable).values([
+    { id: 'alias-private', slug: 'alias-private', type: 'micro', draft: true },
+    { id: 'alias-public', slug: 'alias-public', type: 'micro' },
+  ])
+
+  for (const alias of [
+    'p',
+    'candidate',
+    'focus',
+    'root',
+    'parent',
+    'pc',
+    'u',
+    'ancestor_chain',
+    'requested_post',
+  ]) {
+    const candidate = sql.identifier(alias)
+    expect(
+      await database.all(sql`
+      SELECT ${candidate}.id,
+        EXISTS (${publicMicroAncestorQuery(sql`${candidate}.id`)}) AS admitted,
+        (SELECT count(*) FROM (${publicMicroAncestorQuery(sql`${candidate}.id`)})) AS matches
+      FROM posts AS ${candidate} ORDER BY ${candidate}.id
+    `),
+    ).toEqual([
+      { id: 'alias-private', admitted: 0, matches: 0 },
+      { id: 'alias-public', admitted: 1, matches: 1 },
+    ])
+  }
 })
 
 test('every focus/intermediate/root must be a published unbanned micro; every root pointer must agree', async () => {

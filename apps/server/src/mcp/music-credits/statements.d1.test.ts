@@ -89,7 +89,7 @@ const command = (
     type: 'track',
     id: trackId,
   },
-): ExecuteOperation => ({
+): Extract<ExecuteOperation, { readonly prepare?: never }> => ({
   key: {
     actorId,
     clientId,

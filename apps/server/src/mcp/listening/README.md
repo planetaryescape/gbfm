@@ -22,6 +22,9 @@ Any command result containing private state additionally requires `listening:rea
 Commands are **not registered** or callable. Their schemas must be decoded with
 `{ onExcessProperty: 'error' }`; Effect 4 schema annotations do not override parse
 options. No owner or publication parameter is accepted by that strict decoder.
+Each command must be registered with `.annotate(Tool.Strict, true)` so McpServer
+enforces that decoding option; activation also requires a protocol-level
+`tools/call` test rejecting both `published` and `userId` arguments.
 The version token format remains opaque pending the coordinated revision design;
 read responses do not pretend to supply a concurrency token yet.
 

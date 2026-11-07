@@ -1,20 +1,23 @@
 import { McpPrincipal } from '@gbfm/core/editorial-mcp'
 import { eq } from 'drizzle-orm'
-import { Effect, Layer, Schema } from 'effect'
+import { Effect, Layer, Logger, Schema } from 'effect'
 import { HttpRouter, HttpServer } from 'effect/http'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
+import { DatabaseLayer } from '@/db/layer'
 import {
   listeningCollectionsTable as collections,
   savedMixesTable as mixes,
 } from '@/db/listening.schema'
 import { DatabaseTestLayer, db } from '@/test/database'
+import { withTestLayer } from '@/test/effect'
+import { createMigratedD1Database } from '@/test/migrate-d1'
 
 import { McpActor } from '../authorization'
 import { composeMcpToolkits, makeMcpLayer } from '../server'
 import { CollectionPage, SavedMixPage } from './contracts'
-import { ListeningReadServiceLive } from './reads'
+import { ListeningReadService, ListeningReadServiceLive } from './reads'
 import { ListeningToolHandlersLayer, ListeningToolkit } from './tools'
 
 const owner = 'l1-owner'
@@ -132,11 +135,11 @@ beforeAll(async () => {
       [owner, other].map((id) => ({ id, name: id, email: `${id}@example.test`, role: 'user' })),
     )
 
-  for (const [id, userId] of [
-    ['a', owner],
-    ['b', owner],
-    ['c', owner],
-    ['z', other],
+  for (const [id, userId, createdAt] of [
+    ['a', owner, 300],
+    ['b', owner, 100],
+    ['c', owner, 100],
+    ['z', other, 200],
   ] as const) {
     await db.insert(mixes).values({
       id,
@@ -145,9 +148,9 @@ beforeAll(async () => {
       platform: 'soundcloud',
       title: id,
       notes: `${id}-private-note`,
-      createdAt: 100,
+      createdAt,
     })
-    await db.insert(collections).values({ id, userId, title: `${id}-collection`, createdAt: 100 })
+    await db.insert(collections).values({ id, userId, title: `${id}-collection`, createdAt })
   }
 })
 
@@ -155,22 +158,22 @@ test('listener-only protocol reads paginate only the owner, including private no
   const first = await call('list_saved_mixes', { limit: 2 })
   expect(first.isError).not.toBe(true)
   const page = Schema.decodeUnknownSync(SavedMixPage)(first.structuredContent)
-  expect(page.mixes.map((mix) => mix.id)).toEqual(['c', 'b'])
-  expect(page.mixes.map((mix) => mix.notes)).toEqual(['c-private-note', 'b-private-note'])
+  expect(page.mixes.map((mix) => mix.id)).toEqual(['a', 'c'])
+  expect(page.mixes.map((mix) => mix.notes)).toEqual(['a-private-note', 'c-private-note'])
   expect(page.pagination).toEqual({ limit: 2, offset: 0, hasMore: true })
 
   const last = Schema.decodeUnknownSync(SavedMixPage)(
     (await call('list_saved_mixes', { limit: 2, offset: 2 })).structuredContent,
   )
 
-  expect(last.mixes.map((mix) => mix.id)).toEqual(['a'])
+  expect(last.mixes.map((mix) => mix.id)).toEqual(['b'])
   expect(last.pagination.hasMore).toBe(false)
 
   const collectionPage = Schema.decodeUnknownSync(CollectionPage)(
     (await call('list_collections', { limit: 2, offset: 1 })).structuredContent,
   )
 
-  expect(collectionPage.collections.map((collection) => collection.id)).toEqual(['b', 'a'])
+  expect(collectionPage.collections.map((collection) => collection.id)).toEqual(['c', 'b'])
   expect(collectionPage.pagination.hasMore).toBe(false)
   expect(JSON.stringify(collectionPage)).not.toContain('count')
 
@@ -216,4 +219,85 @@ test('current scope and persisted banned state deny private reads', async () => 
   } finally {
     await db.update(user).set({ banned: false }).where(eq(user.id, owner))
   }
+})
+
+test('read failures distinguish database from projection in value-free diagnostics', async () => {
+  await using resource = await createMigratedD1Database()
+  const database = resource.database
+  const logs: Array<{ readonly message: unknown; readonly cause: unknown }> = []
+
+  const principal = Schema.decodeUnknownSync(McpPrincipal)({
+    userId: owner,
+    clientId: 'l1-fixture',
+    scopes: ['listening:read'],
+  })
+
+  const layer = ListeningReadServiceLive.pipe(
+    Layer.provide(DatabaseLayer(database)),
+    Layer.provideMerge(
+      Logger.layer([Logger.make(({ message, cause }) => logs.push({ message, cause }))]),
+    ),
+  )
+
+  await database
+    .prepare('INSERT INTO user (id, name, email, created_at, updated_at) VALUES (?, ?, ?, 0, 0)')
+    .bind(owner, 'PRIVATE-NAME', 'private@example.test')
+    .run()
+  await database
+    .prepare(
+      "INSERT INTO saved_mixes (id, user_id, url, platform, title, notes, created_at) VALUES ('bad', ?, 'PRIVATE-URL', 'soundcloud', X'0102', 'PRIVATE-NOTES', 0)",
+    )
+    .bind(owner)
+    .run()
+  await database
+    .prepare(
+      "INSERT INTO listening_collections (id, user_id, title, created_at) VALUES ('bad', ?, X'0102', 0)",
+    )
+    .bind(owner)
+    .run()
+
+  const read = (kind: 'mixes' | 'collections') =>
+    Effect.runPromise(
+      withTestLayer(
+        Effect.gen(function* () {
+          const service = yield* ListeningReadService
+
+          return yield* (
+            kind === 'mixes'
+              ? Effect.asVoid(service.listSavedMixes({}))
+              : Effect.asVoid(service.listCollections({}))
+          ).pipe(
+            Effect.match({
+              onSuccess: () => 'unexpected success',
+              onFailure: (error) => error.code,
+            }),
+          )
+        }).pipe(Effect.provideService(McpActor, principal)),
+        layer,
+      ),
+    )
+
+  for (const kind of ['mixes', 'collections'] as const) expect(await read(kind)).toBe('unavailable')
+  expect(logs.map((log) => log.message)).toEqual([
+    [
+      'mcp.listening.projection_invalid',
+      { operation: 'saved_mixes.list', dependency: 'projection' },
+    ],
+    [
+      'mcp.listening.projection_invalid',
+      { operation: 'collections.list', dependency: 'projection' },
+    ],
+  ])
+  expect(JSON.stringify(logs)).not.toContain('PRIVATE')
+  logs.length = 0
+  await database.prepare('DROP TABLE listening_memberships').run()
+  await database.prepare('DROP TABLE saved_mixes').run()
+  await database.prepare('DROP TABLE listening_collections').run()
+
+  for (const kind of ['mixes', 'collections'] as const) expect(await read(kind)).toBe('unavailable')
+  expect(logs.map((log) => log.message)).toEqual([
+    ['mcp.listening.unavailable', { operation: 'saved_mixes.list', dependency: 'database' }],
+    ['mcp.listening.unavailable', { operation: 'collections.list', dependency: 'database' }],
+  ])
+  expect(JSON.stringify(logs)).not.toContain('PRIVATE')
 })

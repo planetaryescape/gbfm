@@ -58,12 +58,27 @@ export const ListeningReadServiceLive = Layer.effect(
             .limit(limit + 1)
             .offset(offset),
         catch: unavailable,
-      })
+      }).pipe(
+        Effect.tapError(() =>
+          Effect.logError('mcp.listening.unavailable', {
+            operation: 'saved_mixes.list',
+            dependency: 'database',
+          }),
+        ),
+      )
 
       return yield* Schema.decodeUnknownEffect(SavedMixPage)({
         mixes: rows.slice(0, limit),
         pagination: { limit, offset, hasMore: rows.length > limit },
-      }).pipe(Effect.mapError(unavailable))
+      }).pipe(
+        Effect.tapError(() =>
+          Effect.logError('mcp.listening.projection_invalid', {
+            operation: 'saved_mixes.list',
+            dependency: 'projection',
+          }),
+        ),
+        Effect.mapError(unavailable),
+      )
     })
 
     const listCollections = Effect.fn('ListeningMcp.listCollections')(function* (
@@ -90,12 +105,27 @@ export const ListeningReadServiceLive = Layer.effect(
             .limit(limit + 1)
             .offset(offset),
         catch: unavailable,
-      })
+      }).pipe(
+        Effect.tapError(() =>
+          Effect.logError('mcp.listening.unavailable', {
+            operation: 'collections.list',
+            dependency: 'database',
+          }),
+        ),
+      )
 
       return yield* Schema.decodeUnknownEffect(CollectionPage)({
         collections: rows.slice(0, limit),
         pagination: { limit, offset, hasMore: rows.length > limit },
-      }).pipe(Effect.mapError(unavailable))
+      }).pipe(
+        Effect.tapError(() =>
+          Effect.logError('mcp.listening.projection_invalid', {
+            operation: 'collections.list',
+            dependency: 'projection',
+          }),
+        ),
+        Effect.mapError(unavailable),
+      )
     })
 
     return { listSavedMixes, listCollections }

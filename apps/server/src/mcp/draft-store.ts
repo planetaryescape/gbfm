@@ -79,6 +79,8 @@ export const insertEditorialDraft = (
             type: sql`'post'`.as('type'),
             musicEntityType: sql`NULL`.as('musicEntityType'),
             musicEntityId: sql`NULL`.as('musicEntityId'),
+            lastOperationId: sql`NULL`.as('lastOperationId'),
+            musicReferencesManaged: sql`0`.as('musicReferencesManaged'),
             parentPostId: sql`NULL`.as('parentPostId'),
             rootPostId: sql`NULL`.as('rootPostId'),
             depth: sql`0`.as('depth'),

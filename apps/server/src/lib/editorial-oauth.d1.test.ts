@@ -571,7 +571,9 @@ describe('editorial OAuth provider on migrated D1', () => {
     })
 
     expect(replay.status).toBe(400)
-  })
+    // Real provider registration, consent, exchange, rotation and revocation share
+    // one migrated-D1 fixture; this is an integration check, not a 5s latency SLO.
+  }, 10_000)
 
   test('PKCE, editorial permission, audience and public client policy', async () => {
     await using fixture = await createEditorialOAuthFixture()

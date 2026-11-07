@@ -4,8 +4,9 @@ Base: verified remote `feat/514-mcp-foundation` at
 `2d1b5592826e66e3a198dc117c153e062264fc5c` (PR #548), above P0 #547;
 prod baseline `aec2782a97bd91e2f030ef05095f76b54fcc79b1`.
 Effect 4.0.6, Drizzle 0.45.4, Miniflare 5.20260801.1-alpha, MCP 2026-07-28.
-No #551 dependency. Owned files: this directory only. All shared paths below
-are **requested, not reserved or approved**. I1 owns music-import; M2 must use
+No #551 dependency. Owned files: this directory plus the explicitly cleared
+`album.service.ts` import/`removeArtistFromAlbumEffect` predicate correction only.
+All broader shared paths below are **requested, not reserved or approved**. I1 owns music-import; M2 must use
 the eventual shared revision/receipt seam, not introduce another ledger.
 
 ## Delivered surface
@@ -13,6 +14,8 @@ the eventual shared revision/receipt seam, not introduce another ledger.
 `MusicEditPreviewToolkit`, `MusicEditPreviewHandlers`, `MusicEditPreviewLive`,
 `MusicEditPreview`, `PreviewMetadataInput`, `PreviewMetadataResult` are exported
 from `preview.ts` for P1 composition. No central registry/OAuth/consent change.
+Composition requires existing `Database`, `McpAuthorization`, and
+`EditorialMcpConfig` services; results include the configured endpoint identity.
 The real MCP test composes this toolkit with the actual request-scoped adapter;
 its principal is injected, **not** evidence of persisted OAuth admission.
 
@@ -29,6 +32,15 @@ Output is bounded observed before/after state with `status: preview_only` and
 plan or authorization. Changes can occur after preview. Full preview acceptance
 must later use the same validated command planner as the approved writer.
 
+Protocol behavior differs from direct service validation: Effect Toolkit decodes
+parameters before invoking the handler. Malformed tool arguments return framework
+`isError` text ("Invalid parameters…"), not typed `McpToolError.invalid_input`.
+That decode also precedes per-service authorization: a malformed request from a
+catalogue-read-only principal gets the schema error; valid arguments reach
+`access_denied`. The schema is public; this does not expose target state. The
+protocol test pins this existing P1 framework behavior. Changing error mapping or
+authorization ordering belongs to P1, not a domain-specific transport override.
+
 | Selected capability | This PR | Remaining contract / gate |
 | --- | --- | --- |
 | `update_music_metadata` | Undelivered | Explicit per-kind metadata allowlist; no owner, identity, slug, publication or broad partial payload |
@@ -42,7 +54,8 @@ must later use the same validated command planner as the approved writer.
 | `preview_metadata_changes` | Partial, two proposals above | Other six proposal forms and shared guarded command planner remain undelivered |
 
 All eight write capabilities remain undelivered, not registered stubs. #523 is
-not complete. No storage, migration, replay list, exports, shared writer, browser,
+not complete. Apart from the exact-pair bug fix, no shared writer changed.
+No storage, migration, replay list, exports, browser,
 production resource policy, merge or deployment change is included.
 
 ## Reproducible evidence
@@ -59,15 +72,22 @@ ban, unsupported/extra fields, missing references, clearing/no-op and persisted
 state equality around preview. It also exercises the actual MCP tools/call route.
 It does not prove production OAuth or browser concurrency is safe.
 
+`remove-credit.d1.test.ts` exercises the existing public album service with two
+albums and two artists. Before the fix, removing X/A1 also removed X/A2 (red);
+after replacing JS `&&` with Drizzle `and()`, X/A2 and Y/A1 both remain (green).
+This fixes the delete predicate only, not revisions, receipts or artistNames.
+
 `revision-proposal.d1.test.ts` contains the **exact candidate SQL**. It creates
 an isolated migrated Miniflare D1 binding and applies test-only revision/receipt
 DDL there; disposal destroys it. The candidate conditional receipt acquisition
 and attempt-token-gated writes run in one D1 batch. Assertions distinguish:
 
 - browser CAS first → stale MCP has no receipt or junction;
-- parallel identical MCP attempts → one receipt, one junction, one revision advance;
+- two submitted same-key attempts, serialized by local D1 → one receipt, one
+  junction, one revision advance (revision and unique-key guards both apply);
 - MCP first → stale browser CAS changes zero rows;
-- same key with changed payload/current revision cannot mutate again;
+- same key with changed payload/current revision cannot mutate again; this later
+  `attempt-c` probe isolates unique-key protection from the stale-revision guard;
 - missing artist FK and failure after junction/projection both roll back the batch;
 - clearing expired result payload leaves key evidence that prevents reapplication.
 
@@ -131,6 +151,11 @@ only, not account/client deletion or an approved retention mechanism.
   together; tie break `displayOrder, artistId`. No direct `artistNames` override
   may contradict credits. Artist rename updates linked names and invalidates
   parents. Deleting a referenced artist/album must invalidate affected parents.
+  Review reproduced a pre-existing `removeArtistFromAlbumEffect` defect: JavaScript
+  `&&` discards the album predicate, deleting the artist's credits on every album.
+  This PR fixes that exact predicate with an asymmetric red/green D1 regression
+  under P1's narrow serialized reservation. Revision/receipt/display-name work
+  remains gated; the pair fix does not establish safe MCP mutation behavior.
 - `services/music-entity/label-affiliation.service.ts`: all four affiliation
   methods compare expected endpoint revisions and invalidate both endpoints.
 - `db/labels.ts`: genre-only replacement must preserve tags and share the guarded
@@ -143,13 +168,14 @@ only, not account/client deletion or an approved retention mechanism.
   sends form state without any entity precondition. Other callers of those API
   endpoints must adopt the same contract before mutation tools enable.
 - `services/canonical-music-identity/repository.ts`: `updateArtwork` and
-  `refreshEntity` write ORM/raw SQL state independently; coordinate with I1/U1,
+  `updateEntityMetadata` write ORM/raw SQL state independently; coordinate with I1/U1,
   including canonical insert statements and artist/genre writers. These paths
   must invalidate revisions and preserve credit projection invariants; a provider
   refresh cannot overwrite an intervening browser/MCP change using a stale plan.
 
 Proposed integration seam is one shared guarded writer, serialized with I1,
-not a parallel MCP backend. M1 has **not** reserved or edited those paths.
+not a parallel MCP backend. Outside the exact-pair correction above, M1 has
+**not** reserved or edited those paths.
 P1 alone coordinates migration filename, `db/exports.ts`, and
 `test/migrate-d1.ts` after explicit schema approval. Before enabling mutations,
 test composed real browser/API/PAT/canonical/MCP contenders, durable receipt

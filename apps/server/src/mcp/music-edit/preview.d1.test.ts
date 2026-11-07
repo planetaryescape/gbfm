@@ -6,7 +6,15 @@ import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
-import { musicAlbumsTable, musicTracksTable } from '@/db/music-entity.schema'
+import {
+  musicAlbumArtistsTable,
+  musicAlbumsTable,
+  musicArtistsTable,
+  musicLabelAlbumsTable,
+  musicLabelsTable,
+  musicTracksTable,
+} from '@/db/music-entity.schema'
+import { entityLabelsTable, labelsTable } from '@/db/tags.schema'
 import { DatabaseTestLayer, db } from '@/test/database'
 import { withTestLayer } from '@/test/effect'
 
@@ -73,6 +81,29 @@ beforeAll(async () => {
     title: 'Track',
     albumId: 'm1-album',
   })
+  await db.insert(musicArtistsTable).values([
+    { id: 'm1-artist-z', slug: 'm1-artist-z', name: 'Zed', bio: 'Old bio' },
+    { id: 'm1-artist-a', slug: 'm1-artist-a', name: 'Ada' },
+  ])
+  await db.insert(musicAlbumArtistsTable).values([
+    { albumId: 'm1-album', artistId: 'm1-artist-z', role: 'primary', displayOrder: 3 },
+    { albumId: 'm1-album', artistId: 'm1-artist-a', role: null, displayOrder: 3 },
+  ])
+  await db.insert(musicLabelsTable).values({
+    id: 'm1-label',
+    slug: 'm1-label',
+    name: 'Label',
+    description: 'Description',
+  })
+  await db.insert(musicLabelAlbumsTable).values({ labelId: 'm1-label', albumId: 'm1-album' })
+  await db.insert(labelsTable).values([
+    { id: 'm1-genre', kind: 'genre', name: 'Jazz' },
+    { id: 'm1-tag', kind: 'tag', name: 'Private category' },
+  ])
+  await db.insert(entityLabelsTable).values([
+    { entityId: 'm1-album', entityType: 'album', labelId: 'm1-genre', position: 0 },
+    { entityId: 'm1-album', entityType: 'album', labelId: 'm1-tag', position: 1 },
+  ])
 })
 
 test('preview observes a real browser-service edit, supports clearing, and never writes', async () => {
@@ -97,6 +128,150 @@ test('preview observes a real browser-service edit, supports clearing, and never
   expect(
     await preview({ operation: 'set_album_type', entityId: 'm1-album', albumType: null }),
   ).toMatchObject({ before: 'single', after: null, changed: true })
+})
+
+test('all metadata and relationship proposals use bounded exact pairs without changing persisted state', async () => {
+  const state = async () => ({
+    artists: await db.select().from(musicArtistsTable),
+    albums: await db.select().from(musicAlbumsTable),
+    tracks: await db.select().from(musicTracksTable),
+    labels: await db.select().from(musicLabelsTable),
+    credits: await db.select().from(musicAlbumArtistsTable),
+    affiliations: await db.select().from(musicLabelAlbumsTable),
+    genres: await db.select().from(entityLabelsTable),
+  })
+
+  const before = await state()
+  expect(
+    await preview({
+      operation: 'update_music_metadata',
+      entityType: 'artist',
+      entityId: 'm1-artist-z',
+      metadata: { bio: null },
+    }),
+  ).toMatchObject({ before: { bio: 'Old bio' }, after: { bio: null }, changed: true })
+  expect(
+    await preview({
+      operation: 'update_music_metadata',
+      entityType: 'album',
+      entityId: 'm1-album',
+      metadata: { title: 'Album', releaseDate: '2001-02-03T00:00:00.000Z' },
+    }),
+  ).toMatchObject({
+    before: { title: 'Album', releaseDate: null },
+    after: { title: 'Album', releaseDate: '2001-02-03T00:00:00.000Z' },
+  })
+  expect(
+    await preview({
+      operation: 'update_music_metadata',
+      entityType: 'track',
+      entityId: 'm1-track',
+      metadata: { title: 'Track' },
+    }),
+  ).toMatchObject({ changed: false })
+  expect(
+    await preview({
+      operation: 'update_music_metadata',
+      entityType: 'label',
+      entityId: 'm1-label',
+      metadata: { description: null },
+    }),
+  ).toMatchObject({ before: { description: 'Description' }, after: { description: null } })
+  expect(
+    await preview({
+      operation: 'set_music_genres',
+      entityType: 'album',
+      entityId: 'm1-album',
+      genres: [],
+    }),
+  ).toMatchObject({ before: ['Jazz'], after: [] })
+
+  const credit = {
+    operation: 'set_artist_credit',
+    entityType: 'album',
+    entityId: 'm1-album',
+    artistId: 'm1-artist-z',
+    role: 'featured',
+    displayOrder: 0,
+  }
+
+  const result = await preview(credit)
+  expect(result.before).toEqual([
+    { artistId: 'm1-artist-a', name: 'Ada', role: null, displayOrder: 3 },
+    { artistId: 'm1-artist-z', name: 'Zed', role: 'primary', displayOrder: 3 },
+  ])
+  expect(result.after).toEqual([
+    { artistId: 'm1-artist-z', name: 'Zed', role: 'featured', displayOrder: 0 },
+    { artistId: 'm1-artist-a', name: 'Ada', role: null, displayOrder: 3 },
+  ])
+  expect(
+    await preview({
+      operation: 'remove_artist_credit',
+      entityType: 'album',
+      entityId: 'm1-album',
+      artistId: 'm1-artist-z',
+    }),
+  ).toMatchObject({
+    after: [{ artistId: 'm1-artist-a', name: 'Ada', role: null, displayOrder: 3 }],
+  })
+  expect(
+    await preview({
+      operation: 'set_label_affiliation',
+      entityType: 'album',
+      entityId: 'm1-album',
+      labelId: 'm1-label',
+    }),
+  ).toMatchObject({ before: ['m1-label'], after: ['m1-label'], changed: false })
+  expect(
+    await preview({
+      operation: 'remove_label_affiliation',
+      entityType: 'album',
+      entityId: 'm1-album',
+      labelId: 'm1-label',
+    }),
+  ).toMatchObject({ after: [] })
+  expect(await state()).toEqual(before)
+
+  for (const change of [
+    { ...credit, artistId: 'missing' },
+    {
+      operation: 'set_label_affiliation',
+      entityType: 'artist',
+      entityId: 'm1-artist-z',
+      labelId: 'missing',
+    },
+  ])
+    await expect(preview(change)).rejects.toMatchObject({ code: 'not_found' })
+})
+
+test('metadata allowlists reject hidden authority, unsupported fields and ambiguous clearing', async () => {
+  for (const metadata of [
+    {},
+    { publishedAt: null },
+    { name: null },
+    { name: 'Zed', slug: 'hijack' },
+    { artistNames: ['Spoof'] },
+    { bio: 'x', createdById: 'other' },
+  ]) {
+    await expect(
+      preview({
+        operation: 'update_music_metadata',
+        entityType: 'artist',
+        entityId: 'm1-artist-z',
+        metadata,
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_input' })
+  }
+
+  for (const genres of [
+    ['Jazz', 'Jazz'],
+    [' Jazz'],
+    Array.from({ length: 31 }, (_, i) => `Genre${i}`),
+  ]) {
+    await expect(
+      preview({ operation: 'set_music_genres', entityType: 'album', entityId: 'm1-album', genres }),
+    ).rejects.toMatchObject({ code: 'invalid_input' })
+  }
 })
 
 test('missing targets/references, unsupported fields and unauthorized accounts deny', async () => {
@@ -209,6 +384,29 @@ test('real MCP 2026-07-28 tools/call returns the bounded read-only result', asyn
     (await db.select().from(musicTracksTable).where(eq(musicTracksTable.id, 'm1-track')))[0]
       ?.albumId,
   ).toBe('m1-album')
+})
+
+test('real MCP accepts the full relationship proposal and returns the same ordered plan', async () => {
+  const change = {
+    operation: 'set_artist_credit',
+    entityType: 'album',
+    entityId: 'm1-album',
+    artistId: 'm1-artist-z',
+    role: null,
+    displayOrder: 1,
+  }
+
+  const response = await callPreview(change)
+
+  const envelope = Schema.decodeUnknownSync(
+    Schema.Struct({ result: Schema.Struct({ structuredContent: PreviewMetadataResult }) }),
+  )(await response.json())
+
+  expect(envelope.result.structuredContent).toEqual(await preview(change))
+  expect(envelope.result.structuredContent.after).toEqual([
+    { artistId: 'm1-artist-z', name: 'Zed', role: null, displayOrder: 1 },
+    { artistId: 'm1-artist-a', name: 'Ada', role: null, displayOrder: 3 },
+  ])
 })
 
 test('protocol validates before service authorization and uses framework errors for malformed parameters', async () => {

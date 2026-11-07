@@ -9,6 +9,7 @@ import { McpAuthorization, McpAuthorizationLive } from './authorization'
 import { CreateDraftInput, EditorialToolError, GetPostResult, UpdateDraftInput } from './contracts'
 import { insertEditorialDraft, readEditorialReceipt, updateEditorialDraft } from './draft-store'
 import { EditorialMcpConfig } from './editorial'
+import { checkpointEditorialCommand } from './editorial-music/save'
 import { loadEditorialSnapshot } from './editorial-music/snapshot'
 import { PersistedPost, projectPost, unavailable, notFound } from './model'
 
@@ -50,7 +51,15 @@ export const EditorialDraftServiceLayer = Layer.effect(
     const posts = yield* PostService
     const config = yield* EditorialMcpConfig
 
-    const authorize = authorization.editorial(true)
+    const authorize = authorization
+      .editorial(true)
+      .pipe(
+        Effect.flatMap((actor) =>
+          checkpointEditorialCommand(['posts:read', 'drafts:write'], actor.userId).pipe(
+            Effect.map((checkpoint) => ({ ...actor, liveGuard: checkpoint.liveGuard })),
+          ),
+        ),
+      )
 
     const loadDraft = Effect.fn('EditorialDraftService.loadDraft')(function* (
       postId: PostId,
@@ -85,6 +94,8 @@ export const EditorialDraftServiceLayer = Layer.effect(
       inputHash: string,
       actor: Effect.Success<typeof authorize>,
     ) {
+      yield* authorize
+
       const [row] = yield* Effect.tryPromise({
         try: () => readEditorialReceipt(db, id, actor.userId),
         catch: unavailable,
@@ -119,6 +130,7 @@ export const EditorialDraftServiceLayer = Layer.effect(
 
       if (receipt.postId !== result.post.postId) return yield* unavailable()
       yield* loadDraft(receipt.postId, actor)
+      yield* authorize
 
       return Option.some(result)
     })
@@ -194,8 +206,10 @@ export const EditorialDraftServiceLayer = Layer.effect(
         createdAt: now,
       }
 
+      const current = yield* authorize
       yield* Effect.tryPromise({
-        try: () => insertEditorialDraft(db, actor.userId, postId, input, now, receipt),
+        try: () =>
+          insertEditorialDraft(db, actor.userId, postId, input, now, receipt, current.liveGuard),
         catch: unavailable,
       })
       const committed = yield* replay(id, inputHash, actor)
@@ -279,8 +293,10 @@ export const EditorialDraftServiceLayer = Layer.effect(
         createdAt: now,
       }
 
+      const current = yield* authorize
       yield* Effect.tryPromise({
-        try: () => updateEditorialDraft(db, actor.userId, previous, input, now, receipt),
+        try: () =>
+          updateEditorialDraft(db, actor.userId, previous, input, now, receipt, current.liveGuard),
         catch: unavailable,
       })
       const committed = yield* replay(id, inputHash, actor)

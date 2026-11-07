@@ -1,4 +1,4 @@
-import { EDITORIAL_DRAFT_RETRY_WINDOW_MS, PostId } from '@gbfm/core/editorial-mcp'
+import { EDITORIAL_DRAFT_RETRY_WINDOW_MS, PostId, type McpScope } from '@gbfm/core/editorial-mcp'
 import type { UserId } from '@gbfm/core/identity'
 import type { DraftMusicReferences } from '@gbfm/core/post-music-references'
 import { and, eq, exists, inArray, sql, type SQL } from 'drizzle-orm'
@@ -10,10 +10,32 @@ import { buildGuardedPostUpdate } from '@/db/guarded-post-update'
 import type { DatabaseClient } from '@/db/layer'
 import { postsTable, type InsertPost } from '@/db/post.schema'
 
+import { CommandAuthority } from '../command-authority'
 import { EditorialToolError } from '../contracts'
 import { notFound, unavailable } from '../model'
 import { boundEditorialResult } from './content'
 import { editorialSnapshotGuard, loadEditorialSnapshot, type EditorialSnapshot } from './snapshot'
+
+/** Request context is resolved at execution, never when the shared service layer is constructed. */
+export const checkpointEditorialCommand = Effect.fn('EditorialCommand.checkpoint')(function* (
+  scopes: ReadonlyArray<McpScope>,
+  actorId: UserId,
+) {
+  const authority = yield* Effect.serviceOption(CommandAuthority)
+
+  const denied = () =>
+    new EditorialToolError({ code: 'access_denied', message: 'Command access denied.' })
+
+  if (Option.isNone(authority)) return yield* denied()
+
+  const checkpoint = yield* authority.value
+    .checkpoint(scopes)
+    .pipe(Effect.mapError((error) => (error.code === 'unavailable' ? unavailable() : denied())))
+
+  if (checkpoint.actorId !== actorId) return yield* denied()
+
+  return checkpoint
+})
 
 /** A failed CAS or reused operation key is not retried as a new edit. */
 export const editorialConflict = () =>
@@ -130,8 +152,8 @@ export const saveEditorialChange = (
   previous: EditorialSnapshot,
   patch: EditorialPatch,
   receipt: typeof editorialOperations.$inferInsert & { readonly result: string },
-  targetGuard?: SQL,
-  liveGuard?: SQL,
+  targetGuard: SQL | undefined,
+  liveGuard: SQL,
 ) =>
   Effect.gen(function* () {
     if (new TextEncoder().encode(receipt.result).byteLength > 256 * 1024)

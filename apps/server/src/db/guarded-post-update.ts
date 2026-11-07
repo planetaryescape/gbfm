@@ -6,17 +6,53 @@ import {
   transitionDraftMusicReferences,
 } from '@gbfm/core/post-music-references'
 import { and, asc, eq, exists, inArray, or, sql, type SQL } from 'drizzle-orm'
-import { Effect, Schema } from 'effect'
+import { Effect, Match, Schema } from 'effect'
 
-import { ValidationError } from '@/errors'
+import { DatabaseError, NotFoundError, ValidationError } from '@/errors'
 
 import { user } from './auth.schema'
 import { postIdsForCreator } from './creator-membership'
 import type { DatabaseClient } from './layer'
+import { musicAlbumsTable, musicPlaylistsTable, musicTracksTable } from './music-entity.schema'
 import { postMusicReferencesTable } from './post-music-reference.schema'
 import { postCreators, postsTable, type InsertPost } from './post.schema'
 import { entityLabelsTable, labelsTable } from './tags.schema'
 import { uploadAssetsTable } from './upload-asset.schema'
+
+/** UUID identity ignores case; foreign keys and compatibility primaries retain actual stored spelling. */
+export const canonicalPostMusicTarget = (db: DatabaseClient, target: DraftMusicTarget) =>
+  Effect.gen(function* () {
+    const table = Match.value(target.entityType).pipe(
+      Match.when('album', () => musicAlbumsTable),
+      Match.when('track', () => musicTracksTable),
+      Match.when('playlist', () => musicPlaylistsTable),
+      Match.exhaustive,
+    )
+
+    const failure = () =>
+      new DatabaseError({
+        message: 'Could not resolve catalogue identity',
+        operation: 'select',
+        table: 'music',
+      })
+
+    const rows = yield* Effect.tryPromise({
+      try: () =>
+        db
+          .select({ id: table.id })
+          .from(table)
+          .where(sql`lower(${table.id}) = ${target.entityId.toLowerCase()}`)
+          .limit(2),
+      catch: failure,
+    })
+
+    if (rows.length > 1) return yield* failure()
+    const row = rows[0]
+
+    if (!row) return yield* new NotFoundError({ message: 'Music not found', resource: 'music' })
+
+    return { entityType: target.entityType, entityId: row.id }
+  })
 
 /** One interpretation of stored rows and the virtual, unmanaged legacy primary for every writer. */
 export const decodePostMusicReferenceState = (
@@ -219,7 +255,7 @@ export const buildGuardedPostUpdate = (
       ? []
       : [
           db.delete(postCreators).where(and(eq(postCreators.postId, existing.id), authorized)),
-          ...[...new Set(options.creatorIds)].map((creatorId) =>
+          ...options.creatorIds.map((creatorId) =>
             db.insert(postCreators).select(
               db
                 .select({
@@ -248,6 +284,15 @@ export const buildGuardedPostUpdate = (
   return { predicate, winner, authorized, writes, update, attemptId }
 }
 
+/** Full edit forms may echo an unchanged primary without editing the frozen association. */
+export const changesPostMusicPrimary = (
+  existing: Pick<typeof postsTable.$inferSelect, 'musicEntityId' | 'musicEntityType'>,
+  data: Pick<Partial<InsertPost>, 'musicEntityId' | 'musicEntityType'>,
+) =>
+  (data.musicEntityType !== undefined && data.musicEntityType !== existing.musicEntityType) ||
+  (data.musicEntityId !== undefined &&
+    (data.musicEntityId?.toLowerCase() ?? null) !== (existing.musicEntityId?.toLowerCase() ?? null))
+
 /** Atomically changes post fields, tags and owned upload tracking under the same version guard. */
 export const guardedPostUpdate = async (
   db: DatabaseClient,
@@ -269,6 +314,13 @@ export const guardedPostUpdate = async (
     if ((data.musicEntityId === undefined) !== (data.musicEntityType === undefined))
       throw new ValidationError({ message: 'Music primary must be supplied as a complete pair' })
 
+    if (!changesPostMusicPrimary(existing, data)) {
+      fields.musicEntityId = existing.musicEntityId
+      fields.musicEntityType = existing.musicEntityType
+    }
+  }
+
+  if (musicReferences === undefined && changesPostMusicPrimary(existing, data)) {
     if (existing.musicReferencesManaged && !existing.draft)
       throw new ValidationError({ message: 'Managed published music associations are frozen' })
 
@@ -280,13 +332,18 @@ export const guardedPostUpdate = async (
 
     const state = await Effect.runPromise(decodePostMusicReferenceState(existing, rows))
 
-    const primary = await Effect.runPromise(
+    const parsedPrimary = await Effect.runPromise(
       Schema.decodeUnknownEffect(Schema.NullOr(DraftMusicTarget))(
         data.musicEntityId === null
           ? null
           : { entityType: data.musicEntityType, entityId: data.musicEntityId },
       ),
     )
+
+    const primary =
+      parsedPrimary === null
+        ? null
+        : await Effect.runPromise(canonicalPostMusicTarget(db, parsedPrimary))
 
     const next = await Effect.runPromise(
       transitionDraftMusicReferences(
@@ -296,6 +353,8 @@ export const guardedPostUpdate = async (
     )
 
     musicReferences = next.musicReferences
+    fields.musicEntityType = next.musicReferences.primary?.entityType ?? null
+    fields.musicEntityId = next.musicReferences.primary?.entityId ?? null
     fields.musicReferencesManaged = next.managed
     guard = and(guard, sql`${postsTable.lastOperationId} IS ${existing.lastOperationId}`)
   }

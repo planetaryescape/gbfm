@@ -60,9 +60,11 @@ export const insertEditorialDraft = (
   input: typeof CreateDraftInput.Type,
   now: Date,
   receipt: Receipt,
+  liveGuard: SQL,
 ) => {
   const attemptId = crypto.randomUUID()
   const winner = eq(postsTable.lastOperationId, attemptId)
+  const authorized = sql`(${winner}) AND (${liveGuard})`
 
   return db.batch([
     db
@@ -95,6 +97,7 @@ export const insertEditorialDraft = (
             and(
               eq(user.id, userId),
               eligibleAccount(db, userId),
+              liveGuard,
               unusedOperation(receipt.id),
               sql`NOT EXISTS (SELECT 1 FROM posts WHERE slug = ${id} AND id <> ${id})`,
             ),
@@ -108,15 +111,15 @@ export const insertEditorialDraft = (
           creatorId: sql<string>`${userId}`.as('creatorId'),
         })
         .from(postsTable)
-        .where(and(eq(postsTable.id, id), winner)),
+        .where(and(eq(postsTable.id, id), authorized)),
     ),
-    insertReceipt(db, receipt, winner),
+    insertReceipt(db, receipt, authorized),
     db
       .select({
         assertion: sql<number>`CASE WHEN NOT EXISTS (
       SELECT 1 FROM ${postsTable} WHERE ${postsTable.id} = ${id} AND ${winner}
-    ) OR EXISTS (SELECT 1 FROM ${editorialOperations} WHERE ${editorialOperations.id} = ${receipt.id}
-      AND ${editorialOperations.inputHash} = ${receipt.inputHash}) THEN 1 ELSE json('editorial create receipt assertion failed') END`,
+    ) OR ((${liveGuard}) AND EXISTS (SELECT 1 FROM ${editorialOperations} WHERE ${editorialOperations.id} = ${receipt.id}
+      AND ${editorialOperations.inputHash} = ${receipt.inputHash})) THEN 1 ELSE json('editorial create receipt assertion failed') END`,
       })
       .from(sql`(SELECT 1)`),
   ])
@@ -129,6 +132,7 @@ export const updateEditorialDraft = (
   input: typeof UpdateDraftInput.Type,
   now: Date,
   receipt: Receipt,
+  liveGuard: SQL,
 ) =>
   Effect.runPromise(
     saveEditorialChange(
@@ -141,5 +145,7 @@ export const updateEditorialDraft = (
         description: input.description,
       },
       { ...receipt, createdAt: now },
+      undefined,
+      liveGuard,
     ),
   )

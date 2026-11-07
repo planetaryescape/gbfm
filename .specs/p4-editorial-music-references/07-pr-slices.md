@@ -8,7 +8,7 @@ Prefer one E3 vertical feature layer above P1's coordinated prerequisite chain a
 
 ## One proposed E3 slice
 
-- Delivers `set_draft_music_references`, authorized references read with a draft, browser reference editing/save, shared post version/receipt behavior and existing-primary preservation.
+- Delivers browser reference editing/save, shared post version/receipt behavior and existing-primary preservation under the consolidated approvals. MCP `set_draft_music_references` registration additionally requires the approved authorized reference read; without the get_post amendment or a separately approved alternative, keep that write unregistered. No blind-overwrite fallback.
 - Includes [contracts](03-contracts.md), [flows](04-flows.md), reserved parts of [the file map](05-file-map.md), approved storage change plus disposable migration evidence, and [test slices](06-test-plan.md).
 - Leaves publication, public multi-reference backlink/recommendation behavior, catalogue import/merge, private media and all deferred tools out.
 - Requires the migration coordinator to choose and approve exact storage/integrity/legacy preservation before code; no independently deployed schema/data phase is assumed or authorized here.

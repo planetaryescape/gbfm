@@ -76,34 +76,43 @@ Input mapping:
 ## Output and persisted state
 
 ```ts
-type DraftReferenceDisplay =
-  | {
-      readonly _tag: 'Available'
-      readonly target: DraftMusicTarget
-      readonly title: string
-      readonly artistNames: ReadonlyArray<string>
-      readonly coverImageUrl: string | null // existing safe public projection only
-    }
-  | { readonly _tag: 'Unavailable'; readonly target: DraftMusicTarget }
-
-type DraftReferenceRead = {
-  readonly musicReferences: DraftMusicReferences & {
-    readonly display: ReadonlyArray<DraftReferenceDisplay> // same order, bounded, no provider work
-  }
-}
-
-// Schema values are not TypeScript value types; use the schema's decoded Type.
-type ExistingPostResult = typeof GetPostResult.Type
-type ReferenceWriteResult = ExistingPostResult & {
-  readonly post: ExistingPostResult['post'] & DraftReferenceRead
-}
+const DraftReferenceDisplay = Schema.Union([
+  Schema.TaggedStruct('Available', {
+    target: DraftMusicTarget,
+    title: Schema.String,
+    artistNames: Schema.Array(Schema.String),
+    coverImageUrl: Schema.NullOr(Schema.String), // existing safe public projection only
+  }),
+  Schema.TaggedStruct('Unavailable', { target: DraftMusicTarget }),
+])
+const DraftReferenceRead = Schema.Struct({
+  ...DraftMusicReferences.fields,
+  display: Schema.Array(DraftReferenceDisplay).check(Schema.isMaxLength(50)),
+}).check(Schema.makeFilter((value) =>
+  Schema.is(DraftMusicReferences)(value) &&
+  value.display.length === value.references.length &&
+  value.display.every((entry, index) => sameTarget(entry.target, value.references[index]!))
+    ? undefined
+    : 'Invalid reference collection or mismatched display order',
+))
+const ReferenceWriteResult = Schema.Struct({
+  ...GetPostResult.fields,
+  post: Schema.Struct({
+    ...GetPostResult.fields.post.fields,
+    musicReferences: DraftReferenceRead,
+  }),
+})
+type ReferenceWriteResult = typeof ReferenceWriteResult.Type
 
 // Proposed get_post-only result schema. Do not reuse it for legacy create/update receipts.
-type GetPostWithReferencesResult = ExistingPostResult & {
-  readonly post: ExistingPostResult['post'] & {
-    readonly musicReferences?: DraftReferenceRead['musicReferences']
-  }
-}
+const GetPostWithReferencesResult = Schema.Struct({
+  ...GetPostResult.fields,
+  post: Schema.Struct({
+    ...GetPostResult.fields.post.fields,
+    musicReferences: Schema.optionalKey(DraftReferenceRead),
+  }),
+})
+type GetPostWithReferencesResult = typeof GetPostWithReferencesResult.Type
 
 type DraftReferenceState = {
   readonly postId: typeof PostId.Type
@@ -112,7 +121,7 @@ type DraftReferenceState = {
 }
 ```
 
-The result means the save committed; there is no accepted job, operation polling or async import. Retain endpoint identity, safe review URL, updated-at and version. Do not add P0's illustrative applied/accepted envelope to legacy editorial receipts. The new reference command stores its own authorized result through the existing receipt mechanism and replays that saved result. Keep the existing `GetPostResult` schema for legacy create/update result and receipt decoding. Do not broaden, replay-enrich or re-render old receipts as a side effect of a richer get_post read schema. Optional enrichment is a deliberate scope-dependent projection, not an unrestricted partial domain model.
+The result means the save committed; there is no accepted job, operation polling or async import. Retain endpoint identity, safe review URL, updated-at and version. Do not add P0's illustrative applied/accepted envelope to legacy editorial receipts. The reference command uses `ReferenceWriteResult` for Tool success/output, serialization and receipt decoding, including `Schema.fromJsonString(ReferenceWriteResult)` on replay. Select the decoder from the known command operation, not an untrusted payload field. Keep `GetPostResult` for legacy create/update success and receipts; using it for E3 would silently strip references. The approved richer get_post read uses `GetPostWithReferencesResult`, never the legacy receipt decoder. Do not broaden, replay-enrich or re-render old receipts. Optional enrichment is a deliberate scope-dependent projection, not an unrestricted partial domain model.
 
 Persist the target list/order/primary, not mutable display snapshots. A relational adapter maps rows/positions and legacy primary columns into `DraftReferenceState`; a JSON adapter decodes the same logical value. Reject corrupt persisted collections as unavailable/repair-required, never silently truncate, deduplicate or sort. Temporary target display unavailability is not the same as corrupt association identity. Target deletion must not create dangling rows; restrictive integrity or an approved atomic canonical replacement is an implementation gate.
 
@@ -148,6 +157,8 @@ Source: approved P0 D1–D6 and the reviewed prerequisite [contract document](..
 
 **Read-enrichment amendment requiring recorded owner approval:** P0 confirmed that the three scopes, visibility rules, unchanged legacy receipt keys and scope-independent version match approved D1–D6. P0 also confirmed that optional `get_post.musicReferences` is not covered by that approval, because existing editorial results were explicitly unchanged. Proposed amendment: keep `get_post` name/input/legacy required fields and `posts:read` admission; add optional `post.musicReferences` only with `catalogue:read`, subject to authored/public visibility. With authorized enrichment and no associations return `{ references: [], primary: null, display: [] }`; without catalogue authority omit the whole field, never return an empty collection as a substitute for denied enrichment. Version hashing remains independent of scopes, enrichment and display snapshots. No separate read tool is mandated. P1 must reserve the get_post result/model/tool-output schemas and use a distinct richer read result, leaving legacy create/update outputs and stored receipts unchanged. P0's recommendation is not owner approval for this amendment.
 
+The complete-replacement MCP write depends on this authorized read. If the amendment is rejected or not yet approved, keep `set_draft_music_references` unregistered; do not ship blind overwrite. Browser editing may proceed only under its other approvals. An alternative MCP read requires a separately approved contract, not an automatic fallback.
+
 ## Errors, retries and cancellation
 
 | Condition | Result |
@@ -156,10 +167,10 @@ Source: approved P0 D1–D6 and the reviewed prerequisite [contract document](..
 | Live actor missing scope/role | access_denied; no writes or target disclosure |
 | Other-owner/published/non-editorial/absent draft, hidden/absent submitted target | not_found under safe target policy, no disclosing which hidden row exists |
 | Malformed/duplicate/nonmember primary/over limit/contradictory patch | invalid_input; no partial write |
-| Expected version absent | precondition_required through P1 expanded boundary; legacy tool validation stays unchanged |
+| Expected version absent | Required wire parameter validation fails before dispatch (or invalid_input at a direct service boundary); precondition_required is not reachable for this schema |
 | Stale version or same receipt key with different payload | conflict; no automatic reload-and-overwrite |
 | Receipt window expired | expired; no mutation with that key |
 | Bounded capacity exhausted | rate_limited through P1; bounded retry delay |
 | DB failure or corrupt stored value | unavailable; unknown post-commit outcomes are not labelled definitely-not-applied |
 
-No automatic retry for denied/invalid/not-found/conflict/expired inputs. After transient or unknown mutation outcome retry only the identical request ID and payload. Receipt authorization includes current `catalogue:read` and current read eligibility for every target whose display appears in the stored result. A playlist that became private must not leak through a historical receipt: return safe not_found rather than replaying its old title/artwork. Reauthorize post state/ownership before replay, but do not re-run the mutation or substitute today's display snapshots for the original result. Legacy create/update receipts contain no new reference display and retain their existing checks. Cancellation before commit writes nothing where supported; disconnect after commit is recovered through the same receipt. Log safe operation/correlation/outcome only, not bodies, raw URLs, catalogue provenance or tokens.
+No automatic retry for denied/invalid/not-found/conflict/expired inputs. After transient or unknown mutation outcome retry only the identical request ID and payload. Reauthorize current grant/account/post ownership/state, including `catalogue:read`, before decoding and returning the operation-specific receipt. For each stored Available display whose target is no longer public, return only `{ _tag: 'Unavailable', target }`; retain identity/order/primary, saved version and the rest of the stored result. This subtraction-only privacy mask acknowledges the committed command without leaking old private metadata or substituting today's title/artwork. Never promote a stored Unavailable entry to Available during replay. Post/actor access loss still denies replay; target visibility loss alone does not claim the author's post is absent. Do not rerun the mutation or alter the stored receipt. Legacy create/update receipts have no new display and retain existing checks. Cancellation before commit writes nothing where supported; disconnect after commit is recovered through the same receipt. Log safe operation/correlation/outcome only, not bodies, raw URLs, catalogue provenance or tokens.

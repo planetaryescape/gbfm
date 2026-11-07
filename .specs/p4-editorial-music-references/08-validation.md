@@ -34,10 +34,12 @@ Result: **3 files passed, 14 tests passed**, exit 0, duration 15.47 seconds. The
 
 Evaluated the first TypeScript fence in `03-contracts.md` with the installed Effect 4.0.6 Schema API after transient Bun transpilation, without creating an application module. **9/9 discriminating cases passed**: non-first primary, empty collection, missing primary, nonmember primary, duplicate UUID with different case, same UUID in different entity types, 50 targets, 51 targets and an unknown field. This checks the proposed parser's shape/invariants only, not catalogue access, persistence or a public application seam. No scratch source/test file was retained.
 
+After the independent PR review, transpiled all four contract fences together with existing core/MCP schemas injected, and evaluated the result schemas: **9 checks passed** (valid ordered display round-trip; four invalid collection/display cases; operation-specific JSON receipt retains references; richer get_post retains references; absent enrichment stays absent; unchanged legacy decoder control). This reproduces and prevents the documented design mistake of losing references through the legacy result decoder. These are temporary documentation-sketch probes, not application tests or full TypeScript typechecking.
+
 ## Delivery and limitations
 
 - `git diff --check` passes; P4 changes only `.specs/p4-editorial-music-references/`.
 - Document PR delivery is authorized. No runtime implementation, schema, migration, production data, policy, shared-file edit, merge or deployment.
-- Design sketches are not application modules. Only the first parser sketch was transpiled/evaluated for the smoke check above; the complete service/API types are not implemented. Future E3 tests remain specified in `06-test-plan.md`, not marked passing here.
+- Design sketches are not application modules. The probes above exercise parser/output-schema sketches; complete service/API types are not implemented. Future E3 tests remain specified in `06-test-plan.md`, not marked passing here.
 - No final implementation-tested SHA exists. The exact runtime baseline checked is named above; final document-head checks and independent review are recorded on the PR.
 - P0 reconciliation uses the reviewed #547 contract at the delivery base and the P0 worker's clarification: scope/version rules match, but optional get_post reference enrichment needs a narrow owner design amendment and must not change legacy create/update receipts. Shared playlist visibility and whole-token eligibility gates are carried forward.

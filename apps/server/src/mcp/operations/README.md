@@ -14,7 +14,8 @@ Import from `@/mcp/operations/store`:
   P1 provides the layer alongside `DatabaseLayer` with the **same** raw binding;
   domain layers consume the service, never reach into Drizzle internals.
 - Types `JsonValue`, `OperationKey`, `OperationOutcome`, `OperationContext`,
-  `AtomicOperationPlan`, `ExecuteOperation`, `OperationPreparation`, `OperationResult`.
+  `AtomicOperationPlan`, `LookupOperation`, `ExecuteOperation`, `OperationPreparation`,
+  `OperationReceipt`, `OperationResult`, `OperationLookupResult`.
 
 `execute({ key, normalizedInput, now, authorize, build })`:
 
@@ -56,6 +57,48 @@ asserted inside the one physical-attempt-fenced batch. Sync build exceptions ret
 the existing invalid-input behavior; expected observation failures use the typed
 preparation result instead of throwing from build.
 
+### Authorized lookup before bounded provider fetch
+
+`lookup(input: LookupOperation): Promise<OperationLookupResult>` accepts the same
+trusted `key`, normalized input, epoch-millisecond `now`, and `authorize(outcome?)`
+as execute, without a builder/preparation callback. It shares the executor's
+identity/hash validation, live authorization, stored-outcome decoding and expiry
+redaction. It returns exactly `{status:'miss'}` for an absent key, an original
+`{status:'replayed',operationId,outcome,createdAt,expiresAt}`, or a status-only
+`conflict/expired/access_denied/invalid_input/unavailable`. Storage/auth/codec
+failures are **never** misses. Lookup never claims a key or mutates domain data;
+its only write is the existing expired-receipt privacy redaction.
+
+U1 recipe (composition/domain names below are illustrative):
+
+```ts
+const intent = { key, normalizedInput, authorize }
+const prior = await store.lookup({ ...intent, now: clock.now() })
+if (prior.status !== 'miss') return prior
+
+// Caller owns current provider authority, bounded fetch, timeout and response parsing.
+const snapshot = await fetchBoundedProvider()
+return store.execute({
+  ...intent,
+  now: clock.now(), // Fresh after fetch: never reuse the preflight timestamp.
+  prepare: () => prepareDomainSnapshot(snapshot), // Read-only DB observation/preflight.
+})
+```
+
+Miss is not a reservation, a provider authorization token, or a promise that the
+key stays absent. The caller must authorize and bound provider access separately;
+no provider fetch occurs inside this store, `prepare`, a builder, or a D1 batch.
+Keep key and normalized **user intent/revisions** identical across lookup/execute;
+do not hash a mutable provider response or silently substitute new user input.
+After the fetch, execute receives a **fresh trusted time** and reruns live
+authorization and receipt inspection before preparation. Another concurrent fetch
+can already have won: execute replays its original result, detects a changed
+payload or expiry, or denies revoked authority without applying the later snapshot.
+Different keys still compete through the existing domain CAS and physical fence.
+Do not implement a miss probe by returning `unavailable` from preparation or keep
+a per-request in-memory replay flag/second ledger. No tool/HTTP lookup endpoint
+or provider-in-transaction guarantee is added by this service method.
+
 Unavailable paths emit `mcp.operation.unavailable` through the Effect logger,
 with fixed operation/dependency/coarse-code fields for lookup, decoding, batch,
 authorization callback and expiry cleanup failures. The optional second factory
@@ -94,8 +137,8 @@ Non-lifecycle missing/hidden targets do not replay. Lifecycle acknowledgements m
 use commit evidence only as allowed by P0, never as permission to read new private
 state. A reminder becoming fenced/accepted need not prevent authorized replay of
 its original outcome: current mutability and current access are separate checks.
-Private result fields still require current read authority. No generic receipt
-lookup or handle-based private result endpoint exists here.
+Private result fields still require current read authority. No generic tool/HTTP
+receipt lookup or handle-based private result endpoint exists here.
 
 The owning SQL statements must also enforce current account/grant/role/visibility
 and domain revision preconditions **inside the batch**. The callback is not a

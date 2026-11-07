@@ -133,6 +133,136 @@ const coupled = () =>
     .first()
 
 describe('shared durable atomic operations', () => {
+  test('lookup miss reserves nothing and is distinct from database, codec and authorization failures', async () => {
+    const input = command()
+    expect(await store.lookup(input)).toEqual({ status: 'miss' })
+    expect(await database.prepare('SELECT count(*) AS n FROM mcp_operations').first()).toEqual({
+      n: 0,
+    })
+    expect(await target()).toMatchObject({ revision: 0, value: 'initial' })
+    expect(await store.lookup({ ...input, key: { ...key, requestId: 'invalid' } })).toEqual({
+      status: 'invalid_input',
+    })
+    expect(await store.lookup({ ...input, now: -1 })).toEqual({ status: 'invalid_input' })
+
+    const events: Array<OperationDiagnostic> = []
+    await using empty = await createMigratedD1Database([])
+    const unavailable = createMcpOperationStore(empty.database, (event) => events.push(event))
+    expect(await unavailable.lookup({ ...input, authorize: async () => true })).toEqual({
+      status: 'unavailable',
+    })
+    const observed = createMcpOperationStore(database, (event) => events.push(event))
+    expect(
+      await observed.lookup({
+        ...input,
+        authorize: async () => {
+          throw new Error('PRIVATE_AUTH SQL token')
+        },
+      }),
+    ).toEqual({ status: 'unavailable' })
+    await store.execute(input)
+    await database
+      .prepare('UPDATE mcp_operations SET outcome = ?')
+      .bind(JSON.stringify({ private: 'PRIVATE_OUTCOME' }))
+      .run()
+    expect(await observed.lookup(input)).toEqual({ status: 'unavailable' })
+    expect(events).toEqual([
+      { operation: 'receipt.lookup', dependency: 'database', code: 'storage_failed' },
+      { operation: 'receipt.authorize', dependency: 'authorization', code: 'authorization_failed' },
+      { operation: 'receipt.decode', dependency: 'codec', code: 'decode_failed' },
+    ])
+  })
+
+  test('lookup returns only original authorized receipt, detects changed input and redacts exact expiry', async () => {
+    const input = command()
+    const first = await store.execute(input)
+    expect((await store.execute(command(1, 'later', crypto.randomUUID()))).status).toBe('applied')
+    expect(await store.lookup(input)).toEqual({ ...first, status: 'replayed' })
+    expect(
+      await store.lookup({
+        ...input,
+        normalizedInput: { ...input.normalizedInput, expectedRevision: 1 },
+      }),
+    ).toEqual({ status: 'conflict' })
+    expect(await store.lookup({ ...input, now: now + 86400000 - 1 })).toMatchObject({
+      status: 'replayed',
+      outcome: { revision: 1, result: { value: 'first' } },
+    })
+    expect(await store.lookup({ ...input, now: now + 86400000 })).toEqual({ status: 'expired' })
+    expect(
+      await database
+        .prepare(
+          'SELECT state, outcome, actor_id, client_id, attempt_id FROM mcp_operations WHERE expires_at = ?',
+        )
+        .bind(now + 86400000)
+        .all(),
+    ).toMatchObject({
+      results: expect.arrayContaining([
+        { state: 'expired', outcome: null, actor_id: null, client_id: null, attempt_id: null },
+      ]),
+    })
+    expect(await target()).toMatchObject({ revision: 2, value: 'later' })
+  })
+
+  test('two missed provider preflights can fetch concurrently but late completion replays the first winner', async () => {
+    const { build: _build, ...intent } = command()
+    expect(await Promise.all([store.lookup(intent), store.lookup(intent)])).toEqual([
+      { status: 'miss' },
+      { status: 'miss' },
+    ])
+    const firstFetch = Promise.withResolvers<string>()
+    const secondFetch = Promise.withResolvers<string>()
+
+    const first = (async () => {
+      const snapshot = await firstFetch.promise
+
+      return store.execute({ ...intent, now: now + 10, build: command(0, snapshot).build })
+    })()
+
+    const second = (async () => {
+      await secondFetch.promise
+
+      return createMcpOperationStore(database).execute({
+        ...intent,
+        now: now + 20,
+        prepare: async () => {
+          throw new Error('Replay MUST bypass preparation of later provider snapshot')
+        },
+      })
+    })()
+
+    firstFetch.resolve('provider-a')
+    const winner = await first
+    expect(winner.status).toBe('applied')
+    expect(winner).toMatchObject({ createdAt: now + 10, expiresAt: now + 10 + 86400000 })
+    secondFetch.resolve('provider-b')
+    expect(await second).toEqual({ ...winner, status: 'replayed' })
+    expect(await target()).toMatchObject({ revision: 1, value: 'provider-a' })
+    expect(await coupled()).toEqual({ value: 'provider-a' })
+  })
+
+  test('post-fetch execute rechecks changed intent, fresh time and authority rather than trusting an earlier miss', async () => {
+    const input = command()
+    expect(await store.lookup(input)).toEqual({ status: 'miss' })
+    await database.prepare('UPDATE user SET banned = 1').run()
+    expect(await store.execute({ ...input, now: now + 1 })).toEqual({ status: 'access_denied' })
+    expect(await target()).toMatchObject({ revision: 0 })
+    await database.prepare('UPDATE user SET banned = 0').run()
+    expect((await store.execute(input)).status).toBe('applied')
+    expect(
+      await store.execute({
+        ...input,
+        normalizedInput: { ...input.normalizedInput, value: 'changed' },
+        now: now + 2,
+      }),
+    ).toEqual({ status: 'conflict' })
+    expect(await store.execute({ ...input, now: now + 86400000 })).toEqual({ status: 'expired' })
+    expect(await target()).toMatchObject({ revision: 1, value: 'first' })
+    expect(await database.prepare('SELECT count(*) AS n FROM mcp_operations').first()).toEqual({
+      n: 1,
+    })
+  })
+
   test('prepares current state only after receipt miss; original replay bypasses later stale state', async () => {
     const { build, ...base } = command()
 
@@ -428,11 +558,13 @@ describe('shared durable atomic operations', () => {
     ] as const) {
       await database.prepare(deny).run()
       expect(await store.execute(command())).toEqual({ status: 'access_denied' })
+      expect(await store.lookup(command())).toEqual({ status: 'access_denied' })
       await database.prepare(restore).run()
     }
 
     await database.prepare('DELETE FROM operation_test_target').run()
     expect(await store.execute(command())).toEqual({ status: 'access_denied' })
+    expect(await store.lookup(command())).toEqual({ status: 'access_denied' })
     expect(
       await store.execute({
         ...command(),

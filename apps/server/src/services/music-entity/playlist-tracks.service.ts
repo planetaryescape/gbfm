@@ -36,7 +36,7 @@ export const getPlaylistTracksEffect = (playlistId: string) =>
           .from(musicPlaylistTracksTable)
           .innerJoin(musicTracksTable, eq(musicPlaylistTracksTable.trackId, musicTracksTable.id))
           .where(eq(musicPlaylistTracksTable.playlistId, playlistId))
-          .orderBy(musicPlaylistTracksTable.position)
+          .orderBy(musicPlaylistTracksTable.position, musicPlaylistTracksTable.trackId)
 
         const trackIds = rows.map((r) => r.track.id)
 
@@ -52,6 +52,7 @@ export const getPlaylistTracksEffect = (playlistId: string) =>
                     inArray(musicEntityLinksTable.entityId, trackIds),
                   ),
                 )
+                .orderBy(musicEntityLinksTable.platform, musicEntityLinksTable.url)
 
         const linksByTrackId = new Map<string, Array<SelectMusicEntityLink>>()
 

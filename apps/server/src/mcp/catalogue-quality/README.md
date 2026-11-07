@@ -1,6 +1,6 @@
 # Q1 bounded catalogue diagnostics (#527)
 
-Stacked after R4 #579 exact `0cff71bddb4bca7d7ba9b368f02993213ceb2b24`, retaining
+Stacked after R4 #579 exact `0316e08b17ba20b328de7d8bfdfdbfbdf72f65f9`, retaining
 reviewed R1 #565. All five selected tools are retained in `CatalogueQualityToolkit`.
 This module adds no central registry, schema, migration, repair or background job.
 PR stays OPEN/unmerged, auto-merge off; no production activation is authorized.

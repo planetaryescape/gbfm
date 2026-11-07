@@ -2,6 +2,19 @@ import type { D1PreparedStatement } from '@cloudflare/workers-types'
 import { type SQL, sql } from 'drizzle-orm'
 
 import {
+  musicParentCas,
+  musicParentGuard,
+  musicParentWinner,
+} from '@/services/music-entity/guarded-statements'
+
+export {
+  type MusicParent,
+  musicParentCas,
+  musicParentGuard,
+  musicParentWinner,
+} from '@/services/music-entity/guarded-statements'
+
+import {
   artistNameFanoutCapacity,
   artistNameFanoutStatements,
   artistPrimaryNameAvailable,
@@ -15,46 +28,6 @@ const tables = {
   track: 'music_tracks',
   label: 'music_labels',
 } as const
-
-export interface MusicParent {
-  readonly entityType: keyof typeof tables
-  readonly entityId: string
-}
-
-export const musicParentGuard = (target: MusicParent, expectedRevision: number): SQL =>
-  sql`EXISTS (SELECT 1 FROM ${sql.identifier(tables[target.entityType])}
-    WHERE id=${target.entityId} AND revision=${expectedRevision})`
-
-export const musicParentWinner = (target: MusicParent, attemptId: string): SQL =>
-  sql`EXISTS (SELECT 1 FROM ${sql.identifier(tables[target.entityType])}
-    WHERE id=${target.entityId} AND last_operation_id=${attemptId})`
-
-/** Shared root CAS for M1 edits and M2 facts. Build only inside the common store
- * after replay lookup. Eligibility includes the caller's fresh version-token
- * comparison and domain predicates; authority and physical receipt fence stay
- * explicit. Coupled statements must still check musicParentWinner + both guards.
- */
-export const musicParentCas = (input: {
-  readonly target: MusicParent
-  readonly expectedRevision: number
-  readonly changed: boolean
-  readonly attemptId: string
-  readonly fence: SQL
-  readonly liveGuard: SQL
-  readonly eligibility: SQL
-  readonly assignments: ReadonlyArray<SQL>
-}): SQL => sql`UPDATE ${sql.identifier(tables[input.target.entityType])}
-  SET ${sql.join(
-    [
-      ...input.assignments,
-      sql`revision=revision+${input.changed ? 1 : 0}`,
-      sql`last_operation_id=${input.attemptId}`,
-    ],
-    sql`, `,
-  )}
-  WHERE id=${input.target.entityId} AND revision=${input.expectedRevision}
-  AND (${input.fence}) AND (${input.liveGuard}) AND (${input.eligibility})
-  ${input.changed ? sql`AND revision<${Number.MAX_SAFE_INTEGER}` : sql``}`
 
 /** Domain statements for the single shared operations executor. This function
  * does not execute or store receipts. Inputs are a decoded exact command and its

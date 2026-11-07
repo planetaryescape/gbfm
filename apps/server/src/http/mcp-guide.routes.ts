@@ -90,9 +90,20 @@ The token's granted scopes are authoritative: an environment whose resource poli
 is still read-only can reduce a write request to read-only access.
 Draft title and content must be nonblank. Content is limited to 100,000 characters,
 title to 500 and description to 2,000.
+The encoded draft-write request and every MCP response must also fit within 256 KiB;
+read requests retain their 16 KiB limit. JSON escaping and multibyte text count toward
+the byte limit, so a schema-valid draft can still be too large. Oversize bodies fail
+explicitly without truncation. After an ambiguous write response, reconcile using
+the same requestId, never a new create key.
 Draft tools never publish, delete, change creators, change media or edit published posts.
 They do not control playback or access your private listening library.
 Review and publishing stay in GBFM.
+
+Tool discovery reflects the connection's current scopes and role on each request.
+Remembered tool names do not authorize calls. The foundation supports separately
+validated listener grants without posts:read, but no new domain tools are enabled
+here and production resource-policy permissions are not expanded by this change.
+New domain permissions require fresh consent and their own delivery gates.
 
 ## Other clients, including Claude Code
 

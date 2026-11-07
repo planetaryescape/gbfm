@@ -1,13 +1,17 @@
+import { UserId } from '@gbfm/core/identity'
 import { eq } from 'drizzle-orm'
 import { Effect, Layer, Match, Redacted, Schema } from 'effect'
 import { expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
+import { musicArtistsTable } from '@/db/music-entity.schema'
+import { oauthClient, oauthResource } from '@/db/oauth.schema'
 import { postCreators, postsTable } from '@/db/post.schema'
 import { GetPostResult } from '@/mcp/contracts'
 import { ConfigService, createConfig } from '@/services/config.service'
 import { createEditorialOAuthFixture, OAuthTokens } from '@/test/editorial-oauth'
 import { createTestWebHandler } from '@/test/http-handler'
+import { createComposedMcpFixture } from '@/test/mcp-catalogue-fixture'
 
 const ToolList = Schema.Struct({
   result: Schema.Struct({ tools: Schema.Array(Schema.Struct({ name: Schema.String })) }),
@@ -53,7 +57,7 @@ test('composed OAuth MCP enforces draft-write consent, saved versions and revoca
     }),
   )
 
-  const call = (name: string, args: Schema.Json, token = writeTokens.access_token) =>
+  const call = (name: string, args: Schema.Json, token = writeTokens.access_token, padding = 0) =>
     handler.handler(
       new Request(fixture.config.mcp.resourceUrl, {
         method: 'POST',
@@ -65,19 +69,20 @@ test('composed OAuth MCP enforces draft-write consent, saved versions and revoca
           'mcp-name': name,
           authorization: `Bearer ${Redacted.value(token)}`,
         },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'tools/call',
-          params: {
-            name,
-            arguments: args,
-            _meta: {
-              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
-              'io.modelcontextprotocol/clientCapabilities': {},
+        body:
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: {
+              name,
+              arguments: args,
+              _meta: {
+                'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                'io.modelcontextprotocol/clientCapabilities': {},
+              },
             },
-          },
-        }),
+          }) + ' '.repeat(padding),
       }),
     )
 
@@ -115,11 +120,68 @@ test('composed OAuth MCP enforces draft-write consent, saved versions and revoca
       description: '\u0001'.repeat(2000),
     }
 
-    const maximum = await call('create_draft', maximumInput)
+    // D5 tightens the former 640 KiB envelope: valid character counts can exceed JSON bytes.
+    expect((await call('create_draft', maximumInput)).status).toBe(413)
+
+    const maximum = await call('create_draft', {
+      ...maximumInput,
+      content: 'x'.repeat(100_000),
+      description: 'x'.repeat(2000),
+    })
+
     expect(maximum.status).toBe(200)
     expect(
       Schema.decodeUnknownSync(Saved)(await maximum.json()).result.structuredContent.post.content,
-    ).toBe(maximumInput.content)
+    ).toBe('x'.repeat(100_000))
+    expect(
+      await (
+        await call('create_draft', {
+          ...input,
+          requestId: crypto.randomUUID(),
+          content: 'x'.repeat(100_001),
+        })
+      ).json(),
+    ).toMatchObject({
+      result: { isError: true, content: [{ text: expect.stringContaining('100000') }] },
+    })
+
+    // Padding is legal JSON whitespace: transport limits are independent of field limits.
+    const boundaryInput = { ...input, requestId: crypto.randomUUID(), content: 'é🎵' }
+
+    const measured = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'create_draft',
+        arguments: boundaryInput,
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+          'io.modelcontextprotocol/clientCapabilities': {},
+        },
+      },
+    })
+
+    const padding = 256 * 1024 - new TextEncoder().encode(measured).byteLength
+    expect(
+      (await call('create_draft', boundaryInput, writeTokens.access_token, padding)).status,
+    ).toBe(200)
+    expect(
+      (await call('create_draft', boundaryInput, writeTokens.access_token, padding + 1)).status,
+    ).toBe(413)
+
+    // A small request must not leak an oversized stored response or truncate its content.
+    await fixture.db
+      .update(postsTable)
+      .set({ content: '\u0001'.repeat(100_000) })
+      .where(eq(postsTable.id, saved.post.postId))
+    const oversizedResponse = await call('get_post', { postId: saved.post.postId })
+    expect(oversizedResponse.status).toBe(413)
+    expect(await oversizedResponse.text()).toBe('MCP response exceeds the supported byte limit.')
+    await fixture.db
+      .update(postsTable)
+      .set({ content: input.content })
+      .where(eq(postsTable.id, saved.post.postId))
     expect((await call('create_draft', { ...input, content: 'x'.repeat(700_000) })).status).toBe(
       413,
     )
@@ -197,7 +259,7 @@ test('composed OAuth MCP enforces draft-write consent, saved versions and revoca
   } finally {
     await handler.dispose()
   }
-})
+}, 30_000)
 
 test('composed API serves connection instructions without OAuth while MCP stays protected', async () => {
   await using fixture = await createEditorialOAuthFixture()
@@ -385,6 +447,7 @@ test('composed HTTP MCP scopes tokens, drafts, connections and disconnection to 
     expect(unauthorized.headers.get('www-authenticate')).toContain(
       '/.well-known/oauth-protected-resource/mcp',
     )
+    expect(unauthorized.headers.get('www-authenticate')).toContain('scope="posts:read"')
     expect(unauthorized.headers.get('cache-control')).toBe('private, no-store')
     expect((await rpc('server/discover')).status).toBe(401)
     expect((await rpc('tools/list', Redacted.make('owner-session-token'))).status).toBe(401)
@@ -421,8 +484,6 @@ test('composed HTTP MCP scopes tokens, drafts, connections and disconnection to 
     const listed = await rpc('tools/list', tokens.access_token)
     expect(listed.status).toBe(200)
     expect(Schema.decodeUnknownSync(ToolList)(await listed.json()).result.tools).toEqual([
-      { name: 'create_draft' },
-      { name: 'update_draft' },
       { name: 'list_drafts' },
       { name: 'get_post' },
     ])
@@ -507,4 +568,289 @@ test('composed HTTP MCP scopes tokens, drafts, connections and disconnection to 
   } finally {
     await handler.dispose()
   }
-})
+}, 15_000)
+
+test('independent catalogue module composes with live OAuth and owned draft services', async () => {
+  await using fixture = await createEditorialOAuthFixture()
+  const clientId = await fixture.register('posts:read drafts:write catalogue:read offline_access')
+  // Disposable resource only. Production policy and schema are untouched.
+  await fixture.db.update(oauthResource).set({
+    allowedScopes: JSON.stringify([
+      'posts:read',
+      'drafts:write',
+      'catalogue:read',
+      'offline_access',
+    ]),
+  })
+  await fixture.db.update(user).set({ role: 'admin' }).where(eq(user.id, 'other'))
+
+  for (const [id, publishedAt] of [
+    ['artist-null', null],
+    ['artist-future', new Date('2099-01-01')],
+  ] as const) {
+    await fixture.db
+      .insert(musicArtistsTable)
+      .values({ id, name: id, slug: id, publishedAt, createdById: 'owner' })
+  }
+
+  const tokens = async (actor: string, scope: string) =>
+    Schema.decodeUnknownSync(OAuthTokens)(
+      await (
+        await fixture.exchange(clientId, await fixture.authorize(clientId, actor, scope))
+      ).json(),
+    )
+
+  const listener = await tokens('reader', 'catalogue:read offline_access')
+  const owner = await tokens('owner', 'posts:read drafts:write catalogue:read offline_access')
+  const admin = await tokens('other', 'posts:read offline_access')
+  const handler = createComposedMcpFixture(fixture)
+
+  const rpc = (
+    method: string,
+    token: typeof owner.access_token,
+    name?: string,
+    args: Schema.Json = {},
+    accept = 'application/json, text/event-stream',
+  ) =>
+    handler.handler(
+      new Request(fixture.config.mcp.resourceUrl, {
+        method: 'POST',
+        headers: {
+          accept,
+          'content-type': 'application/json',
+          'mcp-protocol-version': '2026-07-28',
+          'mcp-method': method,
+          'mcp-name': name ?? '',
+          authorization: `Bearer ${Redacted.value(token)}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 71,
+          method,
+          params: {
+            name,
+            arguments: args,
+            _meta: {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': {},
+            },
+          },
+        }),
+      }),
+    )
+
+  const Saved = Schema.Struct({ result: Schema.Struct({ structuredContent: GetPostResult }) })
+
+  try {
+    expect(
+      Schema.decodeUnknownSync(ToolList)(
+        await (await rpc('tools/list', listener.access_token)).json(),
+      ).result.tools,
+    ).toEqual([{ name: 'fixture_catalogue_artist' }])
+
+    const streamListing = await rpc(
+      'tools/list',
+      listener.access_token,
+      undefined,
+      {},
+      'text/event-stream',
+    )
+
+    // The installed request-scoped transport requires both accepted media types.
+    expect(streamListing.status).toBe(406)
+    const listedOwner = await (await rpc('tools/list', owner.access_token)).json()
+    expect(
+      Schema.decodeUnknownSync(ToolList)(listedOwner).result.tools.map((tool) => tool.name),
+    ).toEqual([
+      'create_draft',
+      'update_draft',
+      'list_drafts',
+      'get_post',
+      'fixture_catalogue_artist',
+    ])
+    expect(listedOwner).toMatchObject({
+      jsonrpc: '2.0',
+      id: 71,
+      result: {
+        tools: [
+          expect.objectContaining({
+            inputSchema: expect.any(Object),
+            outputSchema: expect.any(Object),
+          }),
+          expect.anything(),
+          expect.anything(),
+          expect.anything(),
+          expect.anything(),
+        ],
+      },
+    })
+
+    for (const id of ['artist-null', 'artist-future']) {
+      expect(
+        await (
+          await rpc('tools/call', listener.access_token, 'fixture_catalogue_artist', { id })
+        ).json(),
+      ).toMatchObject({ result: { structuredContent: { artist: { id, name: id, slug: id } } } })
+
+      const text = await (
+        await rpc('tools/call', listener.access_token, 'fixture_catalogue_artist', { id })
+      ).text()
+
+      expect(text).not.toContain('createdById')
+    }
+
+    expect(
+      await (
+        await rpc('tools/call', admin.access_token, 'fixture_catalogue_artist', {
+          id: 'artist-null',
+        })
+      ).json(),
+    ).toMatchObject({ result: { isError: true } })
+    expect(
+      await (
+        await rpc('tools/call', owner.access_token, 'fixture_declared_permission', {
+          nonce: 'declared-scope-dispatch-probe',
+        })
+      ).json(),
+    ).toMatchObject({
+      jsonrpc: '2.0',
+      id: 71,
+      result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
+    })
+    expect(
+      await (
+        await handler.handler(
+          new Request('https://editorial-test.localhost/mcp', {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${Redacted.value(owner.access_token)}`,
+              'content-type': 'application/json',
+              accept: 'application/json, text/event-stream',
+              'mcp-protocol-version': '2026-07-28',
+              'mcp-method': 'tools/call',
+              'mcp-name': 'fixture_declared_permission',
+            },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'tools/call',
+              params: {
+                name: 'fixture_declared_permission',
+                arguments: { nonce: 'id-less-dispatch-probe' },
+                _meta: {
+                  'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                  'io.modelcontextprotocol/clientCapabilities': {},
+                },
+              },
+            }),
+          }),
+        )
+      ).json(),
+    ).toMatchObject({
+      jsonrpc: '2.0',
+      id: null,
+      result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
+    })
+    expect(
+      await (await rpc('tools/call', owner.access_token, 'fixture_unknown_tool')).json(),
+    ).toMatchObject({ jsonrpc: '2.0', id: 71, error: { code: -32602 } })
+    // Cached/guessed wire names never grant editorial access.
+    expect(
+      await (
+        await rpc('tools/call', listener.access_token, 'get_post', { postId: 'private-guess' })
+      ).json(),
+    ).toMatchObject({ result: { isError: true } })
+
+    const input = {
+      requestId: crypto.randomUUID(),
+      title: 'Composed draft',
+      content: 'Owned private body',
+    }
+
+    const created = await Promise.all([
+      rpc('tools/call', owner.access_token, 'create_draft', input),
+      rpc('tools/call', owner.access_token, 'create_draft', input),
+    ])
+
+    const first = Schema.decodeUnknownSync(Saved)(await created[0].json()).result.structuredContent
+    expect(
+      Schema.decodeUnknownSync(Saved)(await created[1].json()).result.structuredContent,
+    ).toEqual(first)
+    expect(
+      await fixture.db.select().from(postsTable).where(eq(postsTable.title, input.title)),
+    ).toHaveLength(1)
+    expect(
+      await (
+        await rpc('tools/call', owner.access_token, 'create_draft', {
+          ...input,
+          title: 'Changed retry',
+        })
+      ).json(),
+    ).toMatchObject({ result: { isError: true } })
+    expect(
+      Schema.decodeUnknownSync(Saved)(
+        await (
+          await rpc('tools/call', owner.access_token, 'get_post', { postId: first.post.postId })
+        ).json(),
+      ).result.structuredContent,
+    ).toEqual(first)
+
+    const privateRead = await (
+      await rpc('tools/call', admin.access_token, 'get_post', { postId: first.post.postId })
+    ).json()
+
+    const absentRead = await (
+      await rpc('tools/call', admin.access_token, 'get_post', { postId: 'absent-id' })
+    ).json()
+
+    expect(privateRead).toEqual(absentRead)
+    expect(privateRead).toMatchObject({ result: { isError: true } })
+
+    const updates = await Promise.all(
+      ['One', 'Two'].map((content) =>
+        rpc('tools/call', owner.access_token, 'update_draft', {
+          requestId: crypto.randomUUID(),
+          postId: first.post.postId,
+          expectedVersion: first.post.version,
+          content,
+        }),
+      ),
+    )
+
+    const results = await Promise.all(updates.map((response) => response.json()))
+    expect(
+      results.filter(
+        (result) =>
+          Schema.decodeUnknownSync(
+            Schema.Struct({ result: Schema.Struct({ isError: Schema.optional(Schema.Boolean) }) }),
+          )(result).result.isError,
+      ),
+    ).toHaveLength(1)
+    await fixture.db.update(user).set({ role: 'user' }).where(eq(user.id, 'owner'))
+    expect((await rpc('tools/call', owner.access_token, 'create_draft', input)).status).toBe(401)
+    // Downgrade must not disqualify an already-listener grant.
+    expect((await rpc('tools/list', listener.access_token)).status).toBe(200)
+    await fixture.db.update(user).set({ banned: true }).where(eq(user.id, 'reader'))
+    expect((await rpc('tools/list', listener.access_token)).status).toBe(401)
+    await fixture.db.update(user).set({ banned: false }).where(eq(user.id, 'reader'))
+    await fixture.db
+      .update(oauthClient)
+      .set({ disabled: true })
+      .where(eq(oauthClient.clientId, clientId))
+    expect((await rpc('tools/list', listener.access_token)).status).toBe(401)
+    await fixture.db
+      .update(oauthClient)
+      .set({ disabled: false })
+      .where(eq(oauthClient.clientId, clientId))
+    await fixture.db.update(oauthResource).set({ disabled: true })
+    expect((await rpc('tools/list', listener.access_token)).status).toBe(401)
+    await fixture.db.update(oauthResource).set({ disabled: false })
+    await Effect.runPromise(fixture.service.disconnect(fixture.userId, clientId))
+    expect((await rpc('tools/call', owner.access_token, 'create_draft', input)).status).toBe(401)
+    await Effect.runPromise(
+      fixture.service.disconnect(Schema.decodeUnknownSync(UserId)('reader'), clientId),
+    )
+    expect((await rpc('tools/list', listener.access_token)).status).toBe(401)
+  } finally {
+    await handler.dispose()
+  }
+}, 30_000)

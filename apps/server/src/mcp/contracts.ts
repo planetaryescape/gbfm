@@ -17,6 +17,23 @@ export class EditorialToolError extends Schema.TaggedError<
   message: Schema.String,
 }) {}
 
+export class McpToolError extends Schema.TaggedError<McpToolError>()('McpToolError', {
+  code: Schema.Literals([
+    'access_denied',
+    'not_found',
+    'unavailable',
+    'conflict',
+    'invalid_input',
+    'expired',
+    'rate_limited',
+    'precondition_required',
+  ]),
+  message: Schema.String,
+  retryAfterSeconds: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 60 })),
+  ),
+}) {}
+
 const httpUrl = Schema.String.check(
   Schema.makeFilter((value) => {
     const url = URL.parse(value)

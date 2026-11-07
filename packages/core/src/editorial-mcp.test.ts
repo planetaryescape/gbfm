@@ -9,12 +9,47 @@ import {
   EditorialPrincipal,
   EditorialReadScopes,
   EditorialScopes,
+  McpScopes,
+  canAuthorizeMcp,
   McpResourceUrl,
   OAuthClientId,
   PostVersion,
 } from './editorial-mcp'
 
 describe('editorial MCP domain boundaries', () => {
+  test('expanded listener grants do not acquire editorial authority or implicit scopes', () => {
+    const scopes = Schema.decodeUnknownSync(McpScopes)(['catalogue:read', 'offline_access'])
+    const listener = Schema.decodeUnknownSync(EditorialAccount)({ role: 'user', banned: false })
+    expect(canAuthorizeMcp(listener, scopes)).toBe(true)
+    expect(canAuthorizeMcp(listener, ['posts:read'])).toBe(false)
+    expect(canAuthorizeMcp(listener, ['catalogue:write'])).toBe(false)
+    expect(
+      canAuthorizeMcp(
+        Schema.decodeUnknownSync(EditorialAccount)({ role: 'creator', banned: false }),
+        ['catalogue:write'],
+      ),
+    ).toBe(false)
+    expect(
+      canAuthorizeMcp(
+        Schema.decodeUnknownSync(EditorialAccount)({ role: 'admin', banned: false }),
+        ['catalogue:write'],
+      ),
+    ).toBe(true)
+    expect(canAuthorizeMcp({ ...listener, banned: true }, scopes)).toBe(false)
+
+    for (const invalid of [
+      [],
+      ['offline_access'],
+      ['drafts:write'],
+      ['catalogue:read', 'catalogue:read'],
+      ['unknown:read'],
+    ]) {
+      expect(Schema.decodeUnknownOption(McpScopes)(invalid)._tag).toBe('None')
+    }
+
+    expect(Schema.decodeUnknownOption(EditorialScopes)(scopes)._tag).toBe('None')
+  })
+
   test.each(['creator', 'editor', 'admin'])(
     'allows an eligible %s without a configured identity',
     (role) => {

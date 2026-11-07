@@ -119,14 +119,19 @@ export const createEditorialOAuthFixture = async () => {
     return auth.handler(new Request(`https://editorial-test.localhost/auth${path}`, options))
   }
 
-  const register = async () => {
-    const response = await request('/oauth2/register', {
+  const register = async (scope?: string) => {
+    const registration = {
       client_name: 'Disposable native client',
       token_endpoint_auth_method: 'none',
       redirect_uris: ['http://127.0.0.1:38479/callback'],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
-    })
+    }
+
+    const response = await request(
+      '/oauth2/register',
+      scope === undefined ? registration : { ...registration, scope },
+    )
 
     if (response.status !== 201) throw new Error(`Registration failed: ${response.status}`)
 

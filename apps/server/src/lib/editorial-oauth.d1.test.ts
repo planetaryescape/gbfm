@@ -8,6 +8,7 @@ import { Database } from '@/db/layer'
 import {
   oauthAccessToken,
   oauthClient,
+  oauthConsent,
   oauthRefreshToken,
   oauthResource,
   rateLimit,
@@ -19,6 +20,105 @@ import { createEditorialOAuthFixture, OAuthTokens } from '@/test/editorial-oauth
 import { withTestLayer } from '@/test/effect'
 
 describe('editorial OAuth provider on migrated D1', () => {
+  test('default resource policy rejects expanded listener scopes before consent', async () => {
+    await using fixture = await createEditorialOAuthFixture()
+    const clientId = await fixture.register('catalogue:read offline_access')
+
+    const authorization = await fixture.request(
+      `/oauth2/authorize?${fixture.authorizationQuery(clientId, 'catalogue:read offline_access')}`,
+      undefined,
+      'reader',
+    )
+
+    expect(authorization.status).toBe(400)
+    expect(await authorization.json()).toMatchObject({ error: 'invalid_scope' })
+    expect(await fixture.db.select().from(oauthConsent)).toHaveLength(0)
+    expect(
+      await Effect.runPromise(fixture.service.listConnections(UserId.make('reader'))),
+    ).toHaveLength(0)
+  })
+
+  test('listener-only scopes require fresh consent and an explicitly enabled disposable resource', async () => {
+    await using fixture = await createEditorialOAuthFixture()
+    const scope = 'catalogue:read offline_access'
+    const clientId = await fixture.register('posts:read drafts:write catalogue:read offline_access')
+
+    const legacy = Schema.decodeUnknownSync(OAuthTokens)(
+      await (await fixture.exchange(clientId, await fixture.authorize(clientId))).json(),
+    )
+
+    const escalation = await fixture.request('/oauth2/token', {
+      grant_type: 'refresh_token',
+      client_id: clientId,
+      refresh_token: Redacted.value(legacy.refresh_token),
+      resource: fixture.config.mcp.resourceUrl,
+      scope,
+    })
+
+    expect(escalation.status).toBe(400)
+    expect(await escalation.json()).toMatchObject({ error: 'invalid_scope' })
+    const [policy] = await fixture.db.select().from(oauthResource)
+    expect(JSON.parse(policy?.allowedScopes ?? 'null')).not.toContain('catalogue:read')
+    await fixture.db.update(oauthResource).set({
+      allowedScopes: JSON.stringify([
+        'posts:read',
+        'drafts:write',
+        'catalogue:read',
+        'offline_access',
+      ]),
+    })
+
+    const expandedAuthorization = await fixture.request(
+      `/oauth2/authorize?${fixture.authorizationQuery(clientId, 'posts:read catalogue:read offline_access')}`,
+      undefined,
+      'owner',
+    )
+
+    const expandedLocation = new URL(expandedAuthorization.headers.get('location') ?? '')
+    expect(expandedLocation.pathname).toBe('/connect/gbfm/consent')
+
+    const authorization = await fixture.request(
+      `/oauth2/authorize?${fixture.authorizationQuery(clientId, scope)}`,
+      undefined,
+      'reader',
+    )
+
+    const continuation = new URL(authorization.headers.get('location') ?? '')
+    expect(continuation.pathname).toBe('/connect/gbfm/consent')
+
+    const tokens = Schema.decodeUnknownSync(OAuthTokens)(
+      await (
+        await fixture.exchange(clientId, await fixture.authorize(clientId, 'reader', scope))
+      ).json(),
+    )
+
+    expect(await Effect.runPromise(fixture.service.verify(tokens.access_token))).toMatchObject({
+      userId: 'reader',
+      scopes: ['catalogue:read', 'offline_access'],
+    })
+
+    const refreshed = await fixture.request('/oauth2/token', {
+      grant_type: 'refresh_token',
+      client_id: clientId,
+      refresh_token: Redacted.value(tokens.refresh_token),
+      resource: fixture.config.mcp.resourceUrl,
+    })
+
+    expect(refreshed.status).toBe(200)
+    const next = Schema.decodeUnknownSync(OAuthTokens)(await refreshed.json())
+    expect((await Effect.runPromise(fixture.service.verify(next.access_token))).scopes).toEqual([
+      'catalogue:read',
+      'offline_access',
+    ])
+    expect(
+      await Effect.runPromise(fixture.service.listConnections(UserId.make('reader'))),
+    ).toHaveLength(1)
+    await Effect.runPromise(fixture.service.disconnect(UserId.make('reader'), clientId))
+    expect(
+      await Effect.runPromise(fixture.service.verify(next.access_token).pipe(Effect.result)),
+    ).toHaveProperty('_tag', 'Failure')
+  }, 15_000)
+
   test('the provider downscopes issuance to an existing read-only resource policy', async () => {
     await using fixture = await createEditorialOAuthFixture()
     const clientId = await fixture.register()
@@ -600,7 +700,7 @@ describe('editorial OAuth provider on migrated D1', () => {
         })
       ).status,
     ).toBe(400)
-  })
+  }, 15_000)
 
   test('a refresh claimed before disconnect cannot insert its successor after reconnection', async () => {
     await using fixture = await createEditorialOAuthFixture()

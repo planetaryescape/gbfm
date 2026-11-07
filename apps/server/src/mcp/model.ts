@@ -1,6 +1,5 @@
-import { EditorialPrincipal, McpResourceUrl, PostId, PostVersion } from '@gbfm/core/editorial-mcp'
+import { McpResourceUrl, PostId, PostVersion } from '@gbfm/core/editorial-mcp'
 import { UserId } from '@gbfm/core/identity'
-import { Role } from '@gbfm/core/roles'
 import { Effect, Match, Schema } from 'effect'
 
 import {
@@ -18,8 +17,6 @@ export const EditorialMcpSettings = Schema.Struct({
   resourceUrl: McpResourceUrl,
   frontendUrl: EditorialFrontendUrl,
 })
-
-export const EditorialReader = Schema.Struct({ ...EditorialPrincipal.fields, role: Role })
 
 export const PostSource = Schema.TaggedUnion({
   Editorial: {},
@@ -59,9 +56,6 @@ export const unavailable = () =>
 
 export const notFound = () =>
   new EditorialToolError({ code: 'not_found', message: 'Post not found.' })
-
-export const accessDenied = () =>
-  new EditorialToolError({ code: 'access_denied', message: 'Editorial read access denied.' })
 
 export const projectPost = Effect.fn('EditorialMcp.projectPost')(function* (
   post: typeof PersistedPost.Type,

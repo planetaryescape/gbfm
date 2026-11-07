@@ -1,7 +1,7 @@
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types'
 import { sql, type SQL } from 'drizzle-orm'
 import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core'
-import { Context, Layer, Schema } from 'effect'
+import { Context, Effect, Layer, Schema } from 'effect'
 
 /** JSON-only normalized command and bounded receipt data; omission differs from null. */
 export type JsonValue =
@@ -69,6 +69,21 @@ export type OperationResult =
     }
   | { readonly status: 'conflict' | 'expired' | 'access_denied' | 'invalid_input' | 'unavailable' }
 
+/** Fixed adapter diagnostics only: never include errors, SQL, keys, IDs or receipt data. */
+export interface OperationDiagnostic {
+  readonly operation:
+    | 'receipt.lookup'
+    | 'receipt.decode'
+    | 'receipt.batch'
+    | 'receipt.authorize'
+    | 'receipt.prune'
+  readonly dependency: 'database' | 'codec' | 'authorization'
+  readonly code: 'storage_failed' | 'decode_failed' | 'authorization_failed'
+}
+
+const reportUnavailable = (diagnostic: OperationDiagnostic) =>
+  Effect.runSync(Effect.logError('mcp.operation.unavailable', diagnostic))
+
 const uuidV4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const windowMs = 86_400_000
@@ -121,7 +136,19 @@ const digest = async (value: string) =>
   ).join('')
 
 /** One shared D1 adapter, not a dispatcher or a transaction spanning provider calls. */
-export const createMcpOperationStore = (database: D1Database) => {
+export const createMcpOperationStore = (
+  database: D1Database,
+  report: (diagnostic: OperationDiagnostic) => void = reportUnavailable,
+) => {
+  const diagnostic = (event: OperationDiagnostic) => {
+    // A broken reporter must not turn a committed command into an exception.
+    try {
+      report(event)
+    } catch {
+      /* Reporting cannot change the persistence contract. */
+    }
+  }
+
   const prepare = (statement: SQL) => {
     const query = dialect.sqlToQuery(statement)
 
@@ -148,6 +175,8 @@ export const createMcpOperationStore = (database: D1Database) => {
 
         return { status: 'pruned' }
       } catch {
+        diagnostic({ operation: 'receipt.prune', dependency: 'database', code: 'storage_failed' })
+
         return { status: 'unavailable' }
       }
     },
@@ -188,22 +217,35 @@ export const createMcpOperationStore = (database: D1Database) => {
         return { status: 'invalid_input' }
       }
 
+      let failure: OperationDiagnostic = {
+        operation: 'receipt.authorize',
+        dependency: 'authorization',
+        code: 'authorization_failed',
+      }
+
       const read = async (attemptId?: string): Promise<OperationResult | undefined> => {
+        failure = { operation: 'receipt.lookup', dependency: 'database', code: 'storage_failed' }
+
         const raw = await prepare(
           sql`SELECT input_hash, state, outcome, created_at, expires_at, attempt_id FROM mcp_operations WHERE id = ${operationId}`,
         ).first()
 
         if (!raw) return undefined
+        failure = { operation: 'receipt.decode', dependency: 'codec', code: 'decode_failed' }
         const row = decodeRow(raw)
 
         if (
           !Number.isSafeInteger(row.created_at) ||
           row.created_at < 0 ||
           row.expires_at !== row.created_at + windowMs
-        )
+        ) {
+          diagnostic(failure)
+
           return { status: 'unavailable' }
+        }
 
         if (row.expires_at <= now || row.state === 'expired') {
+          failure = { operation: 'receipt.prune', dependency: 'database', code: 'storage_failed' }
           await prepare(sql`UPDATE mcp_operations SET ${redact} WHERE id = ${operationId}`).run()
 
           return { status: 'expired' }
@@ -211,8 +253,19 @@ export const createMcpOperationStore = (database: D1Database) => {
 
         if (row.input_hash !== inputHash) return { status: 'conflict' }
 
-        if (row.state !== 'complete' || row.outcome === null) return { status: 'unavailable' }
+        if (row.state !== 'complete' || row.outcome === null) {
+          diagnostic(failure)
+
+          return { status: 'unavailable' }
+        }
+
         const outcome = decodeOutcome(JSON.parse(row.outcome))
+
+        failure = {
+          operation: 'receipt.authorize',
+          dependency: 'authorization',
+          code: 'authorization_failed',
+        }
 
         if (!(await input.authorize(outcome))) return { status: 'access_denied' }
 
@@ -249,6 +302,8 @@ export const createMcpOperationStore = (database: D1Database) => {
           return { status: 'invalid_input' }
         }
 
+        failure = { operation: 'receipt.batch', dependency: 'database', code: 'storage_failed' }
+
         const claim =
           prepare(sql`INSERT INTO mcp_operations (id, actor_id, client_id, input_hash, attempt_id, state, outcome, created_at, expires_at)
           VALUES (${operationId}, ${key.actorId}, ${key.clientId}, ${inputHash}, ${attemptId}, 'pending', NULL, ${now}, ${now + windowMs}) ON CONFLICT(id) DO NOTHING`)
@@ -268,12 +323,16 @@ export const createMcpOperationStore = (database: D1Database) => {
           )
             return { status: 'conflict' }
 
+          diagnostic({ operation: 'receipt.batch', dependency: 'database', code: 'storage_failed' })
+
           // A lost response may follow a committed batch; persisted receipt wins.
           return (await read()) ?? { status: 'unavailable' }
         }
 
         return (await read(attemptId)) ?? { status: 'unavailable' }
       } catch {
+        diagnostic(failure)
+
         return { status: 'unavailable' }
       }
     },

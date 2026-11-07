@@ -203,6 +203,7 @@ test('real OAuth MCP commands enforce separate publication consent, replay and c
       ),
     ).toBe('invalid_input')
     expect((await db.select().from(musicPlaylistsTable))[0]?.revision).toBe(0)
+
     const preview = await rpc('preview_playlist_changes', {
       operation: 'preview_playlist_changes',
       command: add,

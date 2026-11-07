@@ -31,6 +31,7 @@ export const d1MigrationFiles = [
   '0017_mcp_domain_revisions.sql',
   '0018_music_credits_aliases.sql',
   '0019_post_music_references.sql',
+  '0020_playlist_command_revisions.sql',
 ] as const
 
 const splitStatements = (migration: string) =>

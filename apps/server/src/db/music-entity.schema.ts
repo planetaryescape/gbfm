@@ -232,8 +232,19 @@ export const musicPlaylistsTable = sqliteTable(
       .notNull()
       .$defaultFn(() => new Date()),
     revision: integer().notNull().default(0),
+    lastOperationId: text('last_operation_id'),
   },
-  (table) => [index('music_playlists_slug_idx').on(table.slug)],
+  (table) => [
+    index('music_playlists_slug_idx').on(table.slug),
+    check(
+      'music_playlists_revision_check',
+      sql`typeof(${table.revision}) = 'integer' AND ${table.revision} BETWEEN 0 AND 9007199254740991`,
+    ),
+    check(
+      'music_playlists_operation_check',
+      sql`${table.lastOperationId} IS NULL OR length(${table.lastOperationId}) = 36`,
+    ),
+  ],
 )
 
 export const musicLabelsTable = sqliteTable(

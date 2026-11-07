@@ -1,27 +1,14 @@
-import type { McpScope } from '@gbfm/core/editorial-mcp'
-import { and, eq, sql, type SQL } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { Clock, Context, Effect, Layer, Schema } from 'effect'
 
 import { Database } from '@/db/layer'
 import { musicReminder } from '@/db/music-reminder.schema'
+import { CommandAuthority } from '@/mcp/command-authority'
 import { McpToolError } from '@/mcp/contracts'
 import { McpOperationStore } from '@/mcp/operations/store'
 
 import { prepareReminderCommand } from './commands'
 import { ReminderCommandResult } from './contracts'
-
-/** Trusted request composition supplies this closure, never caller-selected identity or SQL. */
-export interface ReminderAuthority {
-  readonly checkpoint: (requiredScopes: ReadonlyArray<McpScope>) => Effect.Effect<
-    {
-      readonly actorId: string
-      readonly clientId: string
-      readonly resource: string
-      readonly liveGuard: SQL
-    },
-    McpToolError
-  >
-}
 
 const unavailable = () =>
   new McpToolError({
@@ -35,10 +22,8 @@ const makeCommands = Effect.gen(function* () {
   const db = yield* Database
   const operations = yield* McpOperationStore
 
-  const execute = Effect.fn('ReminderCommandService.execute')(function* (
-    raw: Schema.Json,
-    authority: ReminderAuthority,
-  ) {
+  const execute = Effect.fn('ReminderCommandService.execute')(function* (raw: Schema.Json) {
+    const authority = yield* CommandAuthority
     const services = yield* Effect.context()
     const runPromise = Effect.runPromiseWith(services)
     const initial = yield* authority.checkpoint(['reminders:write'])
@@ -94,10 +79,10 @@ const makeCommands = Effect.gen(function* () {
     if (expected === Number.MAX_SAFE_INTEGER)
       return yield* new McpToolError({ code: 'conflict', message: 'Reminder revision exhausted.' })
 
-    const date =
-      command.operation === 'cancel_music_reminder'
-        ? previous?.reminderDate
-        : new Date(command.payload.reminderDate)
+    const instant =
+      command.operation === 'cancel_music_reminder' ? undefined : command.payload.reminderDate
+
+    const date = instant === undefined ? previous?.reminderDate : new Date(instant)
 
     const validDate = yield* Schema.decodeUnknownEffect(Schema.Date)(date).pipe(
       Effect.tapError(() => diagnose('invalid_persisted_row', 'database')),
@@ -157,6 +142,15 @@ const makeCommands = Effect.gen(function* () {
           build: (context) => {
             const guard = sql`${context.fence} AND (${initial.liveGuard})`
 
+            const metadata =
+              command.operation === 'update_music_reminder'
+                ? sql`music_title=coalesce(${command.payload.musicTitle ?? null},music_title),
+                artist_name=coalesce(${command.payload.artistName ?? null},artist_name),
+                music_url=coalesce(${command.payload.musicUrl ?? null},music_url),
+                album_cover_url=CASE WHEN ${Number(command.payload.albumCoverUrl !== undefined)} THEN ${command.payload.albumCoverUrl ?? null} ELSE album_cover_url END,
+                notes=CASE WHEN ${Number(command.payload.notes !== undefined)} THEN ${command.payload.notes ?? null} ELSE notes END,`
+                : sql``
+
             const statement =
               command.operation === 'create_music_reminder'
                 ? context.prepare(sql`INSERT INTO music_reminder
@@ -164,7 +158,7 @@ const makeCommands = Effect.gen(function* () {
               SELECT ${reminderId},${initial.actorId},${command.payload.musicTitle},${command.payload.artistName},${command.payload.musicUrl},${command.payload.albumCoverUrl ?? null},${command.payload.notes ?? null},${validDate.getTime()},'pending',0,1,'open',${context.attemptId},${now},${now} WHERE ${guard}`)
                 : context.prepare(sql`UPDATE music_reminder SET command_revision=command_revision+1,
                 dispatch_state=${result.dispatchState}, last_operation_id=${context.attemptId},
-                reminder_date=${validDate.getTime()}, status='pending', updated_at=max(updated_at+1,${now})
+                reminder_date=${validDate.getTime()}, status='pending', ${metadata} updated_at=max(updated_at+1,${now})
               WHERE id=${reminderId} AND user_id=${initial.actorId} AND command_revision=${expected}
                 AND command_revision<9007199254740991 AND dispatch_state='open' AND is_sent=0
                 AND status IN ('pending','processing','failed') AND ${guard}`)

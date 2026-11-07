@@ -16,6 +16,7 @@ import {
   CanonicalMusicIdentityLayer,
   type CanonicalMusicIdentityService,
 } from '@/services/canonical-music-identity'
+import { MusicIdentityAuthorizationFailed } from '@/services/canonical-music-identity/errors'
 import { ConfigService, createConfig } from '@/services/config.service'
 import {
   MusicLinkScraperService,
@@ -37,6 +38,7 @@ import {
   enrichPlaylistLinksEffect,
   importSpotifyPlaylistEffect,
   syncPlaylistLinksEffect,
+  type PlaylistExecutionProgress,
 } from './playlist-tracks.service'
 
 const externalId = () => crypto.randomUUID().replaceAll('-', '').slice(0, 22)
@@ -289,8 +291,18 @@ describe('playlist Spotify caller migration', () => {
       },
     }
 
+    const progress: Array<PlaylistExecutionProgress> = []
+
     const exit = await runWithIdentity(scraper, (identity) =>
-      Effect.exit(syncPlaylistLinksEffect(identity)(playlistId)),
+      Effect.exit(
+        syncPlaylistLinksEffect(identity)(playlistId, {
+          checkpoint: Effect.void,
+          progress: (value) =>
+            Effect.sync(() => {
+              progress.push(value)
+            }),
+        }),
+      ),
     )
 
     expect(Exit.isFailure(exit)).toBe(true)
@@ -302,6 +314,11 @@ describe('playlist Spotify caller migration', () => {
 
     expect(links.map((link) => link.entityId)).toEqual([laterTrackId])
     expect(inputs).toHaveLength(2)
+    expect(progress).toEqual([
+      { phase: 'enriching', processed: 0, total: 2, failed: 0 },
+      { phase: 'enriching', processed: 1, total: 2, failed: 1 },
+      { phase: 'enriching', processed: 2, total: 2, failed: 1 },
+    ])
   })
 
   test('retries enrichment for a reused track without repeating successful provider work', async () => {
@@ -385,5 +402,123 @@ describe('playlist Spotify caller migration', () => {
     expect(enrichmentCalls).toBe(1)
     expect(inputs).toHaveLength(1)
     expect(playlistCalls).toBe(2)
+  })
+
+  test('revocation after one enriched item stops the next provider call without claiming completion', async () => {
+    const playlistId = crypto.randomUUID()
+    const firstTrackId = crypto.randomUUID()
+    const secondTrackId = crypto.randomUUID()
+    await seedPreBackfillPlaylist(playlistId, externalId(), [
+      { trackId: firstTrackId, spotifyTrackId: externalId() },
+      { trackId: secondTrackId, spotifyTrackId: externalId() },
+    ])
+    const inputs: Array<MusicScrapeInput> = []
+    const progress: Array<PlaylistExecutionProgress> = []
+    let allowed = true
+
+    const scraper: MusicLinkScraperService = {
+      scrape: () => Effect.die('Enrichment does not refresh playlist metadata'),
+      discoverCrossPlatformLinks: (input) => {
+        inputs.push(input)
+
+        return Effect.succeed({
+          links: [
+            {
+              platform: 'deezer',
+              url: `https://www.deezer.com/track/${deezerId()}`,
+              scrapedAt: new Date(),
+            },
+          ],
+        })
+      },
+    }
+
+    const exit = await runWithIdentity(scraper, (identity) =>
+      Effect.exit(
+        enrichPlaylistLinksEffect(identity)(playlistId, {
+          checkpoint: Effect.suspend(() =>
+            allowed
+              ? Effect.void
+              : Effect.fail(new MusicIdentityAuthorizationFailed({ reason: 'denied' })),
+          ),
+          progress: (value) =>
+            Effect.sync(() => {
+              progress.push(value)
+
+              if (value.processed === 1) allowed = false
+            }),
+        }),
+      ),
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(inputs).toHaveLength(1)
+    expect(progress).toEqual([
+      { phase: 'enriching', processed: 0, total: 2, failed: 0 },
+      { phase: 'enriching', processed: 1, total: 2, failed: 0 },
+    ])
+
+    const links = await db
+      .select()
+      .from(musicEntityLinksTable)
+      .where(eq(musicEntityLinksTable.entityId, secondTrackId))
+
+    expect(links).toHaveLength(1)
+    expect(links[0]?.platform).toBe('spotify')
+  })
+
+  test('revocation during playlist provider fetch prevents canonical persistence and reports no processed tracks', async () => {
+    const spotifyPlaylistId = externalId()
+    const playlistUrl = `https://open.spotify.com/playlist/${spotifyPlaylistId}`
+    const progress: Array<PlaylistExecutionProgress> = []
+    let allowed = true
+
+    const scraper: MusicLinkScraperService = {
+      scrape: () => Effect.die('No scrape after denial'),
+      discoverCrossPlatformLinks: () => Effect.die('No enrichment after denial'),
+    }
+
+    const exit = await runWithIdentity(scraper, (identity) =>
+      Effect.exit(
+        importSpotifyPlaylistEffect(
+          {
+            getPlaylistForImport: () =>
+              Effect.sync(() => {
+                allowed = false
+
+                return {
+                  spotifyPlaylistId,
+                  playlistUrl,
+                  title: 'Must not persist',
+                  description: null,
+                  coverImageUrl: null,
+                  ownerName: null,
+                  tracks: [trackFixture(externalId())],
+                }
+              }),
+          },
+          identity,
+        )(`${playlistUrl}?si=fixture`, undefined, {
+          checkpoint: Effect.suspend(() =>
+            allowed
+              ? Effect.void
+              : Effect.fail(new MusicIdentityAuthorizationFailed({ reason: 'denied' })),
+          ),
+          progress: (value) =>
+            Effect.sync(() => {
+              progress.push(value)
+            }),
+        }),
+      ),
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(progress).toEqual([{ phase: 'importing', processed: 0, total: null, failed: 0 }])
+    expect(
+      await db
+        .select()
+        .from(musicEntityLinksTable)
+        .where(eq(musicEntityLinksTable.url, playlistUrl)),
+    ).toEqual([])
   })
 })

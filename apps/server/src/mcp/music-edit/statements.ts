@@ -1,7 +1,11 @@
 import type { D1PreparedStatement } from '@cloudflare/workers-types'
 import { type SQL, sql } from 'drizzle-orm'
 
-import { artistNameFanoutCapacity, artistNameFanoutStatements } from './artist-fanout'
+import {
+  artistNameFanoutCapacity,
+  artistNameFanoutStatements,
+  artistPrimaryNameAvailable,
+} from './artist-fanout'
 import type { MusicEditCommand } from './commands'
 import { musicEditTarget } from './planner'
 
@@ -25,6 +29,33 @@ export const musicParentWinner = (target: MusicParent, attemptId: string): SQL =
   sql`EXISTS (SELECT 1 FROM ${sql.identifier(tables[target.entityType])}
     WHERE id=${target.entityId} AND last_operation_id=${attemptId})`
 
+/** Shared root CAS for M1 edits and M2 facts. Build only inside the common store
+ * after replay lookup. Eligibility includes the caller's fresh version-token
+ * comparison and domain predicates; authority and physical receipt fence stay
+ * explicit. Coupled statements must still check musicParentWinner + both guards.
+ */
+export const musicParentCas = (input: {
+  readonly target: MusicParent
+  readonly expectedRevision: number
+  readonly changed: boolean
+  readonly attemptId: string
+  readonly fence: SQL
+  readonly liveGuard: SQL
+  readonly eligibility: SQL
+  readonly assignments: ReadonlyArray<SQL>
+}): SQL => sql`UPDATE ${sql.identifier(tables[input.target.entityType])}
+  SET ${sql.join(
+    [
+      ...input.assignments,
+      sql`revision=revision+${input.changed ? 1 : 0}`,
+      sql`last_operation_id=${input.attemptId}`,
+    ],
+    sql`, `,
+  )}
+  WHERE id=${input.target.entityId} AND revision=${input.expectedRevision}
+  AND (${input.fence}) AND (${input.liveGuard}) AND (${input.eligibility})
+  ${input.changed ? sql`AND revision<${Number.MAX_SAFE_INTEGER}` : sql``}`
+
 /** Domain statements for the single shared operations executor. This function
  * does not execute or store receipts. Inputs are a decoded exact command and its
  * observed plan; eligibility includes live authority and alias collision guards.
@@ -36,6 +67,7 @@ export const musicEditStatements = (input: {
   readonly changed: boolean
   readonly artistNameChanged: boolean
   readonly eligibility: SQL
+  readonly liveGuard: SQL
   readonly now: number
   readonly attemptId: string
   readonly fence: SQL
@@ -52,8 +84,6 @@ export const musicEditStatements = (input: {
 
   const capacityGuards: Array<SQL> = []
 
-  if (input.changed) capacityGuards.push(sql`revision<${Number.MAX_SAFE_INTEGER}`)
-
   if (
     input.changed &&
     (change.operation === 'set_label_affiliation' ||
@@ -65,10 +95,15 @@ export const musicEditStatements = (input: {
 
   if (input.artistNameChanged) capacityGuards.push(artistNameFanoutCapacity(target.entityId))
 
-  const assignments: Array<SQL> = [
-    sql`revision=revision+${input.changed ? 1 : 0}`,
-    sql`last_operation_id=${attemptId}`,
-  ]
+  if (
+    change.operation === 'update_music_metadata' &&
+    change.entityType === 'artist' &&
+    change.metadata.name !== undefined
+  ) {
+    capacityGuards.push(artistPrimaryNameAvailable(target.entityId, change.metadata.name))
+  }
+
+  const assignments: Array<SQL> = []
 
   if (input.changed) {
     assignments.push(
@@ -93,14 +128,23 @@ export const musicEditStatements = (input: {
       break
   }
 
-  const winner = sql`${fence} AND ${musicParentWinner(target, attemptId)}`
+  const winner = sql`${fence} AND ${input.liveGuard} AND ${musicParentWinner(target, attemptId)}`
 
   const statements = [
-    prepare(sql`UPDATE ${table} SET ${sql.join(assignments, sql`, `)}
-      WHERE id=${target.entityId} AND revision=${command.expectedRevision}
-      AND ${fence} AND ${input.eligibility}
+    prepare(
+      musicParentCas({
+        target,
+        expectedRevision: command.expectedRevision,
+        changed: input.changed,
+        attemptId,
+        fence,
+        liveGuard: input.liveGuard,
+        assignments,
+        eligibility: sql`(${input.eligibility})
       ${capacityGuards.length ? sql`AND ${sql.join(capacityGuards, sql` AND `)}` : sql``}
-      ${referenceGuards.length ? sql`AND ${sql.join(referenceGuards, sql` AND `)}` : sql``}`),
+      ${referenceGuards.length ? sql`AND ${sql.join(referenceGuards, sql` AND `)}` : sql``}`,
+      }),
+    ),
   ]
 
   switch (change.operation) {
@@ -187,7 +231,12 @@ export const musicEditStatements = (input: {
 
   if (input.artistNameChanged) {
     statements.push(
-      ...artistNameFanoutStatements({ prepare, artistId: target.entityId, attemptId, fence }),
+      ...artistNameFanoutStatements({
+        prepare,
+        artistId: target.entityId,
+        attemptId,
+        fence: sql`${fence} AND ${input.liveGuard}`,
+      }),
     )
   }
 

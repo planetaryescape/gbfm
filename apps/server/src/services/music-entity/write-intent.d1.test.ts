@@ -10,6 +10,7 @@ import { createMcpOperationStore } from '@/mcp/operations/store'
 import { ConfigService } from '@/services/config.service'
 import { createEditorialOAuthFixture } from '@/test/editorial-oauth'
 
+import { deleteArtistEffect } from './artist.service'
 import { musicParentCas, musicParentWinner } from './guarded-statements'
 import {
   executeMusicWrite,
@@ -72,6 +73,7 @@ const fixture = async () => {
     executeMusicWrite(intent, context, {
       operation: 'fixture_browser_metadata',
       target: { entityType: 'artist', entityId: 'a' },
+      disclosure: 'existing',
       normalizedInput: { bio },
       prepare: Effect.gen(function* () {
         yield* pause
@@ -111,7 +113,33 @@ const fixture = async () => {
       }),
     }).pipe(Effect.provideService(Database, f.db), Effect.result)
 
-  return { ...f, write }
+  const remove = (intent: MusicWriteIntent, beforeBatch: () => Promise<void> = async () => {}) =>
+    deleteArtistEffect('a', {
+      intent,
+      references: [],
+      context: {
+        ...context,
+        checkpoint: context.checkpoint.pipe(
+          Effect.map((authority) => ({
+            ...authority,
+            // Equivalent live authority, deliberately exposing opaque OR precedence.
+            liveGuard: sql`(${authority.liveGuard}) OR 0`,
+          })),
+        ),
+        execute: (input) =>
+          context.execute({
+            ...input,
+            prepare: async () => {
+              const prepared = await input.prepare()
+              await beforeBatch()
+
+              return prepared
+            },
+          }),
+      },
+    }).pipe(Effect.provideService(Database, f.db), Effect.result)
+
+  return { ...f, write, remove }
 }
 
 test('domain intent requires the observed version, rejects stale writes and replays before later preparation', async () => {
@@ -190,5 +218,143 @@ test('real session revocation after preparation starts blocks the physical CAS a
     revision: 0,
     last_operation_id: null,
   })
+  expect(await f.db.get(sql`SELECT count(*) AS total FROM mcp_operations`)).toEqual({ total: 0 })
+})
+
+test('delete loses a late CAS with compound authority without touching junctions, fanout or receipts', async () => {
+  await using f = await fixture()
+  await f.db.run(sql`INSERT INTO music_albums(id,title,slug,artistNames,createdAt,updatedAt)
+    VALUES ('album','Album','album','["Artist"]',1,1)`)
+  await f.db.run(sql`INSERT INTO music_album_artists(albumId,artistId) VALUES ('album','a')`)
+
+  const result = await Effect.runPromise(
+    f.remove({ requestId: crypto.randomUUID(), expectedRevision: 0 }, async () => {
+      await f.db.run(sql`UPDATE music_artists SET revision=1,bio='concurrent' WHERE id='a'`)
+    }),
+  )
+
+  expect(result).toHaveProperty('failure.code', 'conflict')
+  expect(
+    await f.db.get(sql`SELECT bio,revision,last_operation_id FROM music_artists WHERE id='a'`),
+  ).toEqual({ bio: 'concurrent', revision: 1, last_operation_id: null })
+  expect(
+    await f.db.get(
+      sql`SELECT artistNames,revision,last_operation_id FROM music_albums WHERE id='album'`,
+    ),
+  ).toEqual({ artistNames: '["Artist"]', revision: 0, last_operation_id: null })
+  expect(
+    await f.db.all(sql`SELECT artistId FROM music_album_artists WHERE albumId='album'`),
+  ).toEqual([{ artistId: 'a' }])
+  expect(await f.db.get(sql`SELECT count(*) AS total FROM mcp_operations`)).toEqual({ total: 0 })
+
+  // Final absence after a concurrent deletion is not proof that this attempt won.
+  expect(
+    await Effect.runPromise(
+      f.remove({ requestId: crypto.randomUUID(), expectedRevision: 1 }, async () => {
+        await f.db.run(sql`DELETE FROM music_artists WHERE id='a'`)
+      }),
+    ),
+  ).toHaveProperty('failure.code', 'conflict')
+  expect(
+    await f.db.get(
+      sql`SELECT artistNames,revision,last_operation_id FROM music_albums WHERE id='album'`,
+    ),
+  ).toEqual({ artistNames: '["Artist"]', revision: 0, last_operation_id: null })
+  expect(await f.db.get(sql`SELECT count(*) AS total FROM mcp_operations`)).toEqual({ total: 0 })
+})
+
+test('delete rolls back acquired markers and earlier fanout on capacity and physical DELETE failures', async () => {
+  await using f = await fixture()
+  await f.db
+    .run(sql`INSERT INTO music_albums(id,title,slug,artistNames,revision,createdAt,updatedAt)
+    VALUES ('album','Album','album','["Artist"]',${Number.MAX_SAFE_INTEGER},1,1)`)
+  await f.db.run(sql`INSERT INTO music_album_artists(albumId,artistId) VALUES ('album','a')`)
+  expect(
+    await Effect.runPromise(f.remove({ requestId: crypto.randomUUID(), expectedRevision: 0 })),
+  ).toHaveProperty('failure.code', 'conflict')
+  expect(
+    await f.db.get(sql`SELECT revision,last_operation_id FROM music_artists WHERE id='a'`),
+  ).toEqual({ revision: 0, last_operation_id: null })
+  expect(
+    await f.db.get(sql`SELECT artistNames,revision FROM music_albums WHERE id='album'`),
+  ).toEqual({ artistNames: '["Artist"]', revision: Number.MAX_SAFE_INTEGER })
+
+  await f.db.run(sql`UPDATE music_albums SET revision=0 WHERE id='album'`)
+  await f.db.run(sql`CREATE TRIGGER prevent_artist_delete BEFORE DELETE ON music_artists
+    BEGIN SELECT RAISE(ABORT,'disposable delete failure'); END`)
+  expect(
+    await Effect.runPromise(f.remove({ requestId: crypto.randomUUID(), expectedRevision: 0 })),
+  ).toHaveProperty('failure.code', 'unavailable')
+  expect(
+    await f.db.get(sql`SELECT revision,last_operation_id FROM music_artists WHERE id='a'`),
+  ).toEqual({ revision: 0, last_operation_id: null })
+  expect(
+    await f.db.get(
+      sql`SELECT artistNames,revision,last_operation_id FROM music_albums WHERE id='album'`,
+    ),
+  ).toEqual({ artistNames: '["Artist"]', revision: 0, last_operation_id: null })
+  expect(
+    await f.db.all(sql`SELECT artistId FROM music_album_artists WHERE albumId='album'`),
+  ).toEqual([{ artistId: 'a' }])
+  expect(await f.db.get(sql`SELECT count(*) AS total FROM mcp_operations`)).toEqual({ total: 0 })
+
+  await f.db.run(sql`DROP TRIGGER prevent_artist_delete`)
+  await f.db.run(sql`INSERT INTO music_recording_credits
+    (id,album_id,artist_id,credited_name,credited_name_key,role,instrument_key,participant_key,
+      display_order,source_label,evidence_note,asserted_at,created_at)
+    VALUES ('fact','album','a','Artist','artist','producer','','artist:a',0,'Manual','Keep fact',1,1)`)
+  expect(
+    await Effect.runPromise(f.remove({ requestId: crypto.randomUUID(), expectedRevision: 0 })),
+  ).toHaveProperty('failure.code', 'conflict')
+  expect(
+    await f.db.get(
+      sql`SELECT artist_id,evidence_note FROM music_recording_credits WHERE id='fact'`,
+    ),
+  ).toEqual({ artist_id: 'a', evidence_note: 'Keep fact' })
+  expect(
+    await f.db.get(sql`SELECT revision,last_operation_id FROM music_artists WHERE id='a'`),
+  ).toEqual({ revision: 0, last_operation_id: null })
+  expect(await f.db.get(sql`SELECT count(*) AS total FROM mcp_operations`)).toEqual({ total: 0 })
+})
+
+test('duplicate deletes replay one durable result but revoked sessions cannot replay it', async () => {
+  await using f = await fixture()
+  const intent = { requestId: crypto.randomUUID(), expectedRevision: 0 }
+
+  const results = await Promise.all([
+    Effect.runPromise(f.remove(intent)),
+    Effect.runPromise(f.remove(intent)),
+  ])
+
+  expect(results.map(Result.isSuccess)).toEqual([true, true])
+  expect(await f.db.get(sql`SELECT id FROM music_artists WHERE id='a'`)).toBeUndefined()
+  expect(await f.db.get(sql`SELECT count(*) AS total FROM mcp_operations`)).toEqual({ total: 1 })
+  expect(
+    await Effect.runPromise(
+      f.remove(intent, async () => {
+        throw new Error('Replay prepared')
+      }),
+    ),
+  ).toHaveProperty('success')
+  expect(
+    await Effect.runPromise(f.remove({ ...intent, requestId: crypto.randomUUID() })),
+  ).toHaveProperty('failure.code', 'not_found')
+  await f.db.delete(session).where(eq(session.id, 'owner-session'))
+  expect(await Effect.runPromise(f.remove(intent))).toHaveProperty('failure.code', 'access_denied')
+})
+
+test('session revocation during delete preparation prevents root and coupled mutations', async () => {
+  await using f = await fixture()
+
+  const result = await Effect.runPromise(
+    f.remove({ requestId: crypto.randomUUID(), expectedRevision: 0 }, async () => {
+      await f.db.delete(session).where(eq(session.id, 'owner-session'))
+    }),
+  )
+
+  expect(result).toHaveProperty('failure.code', 'conflict')
+  expect(
+    await f.db.get(sql`SELECT revision,last_operation_id FROM music_artists WHERE id='a'`),
+  ).toEqual({ revision: 0, last_operation_id: null })
   expect(await f.db.get(sql`SELECT count(*) AS total FROM mcp_operations`)).toEqual({ total: 0 })
 })

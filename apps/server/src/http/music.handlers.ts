@@ -41,7 +41,11 @@ import {
   mapSpotifyTrackImportErrors,
   PROVIDER_UNAVAILABLE_RETRY_AFTER_SECONDS,
 } from '@/http/music-identity-http'
-import { mapMusicWriteErrors, musicBodyWriteRequest } from '@/http/music-write-http'
+import {
+  mapMusicWriteErrors,
+  musicBodyWriteRequest,
+  musicHeaderWriteRequest,
+} from '@/http/music-write-http'
 import { omitUndefined } from '@/lib/omit-undefined'
 import {
   CanonicalMusicIdentity,
@@ -355,15 +359,12 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
         return toArtistResponse(row)
       }),
     )
-    .handle('deleteArtist', ({ params }) =>
+    .handle('deleteArtist', ({ params, headers }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(
-          svc
-            .deleteArtist(params.id)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
-        )
+        const write = yield* musicHeaderWriteRequest(headers)
+        yield* mapMusicWriteErrors(svc.deleteArtist(params.id, write))
       }),
     )
     .handle('listArtistLabels', ({ params }) =>
@@ -458,15 +459,12 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
         return toAlbumResponse(row)
       }),
     )
-    .handle('deleteAlbum', ({ params }) =>
+    .handle('deleteAlbum', ({ params, headers }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(
-          svc
-            .deleteAlbum(params.id)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
-        )
+        const write = yield* musicHeaderWriteRequest(headers)
+        yield* mapMusicWriteErrors(svc.deleteAlbum(params.id, write))
       }),
     )
     .handle('listAlbumLabels', ({ params }) =>
@@ -529,15 +527,12 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
         return toTrackResponse(row)
       }),
     )
-    .handle('deleteTrack', ({ params }) =>
+    .handle('deleteTrack', ({ params, headers }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(
-          svc
-            .deleteTrack(params.id)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
-        )
+        const write = yield* musicHeaderWriteRequest(headers)
+        yield* mapMusicWriteErrors(svc.deleteTrack(params.id, write))
       }),
     )
     // -----------------------------------------------------------------
@@ -687,15 +682,12 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
         return toLabelResponse(row)
       }),
     )
-    .handle('deleteLabel', ({ params }) =>
+    .handle('deleteLabel', ({ params, headers }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(
-          svc
-            .deleteLabel(params.id)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
-        )
+        const write = yield* musicHeaderWriteRequest(headers)
+        yield* mapMusicWriteErrors(svc.deleteLabel(params.id, write))
       }),
     )
     .handle('listLabelArtists', ({ params }) =>

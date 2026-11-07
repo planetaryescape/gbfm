@@ -48,6 +48,7 @@ export interface MusicWriteAttempt {
   readonly operationId: string
   readonly fence: SQL
   readonly prepare: (statement: SQL) => D1PreparedStatement
+  readonly assert: (predicate: SQL) => D1PreparedStatement
 }
 
 export interface MusicWritePlan {
@@ -90,7 +91,12 @@ const Target = Schema.Struct({
   entityId: Schema.NonEmptyString,
 })
 
-const SavedAccess = Schema.Struct({ access: Target })
+const SavedAccess = Schema.Struct({
+  access: Schema.Struct({
+    ...Target.fields,
+    deleted: Schema.optionalKey(Schema.Literal(true)),
+  }),
+})
 
 export const MusicWriteStoredOutcome = Schema.Struct({
   result: Schema.Json,
@@ -140,6 +146,7 @@ export const executeMusicWrite = Effect.fn('musicEntity.executeWrite')(function*
   command: {
     readonly operation: string
     readonly target: typeof Target.Type
+    readonly disclosure: 'existing' | 'deleted'
     readonly normalizedInput: Schema.Json
     readonly prepare: Effect.Effect<
       {
@@ -213,15 +220,18 @@ export const executeMusicWrite = Effect.fn('musicEntity.executeWrite')(function*
 
           if (
             access.entityType !== command.target.entityType ||
-            access.entityId !== command.target.entityId
+            access.entityId !== command.target.entityId ||
+            (access.deleted === true) !== (command.disclosure === 'deleted')
           )
             return false
 
-          return Boolean(
+          const exists = Boolean(
             await db.get(
               sql`SELECT 1 FROM ${sql.identifier(tables[access.entityType])} WHERE id=${access.entityId}`,
             ),
           )
+
+          return command.disclosure === 'deleted' ? !exists : exists
         },
         prepare: async () => {
           const prepared = await runPromise(Effect.result(command.prepare))

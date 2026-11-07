@@ -8,12 +8,9 @@ import { DatabaseError, getErrorMessage } from '@/errors'
 import { toSlug } from '@/services/to-slug'
 
 import { insertMusicEntity } from './create-statements'
-import {
-  deleteEntityLabels,
-  deleteIdentitiesForEntity,
-  deleteLinksForEntity,
-  requireOne,
-} from './shared'
+import { deleteMusicEntity } from './delete-write'
+import { requireOne } from './shared'
+import type { MusicWriteRequest } from './write-intent'
 
 export interface CreateAlbumInput {
   title: string
@@ -181,35 +178,8 @@ export const updateAlbumEffect = (id: string, data: Partial<CreateAlbumInput>) =
     return { ...rows, genres: projectedGenres }
   }).pipe(Effect.withSpan('musicEntity.updateAlbum', { attributes: { id } }))
 
-export const deleteAlbumEffect = (id: string) =>
-  Effect.gen(function* () {
-    const db = yield* Database
-
-    const rows = yield* Effect.tryPromise({
-      try: () =>
-        (async () => {
-          const [, , , rows] = await db.batch([
-            deleteIdentitiesForEntity(db, 'album', id),
-            deleteLinksForEntity(db, 'album', id),
-            deleteEntityLabels(db, 'album', id),
-            db
-              .delete(musicAlbumsTable)
-              .where(eq(musicAlbumsTable.id, id))
-              .returning({ id: musicAlbumsTable.id }),
-          ])
-
-          return rows
-        })(),
-      catch: (e) =>
-        new DatabaseError({
-          message: `Failed to delete album: ${getErrorMessage(e)}`,
-          operation: 'delete',
-          table: 'music_albums',
-        }),
-    })
-
-    yield* requireOne(rows, 'MusicAlbum', id)
-  }).pipe(Effect.withSpan('musicEntity.deleteAlbum', { attributes: { id } }))
+export const deleteAlbumEffect = (id: string, write?: MusicWriteRequest) =>
+  deleteMusicEntity({ entityType: 'album', entityId: id }, write)
 
 export const addArtistToAlbumEffect = (
   albumId: string,

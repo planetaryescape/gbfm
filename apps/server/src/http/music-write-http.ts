@@ -56,6 +56,18 @@ export const musicBodyWriteRequest = Effect.fn('musicHttp.writeRequest')(functio
   } satisfies MusicWriteRequest
 })
 
+export const musicHeaderWriteRequest = (headers: {
+  readonly 'x-gbfm-music-revision'?: string | undefined
+  readonly 'x-gbfm-request-id'?: string | undefined
+}) =>
+  musicBodyWriteRequest({
+    expectedRevision:
+      headers['x-gbfm-music-revision'] === undefined
+        ? undefined
+        : Number(headers['x-gbfm-music-revision']),
+    requestId: headers['x-gbfm-request-id'],
+  })
+
 export const mapMusicWriteErrors = <A, R>(effect: Effect.Effect<A, MusicWriteError, R>) =>
   effect.pipe(
     Effect.catchTag('MusicWriteError', (error: MusicWriteError) => {

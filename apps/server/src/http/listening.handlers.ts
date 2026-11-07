@@ -3,6 +3,7 @@ import { AuthSession } from '@gbfm/api/middleware/auth'
 import { Effect } from 'effect'
 import { HttpApiBuilder, HttpApiError } from 'effect/http-api'
 
+import { CommandAuthority, makeSessionCommandAuthority } from '@/mcp/command-authority'
 import { previewListeningImport } from '@/services/listening-import'
 import {
   deleteListeningItem,
@@ -24,12 +25,21 @@ const respond = <A, R>(effect: Effect.Effect<A, ListeningError, R>) =>
 
       if (error.reason === 'conflict') return new HttpApiError.Conflict()
 
+      if (error.reason === 'access-denied') return new HttpApiError.Forbidden()
+
       return new HttpApiError.ServiceUnavailable()
     }),
   )
 
 const mutate = <R>(effect: Effect.Effect<void, ListeningError, R>) =>
-  respond(effect).pipe(Effect.as({ success: true }))
+  Effect.gen(function* () {
+    const authority = yield* makeSessionCommandAuthority
+
+    return yield* respond(effect).pipe(
+      Effect.provideService(CommandAuthority, authority),
+      Effect.as({ success: true }),
+    )
+  })
 
 /** Authenticated mutations never accept an owner ID from the client. */
 export const ListeningHandlersLive = HttpApiBuilder.group(Api, 'listening', (handlers) =>

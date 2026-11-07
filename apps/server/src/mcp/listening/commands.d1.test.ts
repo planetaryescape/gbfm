@@ -1,11 +1,10 @@
-import { McpPrincipal } from '@gbfm/core/editorial-mcp'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { Clock, Effect, Layer, Result, Schema } from 'effect'
 import { TestClock } from 'effect/testing'
 import { beforeAll, expect, test } from 'vitest'
 
-import { user } from '@/db/auth.schema'
-import type { Database } from '@/db/layer'
+import { session, user } from '@/db/auth.schema'
+import { Database } from '@/db/layer'
 import {
   listeningCollectionsTable as collections,
   listeningMembershipsTable as memberships,
@@ -20,12 +19,13 @@ import {
 import { DatabaseTestLayer, db, d1 } from '@/test/database'
 import { withTestLayer } from '@/test/effect'
 
-import { McpActor } from '../authorization'
+import { CommandAuthority } from '../command-authority'
 import type { McpToolError } from '../contracts'
 import { EditorialMcpConfig } from '../editorial'
 import { EditorialMcpSettings } from '../model'
 import { McpOperationStoreLayer } from '../operations/store'
 import { ListeningCommandService, ListeningCommandServiceLive } from './commands'
+import { listeningTestSessionAuthority } from './test-session'
 
 const owner = 'l1-command-owner'
 
@@ -39,22 +39,30 @@ const config = Schema.decodeUnknownSync(EditorialMcpSettings)({
 })
 
 const layer = ListeningCommandServiceLive.pipe(
-  Layer.provide(DatabaseTestLayer),
+  Layer.provideMerge(DatabaseTestLayer),
   Layer.provide(McpOperationStoreLayer(d1)),
   Layer.provide(Layer.succeed(EditorialMcpConfig, config)),
 )
 
-const actor = (
-  userId = owner,
-  scopes: typeof McpPrincipal.Type.scopes = ['listening:read', 'listening:write'],
-) =>
-  Schema.decodeUnknownSync(McpPrincipal)({ userId, clientId: 'listening-command-fixture', scopes })
+const actor = (userId = owner) => userId
 
-const run = <A, E>(program: Effect.Effect<A, E, ListeningCommandService>, identity = actor()) =>
-  Effect.runPromise(withTestLayer(program, layer).pipe(Effect.provideService(McpActor, identity)))
+const run = <A, E>(
+  program: Effect.Effect<A, E, ListeningCommandService | CommandAuthority>,
+  identity = actor(),
+) =>
+  Effect.runPromise(
+    withTestLayer(
+      Effect.gen(function* () {
+        const authority = yield* listeningTestSessionAuthority(identity)
+
+        return yield* program.pipe(Effect.provideService(CommandAuthority, authority))
+      }),
+      layer,
+    ),
+  )
 
 const denied = <A>(
-  program: Effect.Effect<A, McpToolError, ListeningCommandService>,
+  program: Effect.Effect<A, McpToolError, ListeningCommandService | CommandAuthority>,
   identity = actor(),
 ) => run(Effect.flip(program), identity)
 
@@ -71,6 +79,29 @@ beforeAll(async () => {
     .values(
       [owner, other].map((id) => ({ id, name: id, email: `${id}@example.test`, role: 'user' })),
     )
+  await db.insert(session).values(
+    [owner, other].map((id) => ({
+      id: `${id}-session`,
+      token: `${id}-token`,
+      userId: id,
+      expiresAt: new Date(Date.now() + 3600000),
+      updatedAt: new Date(),
+    })),
+  )
+})
+
+test('commands fail closed when no request-scoped credential authority is provided', async () => {
+  const result = await Effect.runPromise(
+    withTestLayer(save('https://soundcloud.com/l1-command/no-authority').pipe(Effect.flip), layer),
+  )
+
+  expect(result.code).toBe('access_denied')
+  expect(
+    await db
+      .select()
+      .from(mixes)
+      .where(eq(mixes.url, 'https://soundcloud.com/l1-command/no-authority')),
+  ).toEqual([])
 })
 
 test('six commands preserve private state, original replay and CAS across split notes/status edits', async () => {
@@ -295,9 +326,16 @@ test('replays recheck live account and stored target, and expired create never c
           ).toHaveLength(1)
         })
 
-        yield* withTestLayer(program, layer).pipe(
-          Effect.provideService(McpActor, actor()),
-          Effect.provideService(Clock.Clock, clock),
+        const authority = yield* listeningTestSessionAuthority(owner).pipe(
+          Effect.provideService(Database, db),
+        )
+
+        yield* withTestLayer(
+          program.pipe(
+            Effect.provideService(CommandAuthority, authority),
+            Effect.provideService(Clock.Clock, clock),
+          ),
+          layer,
         )
       }),
     ),
@@ -312,14 +350,6 @@ test('replays recheck live account and stored target, and expired create never c
   const created = await run(create)
   await db.delete(collections).where(eq(collections.id, created.collectionId))
   expect((await denied(create)).code).toBe('access_denied')
-  expect(
-    (
-      await denied(
-        save('https://soundcloud.com/l1-command/scope'),
-        actor(owner, ['listening:write']),
-      )
-    ).code,
-  ).toBe('access_denied')
   const bannedRequest = crypto.randomUUID()
   const saved = await run(save('https://soundcloud.com/l1-command/banned', bannedRequest))
   await db.update(user).set({ banned: true }).where(eq(user.id, owner))
@@ -346,8 +376,17 @@ test('browser writers and MCP share revisions, publication guards and deletion f
     }),
   )
 
-  const browser = <A, E>(effect: Effect.Effect<A, E, Database>) =>
-    Effect.runPromise(withTestLayer(effect, DatabaseTestLayer))
+  const browser = <A, E>(effect: Effect.Effect<A, E, Database | CommandAuthority>) =>
+    Effect.runPromise(
+      withTestLayer(
+        Effect.gen(function* () {
+          const authority = yield* listeningTestSessionAuthority(owner)
+
+          return yield* effect.pipe(Effect.provideService(CommandAuthority, authority))
+        }),
+        DatabaseTestLayer,
+      ),
+    )
 
   const noteInput = {
     requestId: crypto.randomUUID(),
@@ -460,4 +499,74 @@ test('browser writers and MCP share revisions, publication guards and deletion f
       )
     ).reason,
   ).toBe('conflict')
+}, 30_000)
+
+test('session loss after a browser claim rolls back membership and deletion fanout atomically', async () => {
+  for (const kind of ['membership', 'deletion'] as const) {
+    const saved = await run(save(`https://soundcloud.com/l1-command/session-loss-${kind}`))
+
+    const created = await run(
+      Effect.gen(function* () {
+        return yield* (yield* ListeningCommandService).createCollection({
+          requestId: crypto.randomUUID(),
+          title: `Session loss ${kind}`,
+        })
+      }),
+    )
+
+    if (kind === 'deletion')
+      await db
+        .insert(memberships)
+        .values({ collectionId: created.collectionId, mixId: saved.mixId })
+
+    const snapshot = async () => ({
+      mix: await db.select().from(mixes).where(eq(mixes.id, saved.mixId)),
+      collection: await db
+        .select()
+        .from(collections)
+        .where(eq(collections.id, created.collectionId)),
+      memberships: await db.select().from(memberships).where(eq(memberships.mixId, saved.mixId)),
+    })
+
+    const before = await snapshot()
+    const table = kind === 'membership' ? collections : mixes
+
+    // Disposable test-only fault injection: invalidate the real session between batch statements.
+    await db.run(sql`CREATE TRIGGER l1_test_session_loss AFTER UPDATE OF last_operation_id ON ${table}
+      WHEN NEW.last_operation_id IS NOT NULL BEGIN
+        UPDATE session SET expires_at = 0 WHERE user_id = NEW.user_id;
+      END`)
+
+    try {
+      const result = await Effect.runPromise(
+        withTestLayer(
+          Effect.gen(function* () {
+            const authority = yield* listeningTestSessionAuthority(owner)
+
+            const write =
+              kind === 'membership'
+                ? setListeningMembership(
+                    owner,
+                    created.collectionId,
+                    saved.mixId,
+                    true,
+                    created.version,
+                  )
+                : deleteListeningItem(owner, saved.mixId, 'mix', saved.version)
+
+            return yield* write.pipe(
+              Effect.provideService(CommandAuthority, authority),
+              Effect.flip,
+            )
+          }),
+          DatabaseTestLayer,
+        ),
+      )
+
+      expect(result.reason).toBe('unavailable')
+      expect(await snapshot()).toEqual(before)
+    } finally {
+      await db.run(sql`DROP TRIGGER l1_test_session_loss`)
+    }
+  }
 }, 30_000)

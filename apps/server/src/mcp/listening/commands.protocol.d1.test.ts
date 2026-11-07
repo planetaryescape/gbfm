@@ -3,10 +3,12 @@ import { Effect, Layer, Schema } from 'effect'
 import { HttpRouter, HttpServer } from 'effect/http'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 
-import { user } from '@/db/auth.schema'
+import { session, user } from '@/db/auth.schema'
+import { Database } from '@/db/layer'
 import { DatabaseTestLayer, db, d1 } from '@/test/database'
 
 import { McpActor } from '../authorization'
+import { CommandAuthority } from '../command-authority'
 import { EditorialMcpConfig } from '../editorial'
 import { EditorialMcpSettings } from '../model'
 import { McpOperationStoreLayer } from '../operations/store'
@@ -15,6 +17,7 @@ import { ListeningCommandToolHandlersLayer, ListeningCommandToolkit } from './co
 import { ListeningCommandServiceLive } from './commands'
 import { SavedMixCommandResult } from './contracts'
 import { ListeningReadServiceLive } from './reads'
+import { listeningTestSessionAuthority } from './test-session'
 import { ListeningToolHandlersLayer, ListeningToolkit } from './tools'
 
 const owner = 'listening-protocol-command-owner'
@@ -43,16 +46,23 @@ const web = HttpRouter.toWebHandler(
   {
     disableLogger: true,
     middleware: (effect) =>
-      effect.pipe(
-        Effect.provideService(
-          McpActor,
-          Schema.decodeUnknownSync(McpPrincipal)({
-            userId: owner,
-            clientId: 'listening-protocol-client',
-            scopes: ['listening:read', 'listening:write'],
-          }),
-        ),
-      ),
+      Effect.gen(function* () {
+        const authority = yield* listeningTestSessionAuthority(owner).pipe(
+          Effect.provideService(Database, db),
+        )
+
+        return yield* effect.pipe(
+          Effect.provideService(CommandAuthority, authority),
+          Effect.provideService(
+            McpActor,
+            yield* Schema.decodeUnknownEffect(McpPrincipal)({
+              userId: owner,
+              clientId: 'listening-protocol-client',
+              scopes: ['listening:read', 'listening:write'],
+            }),
+          ),
+        )
+      }),
   },
 )
 
@@ -60,6 +70,13 @@ beforeAll(async () => {
   await db
     .insert(user)
     .values({ id: owner, name: 'Fixture', email: 'listening-protocol@example.test', role: 'user' })
+  await db.insert(session).values({
+    id: `${owner}-session`,
+    userId: owner,
+    token: `${owner}-token`,
+    expiresAt: new Date(Date.now() + 3600000),
+    updatedAt: new Date(),
+  })
 })
 
 afterAll(() => web.dispose())

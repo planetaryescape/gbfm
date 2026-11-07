@@ -25,6 +25,8 @@ Contracts live in `contracts.ts`. Shared failures use `EditorialToolError` with
 `failureMode: return`: access denied, not found, invalid input or unavailable.
 Empty lists succeed. Unknown/unresolved/orphaned/gated URL identities return a
 successful `not_found` result. No fetch-on-miss or implicit canonical identity write.
+URL candidates are deduplicated and ordered by kind/ID, not source-key/canonical/alias
+precedence; if stored identities disagree, the first existing entity in that order wins.
 
 Kinds are artist/album/track/label, never audio mixes/episodes. Playlist reads and
 edges remain excluded until PL1's shared service/API/embed visibility gate closes.
@@ -43,7 +45,10 @@ by kind/ID, relationships by relationship/kind/ID. Album tracks sort by track nu
 No total-count scan, recursive graph or unbounded entity/link load is performed.
 The byte budget measures both structured JSON and the adapter's duplicated text,
 including nested string escaping. Encoded tool results above 232 KiB fail explicitly,
-reserving 24 KiB for JSON-RPC/SSE framing and the ID from the <=16 KiB read request.
+reserving 24 KiB for JSON-RPC/SSE framing and IDs within read-only request admission
+(16 KiB). Grants with `drafts:write` have 256 KiB request admission: a larger echoed
+ID can exceed the full-envelope ceiling and receive the transport's generic error,
+not this module's smaller-page guidance. The reserve does not cover those larger IDs.
 Central transport must retain its full 256 KiB envelope ceiling and lower request
 limits. Real HTTP tests exercise ordinary, escaped and multibyte names on both sides
 of the budget; the failure retains the smaller-page/batch guidance.
@@ -71,7 +76,8 @@ the real service's Database adapter to explain each statement before executing i
 | `lookup_music_url` | UNION of source-key PK, canonical-URL unique index, normalized-alias PK and state+source-key identity **SEARCH**. At most three candidates; skip orphaned targets rather than hiding a live alias. |
 | `get_music_entity` / batch / relationship target projection | Choose the exact kind's table, **SEARCH** by ID PK, then bounded link lookup by entity. No four-kind projection scan. |
 | `search_music` | `instr(lower(name), lower(?))`: **SCAN** all four catalogue tables when no kind supplied, or only the specified kind's table. No name index supports substring search. |
-| `filter_music` with name | Exact `lower(name) = lower(?)`: **SCAN** the specified kind's table, absent matching expression index. Kind-only listing remains offset-based and is not a catalogue-independent-cost promise. |
+| `filter_music` with name | Exact `lower(name) = lower(?)`: **SCAN** the specified kind's table, absent matching expression index. |
+| Kind-only `filter_music` | Order only by ID, not the constant kind: walk the ID PK index without a temporary sort, stopping after offset + limit + 1 (offset ≤10000, limit ≤50). This avoids a full-table sort/scan; name predicates do not gain this rows-examined bound. |
 
 Representative actual plan lines (temporary sort/subquery scans are not base-table
 index searches, and do not establish a fixed rows-examined bound):
@@ -87,6 +93,7 @@ URL lookup: SEARCH music_source_identities USING INDEX sqlite_autoindex_music_so
             SEARCH i USING INDEX music_source_identities_resolving_audit_page_idx (state=? AND source_key=?)
 search: SCAN music_artists; SCAN music_albums; SCAN music_tracks; SCAN music_labels
 artist name filter: SCAN music_artists
+artist kind-only filter: SCAN music_artists USING INDEX sqlite_autoindex_music_artists_1 (no TEMP B-TREE)
 ```
 
 There is no longer a global `MATERIALIZE edges` step. Source predicates apply inside

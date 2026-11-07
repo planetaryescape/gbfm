@@ -61,7 +61,9 @@ const makeService = Effect.gen(function* () {
 
   const bounded = <A>(value: A) => {
     // Effect 4.0.6 emits both structuredContent and its JSON text. Measure both,
-    // including string escaping; reserve 24KiB for the <=16KiB read request ID and framing.
+    // including string escaping; reserve 24KiB for framing and IDs within read-only
+    // admission (16KiB). Write-capable grants admit larger requests: oversized echoed
+    // IDs can still hit the central full-envelope ceiling instead of this guidance.
     const encoded = JSON.stringify({
       isError: false,
       structuredContent: value,
@@ -161,7 +163,8 @@ const makeService = Effect.gen(function* () {
     const rows = yield* query(
       sql`select * from (${input.entityType === undefined ? entities : musicRows[input.entityType]})
       where ${match}
-      order by entityType, entityId limit ${limit + 1} offset ${offset}`,
+      order by ${input.entityType === undefined ? sql`entityType,` : sql``} entityId
+      limit ${limit + 1} offset ${offset}`,
       StoredEntity,
     )
 

@@ -37,7 +37,41 @@ removing that evidence, fence every coupled DML, and prove the actual completed
 source/alias/link state in its final assertion. This module supplies no completion
 or staged-association plan; `ctx.assert` is atomic-pending-only.
 
-## Required trusted intent and caller changes — proposal, not allocated cutover
+## Additive trusted contract and exact coordinated cutover recipe
+
+`contract.ts` now declares `CanonicalWriteIntent`,
+`CanonicalReadOnlySnapshotProvider`, `GuardedRefreshMusicEntity` and
+`CanonicalGuardedEntityOperations`. They are checked internal prerequisite types,
+not installed adapters. Existing `RefreshMusicEntity`, service method signatures,
+`buildEntityOperations` and its index.ts call remain unchanged: changing them
+without P1's matching callers would break compilation or invite fake defaults.
+
+The intended replacement signatures are precisely the two methods in
+`CanonicalGuardedEntityOperations`:
+
+```ts
+refreshEntity(input: GuardedRefreshMusicEntity): Effect.Effect<
+  OperationResult, MusicIdentityError | McpToolError
+>
+enrichEntity(input: GuardedRefreshMusicEntity): Effect.Effect<
+  OperationResult, MusicIdentityError | McpToolError
+>
+```
+
+The mandatory `intent` carries key, normalizedInput, checkpoint, parsed source
+and typed target with expectedRevision/overwriteFields; it replaces actorId-only
+input. Empty overwriteFields preserves public values. Original bounded receipt
+projections replace fresh entity reads on replay; callers must handle every
+OperationResult status rather than assume `.links` exists on all results.
+
+For the matching orchestration patch, append a **required** canonical-write
+dependency to `buildEntityOperations` containing the same-DB common operation
+store, `CanonicalReadOnlySnapshotProvider`, and a fresh-time supplier. index.ts
+must construct it from genuine composition, not the old raw scraper. Existing
+attach/release/create/import dependencies and barrel exports are not allocated
+for change. No provider dependency exists to wire today. Artwork policies other
+than preserve additionally need the approved staged association capability;
+otherwise the composed path must fail typed unavailable before providers.
 
 Required intent: a stable genuine `OperationKey`, parsed normalized command
 including source/overwrite selection, target type/id/expectedRevision pinned
@@ -54,14 +88,21 @@ or reserve work with an in-memory receipt.
 
 Before shared cutover, owners must change:
 
-1. P1 HTTP/music API/dashboard: rescrape calls carry explicit requestId and actual
-   expectedRevision, with genuine request-scoped authority. Coordinate M1 intent
-   overlap; no generated fallback IDs/revisions in handlers.
-2. PL2/I1 background playlist enrichment/sync: receive a genuine persisted
+1. P1 `packages/api/src/music.ts` rescrapeEntityLinks endpoint and its dashboard
+   consumer: add required requestId + expectedRevision and explicit overwrite
+   selection to the parsed request. `http/music.handlers.ts` rescrapeEntityLinks
+   must construct the normalized intent from those fields, actual selected exact
+   source and genuine request-scoped session authority. Preserve the API's bounded
+   links response by mapping the original successful receipt projection, not a
+   current reload; handle conflicts/denial/unavailability explicitly. Coordinate
+   M1 intent overlap; no fallback IDs/revisions or fabricated OAuth clients.
+2. PL2/I1 `playlist-tracks.service.ts` enrichTrackLinksEffect and
+   syncPlaylistLinksEffect (and their owning enrichment/import entrypoints): receive a genuine persisted
    authorized per-item intent and recover real durable authority. The current
    fabricated `playlist_enrichment`/`playlist_sync` actor strings are not authority.
    Missing intent/authority/transport must fail typed unavailable **before** providers.
-3. I1 canonical refresh/enrich: require that intent instead of actorId-only input;
+3. I1 `entity-operations.ts` refresh/enrich and the narrow index.ts
+   buildEntityOperations call: require that intent/dependency instead of actorId-only input;
    split provider preparation from guarded persistence and preserve original
    created/reused/partial semantics. Pure builders alone do not accomplish this.
 4. I1 artwork association: retain the original revision across fetch/PUT; never
@@ -69,6 +110,11 @@ Before shared cutover, owners must change:
    Consume a separately approved staged association contract, not atomic ctx.assert.
 5. P1 runtime: compose the actual same-DB store, authority and admitted transport.
    Queue/scheduler/worker activation and all production effects remain outside scope.
+
+These caller, dependency and guarded implementation changes must be adopted
+atomically on a P1-named combined head. Until then, the additive types/builders
+are obtainable but unused, legacy callers are unchanged, and missing-intent
+fail-closed behavior is a required cutover contract, **not** implemented behavior.
 
 ## Evidence boundary
 

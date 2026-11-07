@@ -7,9 +7,12 @@ import type {
   SelectMusicPlaylist,
   SelectMusicTrack,
 } from '@/db/music-entity.schema'
+import type { CommandAuthority } from '@/mcp/command-authority'
+import type { McpToolError } from '@/mcp/contracts'
+import type { JsonValue, OperationKey, OperationResult } from '@/mcp/operations/store'
 
 import type { MusicIdentityAuthorizationFailed, MusicIdentityError } from './errors'
-import type { CanonicalMusicEntityType } from './music-source'
+import type { CanonicalMusicEntityType, ParsedMusicSource } from './music-source'
 import type { ProviderMusicSnapshot } from './source-result'
 
 export const ARTWORK_DELIVERY = {
@@ -80,6 +83,77 @@ export type RefreshMusicEntity = {
   readonly actorId: string
   readonly origin: 'manual' | 'playlist_enrichment'
   readonly artworkDelivery: ArtworkDelivery
+}
+
+/** Additive internal cutover contract, NOT accepted by the legacy service below.
+ * Trusted composition supplies the genuine immutable namespace and required
+ * checkpoint. requestId and expectedRevision must survive retries; do not invent
+ * either for a legacy caller. Wire parsing/normalization precedes this boundary.
+ */
+export type CanonicalWriteIntent = {
+  readonly key: OperationKey
+  /** Includes target/revision, parsed source identity, mode and selected fields.
+   * No credentials/provider payloads. Same identity for lookup and execute.
+   */
+  readonly normalizedInput: JsonValue
+  readonly checkpoint: ReturnType<typeof CommandAuthority.of>['checkpoint']
+  readonly source: ParsedMusicSource
+  /** Pin before provider work. Empty overwriteFields means preserve canonical
+   * public values; it does not authorize a link/alias/source write by itself.
+   */
+  readonly target: {
+    readonly entityId: string
+    readonly expectedRevision: number
+  } & (
+    | {
+        readonly entityType: 'artist'
+        readonly overwriteFields: ReadonlyArray<'name' | 'imageUrl'>
+      }
+    | {
+        readonly entityType: 'album' | 'track'
+        readonly overwriteFields: ReadonlyArray<'title' | 'coverImageUrl'>
+      }
+    | {
+        readonly entityType: 'playlist'
+        readonly overwriteFields: ReadonlyArray<'title' | 'description' | 'coverImageUrl'>
+      }
+  )
+}
+
+/** Required, explicitly admitted composition capability, not a raw scraper
+ * fallback. Implementation must enforce bounded parsed output, cancellation,
+ * destination/privacy policy and no canonical/storage/email side effects.
+ * This declaration does not admit or implement any transport.
+ */
+export interface CanonicalReadOnlySnapshotProvider {
+  readonly prepareSnapshot: (input: {
+    readonly target: CanonicalWriteIntent['target']
+    readonly source: ParsedMusicSource
+    readonly mode: 'refresh' | 'enrich'
+  }) => Effect.Effect<ProviderMusicSnapshot, MusicIdentityError>
+}
+
+/** Future replacement input; actor/type/id/revision come only from intent.
+ * Remote artwork delivery additionally requires the approved staged contract;
+ * carrying this policy alone confers no association authority.
+ */
+export type GuardedRefreshMusicEntity = {
+  readonly intent: CanonicalWriteIntent
+  readonly origin: RefreshMusicEntity['origin']
+  readonly artworkDelivery: ArtworkDelivery
+}
+
+/** Target internal signatures for the coordinated caller cutover. No adapter or
+ * optional fallback is installed. Original bounded receipt outcomes, not a fresh
+ * entity read, preserve truthful replay; errors retain their typed channel.
+ */
+export interface CanonicalGuardedEntityOperations {
+  readonly refreshEntity: (
+    input: GuardedRefreshMusicEntity,
+  ) => Effect.Effect<OperationResult, MusicIdentityError | McpToolError>
+  readonly enrichEntity: (
+    input: GuardedRefreshMusicEntity,
+  ) => Effect.Effect<OperationResult, MusicIdentityError | McpToolError>
 }
 
 export type MusicEntityByType = {

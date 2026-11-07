@@ -39,3 +39,7 @@ export * from './oauth.schema'
 export * from './editorial-operation.schema'
 
 export * from './mcp-operation.schema'
+
+export * from './music-credit.schema'
+
+export * from './post-music-reference.schema'

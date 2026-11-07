@@ -1,3 +1,8 @@
+import {
+  MembershipMutationResult,
+  MembershipRevision,
+  MembershipStateResponse,
+} from '@gbfm/api/favorites'
 import { Effect, Match, Schema } from 'effect'
 import { Command, type Update } from 'foldkit'
 import type { HtmlBuilder } from 'foldkit/html'
@@ -24,21 +29,39 @@ export const Model = Schema.Struct({
   notice: Schema.NullOr(Schema.String),
   principalId: Schema.NullOr(Schema.String),
   requestId: Schema.Number,
+  revision: Schema.NullOr(MembershipRevision),
+  mutationId: Schema.NullOr(Schema.String),
 })
 
 export type Model = typeof Model.Type
 
 export const Message = defineMessageUnion({
   Toggle: {},
+  Loaded: {
+    target: Target,
+    active: Schema.Boolean,
+    revision: MembershipRevision,
+    principalId: Schema.String,
+    requestId: Schema.Number,
+  },
+  LoadFailed: {
+    target: Target,
+    unauthorized: Schema.Boolean,
+    principalId: Schema.String,
+    requestId: Schema.Number,
+  },
   Saved: {
     target: Target,
     active: Schema.Boolean,
+    revision: MembershipRevision,
     principalId: Schema.String,
     requestId: Schema.Number,
   },
   Failed: {
     target: Target,
     unauthorized: Schema.Boolean,
+    conflicted: Schema.Boolean,
+    mutationId: Schema.String,
     principalId: Schema.String,
     requestId: Schema.Number,
   },
@@ -46,71 +69,130 @@ export const Message = defineMessageUnion({
 
 export type Message = typeof Message.Type
 
+const Load = Command.define('PublicActions.Load', {
+  args: { target: Target, principalId: Schema.String, requestId: Schema.Number },
+  messages: [Message.Loaded, Message.LoadFailed],
+  execute: ({ target, principalId, requestId }) =>
+    Effect.gen(function* () {
+      const response = yield* Effect.tryPromise((signal) =>
+        fetch(`/api/favorites/${target.kind}/${encodeURIComponent(target.id)}/state`, {
+          credentials: 'same-origin',
+          cache: 'no-store',
+          signal,
+        }),
+      )
+
+      if (!response.ok)
+        return Message.LoadFailed({
+          target,
+          principalId,
+          requestId,
+          unauthorized: response.status === 401,
+        })
+
+      const body = yield* Effect.tryPromise(() => response.json())
+      const state = yield* Schema.decodeUnknownEffect(MembershipStateResponse)(body)
+      const active = target.kind === 'audio' ? state.favorited : state.subscribed
+
+      if (active === null)
+        return Message.LoadFailed({ target, principalId, requestId, unauthorized: false })
+
+      return Message.Loaded({ target, principalId, requestId, active, revision: state.revision })
+    }).pipe(
+      Effect.orElseSucceed(() =>
+        Message.LoadFailed({ target, principalId, requestId, unauthorized: false }),
+      ),
+    ),
+})
+
 const Save = Command.define('PublicActions.Save', {
   args: {
     target: Target,
     active: Schema.Boolean,
     principalId: Schema.String,
     requestId: Schema.Number,
+    expectedRevision: MembershipRevision,
+    mutationId: Schema.NullOr(Schema.String),
   },
   messages: [Message.Saved, Message.Failed],
-  execute: ({ target, active, principalId, requestId }) =>
-    Effect.tryPromise(async (signal) => {
-      const path =
-        target.kind === 'show'
-          ? `/api/shows/${encodeURIComponent(target.id)}/${active ? 'subscribe' : 'unsubscribe'}`
-          : active
-            ? '/api/favorites'
-            : `/api/favorites/${encodeURIComponent(target.id)}`
+  execute: ({ target, active, principalId, requestId, expectedRevision, mutationId }) =>
+    Effect.gen(function* () {
+      const id = mutationId ?? (yield* Effect.sync(() => crypto.randomUUID()))
 
-      const response = await fetch(path, {
-        method: active ? 'POST' : 'DELETE',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body:
-          target.kind === 'audio' && active ? JSON.stringify({ audioId: target.id }) : undefined,
-        signal,
-      })
+      const failed = (unauthorized = false, conflicted = false) =>
+        Message.Failed({ target, principalId, requestId, mutationId: id, unauthorized, conflicted })
 
-      return response.ok
-        ? Message.Saved({ target, active, principalId, requestId })
-        : Message.Failed({ target, unauthorized: response.status === 401, principalId, requestId })
-    }).pipe(
-      Effect.orElseSucceed(() =>
-        Message.Failed({ target, unauthorized: false, principalId, requestId }),
-      ),
-    ),
+      return yield* Effect.gen(function* () {
+        const path =
+          target.kind === 'show'
+            ? `/api/shows/${encodeURIComponent(target.id)}/${active ? 'subscribe' : 'unsubscribe'}`
+            : active
+              ? '/api/favorites'
+              : `/api/favorites/${encodeURIComponent(target.id)}`
+
+        const mutation = { requestId: id, expectedRevision }
+
+        const body =
+          target.kind === 'audio' && active ? { ...mutation, audioId: target.id } : mutation
+
+        const response = yield* Effect.tryPromise((signal) =>
+          fetch(path, {
+            method: active ? 'POST' : 'DELETE',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+            signal,
+          }),
+        )
+
+        if (!response.ok)
+          return failed(
+            response.status === 401 || response.status === 403,
+            response.status === 409 || response.status === 410,
+          )
+        const responseBody = yield* Effect.tryPromise(() => response.json())
+        const result = yield* Schema.decodeUnknownEffect(MembershipMutationResult)(responseBody)
+
+        if (
+          result.requestId !== id ||
+          result.targetKind !== target.kind ||
+          result.targetId !== target.id ||
+          result.desiredState !== active ||
+          result.revision !== expectedRevision + 1
+        )
+          return failed()
+
+        return Message.Saved({ target, active, principalId, requestId, revision: result.revision })
+      }).pipe(Effect.orElseSucceed(() => failed()))
+    }),
 })
 
 export const init = (document: Document | null, principalId: string | null = null): Model => ({
   document,
   principalId,
   requestId: 0,
+  revision: null,
+  mutationId: null,
   busy: false,
   notice: null,
 })
 
+export const load = (model: Model): Update.Return<Model, Message> => {
+  if (!model.document || !model.principalId || model.document.state === 'anonymous')
+    return { model }
+  const requestId = model.requestId + 1
+
+  return {
+    model: { ...model, requestId, revision: null, mutationId: null, busy: true },
+    commands: [Load({ target: model.document.target, principalId: model.principalId, requestId })],
+  }
+}
+
 export const update = (model: Model, message: Message): Update.Return<Model, Message> =>
   Message.match<Update.Return<Model, Message>>(message, {
-    Toggle: () =>
-      !model.document ||
-      !model.principalId ||
-      model.busy ||
-      !['active', 'inactive'].includes(model.document.state)
-        ? { model }
-        : {
-            model: { ...model, requestId: model.requestId + 1, busy: true, notice: null },
-            commands: [
-              Save({
-                target: model.document.target,
-                active: model.document.state !== 'active',
-                principalId: model.principalId,
-                requestId: model.requestId + 1,
-              }),
-            ],
-          },
-    Saved: ({ target, active, principalId, requestId }) =>
+    Loaded: ({ target, active, revision, principalId, requestId }) =>
       !model.busy ||
+      model.revision !== null ||
       principalId !== model.principalId ||
       requestId !== model.requestId ||
       model.document?.target.id !== target.id ||
@@ -120,12 +202,13 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
             model: {
               ...model,
               busy: false,
+              revision,
               document: { ...model.document, state: active ? 'active' : 'inactive' },
-              notice: 'Saved',
             },
           },
-    Failed: ({ target, unauthorized, principalId, requestId }) =>
+    LoadFailed: ({ target, unauthorized, principalId, requestId }) =>
       !model.busy ||
+      model.revision !== null ||
       principalId !== model.principalId ||
       requestId !== model.requestId ||
       model.document?.target.id !== target.id ||
@@ -136,13 +219,70 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
               ...model,
               busy: false,
               principalId: unauthorized ? null : model.principalId,
-              document: {
-                ...model.document,
-                state: unauthorized ? 'anonymous' : model.document.state,
-              },
-              notice: unauthorized ? 'Sign in to continue.' : 'Action failed. Please try again.',
+              document: { ...model.document, state: unauthorized ? 'anonymous' : 'unavailable' },
             },
           },
+    Toggle: () =>
+      !model.document ||
+      !model.principalId ||
+      model.busy ||
+      model.revision === null ||
+      !['active', 'inactive'].includes(model.document.state)
+        ? { model }
+        : {
+            model: { ...model, requestId: model.requestId + 1, busy: true, notice: null },
+            commands: [
+              Save({
+                target: model.document.target,
+                active: model.document.state !== 'active',
+                principalId: model.principalId,
+                requestId: model.requestId + 1,
+                expectedRevision: model.revision,
+                mutationId: model.mutationId,
+              }),
+            ],
+          },
+    Saved: ({ target, active, revision, principalId, requestId }) =>
+      !model.busy ||
+      model.revision === null ||
+      principalId !== model.principalId ||
+      requestId !== model.requestId ||
+      model.document?.target.id !== target.id ||
+      model.document.target.kind !== target.kind
+        ? { model }
+        : {
+            model: {
+              ...model,
+              busy: false,
+              revision,
+              mutationId: null,
+              document: { ...model.document, state: active ? 'active' : 'inactive' },
+              notice: 'Saved',
+            },
+          },
+    Failed: ({ target, unauthorized, conflicted, mutationId, principalId, requestId }) =>
+      !model.busy ||
+      model.revision === null ||
+      principalId !== model.principalId ||
+      requestId !== model.requestId ||
+      model.document?.target.id !== target.id ||
+      model.document.target.kind !== target.kind
+        ? { model }
+        : conflicted
+          ? load({ ...model, busy: false, notice: 'Saved state changed. Review it and try again.' })
+          : {
+              model: {
+                ...model,
+                busy: false,
+                mutationId: unauthorized ? null : mutationId,
+                principalId: unauthorized ? null : model.principalId,
+                document: {
+                  ...model.document,
+                  state: unauthorized ? 'anonymous' : model.document.state,
+                },
+                notice: unauthorized ? 'Sign in to continue.' : 'Action failed. Please try again.',
+              },
+            },
   })
 
 export const view = <M>(
@@ -198,13 +338,18 @@ export const view = <M>(
           h.button(
             [
               h.Type('button'),
-              h.Disabled(model.busy || !interactive),
+              h.Disabled(model.busy || model.revision === null || !interactive),
               h.AriaPressed(String(active)),
               h.OnClick(message(Message.Toggle())),
               ...(iconOnly ? [h.AriaLabel(label), h.Title(label)] : []),
               h.Class(iconOnly ? iconButton : outlineButton),
             ],
-            iconOnly ? [icon] : [lucide(iconPath, 'h-4 w-4'), model.busy ? 'Saving…' : label],
+            iconOnly
+              ? [icon]
+              : [
+                  lucide(iconPath, 'h-4 w-4'),
+                  model.busy ? (model.revision === null ? 'Checking…' : 'Saving…') : label,
+                ],
           ),
         ),
       ),

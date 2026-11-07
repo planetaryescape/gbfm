@@ -1,9 +1,14 @@
 import { Api } from '@gbfm/api/api'
+import { MembershipStateResponse } from '@gbfm/api/favorites'
 import { AuthSession } from '@gbfm/api/middleware/auth'
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
+import { HttpServerResponse } from 'effect/http'
 import { HttpApiBuilder, HttpApiError } from 'effect/http-api'
 
 import { dieOnDatabaseError as makeDieOnDatabaseError } from '@/http/handler-utils'
+import { makeSessionCommandAuthority } from '@/mcp/command-authority'
+import { membershipOutcome, membershipWriteContext } from '@/mcp/favorites/command'
+import { membershipHttpError } from '@/mcp/favorites/http'
 import { FavoriteService } from '@/services/favorite.service'
 
 const dieOnDatabaseError = makeDieOnDatabaseError('favorites')
@@ -13,6 +18,7 @@ const toFavoriteResponse = (favorite: {
   userId: string
   audioId: string | null
   showId: string | null
+  membershipRevision: number
   createdAt: Date
   audio: {
     id: string
@@ -30,59 +36,72 @@ const toFavoriteResponse = (favorite: {
 
 export const FavoritesHandlersLive = HttpApiBuilder.group(Api, 'favorites', (handlers) =>
   handlers
+    .handle('getMembershipState', ({ params }) =>
+      Effect.gen(function* () {
+        const { user } = yield* AuthSession
+        const svc = yield* FavoriteService
+
+        const state = yield* dieOnDatabaseError(
+          svc
+            .getMembershipState(user.id, params.targetKind, params.targetId)
+            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
+        )
+
+        const encoded = yield* Schema.encodeEffect(MembershipStateResponse)(state).pipe(
+          Effect.orDie,
+        )
+
+        return (yield* HttpServerResponse.json(encoded).pipe(Effect.orDie)).pipe(
+          HttpServerResponse.setHeader('Cache-Control', 'private, no-store'),
+          HttpServerResponse.setHeader('Vary', 'Cookie, Authorization'),
+        )
+      }),
+    )
     .handle('addFavorite', ({ payload }) =>
       Effect.gen(function* () {
-        const { user } = yield* AuthSession
         const svc = yield* FavoriteService
 
-        if (payload.audioId) {
-          yield* dieOnDatabaseError(
-            svc.addFavorite(user.id, payload.audioId).pipe(
-              Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
-              Effect.catchTag('ConflictError', () => new HttpApiError.Conflict()),
-            ),
-          )
-        } else if (payload.showId) {
-          yield* dieOnDatabaseError(
-            svc.addShowFavorite(user.id, payload.showId).pipe(
-              Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
-              Effect.catchTag('ConflictError', () => new HttpApiError.Conflict()),
-            ),
-          )
-        } else {
+        if (Boolean(payload.audioId) === Boolean(payload.showId))
           return yield* new HttpApiError.BadRequest()
-        }
+        const authority = yield* makeSessionCommandAuthority
 
-        return { success: true, message: 'Added to favorites' }
-      }),
-    )
-    .handle('removeFavorite', ({ params }) =>
-      Effect.gen(function* () {
-        const { user } = yield* AuthSession
-        const svc = yield* FavoriteService
-
-        yield* dieOnDatabaseError(
-          svc
-            .removeFavorite(user.id, params.audioId)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
+        const context = yield* membershipWriteContext(
+          authority,
+          payload.showId ? ['favorites:write', 'subscriptions:write'] : ['favorites:write'],
+          payload,
         )
 
-        return { success: true, message: 'Removed from favorites' }
-      }),
-    )
-    .handle('removeShowFavorite', ({ params }) =>
-      Effect.gen(function* () {
-        const { user } = yield* AuthSession
-        const svc = yield* FavoriteService
+        const result = payload.audioId
+          ? yield* svc.addFavorite(context, payload.audioId)
+          : payload.showId
+            ? yield* svc.addShowFavorite(context, payload.showId)
+            : yield* new HttpApiError.BadRequest()
 
-        yield* dieOnDatabaseError(
-          svc
-            .removeShowFavorite(user.id, params.showId)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
+        return yield* membershipOutcome(result)
+      }).pipe(Effect.catchTag('McpToolError', membershipHttpError)),
+    )
+    .handle('removeFavorite', ({ params, payload }) =>
+      Effect.gen(function* () {
+        const svc = yield* FavoriteService
+        const authority = yield* makeSessionCommandAuthority
+        const context = yield* membershipWriteContext(authority, ['favorites:write'], payload)
+
+        return yield* membershipOutcome(yield* svc.removeFavorite(context, params.audioId))
+      }).pipe(Effect.catchTag('McpToolError', membershipHttpError)),
+    )
+    .handle('removeShowFavorite', ({ params, payload }) =>
+      Effect.gen(function* () {
+        const svc = yield* FavoriteService
+        const authority = yield* makeSessionCommandAuthority
+
+        const context = yield* membershipWriteContext(
+          authority,
+          ['favorites:write', 'subscriptions:write'],
+          payload,
         )
 
-        return { success: true, message: 'Removed from favorites' }
-      }),
+        return yield* membershipOutcome(yield* svc.removeShowFavorite(context, params.showId))
+      }).pipe(Effect.catchTag('McpToolError', membershipHttpError)),
     )
     .handle('getFavorites', ({ query }) =>
       Effect.gen(function* () {

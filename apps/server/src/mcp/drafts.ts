@@ -9,6 +9,7 @@ import { McpAuthorization, McpAuthorizationLive } from './authorization'
 import { CreateDraftInput, EditorialToolError, GetPostResult, UpdateDraftInput } from './contracts'
 import { insertEditorialDraft, readEditorialReceipt, updateEditorialDraft } from './draft-store'
 import { EditorialMcpConfig } from './editorial'
+import { loadEditorialSnapshot } from './editorial-music/snapshot'
 import { PersistedPost, projectPost, unavailable, notFound } from './model'
 
 const conflict = () =>
@@ -55,7 +56,7 @@ export const EditorialDraftServiceLayer = Layer.effect(
       postId: PostId,
       actor: Effect.Success<typeof authorize>,
     ) {
-      const loaded = yield* posts
+      yield* posts
         .getSourceById(
           postId,
           PostSourceAccess.cases.Authored.make({ userId: actor.userId, userRole: actor.role }),
@@ -67,9 +68,7 @@ export const EditorialDraftServiceLayer = Layer.effect(
           }),
         )
 
-      const post = yield* Schema.decodeUnknownEffect(PersistedPost)(loaded).pipe(
-        Effect.mapError(unavailable),
-      )
+      const post = yield* loadEditorialSnapshot(db, postId)
 
       if (
         !post.draft ||
@@ -167,6 +166,8 @@ export const EditorialDraftServiceLayer = Layer.effect(
         bannerImageUrl: null,
         musicEntityType: null,
         musicEntityId: null,
+        musicReferencesManaged: false,
+        musicReferences: { references: [], primary: null },
         parentPostId: null,
         rootPostId: null,
         quotedPostId: null,

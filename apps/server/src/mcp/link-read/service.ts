@@ -86,6 +86,11 @@ const make = Effect.gen(function* () {
         (parsed.success.platform === 'youtube' && row.platform === 'youtube_music') ||
         (parsed.success.platform === 'other' &&
           [
+            'apple_music',
+            'bandcamp',
+            'soundcloud',
+            'tidal',
+            'amazon_music',
             'discord',
             'website',
             'instagram',

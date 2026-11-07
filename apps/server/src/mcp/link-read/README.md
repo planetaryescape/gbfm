@@ -22,8 +22,12 @@ publication timestamps. No playlists or private editorial bodies. Stored link me
 verification actor, identity source/lease tokens and creator IDs are never projected.
 Rejected/unsafe URLs, wrong typed provider sources and platform mismatches are omitted.
 Canonical-writer display aliases are retained: YouTube → YouTube Music, and generic
-sources → discord/website/instagram/twitter/musicbrainz/discogs/other. These are stored
-display mappings, not provider equivalence inference; they do not widen health destinations.
+sources → discord/website/instagram/twitter/musicbrainz/discogs/other plus snapshot-import
+labels apple_music/bandcamp/soundcloud/tidal/amazon_music. The real attachment and import
+writers produce these verified rows, including safe custom-domain/short-link sources.
+These are stored display mappings, not provider equivalence inference; they do not widen
+health destinations. Recognized provider mismatches (such as Spotify URL labelled Deezer)
+remain excluded.
 Dates are observations, not write concurrency tokens. HTTP success never verifies a link.
 Generic safe HTTPS links can be returned but are never fetched by this module.
 

@@ -434,7 +434,7 @@ test('oversize link IDs fail explicitly and typed provider mismatches are not eq
   }
 })
 
-test('canonical writer display aliases remain readable without widening health destinations', async () => {
+test('canonical attachment and import display aliases remain readable without widening health destinations', async () => {
   const target = { entityType: 'track', entityId: 'r4-display' } as const
   await db
     .insert(musicTracksTable)
@@ -514,6 +514,68 @@ test('canonical writer display aliases remain readable without widening health d
     expect(health.observation?.status).toBe(
       platform === 'youtube_music' ? 'provider_unavailable' : 'blocked',
     )
+  }
+
+  const importedLinks = [
+    { platform: 'apple_music', url: 'https://itunes.apple.com/us/album/example/123?i=456' },
+    { platform: 'bandcamp', url: 'https://artist.example.test/track/example' },
+    { platform: 'soundcloud', url: 'https://snd.sc/example' },
+    { platform: 'tidal', url: 'https://tidal.link/example' },
+    { platform: 'amazon_music', url: 'https://music.amazon.co.uk/tracks/example' },
+  ] as const
+
+  const imported = await Effect.runPromise(
+    withTestLayer(
+      Effect.gen(function* () {
+        const canonical = yield* CanonicalMusicIdentity
+
+        return yield* canonical.importProviderEntity({
+          snapshot: {
+            entityType: 'track',
+            sourceUrl: 'https://open.spotify.com/track/r4importdisplay',
+            title: 'Imported display labels',
+            links: importedLinks,
+          },
+          origin: 'spotify_import',
+          artworkDelivery: 'best_effort',
+        })
+      }),
+      CanonicalMusicIdentityLayer.pipe(Layer.provide(dependencies)),
+    ),
+  )
+
+  const importedTarget = { entityType: 'track', entityId: imported.entity.id } as const
+  const importedPage = await call('get_music_links', importedTarget, LinksResult)
+  expect(importedPage.scanned).toBe(6)
+  expect(importedPage.links.map((link) => link.platform)).toEqual(
+    ['spotify', ...importedLinks.map((link) => link.platform)].sort(),
+  )
+
+  for (const { platform, url } of importedLinks) {
+    const equivalent = await call(
+      'find_platform_equivalent',
+      { ...importedTarget, platform },
+      EquivalentResult,
+    )
+
+    expect(equivalent.result).toMatchObject({ status: 'stored_link', link: { platform, url } })
+
+    const missing = await call(
+      'find_missing_platform_links',
+      { entityType: 'track', platform },
+      MissingLinksResult,
+    )
+
+    expect(missing.missing.map((entry) => entry.entityId)).not.toContain(importedTarget.entityId)
+
+    const health = await call(
+      'check_music_link_health',
+      { ...importedTarget, platform },
+      HealthResult,
+    )
+
+    expect(health.link?.platform).toBe(platform)
+    expect(health.observation?.status).toBe('blocked')
   }
 
   await db

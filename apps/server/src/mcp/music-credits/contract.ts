@@ -77,6 +77,7 @@ const credit = Schema.Struct({
 }).check(
   Schema.makeFilter(hasEvidence),
   Schema.makeFilter((item) => (item.role === 'instrument') === (item.instrument !== undefined)),
+  Schema.makeFilter((item) => item.artistId !== null || item.id !== undefined),
 )
 
 const alias = Schema.Struct({
@@ -94,14 +95,62 @@ const common = {
 export const SetRecordingCreditsInput = Schema.Struct({
   ...common,
   target: Schema.Struct({ type: Schema.Literals(['track', 'album']), id }),
-  credits: Schema.Array(credit).check(Schema.isMaxLength(50)),
+  credits: Schema.Array(credit).check(
+    Schema.isMaxLength(50),
+    Schema.makeFilter((items) => {
+      const ids = new Set<string>()
+      const facts = new Set<string>()
+
+      for (const item of items) {
+        if (item.id !== undefined) {
+          if (ids.has(item.id)) return false
+          ids.add(item.id)
+        }
+
+        const participant = item.artistId
+          ? `artist:${item.artistId}`
+          : `name:${musicFactNameKey(item.creditedName)}`
+
+        const key = JSON.stringify([
+          participant,
+          item.role,
+          item.instrument ? musicFactNameKey(item.instrument) : '',
+        ])
+
+        if (facts.has(key)) return false
+        facts.add(key)
+      }
+
+      return true
+    }),
+  ),
 })
 
 /** Complete alias replacement. Decode through parseArtistAliases to enforce byte limits. */
 export const SetArtistAliasesInput = Schema.Struct({
   ...common,
   artistId: id,
-  aliases: Schema.Array(alias).check(Schema.isMaxLength(50)),
+  aliases: Schema.Array(alias).check(
+    Schema.isMaxLength(50),
+    Schema.makeFilter((items) => {
+      const ids = new Set<string>()
+      const names = new Set<string>()
+
+      for (const item of items) {
+        if (item.id !== undefined) {
+          if (ids.has(item.id)) return false
+          ids.add(item.id)
+        }
+
+        const key = musicFactNameKey(item.name)
+
+        if (names.has(key)) return false
+        names.add(key)
+      }
+
+      return true
+    }),
+  ),
 })
 
 const invalid = () =>
@@ -159,14 +208,12 @@ export const parseArtistAliases = Effect.fn('MusicCredits.parseArtistAliases')(f
 export const musicFactNameKey = (value: string) =>
   value.normalize('NFC').trim().replace(/\s+/gu, ' ').toLowerCase().normalize('NFC')
 
-/** Check row ownership and explicit unlink intent against the complete authorized collection. */
+/** After receipt lookup, check row ownership and explicit unlink intent against current state. */
 export const checkCreditReplacement = Effect.fn('MusicCredits.checkCreditReplacement')(function* (
   input: typeof SetRecordingCreditsInput.Type,
   existing: ReadonlyArray<{ readonly id: string; readonly artistId: string | null }>,
 ) {
   const rows = new Map(existing.map((row) => [row.id, row]))
-  const seenIds = new Set<string>()
-  const seenFacts = new Set<string>()
 
   for (const item of input.credits) {
     if (item.id !== undefined) {
@@ -174,52 +221,33 @@ export const checkCreditReplacement = Effect.fn('MusicCredits.checkCreditReplace
 
       if (
         !previous ||
-        seenIds.has(item.id) ||
-        (previous.artistId !== null && item.artistId === undefined)
+        (previous.artistId !== null && item.artistId === undefined) ||
+        (previous.artistId === null && item.artistId === null)
       ) {
         return yield* invalid()
       }
-
-      seenIds.add(item.id)
     }
-
-    const participant = item.artistId
-      ? `artist:${item.artistId}`
-      : `name:${musicFactNameKey(item.creditedName)}`
-
-    const key = JSON.stringify([
-      participant,
-      item.role,
-      item.instrument ? musicFactNameKey(item.instrument) : '',
-    ])
-
-    if (seenFacts.has(key)) return yield* invalid()
-    seenFacts.add(key)
   }
 
   return input
 })
 
-/** Reject duplicate/foreign alias IDs and primary-name collisions without merging artists. */
+/** After receipt lookup, reject foreign alias IDs and current primary-name collisions. */
 export const checkAliasReplacement = Effect.fn('MusicCredits.checkAliasReplacement')(function* (
   input: typeof SetArtistAliasesInput.Type,
   primaryName: string,
   existingIds: ReadonlyArray<string>,
 ) {
   const allowed = new Set(existingIds)
-  const ids = new Set<string>()
-  const names = new Set([musicFactNameKey(primaryName)])
 
   for (const item of input.aliases) {
     if (item.id !== undefined) {
-      if (!allowed.has(item.id) || ids.has(item.id)) return yield* invalid()
-      ids.add(item.id)
+      if (!allowed.has(item.id)) return yield* invalid()
     }
 
     const key = musicFactNameKey(item.name)
 
-    if (names.has(key)) return yield* invalid()
-    names.add(key)
+    if (musicFactNameKey(primaryName) === key) return yield* invalid()
   }
 
   return input

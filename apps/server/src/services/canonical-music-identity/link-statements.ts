@@ -47,14 +47,13 @@ const sourceAvailable = (target: LinkTarget, source: ParsedMusicSource) =>
 const observedLinks = (target: LinkTarget, links: ReadonlyArray<ObservedMusicLink>) => sql`
   (SELECT COUNT(*) FROM music_entity_links WHERE entity_type=${target.entityType}
     AND entityId=${target.entityId})=${links.length}
-  ${sql.join(
-    links.map(
-      (link) => sql`AND EXISTS (SELECT 1 FROM music_entity_links WHERE id=${link.id}
-        AND entity_type=${target.entityType} AND entityId=${target.entityId}
-        AND platform=${link.platform} AND url=${link.url} AND status=${link.status})`,
-    ),
-    sql` `,
-  )}`
+  AND NOT EXISTS (SELECT 1 FROM json_each(${JSON.stringify(
+    links.map((link) => [link.id, link.platform, link.url, link.status]),
+  )}) snapshot LEFT JOIN music_entity_links link
+    ON link.id=json_extract(snapshot.value,'$[0]')
+      AND link.entity_type=${target.entityType} AND link.entityId=${target.entityId}
+    WHERE link.id IS NULL OR link.platform<>json_extract(snapshot.value,'$[1]')
+      OR link.url<>json_extract(snapshot.value,'$[2]') OR link.status<>json_extract(snapshot.value,'$[3]'))`
 
 /** Pure U1 plan, called only inside the shared receipt executor after authorized replay lookup.
  * No network, lease claim, raw repository writer or second receipt ledger runs outside this plan.

@@ -1,16 +1,26 @@
+import { AuthSession } from '@gbfm/api/middleware/auth'
 import { sql } from 'drizzle-orm'
+import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core'
 import { Effect, Layer, Schema } from 'effect'
 import { HttpRouter, HttpServer } from 'effect/http'
 import { expect, test } from 'vitest'
 
-import { DatabaseLayer, makeDatabaseClient } from '@/db/layer'
+import { Database, DatabaseLayer, makeDatabaseClient } from '@/db/layer'
+import { MUSIC_PLATFORMS } from '@/db/music-entity.schema'
 import { seedMusicLookups } from '@/db/seed-music-lookups'
 import { musicLinkStatements } from '@/services/canonical-music-identity/link-statements'
 import { parseMusicSource } from '@/services/canonical-music-identity/music-source'
+import { ConfigService } from '@/services/config.service'
+import { EditorialOAuth } from '@/services/editorial-oauth.service'
+import { createEditorialOAuthFixture } from '@/test/editorial-oauth'
 import { withTestLayer } from '@/test/effect'
 import { createMigratedD1Database } from '@/test/migrate-d1'
 
-import { CommandAuthority } from '../command-authority'
+import {
+  CommandAuthority,
+  makeOAuthCommandAuthority,
+  makeSessionCommandAuthority,
+} from '../command-authority'
 import { McpToolError } from '../contracts'
 import { createMcpOperationStore, McpOperationStoreLayer } from '../operations/store'
 import { makeMcpLayer } from '../server'
@@ -500,6 +510,233 @@ test('actual MCP wire publishes object schemas and applies/replays/rejects/remov
     }
   } finally {
     await app.dispose()
+    await f.dispose()
+  }
+})
+
+test('all manual commands compile and commit dense16-platform observations under real persisted session and OAuth authority', async () => {
+  await using f = await createEditorialOAuthFixture()
+  await seedMusicLookups(f.db)
+  await f.database.prepare("UPDATE user SET role='admin' WHERE id='owner'").run()
+  const clientId = await f.register('catalogue:write')
+  // Disposable local resource only; never production policy or a shared fixture change.
+  await f.database
+    .prepare('UPDATE oauth_resource SET allowed_scopes=?')
+    .bind(JSON.stringify(['catalogue:write']))
+    .run()
+
+  const tokens = Schema.decodeUnknownSync(
+    Schema.Struct({ access_token: Schema.RedactedFromValue(Schema.String) }),
+  )(
+    await (
+      await f.exchange(clientId, await f.authorize(clientId, 'owner', 'catalogue:write'))
+    ).json(),
+  )
+
+  const principal = await Effect.runPromise(f.service.verify(tokens.access_token))
+
+  const oauth = await Effect.runPromise(
+    makeOAuthCommandAuthority(tokens.access_token, principal).pipe(
+      Effect.provideService(Database, f.db),
+      Effect.provideService(ConfigService, f.config),
+      Effect.provideService(EditorialOAuth, f.service),
+    ),
+  )
+
+  const browser = await Effect.runPromise(
+    makeSessionCommandAuthority.pipe(
+      Effect.provideService(AuthSession, {
+        user: { id: 'owner', name: 'owner', email: 'owner@example.com' },
+        session: { id: 'owner-session', createdAt: new Date() },
+      }),
+      Effect.provideService(Database, f.db),
+      Effect.provideService(ConfigService, f.config),
+    ),
+  )
+
+  const dialect = new SQLiteSyncDialect()
+
+  for (const [entityId, authority] of [
+    ['browser', browser],
+    ['oauth', oauth],
+  ] as const) {
+    await f.database
+      .prepare('INSERT INTO music_tracks (id,title,slug,createdAt,updatedAt) VALUES (?,?,?,1,1)')
+      .bind(entityId, entityId, entityId)
+      .run()
+
+    const observed = MUSIC_PLATFORMS.map((platform) => ({
+      id: `${entityId}-${platform}`,
+      platform,
+      url: `https://example.test/${platform}`,
+      status: 'verified',
+    }))
+
+    await f.database.batch(
+      observed.map((link) =>
+        f.database
+          .prepare(`INSERT INTO music_entity_links
+      (id,entity_type,entityId,platform,url,status,createdAt,updatedAt) VALUES (?,'track',?,?,?,'verified',1,1)`)
+          .bind(link.id, entityId, link.platform, link.url),
+      ),
+    )
+    const checkpoint = await Effect.runPromise(authority.checkpoint(['catalogue:write']))
+
+    const source = await Effect.runPromise(
+      parseMusicSource('https://example.test/website', 'track'),
+    )
+
+    const parameterCounts: Array<number> = []
+    const target = { entityType: 'track', entityId } as const
+    musicLinkStatements({
+      context: {
+        attemptId: crypto.randomUUID(),
+        operationId: 'a'.repeat(64),
+        fence: sql`EXISTS (SELECT 1 FROM mcp_operations WHERE id=${'a'.repeat(64)} AND attempt_id=${crypto.randomUUID()} AND state=${'pending'})`,
+        prepare: (statement) => {
+          const query = dialect.sqlToQuery(statement)
+          parameterCounts.push(query.params.length)
+
+          return f.database.prepare(query.sql).bind(...query.params)
+        },
+      },
+      target,
+      expectedRevision: 0,
+      liveGuard: checkpoint.liveGuard,
+      now: Date.now(),
+      observed,
+      attach: [{ platform: 'website', url: source.canonicalUrl, source }],
+      release: undefined,
+    })
+    expect(Math.max(...parameterCounts)).toBeLessThanOrEqual(100)
+
+    const layer = Layer.mergeAll(
+      DatabaseLayer(f.database),
+      Layer.succeed(CommandAuthority, authority),
+      McpOperationStoreLayer(f.database),
+    )
+
+    const apply = (raw: Schema.Json) =>
+      Effect.runPromise(withTestLayer(applyMusicLink(raw, Date.now()), layer))
+
+    const command = {
+      entityType: 'track',
+      entityId,
+      requestId: crypto.randomUUID(),
+      expectedRevision: 0,
+      change: { operation: 'attach_music_link', platform: 'website', url: source.canonicalUrl },
+    }
+
+    expect(await apply(command)).toMatchObject({
+      status: 'applied',
+      outcome: { revision: { revision: 1 } },
+    })
+    expect(await apply(command)).toHaveProperty('status', 'replayed')
+    expect(
+      await apply({
+        ...command,
+        requestId: crypto.randomUUID(),
+        expectedRevision: 1,
+        change: { operation: 'reject_music_link', linkId: `${entityId}-website` },
+      }),
+    ).toHaveProperty('status', 'applied')
+    expect(
+      await apply({
+        ...command,
+        requestId: crypto.randomUUID(),
+        expectedRevision: 2,
+        change: { operation: 'remove_music_link', linkId: `${entityId}-website` },
+      }),
+    ).toHaveProperty('status', 'applied')
+    expect(
+      await f.database
+        .prepare('SELECT revision FROM music_tracks WHERE id=?')
+        .bind(entityId)
+        .first(),
+    ).toEqual({ revision: 3 })
+    expect(
+      await f.database
+        .prepare('SELECT COUNT(*) AS n FROM music_entity_links WHERE entityId=?')
+        .bind(entityId)
+        .first(),
+    ).toEqual({ n: 15 })
+  }
+}, 30_000)
+
+test('JSON snapshot equality rejects same-count changes in every observed field as well as missing and extra rows', async () => {
+  const f = await fixture()
+  const target = { entityType: 'track', entityId: 't' } as const
+  const store = createMcpOperationStore(f.d1)
+
+  const original = {
+    id: 'observed',
+    platform: 'website',
+    url: 'https://example.test/🧪?q="quoted"',
+    status: 'verified',
+  } as const
+
+  try {
+    for (const scenario of ['id', 'platform', 'url', 'status', 'missing', 'extra']) {
+      await f.d1.prepare('DELETE FROM music_entity_links').run()
+      await f.d1
+        .prepare(`INSERT INTO music_entity_links (id,entity_type,entityId,platform,url,status,createdAt,updatedAt)
+        VALUES (?,'track','t',?,?,?,1,1)`)
+        .bind(original.id, original.platform, original.url, original.status)
+        .run()
+
+      if (scenario === 'id')
+        await f.d1.prepare("UPDATE music_entity_links SET id='different'").run()
+
+      if (scenario === 'platform')
+        await f.d1.prepare("UPDATE music_entity_links SET platform='other'").run()
+
+      if (scenario === 'url')
+        await f.d1
+          .prepare("UPDATE music_entity_links SET url='https://example.test/different'")
+          .run()
+
+      if (scenario === 'status')
+        await f.d1.prepare("UPDATE music_entity_links SET status='rejected'").run()
+
+      if (scenario === 'missing') await f.d1.prepare('DELETE FROM music_entity_links').run()
+
+      if (scenario === 'extra')
+        await f.d1
+          .prepare(`INSERT INTO music_entity_links (id,entity_type,entityId,platform,url,status,createdAt,updatedAt)
+        VALUES ('extra','track','t','other','https://example.test/extra','verified',1,1)`)
+          .run()
+      expect(
+        await store.execute({
+          key: {
+            actorId: 'editor',
+            clientId: 'client',
+            resource: 'https://u1.example.test/mcp',
+            operation: 'fixture',
+            requestId: crypto.randomUUID(),
+          },
+          normalizedInput: { scenario },
+          now: Date.now(),
+          authorize: async () => true,
+          build: (context) => ({
+            ...musicLinkStatements({
+              context,
+              target,
+              expectedRevision: 0,
+              liveGuard: sql`1`,
+              now: Date.now(),
+              observed: [original],
+              attach: [],
+              release: undefined,
+            }),
+            outcome: { result: target, revision: 1, access: target },
+          }),
+        }),
+      ).toHaveProperty('status', 'conflict')
+      expect(await f.d1.prepare("SELECT revision FROM music_tracks WHERE id='t'").first()).toEqual({
+        revision: 0,
+      })
+    }
+  } finally {
     await f.dispose()
   }
 })

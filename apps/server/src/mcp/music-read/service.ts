@@ -15,10 +15,12 @@ import {
   type LabelCatalogueInput,
   type LookupMusicUrlInput,
   MusicEntity,
+  MusicKind,
   MusicRef,
   type MusicRelationshipsInput,
   MusicRelationshipsResult,
   type SearchMusicInput,
+  SearchMusicResult,
 } from './contracts'
 
 // D3: timestamps do not gate these four kinds. Label content is deliberately never selected.
@@ -29,13 +31,26 @@ const musicRows = {
   label: sql`select 'label' as entityType, id as entityId, name, slug, updated_at as updatedAt from music_labels`,
 }
 
-const entities = sql.join(Object.values(musicRows), sql` union all `)
-
 const StoredEntity = Schema.Struct({
   ...MusicRef.fields,
   name: Schema.String,
   slug: Schema.String,
   updatedAt: Schema.Number,
+})
+
+const searchPolicy = Schema.decodeUnknownSync(
+  Schema.Struct({
+    candidates: Schema.Int.check(Schema.isGreaterThan(0)),
+    matchBytes: Schema.Int.check(Schema.isGreaterThan(0)),
+  }),
+)({ candidates: 8192, matchBytes: 256 * 1024 })
+
+const SearchSelection = Schema.Struct({
+  status: Schema.Literals(['complete', 'budget_exhausted']),
+  hasMore: Schema.Literals([0, 1]),
+  rows: Schema.fromJsonString(Schema.Array(StoredEntity)),
+  firstOpen: Schema.NullOr(MusicKind),
+  byteGap: Schema.Literals([0, 1]),
 })
 
 const unavailable = () =>
@@ -146,24 +161,19 @@ const makeService = Effect.gen(function* () {
     return yield* bounded({ endpoint, results })
   })
 
-  const list = Effect.fn('MusicRead.list')(function* (
-    input: typeof SearchMusicInput.Type | typeof FilterMusicInput.Type,
+  const filterMusic = Effect.fn('MusicRead.filterMusic')(function* (
+    input: typeof FilterMusicInput.Type,
   ) {
     yield* authorization.catalogue
     const limit = input.limit ?? 20
     const offset = input.offset ?? 0
 
-    const match =
-      'query' in input
-        ? sql`instr(lower(name), lower(${input.query})) > 0`
-        : input.name === undefined
-          ? sql`1`
-          : sql`lower(name) = lower(${input.name})`
+    const match = input.name === undefined ? sql`1` : sql`lower(name) = lower(${input.name})`
 
     const rows = yield* query(
-      sql`select * from (${input.entityType === undefined ? entities : musicRows[input.entityType]})
+      sql`select * from (${musicRows[input.entityType]})
       where ${match}
-      order by ${input.entityType === undefined ? sql`entityType,` : sql``} entityId
+      order by entityId
       limit ${limit + 1} offset ${offset}`,
       StoredEntity,
     )
@@ -173,6 +183,116 @@ const makeService = Effect.gen(function* () {
       entities: yield* Effect.forEach(rows.slice(0, limit), project),
       pagination: { limit, offset, hasMore: rows.length > limit },
     })
+  })
+
+  const searchMusic = Effect.fn('MusicRead.searchMusic')(function* (
+    input: typeof SearchMusicInput.Type,
+  ) {
+    yield* authorization.catalogue
+    const limit = input.limit ?? 20
+    const offset = input.offset ?? 0
+
+    const kinds = (['album', 'artist', 'label', 'track'] as const).filter(
+      (kind) => input.entityType === undefined || kind === input.entityType,
+    )
+
+    const quotas = kinds.map(
+      (_, i) =>
+        Math.floor(searchPolicy.candidates / kinds.length) +
+        (i < searchPolicy.candidates % kinds.length ? 1 : 0),
+    )
+
+    const prefix = (i: number) => sql.identifier(`p${i}`)
+
+    // LIMIT precedes the unchanged matcher. All gap/EOF/page proof shares one statement.
+    // These caps bound selected records and admitted match input, not fetched bytes or CPU.
+    const [selection] = yield* query(
+      sql`with
+      cfg(query,byte_limit,lim,off) as materialized (
+        values(${input.query},${searchPolicy.matchBytes},${limit},${offset})
+      ),
+      ${sql.join(
+        kinds.map(
+          (kind, i) => sql`${prefix(i)} as materialized (
+        select * from (${musicRows[kind]}) order by entityId limit ${quotas[i]}
+      )`,
+        ),
+        sql`,`,
+      )},
+      stats as materialized (${sql.join(
+        kinds.map(
+          (kind, i) =>
+            sql`select ${kind} as kind,${quotas[i]} as quota,(select count(*) from ${prefix(i)}) as n`,
+        ),
+        sql` union all `,
+      )}),
+      boundary as materialized (select min(kind) as firstOpen from stats where n=quota),
+      raw as materialized (${sql.join(
+        kinds.map((_, i) => sql`select * from ${prefix(i)}`),
+        sql` union all `,
+      )}),
+      usable as materialized (select * from raw where (select firstOpen from boundary) is null
+        or entityType<=(select firstOpen from boundary)),
+      charged as materialized (select *,sum(length(cast(name as blob))+
+        length(cast((select query from cfg) as blob))) over(
+          order by entityType,entityId rows between unbounded preceding and current row
+        ) as charge from usable),
+      admitted as materialized (select * from charged where charge<=(select byte_limit from cfg)),
+      matched as materialized (select * from admitted where case
+        when charge<=(select byte_limit from cfg)
+        then instr(lower(name),lower((select query from cfg)))>0 else 0 end),
+      proof as materialized (select
+        (select count(*) from matched)>=(select off+lim+1 from cfg) as sentinel,
+        (select firstOpen from boundary) is null and not exists(
+          select 1 from charged where charge>(select byte_limit from cfg)
+        ) as eof),
+      page as materialized (select * from matched order by entityType,entityId
+        limit (select lim from cfg) offset (select off from cfg))
+      select case when sentinel or eof then 'complete' else 'budget_exhausted' end as status,
+        case when sentinel then 1 else 0 end as hasMore,
+        case when sentinel or eof then (select json_group_array(json_object(
+          'entityType',entityType,'entityId',entityId,'name',name,'slug',slug,'updatedAt',updatedAt
+        )) from (select * from page order by entityType,entityId)) else '[]' end as rows,
+        (select firstOpen from boundary) as firstOpen,
+        exists(select 1 from charged where charge>(select byte_limit from cfg)) as byteGap
+      from proof`,
+      SearchSelection,
+    )
+
+    if (
+      !selection ||
+      selection.rows.length > limit ||
+      (selection.status === 'budget_exhausted' &&
+        (selection.hasMore !== 0 ||
+          selection.rows.length !== 0 ||
+          (selection.firstOpen === null && !selection.byteGap))) ||
+      (selection.status === 'complete' &&
+        (selection.hasMore
+          ? selection.rows.length !== limit
+          : selection.firstOpen !== null || selection.byteGap !== 0))
+    )
+      return yield* unavailable()
+
+    const result =
+      selection.status === 'budget_exhausted'
+        ? {
+            status: 'budget_exhausted' as const,
+            endpoint,
+            requestedPage: { limit, offset },
+            guidance:
+              'Search budget exhausted; refine query, specify a kind, or lower the offset. Unchanged retries may exhaust again.' as const,
+          }
+        : {
+            status: 'complete' as const,
+            endpoint,
+            entities: yield* Effect.forEach(selection.rows, project),
+            pagination: { limit, offset, hasMore: selection.hasMore === 1 },
+          }
+
+    return yield* Schema.decodeUnknownEffect(SearchMusicResult)(result).pipe(
+      Effect.mapError(unavailable),
+      Effect.flatMap(bounded),
+    )
   })
 
   const lookupMusicUrl = Effect.fn('MusicRead.lookupMusicUrl')(function* (
@@ -225,59 +345,66 @@ const makeService = Effect.gen(function* () {
     const limit = input.limit ?? 20
     const offset = input.offset ?? 0
 
-    // Predicates belong on each base table: a multiply referenced global edge CTE
-    // materializes the entire catalogue before applying the source ID restriction.
+    // A row beyond p in a branch cannot enter the first p rows of the global order.
+    // Drop constant relationship/kind sort keys inside each indexed branch.
+    const prefix = (statement: ReturnType<typeof sql>, order = sql`entityId`) =>
+      sql`select * from (${statement} order by ${order} limit ${offset + limit + 1})`
+
     const selected = Match.value(input.entityType).pipe(
-      Match.when(
-        'artist',
-        () => sql`
-        select 'album_artist' as relationship, 'album' as entityType, albumId as entityId,
-          role, displayOrder as position, 'incoming' as direction from music_album_artists where artistId = ${input.entityId}
-        union all select 'track_artist', 'track', trackId, role, displayOrder, 'incoming'
-          from music_track_artists where artistId = ${input.entityId}
-        ${
-          mode === 'all'
-            ? sql`union all select 'label_artist', 'label', label_id, null, null, 'incoming'
-          from music_label_artists where artist_id = ${input.entityId}`
-            : sql``
-        }`,
-      ),
-      Match.when(
-        'album',
-        () => sql`
-        select 'album_track' as relationship, 'track' as entityType, id as entityId,
-          null as role, trackNumber as position, 'outgoing' as direction from music_tracks where albumId = ${input.entityId}
-        ${
-          mode === 'all'
-            ? sql`
-          union all select 'album_artist', 'artist', artistId, role, displayOrder, 'outgoing'
-            from music_album_artists where albumId = ${input.entityId}
-          union all select 'label_album', 'label', label_id, null, null, 'incoming'
-            from music_label_albums where album_id = ${input.entityId}`
-            : sql``
-        }`,
-      ),
-      Match.when(
-        'track',
-        () => sql`
-        select 'track_artist' as relationship, 'artist' as entityType, artistId as entityId,
-          role, displayOrder as position, 'outgoing' as direction from music_track_artists where trackId = ${input.entityId}
-        union all select 'album_track', 'album', albumId, null, trackNumber, 'incoming'
-          from music_tracks where id = ${input.entityId} and albumId is not null`,
-      ),
-      Match.when(
-        'label',
-        () => sql`
-        select 'label_artist' as relationship, 'artist' as entityType, artist_id as entityId,
-          null as role, null as position, 'outgoing' as direction from music_label_artists where label_id = ${input.entityId}
-        union all select 'label_album', 'album', album_id, null, null, 'outgoing'
-          from music_label_albums where label_id = ${input.entityId}`,
-      ),
+      Match.when('artist', () => [
+        prefix(sql`select 'album_artist' as relationship, 'album' as entityType, albumId as entityId,
+            role, displayOrder as position, 'incoming' as direction
+            from music_album_artists where artistId = ${input.entityId}`),
+        prefix(sql`select 'track_artist' as relationship, 'track' as entityType, trackId as entityId,
+            role, displayOrder as position, 'incoming' as direction
+            from music_track_artists where artistId = ${input.entityId}`),
+        ...(mode === 'all'
+          ? [
+              prefix(sql`select 'label_artist' as relationship, 'label' as entityType,
+            label_id as entityId, null as role, null as position, 'incoming' as direction
+            from music_label_artists where artist_id = ${input.entityId}`),
+            ]
+          : []),
+      ]),
+      Match.when('album', () => [
+        prefix(
+          sql`select 'album_track' as relationship, 'track' as entityType, id as entityId,
+            null as role, trackNumber as position, 'outgoing' as direction
+            from music_tracks where albumId = ${input.entityId}`,
+          mode === 'tracks' ? sql`position is null, position, entityId` : sql`entityId`,
+        ),
+        ...(mode === 'all'
+          ? [
+              prefix(sql`select 'album_artist' as relationship, 'artist' as entityType, artistId as entityId,
+              role, displayOrder as position, 'outgoing' as direction
+              from music_album_artists where albumId = ${input.entityId}`),
+              prefix(sql`select 'label_album' as relationship, 'label' as entityType, label_id as entityId,
+              null as role, null as position, 'incoming' as direction
+              from music_label_albums where album_id = ${input.entityId}`),
+            ]
+          : []),
+      ]),
+      Match.when('track', () => [
+        prefix(sql`select 'track_artist' as relationship, 'artist' as entityType, artistId as entityId,
+            role, displayOrder as position, 'outgoing' as direction
+            from music_track_artists where trackId = ${input.entityId}`),
+        prefix(sql`select 'album_track' as relationship, 'album' as entityType, albumId as entityId,
+            null as role, trackNumber as position, 'incoming' as direction
+            from music_tracks where id = ${input.entityId} and albumId is not null`),
+      ]),
+      Match.when('label', () => [
+        prefix(sql`select 'label_artist' as relationship, 'artist' as entityType, artist_id as entityId,
+            null as role, null as position, 'outgoing' as direction
+            from music_label_artists where label_id = ${input.entityId}`),
+        prefix(sql`select 'label_album' as relationship, 'album' as entityType, album_id as entityId,
+            null as role, null as position, 'outgoing' as direction
+            from music_label_albums where label_id = ${input.entityId}`),
+      ]),
       Match.exhaustive,
     )
 
     const rows = yield* query(
-      sql`select * from (${selected})
+      sql`select * from (${sql.join(selected, sql` union all `)})
       order by ${mode === 'tracks' ? sql`position is null, position,` : sql``}
         relationship, entityType, entityId limit ${limit + 1} offset ${offset}`,
       Schema.Struct({
@@ -317,8 +444,8 @@ const makeService = Effect.gen(function* () {
     getMusicEntity,
     getMusicEntities,
     lookupMusicUrl,
-    searchMusic: (input: typeof SearchMusicInput.Type) => list(input),
-    filterMusic: (input: typeof FilterMusicInput.Type) => list(input),
+    searchMusic,
+    filterMusic,
     getMusicRelationships: (input: typeof MusicRelationshipsInput.Type) => relationships(input),
     getArtistDiscography: (input: typeof ArtistDiscographyInput.Type) =>
       relationships({ ...input, entityType: 'artist', entityId: input.artistId }, 'discography'),

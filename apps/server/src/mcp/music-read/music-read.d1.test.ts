@@ -36,6 +36,7 @@ import {
   MusicRef,
   MusicRelationshipsResult,
   SearchMusicInput,
+  SearchMusicResult,
 } from './contracts'
 import { MusicReadService, MusicReadServiceLayer } from './service'
 import { MusicReadHandlersLayer, MusicReadToolkit } from './toolkit'
@@ -80,7 +81,7 @@ const Envelope = Schema.Struct({
   }),
 })
 
-const exchange = async (name: string, args: Schema.Json) => {
+const exchange = async (name: string, args: Schema.Json, id: string | number = 1) => {
   const response = await app.handler(
     new Request('https://api.example.test/mcp', {
       method: 'POST',
@@ -93,7 +94,7 @@ const exchange = async (name: string, args: Schema.Json) => {
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
-        id: 1,
+        id,
         method: 'tools/call',
         params: {
           name,
@@ -366,6 +367,70 @@ test('batch preserves order, duplicates, wrong-kind and missing references', asy
   expect(batch.results[0]).toEqual(batch.results[3])
 })
 
+test('search proves pages or explicitly exhausts without partial results, preserving literal matching', async () => {
+  await db.run(sql`with recursive n(i) as (
+    select 0 union all select i+1 from n where i<8189
+  ) insert into music_artists(id,name,slug,createdAt,updatedAt)
+    select printf('budget-%05d',i),'Needle',printf('budget-%05d',i),0,0 from n`)
+
+  const search = (args: Schema.Json) => success('search_music', args, SearchMusicResult)
+
+  try {
+    const page = await search({ entityType: 'artist', query: 'nEeDlE', limit: 2, offset: 3 })
+    expect(page.status).toBe('complete')
+
+    if (page.status !== 'complete') throw new Error('Expected proved page')
+    expect(page.entities.map((row) => row.entityId)).toEqual(['budget-00003', 'budget-00004'])
+    expect(page.pagination.hasMore).toBe(true)
+
+    // Exactly 8192 artists: equality at the cap cannot prove EOF or a final page.
+    for (const args of [
+      { entityType: 'artist', query: 'absent' },
+      { entityType: 'artist', query: 'Needle', limit: 2, offset: 8188 },
+    ]) {
+      const exhausted = await search(args)
+      expect(exhausted).toEqual({
+        status: 'budget_exhausted',
+        endpoint: page.endpoint,
+        requestedPage: {
+          limit: 'limit' in args ? args.limit : 20,
+          offset: 'offset' in args ? args.offset : 0,
+        },
+        guidance:
+          'Search budget exhausted; refine query, specify a kind, or lower the offset. Unchanged retries may exhaust again.',
+      })
+    }
+
+    await db.delete(musicArtistsTable).where(eq(musicArtistsTable.id, 'budget-08189'))
+    const empty = await search({ entityType: 'artist', query: '%', offset: 10000 })
+    expect(empty).toMatchObject({
+      status: 'complete',
+      entities: [],
+      pagination: { hasMore: false },
+    })
+
+    // No matching album in its quota: later artist matches cannot bridge that gap.
+    await db.run(sql`with recursive n(i) as (
+      select 0 union all select i+1 from n where i<2047
+    ) insert into music_albums(id,title,slug,createdAt,updatedAt)
+      select printf('budget-%05d',i),'Other',printf('budget-%05d',i),0,0 from n`)
+    expect((await search({ query: 'Needle', limit: 1 })).status).toBe('budget_exhausted')
+
+    // UTF-8 bytes, not characters: 65536 emoji exceed the admitted byte allowance.
+    await db.insert(musicArtistsTable).values({
+      id: '000-byte-budget',
+      name: '😀'.repeat(65536),
+      slug: '000-byte-budget',
+    })
+    expect((await search({ entityType: 'artist', query: 'Needle', limit: 1 })).status).toBe(
+      'budget_exhausted',
+    )
+  } finally {
+    await db.delete(musicArtistsTable).where(sql`id like 'budget-%' or id='000-byte-budget'`)
+    await db.delete(musicAlbumsTable).where(sql`id like 'budget-%'`)
+  }
+}, 60000)
+
 test('asymmetric relationships retain roles, direction and bounded album track order without graph expansion', async () => {
   const discography = await success(
     'get_artist_discography',
@@ -582,7 +647,7 @@ test('the duplicated MCP text/structured result stays inside D5 and oversized re
     await db.insert(musicArtistsTable).values({ id, name: `Wire ${'x'.repeat(2000)}`, slug: id })
 
   try {
-    const below = await exchange('search_music', { query: 'Wire ', limit: 50 })
+    const below = await exchange('search_music', { query: 'Wire ', limit: 50 }, 'x'.repeat(15500))
     expect(below.result.isError).not.toBe(true)
     expect(
       Schema.decodeUnknownSync(MusicListResult)(below.result.structuredContent).entities,
@@ -637,6 +702,22 @@ test('the duplicated MCP text/structured result stays inside D5 and oversized re
       'Request a smaller page or batch',
     )
     expect(unicodeAbove.bytes).toBeLessThan(256 * 1024)
+
+    for (const char of ['\u0001', '😀']) {
+      await db
+        .update(musicArtistsTable)
+        .set({ name: `Wire ${char.repeat(250)}` })
+        .where(sql`id like 'wire-%'`)
+
+      const accepted = await exchange(
+        'search_music',
+        { query: 'Wire ', limit: 50 },
+        'x'.repeat(15500),
+      )
+
+      expect(accepted.result.isError).not.toBe(true)
+      expect(accepted.bytes).toBeLessThan(256 * 1024)
+    }
   } finally {
     await db.delete(musicArtistsTable).where(sql`id like 'wire-%'`)
   }

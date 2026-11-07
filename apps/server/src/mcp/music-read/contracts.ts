@@ -86,6 +86,22 @@ export const MusicListResult = Schema.Struct({
   pagination,
 })
 
+/** Exhaustion is not a partial or empty page; matching semantics remain unchanged. */
+export const SearchMusicResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal('complete'), ...MusicListResult.fields }),
+  Schema.Struct({
+    status: Schema.Literal('budget_exhausted'),
+    endpoint: EndpointIdentity,
+    requestedPage: Schema.Struct({
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 })),
+      offset: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10_000 })),
+    }),
+    guidance: Schema.Literal(
+      'Search budget exhausted; refine query, specify a kind, or lower the offset. Unchanged retries may exhaust again.',
+    ),
+  }),
+])
+
 /** Missing batch IDs are data, not a failure of the entire batch. */
 export const GetMusicEntitiesResult = Schema.Struct({
   endpoint: EndpointIdentity,

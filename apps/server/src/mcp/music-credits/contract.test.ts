@@ -143,6 +143,8 @@ describe('M2 complete collection inputs', () => {
       'http://10.0.0.1/',
       'http://[::1]/',
       'http://[fd00::1]/',
+      'http://[fec0::1]/sleeve',
+      'http://[feff::1]/sleeve',
       'https://example.com/?token=x',
       'https://example.com/#x',
       'https://user:pass@example.com/',
@@ -160,6 +162,19 @@ describe('M2 complete collection inputs', () => {
         parseArtistAliases(
           aliases([
             { name: 'Echo', sourceLabel: 'Sleeve', sourceUrl: 'https://example.com/sleeve' },
+          ]),
+        ),
+      ),
+    ).toBe('ok')
+    expect(
+      await errorCode(
+        parseArtistAliases(
+          aliases([
+            {
+              name: 'Echo',
+              sourceLabel: 'Sleeve',
+              sourceUrl: 'https://[2001:4860:4860::8888]/sleeve',
+            },
           ]),
         ),
       ),

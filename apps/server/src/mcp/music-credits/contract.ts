@@ -34,7 +34,7 @@ const sourceUrl = text(2048).check(
     if (host === 'localhost' || host.endsWith('.localhost')) return false
 
     if (host.startsWith('[')) {
-      return !/^\[(?:::|fc|fd|fe[89ab]|ff)/i.test(host)
+      return !/^\[(?:::|fc|fd|fe[89a-f]|ff)/i.test(host)
     }
 
     if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {

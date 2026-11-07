@@ -47,3 +47,5 @@ export * from './post-music-reference.schema'
 export * from './metadata-review.schema'
 
 export * from './music-merge.schema'
+
+export * from './playlist-import-status.schema'

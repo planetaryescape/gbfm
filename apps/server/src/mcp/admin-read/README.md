@@ -59,12 +59,16 @@ Exports from `@/mcp/admin-read`:
 
 Compose `AdminReadToolkit` with existing toolkits using `composeMcpToolkits`,
 then supply `AdminReadToolHandlersLayer` backed by `AdminReadServiceLayer` to
-`makeMcpRoutes`. Supply the same parsed `EditorialMcpConfig` endpoint identity as
-the route's existing editorial services. At the pinned P1 base the route's
-internal endpoint layer does not flow outward to independently supplied handlers,
-so provide that endpoint layer to the admin service explicitly. The colocated
-protocol test demonstrates this complete composition with the four editorial
-tools and real OAuth, with no shared fixture edits.
+`makeMcpRoutes`. P1 must expose its existing parsed `EditorialMcpConfig` to all
+consumer handlers, not copy the route's private endpoint derivation. For example,
+P1 can accept the consumer handlers layer as a route-construction argument and
+provide its existing `endpointConfig` to that layer inside `makeMcpRoutes`.
+This is a serialized P1-owned central integration edit, not part of this lane.
+The pinned base does not yet expose that composition seam. The local test supplies
+a disposable endpoint layer and checks equality between admin and editorial
+endpoint objects; P1 must retain that equality check using its single shared
+endpoint layer when registering this tool. Do not maintain two production
+endpoint derivations (in particular, the local-environment detection).
 
 P1 should integrate centrally after this lane is reviewed; do not copy its
 test-only `oauthResource.allowedScopes` update into production. Production
@@ -83,7 +87,8 @@ bunx vitest run --config vitest.d1.config.ts src/mcp/admin-read/admin-read.d1.te
 The tests use disposable Miniflare D1 with all repository migrations, the actual
 OAuth authorize/consent/PKCE/token path, persisted verifier and request-scoped MCP
 2026-07-28 HTTP transport. They cover scoped discovery, cached-call denial,
-scope/role service defenses, role demotion and ban at the HTTP boundary,
+scope/role service defenses, non-admin OAuth admission refusal with no consent or
+token rows, admin/editorial endpoint equality, role demotion and ban at the HTTP boundary,
 connection revocation, exact raw redaction, asymmetric category/state counts,
 empty categories, growing row counts, unknown arguments and scrubbed failure
 after dropping a table in the disposable database. No production data is used.

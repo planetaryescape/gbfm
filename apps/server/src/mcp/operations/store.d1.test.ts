@@ -132,6 +132,35 @@ const coupled = () =>
     .bind(targetId)
     .first()
 
+// Deletion receipt disclosure depends on current actor/grant authority and saved
+// owner evidence, not on the continued existence of the physically deleted row.
+const deleteCommand = (requestId = key.requestId) =>
+  ({
+    ...command(0, 'deleted', requestId),
+    key: { ...key, operation: 'delete_private_target', requestId },
+    authorize: async (outcome) => (!outcome || outcome.access === actorId) && (await authorize()),
+    build: (ctx: OperationContext) => {
+      const plan = command(0, 'deleted', requestId).build(ctx)
+
+      const winner = sql`EXISTS (SELECT 1 FROM operation_test_target
+      WHERE id = ${targetId} AND owner_id = ${actorId} AND visible = 1 AND revision = 1 AND marker = ${ctx.attemptId})
+      AND EXISTS (SELECT 1 FROM user WHERE id = ${actorId} AND banned = 0 AND role = 'admin')
+      AND EXISTS (SELECT 1 FROM oauth_client WHERE client_id = ${clientId} AND coalesce(disabled,0) = 0)`
+
+      return {
+        statements: [
+          ...plan.statements,
+          ctx.assert(winner),
+          ctx.prepare(
+            sql`DELETE FROM operation_test_target WHERE id = ${targetId} AND ${ctx.fence} AND ${winner}`,
+          ),
+        ],
+        assertApplied: sql`NOT EXISTS (SELECT 1 FROM operation_test_target WHERE id = ${targetId})`,
+        outcome: { result: { targetId, deleted: true }, revision: 1, access: actorId },
+      }
+    },
+  }) satisfies ExecuteOperation
+
 describe('shared durable atomic operations', () => {
   test('lookup miss reserves nothing and is distinct from database, codec and authorization failures', async () => {
     const input = command()
@@ -432,6 +461,101 @@ describe('shared durable atomic operations', () => {
     expect(await database.prepare('SELECT count(*) AS count FROM mcp_operations').first()).toEqual({
       count: 1,
     })
+  })
+
+  test('intermediate winner proof permits physical deletion and original authorized replay', async () => {
+    const input = deleteCommand()
+    const result = await store.execute(input)
+    expect(result).toMatchObject({
+      status: 'applied',
+      outcome: { result: { targetId, deleted: true }, revision: 1, access: actorId },
+    })
+    expect(await target()).toBeNull()
+    expect(await coupled()).toEqual({ value: 'deleted' })
+    expect(await store.execute(input)).toEqual({ ...result, status: 'replayed' })
+    await database.prepare('UPDATE user SET banned = 1 WHERE id = ?').bind(actorId).run()
+    expect(await store.execute(input)).toEqual({ status: 'access_denied' })
+  })
+
+  test.each(['absent', 'stale'])(
+    'missing physical winner (%s) rolls back earlier coupled writes',
+    async (state) => {
+      if (state === 'absent') await database.prepare('DELETE FROM operation_test_target').run()
+      else await database.prepare('UPDATE operation_test_target SET revision = 7').run()
+      await database
+        .prepare('INSERT INTO operation_test_coupled VALUES (?,?)')
+        .bind(targetId, 'untouched')
+        .run()
+      const input = deleteCommand()
+      expect(
+        await store.execute({
+          ...input,
+          build: (ctx) => {
+            const plan = input.build(ctx)
+
+            // Deliberately malformed coupled DML proves the assertion rolls back
+            // earlier writes; production DML must always use fence AND marker.
+            return {
+              ...plan,
+              statements: [
+                ctx.prepare(sql`UPDATE operation_test_coupled SET value = 'must-rollback'`),
+                ...plan.statements,
+              ],
+            }
+          },
+        }),
+      ).toEqual({ status: 'conflict' })
+      expect(await coupled()).toEqual({ value: 'untouched' })
+      expect(await target()).toEqual(
+        state === 'absent' ? null : { revision: 7, marker: null, value: 'initial' },
+      )
+      expect(await database.prepare('SELECT count(*) AS n FROM mcp_operations').first()).toEqual({
+        n: 0,
+      })
+    },
+  )
+
+  test('duplicate deletion replays its winner while another key cannot claim prior absence', async () => {
+    const input = deleteCommand()
+    const competing = deleteCommand(crypto.randomUUID())
+
+    const results = await Promise.all([
+      store.execute(input),
+      createMcpOperationStore(database).execute(input),
+      createMcpOperationStore(database).execute(competing),
+    ])
+
+    expect(results.filter((result) => result.status === 'applied')).toHaveLength(1)
+    expect(await target()).toBeNull()
+    expect(await coupled()).toEqual({ value: 'deleted' })
+    const firstKeyWon = results[0]?.status !== 'conflict'
+    expect(results.map((result) => result.status).sort()).toEqual(
+      firstKeyWon ? ['applied', 'conflict', 'replayed'] : ['applied', 'conflict', 'conflict'],
+    )
+    expect(await database.prepare('SELECT count(*) AS n FROM mcp_operations').first()).toEqual({
+      n: 1,
+    })
+  })
+
+  test('failed deletion after a successful checkpoint rolls back CAS, coupled writes and receipt', async () => {
+    const input = deleteCommand()
+    expect(
+      await store.execute({
+        ...input,
+        build: (ctx) => {
+          const plan = input.build(ctx)
+
+          // Omit the DELETE: a successful checkpoint cannot replace final proof.
+          return { ...plan, statements: plan.statements.slice(0, -1) }
+        },
+      }),
+    ).toEqual({ status: 'conflict' })
+    expect(await target()).toMatchObject({ revision: 0, marker: null, value: 'initial' })
+    expect(await coupled()).toBeNull()
+    expect(await database.prepare('SELECT count(*) AS n FROM mcp_operations').first()).toEqual({
+      n: 0,
+    })
+    expect((await store.execute(input)).status).toBe('applied')
   })
 
   test('database assertion ABORTS the whole batch after zero-CAS and deliberately unconditional coupled DML', async () => {

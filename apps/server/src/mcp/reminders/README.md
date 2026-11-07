@@ -114,10 +114,22 @@ Keep the existing four-value `status` and `is_sent` for processor compatibility;
 a row/tombstone (`dispatch_state='cancelled'`, unsent, legacy status `pending`),
 not a physical delete. Read/API/admin projections must show/exclude cancellation
 explicitly, never report that row as an active pending schedule. Historical sent
-rows must be initialized to `accepted` by the coordinator; the default is for
-new rows. Do not silently reset historical processing/failed attempts to `open`
-as if no send could have started; migration needs an explicit conservative
-classification for those rows. No data migration is performed here.
+rows must be initialized to `accepted` by the coordinator; the default is only
+for newly created rows. Conservative historical classification recommendation:
+
+- `is_sent=1 AND status='sent'` → `accepted`, no further sends or schedule edits.
+- `is_sent=0 AND status IN ('pending','processing','failed')` → `fenced`, never
+  `open`: even a pending row may have been rescheduled after an earlier dispatch.
+  No existing durable negative evidence proves that no provider attempt began.
+  This deliberately denies later cancel/reschedule on historical unsent rows;
+  existing recovery can still deliver their current schedule at least once.
+- Inconsistent sent/status combinations or unknown states → stop that migration
+  decision for those rows and require explicit classification, not silent repair.
+
+That conservative loss of historical editability needs owner approval. An
+alternative that claims those rows are safely cancellable needs new evidence,
+not a heuristic based on timestamps or absent delivery logs. No production data
+is inspected or migrated here; previously deleted rows cannot be reconstructed.
 
 - **Create:** revision 1, state `open`; receipt and row insertion commit together.
 - **Edit/reschedule while open:** SQL predicates include actor owner, ID,
@@ -161,8 +173,8 @@ receipt durability, production integration or provider atomicity.
 - `apps/server/src/services/music-reminder.service.ts`: `createEffect`,
   `updateEffect`, `deleteEffect`, interface/layer and both reads. Browser/PAT
   writers must increment revisions and respect the fence; MCP expected-version
-  methods must use atomic CAS. Browser contracts must not silently gain required
-  inputs: adapt their existing writes under the same guards and report conflicts.
+  methods must use atomic CAS. Existing input compatibility does **not** prove
+  stale-browser-intent rejection; see the explicit cutover request below.
 - `apps/server/src/services/reminder-processor.ts`: `eligibleReminder`,
   `ownsClaim`, `claimReminderRow`, `deliverReminderEmail`,
   `sendClaimedReminder`, `queryDueReminders`, `queryNextDueReminder`,
@@ -174,9 +186,48 @@ receipt durability, production integration or provider atomicity.
   `createMusicReminder`, `updateMusicReminder`, `deleteMusicReminder`,
   `getMusicReminders`: truthful fence/conflict/cancelled outcomes and revisions.
 - `packages/api/src/music-reminders.ts`: response revision/dispatch state,
-  typed conflict outcome on update/delete, preserving existing browser inputs.
+  observed expected-revision/request-ID envelopes and typed precondition/conflict
+  outcomes. This is a coordinated API contract change, not approved here.
 - `apps/server/src/http/admin.handlers.ts`: `getAdminOverview` reminder counts must exclude
   cancelled rows from pending/due counts. Actual caller/client changes must be
   inventoried when this request is approved; none are reserved by this document.
 - This lane's future MCP command handlers and the P1-owned consolidated receipts
   must use these same guards. Central registry/consent/auth remain P1.
+
+### Caller inventory and observed-revision cutover request
+
+At the pinned foundation plus this read-only lane:
+
+- `packages/api/src/music-reminders.ts` POST/PUT/DELETE currently have no
+  request key or expected revision. GET returns `updatedAt`, not a command revision.
+- `apps/server/src/http/music-reminders.handlers.ts` derives the actor from
+  `AuthSession`; PUT/DELETE call unconditional-version service methods. Their
+  `AuthMiddlewareLive` (`apps/server/src/middleware/auth.impl.ts`) resolves
+  cookie/bearer sessions through `auth.api.getSession`. No distinct reminder PAT
+  route or repository PAT reminder caller was found; external callers are not
+  inventoried by repository search and must be treated as unknown consumers.
+- The only in-repo browser writer found is dashboard deletion:
+  `apps/www/src/page/dashboard/document.ts` discards revision when mapping GET
+  rows; `update.ts` `DeleteRequested` emits a DELETE with an empty body;
+  `command.ts` `Write` sends it through `service.ts`. `section.ts` owns the GET
+  endpoint. No in-repo web POST/PUT reminder caller was found.
+- `apps/mobile/src/app/music-reminders.tsx` only opens the website. It has no
+  direct reminder API writer; it inherits the browser's eventual cutover.
+
+Recommend a coordinated, explicitly approved write-contract cutover before MCP
+writes are enabled: GET/POST/PUT return `commandRevision`; POST requires a stable
+UUIDv4 `requestId`; PUT and DELETE require `{ requestId, expectedRevision, ... }`,
+where expectedRevision is the positive safe integer **observed by the caller**,
+not obtained by a fresh server read. Use that value in the atomic SQL predicate.
+Missing revision returns `precondition_required` (HTTP 428), stale revision or
+post-fence state returns conflict (HTTP 409), without fetching a current version
+and silently retrying the user's old intent. Retries reuse the original request
+ID and payload. Refreshing and issuing a new command is an explicit user action.
+
+The dashboard must retain each row's observed revision and bind it plus a stable
+request ID into the delete command. API/PAT clients must fetch an observed
+revision and send the same envelope; do not grandfather a versionless bypass.
+This request changes existing write inputs and needs owner approval and caller
+tests. If compatibility is retained instead, stale-browser/API intent safety
+remains **unresolved**, even if an internal read/CAS fixes processor races. This
+PR changes no browser inputs and claims no stale-form rejection.

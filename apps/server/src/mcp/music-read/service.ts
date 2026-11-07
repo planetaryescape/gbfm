@@ -22,17 +22,14 @@ import {
 } from './contracts'
 
 // D3: timestamps do not gate these four kinds. Label content is deliberately never selected.
-const entities = sql`select 'artist' as entityType, id as entityId, name, slug, updatedAt from music_artists
-  union all select 'album', id, title, slug, updatedAt from music_albums
-  union all select 'track', id, title, slug, updatedAt from music_tracks
-  union all select 'label', id, name, slug, updated_at from music_labels`
+const musicRows = {
+  artist: sql`select 'artist' as entityType, id as entityId, name, slug, updatedAt from music_artists`,
+  album: sql`select 'album' as entityType, id as entityId, title as name, slug, updatedAt from music_albums`,
+  track: sql`select 'track' as entityType, id as entityId, title as name, slug, updatedAt from music_tracks`,
+  label: sql`select 'label' as entityType, id as entityId, name, slug, updated_at as updatedAt from music_labels`,
+}
 
-const edges = sql`select 'album_artist' as relationship, 'album' as fromType, albumId as fromId,
-  'artist' as toType, artistId as toId, role, displayOrder as position from music_album_artists
-  union all select 'track_artist', 'track', trackId, 'artist', artistId, role, displayOrder from music_track_artists
-  union all select 'label_artist', 'label', label_id, 'artist', artist_id, null, null from music_label_artists
-  union all select 'label_album', 'label', label_id, 'album', album_id, null, null from music_label_albums
-  union all select 'album_track', 'album', albumId, 'track', id, null, trackNumber from music_tracks where albumId is not null`
+const entities = sql.join(Object.values(musicRows), sql` union all `)
 
 const StoredEntity = Schema.Struct({
   ...MusicRef.fields,
@@ -62,15 +59,25 @@ const makeService = Effect.gen(function* () {
       Effect.mapError(unavailable),
     )
 
-  const bounded = <A>(value: A) =>
-    new TextEncoder().encode(JSON.stringify(value)).byteLength > 256 * 1024
+  const bounded = <A>(value: A) => {
+    // Effect 4.0.6 emits both structuredContent and its JSON text. Measure both,
+    // including string escaping; reserve 24KiB for the <=16KiB read request ID and framing.
+    const encoded = JSON.stringify({
+      isError: false,
+      structuredContent: value,
+      content: [{ type: 'text', text: JSON.stringify(value) }],
+    })
+
+    return new TextEncoder().encode(encoded).byteLength > 232 * 1024
       ? Effect.fail(
           new EditorialToolError({
             code: 'unavailable',
-            message: 'Music result exceeds 256 KiB. Request a smaller page or batch.',
+            message:
+              'Music result exceeds the 256 KiB MCP response budget. Request a smaller page or batch.',
           }),
         )
       : Effect.succeed(value)
+  }
 
   const project = Effect.fn('MusicRead.project')(function* (row: typeof StoredEntity.Type) {
     const links = yield* query(
@@ -101,8 +108,7 @@ const makeService = Effect.gen(function* () {
 
   const load = Effect.fn('MusicRead.load')(function* (ref: typeof MusicRef.Type) {
     const [row] = yield* query(
-      sql`with entities as (${entities}) select * from entities
-      where entityType = ${ref.entityType} and entityId = ${ref.entityId} limit 1`,
+      sql`select * from (${musicRows[ref.entityType]}) where entityId = ${ref.entityId} limit 1`,
       StoredEntity,
     )
 
@@ -153,8 +159,8 @@ const makeService = Effect.gen(function* () {
           : sql`lower(name) = lower(${input.name})`
 
     const rows = yield* query(
-      sql`with entities as (${entities}) select * from entities
-      where ${input.entityType === undefined ? sql`1` : sql`entityType = ${input.entityType}`} and ${match}
+      sql`select * from (${input.entityType === undefined ? entities : musicRows[input.entityType]})
+      where ${match}
       order by entityType, entityId limit ${limit + 1} offset ${offset}`,
       StoredEntity,
     )
@@ -178,24 +184,32 @@ const makeService = Effect.gen(function* () {
       ),
     )
 
-    const [ref] = yield* query(
-      sql`select i.entity_type as entityType, i.entity_id as entityId
-      from music_source_identities i where i.state = 'resolved'
-      and i.entity_type in ('artist', 'album', 'track', 'label')
-      and (i.source_key = ${source.sourceKey} or i.canonical_url = ${source.canonicalUrl}
-        or i.source_key in (select source_key from music_source_aliases where normalized_url = ${source.normalizedUrl}))
-      order by i.source_key limit 1`,
+    const refs = yield* query(
+      sql`select entity_type as entityType, entity_id as entityId from music_source_identities
+        where source_key = ${source.sourceKey} and state = 'resolved'
+        and entity_type in ('artist', 'album', 'track', 'label')
+      union select entity_type, entity_id from music_source_identities
+        where canonical_url = ${source.canonicalUrl} and state = 'resolved'
+        and entity_type in ('artist', 'album', 'track', 'label')
+      union select i.entity_type, i.entity_id from music_source_aliases a
+        inner join music_source_identities i on i.source_key = a.source_key
+        where a.normalized_url = ${source.normalizedUrl} and i.state = 'resolved'
+        and i.entity_type in ('artist', 'album', 'track', 'label')
+      order by entityType, entityId limit 3`,
       MusicRef,
     )
 
-    const row = ref ? yield* load(ref) : undefined
+    for (const ref of refs) {
+      const row = yield* load(ref)
 
-    return yield* bounded({
-      endpoint,
-      result: row
-        ? { status: 'found' as const, entity: yield* project(row) }
-        : { status: 'not_found' as const },
-    })
+      if (row)
+        return yield* bounded({
+          endpoint,
+          result: { status: 'found' as const, entity: yield* project(row) },
+        })
+    }
+
+    return yield* bounded({ endpoint, result: { status: 'not_found' as const } })
   })
 
   const relationships = Effect.fn('MusicRead.relationships')(function* (
@@ -208,27 +222,63 @@ const makeService = Effect.gen(function* () {
     const limit = input.limit ?? 20
     const offset = input.offset ?? 0
 
-    const selected = Match.value(mode).pipe(
-      Match.when('all', () => sql`1`),
-      Match.when('discography', () => sql`relationship in ('album_artist', 'track_artist')`),
-      Match.when('tracks', () => sql`relationship = 'album_track'`),
-      Match.when('catalogue', () => sql`relationship in ('label_artist', 'label_album')`),
+    // Predicates belong on each base table: a multiply referenced global edge CTE
+    // materializes the entire catalogue before applying the source ID restriction.
+    const selected = Match.value(input.entityType).pipe(
+      Match.when(
+        'artist',
+        () => sql`
+        select 'album_artist' as relationship, 'album' as entityType, albumId as entityId,
+          role, displayOrder as position, 'incoming' as direction from music_album_artists where artistId = ${input.entityId}
+        union all select 'track_artist', 'track', trackId, role, displayOrder, 'incoming'
+          from music_track_artists where artistId = ${input.entityId}
+        ${
+          mode === 'all'
+            ? sql`union all select 'label_artist', 'label', label_id, null, null, 'incoming'
+          from music_label_artists where artist_id = ${input.entityId}`
+            : sql``
+        }`,
+      ),
+      Match.when(
+        'album',
+        () => sql`
+        select 'album_track' as relationship, 'track' as entityType, id as entityId,
+          null as role, trackNumber as position, 'outgoing' as direction from music_tracks where albumId = ${input.entityId}
+        ${
+          mode === 'all'
+            ? sql`
+          union all select 'album_artist', 'artist', artistId, role, displayOrder, 'outgoing'
+            from music_album_artists where albumId = ${input.entityId}
+          union all select 'label_album', 'label', label_id, null, null, 'incoming'
+            from music_label_albums where album_id = ${input.entityId}`
+            : sql``
+        }`,
+      ),
+      Match.when(
+        'track',
+        () => sql`
+        select 'track_artist' as relationship, 'artist' as entityType, artistId as entityId,
+          role, displayOrder as position, 'outgoing' as direction from music_track_artists where trackId = ${input.entityId}
+        union all select 'album_track', 'album', albumId, null, trackNumber, 'incoming'
+          from music_tracks where id = ${input.entityId} and albumId is not null`,
+      ),
+      Match.when(
+        'label',
+        () => sql`
+        select 'label_artist' as relationship, 'artist' as entityType, artist_id as entityId,
+          null as role, null as position, 'outgoing' as direction from music_label_artists where label_id = ${input.entityId}
+        union all select 'label_album', 'album', album_id, null, null, 'outgoing'
+          from music_label_albums where label_id = ${input.entityId}`,
+      ),
       Match.exhaustive,
     )
 
     const rows = yield* query(
-      sql`with entities as (${entities}), edges as (${edges}), related as (
-      select relationship, toType as entityType, toId as entityId, role, position, 'outgoing' as direction
-      from edges where fromType = ${input.entityType} and fromId = ${input.entityId}
-      union all select relationship, fromType, fromId, role, position, 'incoming'
-      from edges where toType = ${input.entityType} and toId = ${input.entityId}
-    ) select e.*, r.relationship, r.role, r.position, r.direction from related r
-      inner join entities e on e.entityType = r.entityType and e.entityId = r.entityId
-      where ${selected}
-      order by ${mode === 'tracks' ? sql`r.position is null, r.position,` : sql``}
-        r.relationship, e.entityType, e.entityId limit ${limit + 1} offset ${offset}`,
+      sql`select * from (${selected})
+      order by ${mode === 'tracks' ? sql`position is null, position,` : sql``}
+        relationship, entityType, entityId limit ${limit + 1} offset ${offset}`,
       Schema.Struct({
-        ...StoredEntity.fields,
+        ...MusicRef.fields,
         relationship: MusicRelationshipsResult.fields.relationships.value.fields.relationship,
         direction: Schema.Literals(['outgoing', 'incoming']),
         role: Schema.NullOr(Schema.String),
@@ -238,12 +288,16 @@ const makeService = Effect.gen(function* () {
 
     const related = yield* Effect.forEach(rows.slice(0, limit), (row) =>
       Effect.gen(function* () {
+        const entity = yield* load(row)
+
+        if (!entity) return yield* unavailable()
+
         return {
           relationship: row.relationship,
           direction: row.direction,
           role: row.role,
           position: row.position,
-          entity: yield* project(row),
+          entity: yield* project(entity),
         }
       }),
     )

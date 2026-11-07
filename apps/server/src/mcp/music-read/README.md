@@ -41,8 +41,56 @@ filter uses exact name matching; both use SQLite's ASCII case folding. Paging so
 by kind/ID, relationships by relationship/kind/ID. Album tracks sort by track number
 (null last), then ID. Offset pages are not snapshots across concurrent catalogue edits.
 No total-count scan, recursive graph or unbounded entity/link load is performed.
-Responses over 256 KiB of encoded structured JSON fail explicitly; central transport
-must retain its full MCP-envelope byte ceiling and lower read request limits.
+The byte budget measures both structured JSON and the adapter's duplicated text,
+including nested string escaping. Encoded tool results above 232 KiB fail explicitly,
+reserving 24 KiB for JSON-RPC/SSE framing and the ID from the <=16 KiB read request.
+Central transport must retain its full 256 KiB envelope ceiling and lower request
+limits. Real HTTP tests exercise ordinary, escaped and multibyte names on both sides
+of the budget; the failure retains the smaller-page/batch guidance.
+
+## Query cost limitation — integration HOLD
+
+**Bounded output is not bounded rows examined.** Application materialization is at
+most 51 list/relationship rows, 50 batch references, three URL identity candidates
+and 21 link candidates per returned entity. Database scans and temporary sort work
+can still grow with catalogue size. This does **not** satisfy #518's bounded-query
+acceptance by disclosure alone. Integration stays HOLD until Guide Fari explicitly
+accepts this limitation for the slice or authorizes separately coordinated index
+work. No migration is included or authorized. Substring/name search needs its own
+decision: the three relationship indexes below would not solve it.
+
+`EXPLAIN QUERY PLAN` captured on migrated Miniflare D1, 2026-11-07, by instrumenting
+the real service's Database adapter to explain each statement before executing it:
+
+| Operations | Source-kind predicates and remaining cost |
+| --- | --- |
+| `get_artist_discography`; artist `get_music_relationships` | `artistId = ?` on `music_album_artists` and `music_track_artists`: **SCAN both full tables**, absent artistId indexes. General relationships also search indexed `music_label_artists.artist_id`. |
+| `get_album_tracks`; album `get_music_relationships` | `albumId = ?` on `music_tracks`: **SCAN full track table**, absent albumId index. General relationships search indexed album credits and `music_label_albums.album_id`. |
+| `get_label_catalogue`; label `get_music_relationships` | `label_id = ?` on both label edge tables: covering PK **SEARCH**, no catalogue-wide edge-table scan. Sorting still depends on this label's matching edges. |
+| Track `get_music_relationships` | `trackId = ?` credit PK **SEARCH** and `id = ?` track PK **SEARCH** for album membership. No unrelated artist/album/label edge-table scan. |
+| `lookup_music_url` | UNION of source-key PK, canonical-URL unique index, normalized-alias PK and state+source-key identity **SEARCH**. At most three candidates; skip orphaned targets rather than hiding a live alias. |
+| `get_music_entity` / batch / relationship target projection | Choose the exact kind's table, **SEARCH** by ID PK, then bounded link lookup by entity. No four-kind projection scan. |
+| `search_music` | `instr(lower(name), lower(?))`: **SCAN** all four catalogue tables when no kind supplied, or only the specified kind's table. No name index supports substring search. |
+| `filter_music` with name | Exact `lower(name) = lower(?)`: **SCAN** the specified kind's table, absent matching expression index. Kind-only listing remains offset-based and is not a catalogue-independent-cost promise. |
+
+Representative actual plan lines (temporary sort/subquery scans are not base-table
+index searches, and do not establish a fixed rows-examined bound):
+
+```text
+discography: SCAN music_album_artists; SCAN music_track_artists
+album tracks: SCAN music_tracks; USE TEMP B-TREE FOR ORDER BY
+label catalogue: SEARCH music_label_artists USING COVERING INDEX sqlite_autoindex_music_label_artists_1 (label_id=?)
+                 SEARCH music_label_albums USING COVERING INDEX sqlite_autoindex_music_label_albums_1 (label_id=?)
+URL lookup: SEARCH music_source_identities USING INDEX sqlite_autoindex_music_source_identities_1 (source_key=?)
+            SEARCH music_source_identities USING INDEX music_source_identities_canonical_url_uq (canonical_url=?)
+            SEARCH a USING INDEX sqlite_autoindex_music_source_aliases_1 (normalized_url=?)
+            SEARCH i USING INDEX music_source_identities_resolving_audit_page_idx (state=? AND source_key=?)
+search: SCAN music_artists; SCAN music_albums; SCAN music_tracks; SCAN music_labels
+artist name filter: SCAN music_artists
+```
+
+There is no longer a global `MATERIALIZE edges` step. Source predicates apply inside
+each selected base-table branch; no `NOT MATERIALIZED` hint or extra schema is used.
 
 ## Central integration handoff (P1 owns these edits)
 

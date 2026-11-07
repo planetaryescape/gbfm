@@ -15,6 +15,7 @@ import {
   CreateMicroPostInput,
   CreatorCommandResult,
   PublishEditorialInput,
+  ReplyToMicroPostInput,
   UnpublishContentInput,
 } from '@/mcp/creator/contracts'
 import { checkCreatorResponse, creatorResultFits, requireCreatorWire } from '@/mcp/creator/wire'
@@ -25,6 +26,7 @@ import {
   type OperationPreparation,
   type JsonValue,
 } from '@/mcp/operations/store'
+import { publicMicroAncestorPredicate } from '@/services/public-micro-ancestry'
 
 import { buildCreatorUpdate } from './guarded-update'
 import { prepareCreatorMicro, prepareCreatorPostTransition } from './prepare-post'
@@ -55,9 +57,14 @@ const make = Effect.gen(function* () {
   )
 
   const execute = Effect.fn('CreatorCommand.executePost')(function* (options: {
-    readonly operation: 'create_micro_post' | 'publish_editorial' | 'unpublish_content'
+    readonly operation:
+      | 'create_micro_post'
+      | 'reply_to_micro_post'
+      | 'publish_editorial'
+      | 'unpublish_content'
     readonly input:
       | typeof CreateMicroPostInput.Type
+      | typeof ReplyToMicroPostInput.Type
       | typeof PublishEditorialInput.Type
       | typeof UnpublishContentInput.Type
     readonly scopes: ReadonlyArray<McpScope>
@@ -177,7 +184,11 @@ const make = Effect.gen(function* () {
               .limit(1)
 
             // Lifecycle acknowledgement may outlive its row; creation replay still needs current target access.
-            if (!post) return options.operation !== 'create_micro_post'
+            if (!post)
+              return (
+                options.operation !== 'create_micro_post' &&
+                options.operation !== 'reply_to_micro_post'
+              )
 
             return (
               (
@@ -192,23 +203,33 @@ const make = Effect.gen(function* () {
             )
           },
           prepare: async (): Promise<OperationPreparation> => {
-            if (options.operation === 'create_micro_post') {
-              const input = Schema.decodeUnknownSync(CreateMicroPostInput, {
-                onExcessProperty: 'error',
-              })(options.input)
+            if (
+              options.operation === 'create_micro_post' ||
+              options.operation === 'reply_to_micro_post'
+            ) {
+              const input = Schema.decodeUnknownSync(
+                options.operation === 'reply_to_micro_post'
+                  ? ReplyToMicroPostInput
+                  : CreateMicroPostInput,
+                { onExcessProperty: 'error' },
+              )(options.input)
 
               const prepared = await run(
                 Effect.result(
                   prepareCreatorMicro({ input, actorId: actor.userId, now: new Date(now) }).pipe(
                     Effect.provideService(EditorialMcpConfig, config),
+                    Effect.provideService(Database, db),
                   ),
                 ),
               )
 
               if (Result.isFailure(prepared))
                 return {
-                  status:
-                    prepared.failure.code === 'invalid_input' ? 'invalid_input' : 'unavailable',
+                  status: Match.value(prepared.failure.code).pipe(
+                    Match.when('not_found', () => 'not_found' as const),
+                    Match.when('invalid_input', () => 'invalid_input' as const),
+                    Match.orElse(() => 'unavailable' as const),
+                  ),
                 }
               const { data, id, version } = prepared.success
 
@@ -225,7 +246,16 @@ const make = Effect.gen(function* () {
               return {
                 status: 'ready',
                 build: (ctx) => {
-                  const guard = and(ctx.fence, checkpoint.liveGuard)
+                  const ancestry =
+                    data.parentPostId && data.rootPostId
+                      ? publicMicroAncestorPredicate({
+                          postId: data.parentPostId,
+                          rootId: data.rootPostId,
+                          depth: (data.depth ?? 0) - 1,
+                        })
+                      : sql`1`
+
+                  const guard = and(ctx.fence, checkpoint.liveGuard, ancestry)
 
                   const winner = exists(
                     db
@@ -236,10 +266,10 @@ const make = Effect.gen(function* () {
                       ),
                   )
 
-                  const authorized = and(ctx.fence, checkpoint.liveGuard, winner)
+                  const authorized = and(ctx.fence, checkpoint.liveGuard, ancestry, winner)
 
-                  const insert = sql`INSERT INTO posts(id,slug,title,content,type,draft,createdAt,updatedAt,depth,last_operation_id,music_references_managed)
-                SELECT ${id},${data.slug},${data.title ?? null},${data.content ?? null},'micro',0,${now},${now},0,${ctx.attemptId},0 WHERE ${guard}`
+                  const insert = sql`INSERT INTO posts(id,slug,title,content,type,draft,createdAt,updatedAt,parent_post_id,root_post_id,depth,last_operation_id,music_references_managed)
+                SELECT ${id},${data.slug},${data.title ?? null},${data.content ?? null},'micro',0,${now},${now},${data.parentPostId ?? null},${data.rootPostId ?? null},${data.depth ?? 0},${ctx.attemptId},0 WHERE ${guard}`
 
                   const creator = sql`INSERT INTO post_creators(postId,creatorId) SELECT ${id},${actor.userId} WHERE ${authorized}`
 
@@ -466,6 +496,13 @@ const make = Effect.gen(function* () {
   })
 
   return {
+    replyToMicroPost: (raw: typeof ReplyToMicroPostInput.Type) =>
+      Schema.decodeUnknownEffect(ReplyToMicroPostInput, { onExcessProperty: 'error' })(raw).pipe(
+        Effect.mapError(invalid),
+        Effect.flatMap((input) =>
+          execute({ operation: 'reply_to_micro_post', input, scopes: ['micros:publish'] }),
+        ),
+      ),
     createMicroPost: (raw: typeof CreateMicroPostInput.Type) =>
       Schema.decodeUnknownEffect(CreateMicroPostInput, { onExcessProperty: 'error' })(raw).pipe(
         Effect.mapError(invalid),

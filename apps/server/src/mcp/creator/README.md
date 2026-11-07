@@ -1,17 +1,17 @@
 # Creator commands — C1, C2, C4
 
-Work in progress for #539, #540 and #542. Six candidate tools are implemented
+Work in progress for #539, #540 and #542. Seven candidate tools are implemented
 and exercised locally; none is registered in the central production toolkit.
-Reply creation and durable private-media publication remain blocked. None of
+Durable private-media publication remains blocked. None of
 these issues is complete.
 
 Initial prerequisite: PR #568 at
 `8dbd4f4863ddab00238f955913ca064629e7b321`. Adopted P1's named command foundation
-PR #575 through named `aa3396668b79a6401cf21f68711933cf10e70091`, containing
+PR #575 through named `3f478e35614a6982c88bf45ae68e218eace2a27c`, containing
 the shared durable operation store, schema through 0025, live persisted OAuth SQL
 authority, E1 post guard and physical-winner `ctx.assert` checkpoint. No sibling
-branches were woven. R3's reviewed ancestry helper PR #597 is not in that named
-base; a later P1 serial adoption is required before reply implementation.
+branches were woven. R3's reviewed ancestry helper PR #597 is serially included
+in that named base, not imported from its sibling branch.
 Authorization callbacks alone do not lock authority inside the mutation batch.
 No production migration, policy activation, data write, deployment, merge or
 auto-merge is authorized.
@@ -85,6 +85,17 @@ Root micro creation and editorial publishing reject recognized private media
 URLs rather than copying them or claiming an applied outcome before durable
 copy recovery exists. Unpublish and delete make no storage/provider calls.
 
+Replies use the same canonical validation, operation store and response budget
+as root creation. Read-only preparation projects the complete public micro
+ancestor chain and derives thread fields through the existing shared helper;
+stored depth is ignored. The INSERT itself embeds the reviewed predicate,
+matching the expected actual root and computed parent depth below8, alongside
+live authority and receipt fences. Coupled creator insertion and final outcome
+also require that ancestry and the physical attempt winner. Hidden, banned,
+malformed, cyclic or over-depth paths fail closed even for their own creator.
+No notification or provider call occurs. Replay acknowledges only the original
+reply after current actor/target ownership checks and never republishes it.
+
 Existing editorial snapshot/version and actor/requestId receipts remain E1-owned
 and unchanged by this lane. New commands use the shared durable store; no second
 ledger. Replay rechecks current account/grant/scopes and target access, including
@@ -124,8 +135,8 @@ Still required:
 - Real migrated D1 application of all seven commands, concurrent identical retry,
   changed payload, expiry, stale revisions, current grant/role/owner loss and
   publication races, with persisted winner/receipt assertions.
-- Public full-ancestor reply checks, server-derived root/depth, hidden/deleted
-  parent denial and no notification/provider/media side effects during preparation.
+- Final integrated-head proof of reply ancestor/publication races and
+  server-derived root/depth, with no notification/provider/media side effects.
 - Browser/PAT versus MCP revision races and no partial relationship/asset writes.
 - Media/reference dependency safety and no implicit deletion cascade; lifecycle
   replay after deletion/publication without private-state disclosure.

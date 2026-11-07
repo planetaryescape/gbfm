@@ -667,9 +667,9 @@ export const ShowServiceLayer = Layer.effect(
                 .from(showsTable)
                 .where(and(eq(showsTable.slug, slug), eq(showsTable.draft, false)))
                 .limit(1),
-            catch: () =>
+            catch: (error) =>
               new DatabaseError({
-                message: 'Failed to read public show metadata',
+                message: `Failed to read public show metadata: ${getErrorMessage(error)}`,
                 operation: 'select',
                 table: 'shows',
               }),

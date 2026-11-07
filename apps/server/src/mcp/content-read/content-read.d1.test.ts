@@ -417,6 +417,14 @@ test('episode pages use timestamp first and ID descending for ties, not insertio
     .insert(showsTable)
     .values({ id: 'tie-show', slug: 'tie-show', title: 'Tie show', content: '' })
 
+  const empty = Schema.decodeUnknownSync(ShowEpisodesResult)(
+    (await call({ slug: 'tie-show' }, 'content:read', 'list_show_episodes')).result
+      ?.structuredContent,
+  )
+
+  expect(empty.episodes).toEqual([])
+  expect(empty.pagination).toEqual({ limit: 20, offset: 0, total: 0, hasMore: false })
+
   for (const [id, timestamp] of [
     ['tie-a', 2000],
     ['tie-new', 3000],
@@ -449,4 +457,27 @@ test('episode pages use timestamp first and ID descending for ties, not insertio
   }
 
   expect(ids).toEqual(['tie-new', 'tie-z', 'tie-a', 'tie-zzz-old'])
+})
+
+test('misc audio has a show review URL rather than a music-track or playback URL', async () => {
+  await db.insert(audioTable).values({
+    id: 'misc-episode',
+    slug: 'misc-episode',
+    title: 'Misc episode',
+    type: 'misc',
+    content: '',
+    url: 'https://example.test/misc.mp3',
+    showId: 'public-show',
+    createdAt: new Date(9000),
+  })
+
+  const page = Schema.decodeUnknownSync(ShowEpisodesResult)(
+    (await call({ slug: 'public-show', limit: 1 }, 'content:read', 'list_show_episodes')).result
+      ?.structuredContent,
+  )
+
+  expect(page.episodes).toHaveLength(1)
+  expect(page.episodes[0]?.audioId).toBe('misc-episode')
+  expect(page.episodes[0]?.type).toBe('misc')
+  expect(page.episodes[0]?.reviewUrl).toBe('https://example.test/shows/public-show')
 })

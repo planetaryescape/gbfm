@@ -1,3 +1,19 @@
+# [2.127.0](https://github.com/planetaryescape/gbfm/compare/v2.126.0...v2.127.0) (2026-11-07)
+
+
+### Bug Fixes
+
+* **editorial:** recover conflicts without discarding the original tab ([b6ddf01](https://github.com/planetaryescape/gbfm/commit/b6ddf01c9773501f52376fdc2de04605a3eeea04))
+* **editorial:** reject stale browser saves without losing local edits ([835c507](https://github.com/planetaryescape/gbfm/commit/835c5073d46cb64d3557ec7c3e47355538fa00a6))
+* **mcp:** bound receipt replay and retain safe retry tombstones ([aee8731](https://github.com/planetaryescape/gbfm/commit/aee87313bd23d3cc08101e54e8ec50e3dca03d61))
+* **mcp:** enforce scope-bound request sizes before parsing ([340f298](https://github.com/planetaryescape/gbfm/commit/340f298a673d43fa87cb9baafe42ef53a33688db))
+* **mcp:** verify write limits and retain cleanup diagnostics ([ee3ba6b](https://github.com/planetaryescape/gbfm/commit/ee3ba6be7edb189e594582d44647c12c16d2ce54))
+
+
+### Features
+
+* **mcp:** add separately consented retry-safe draft writes ([9958337](https://github.com/planetaryescape/gbfm/commit/9958337fb3ecc5138414f69c99802d89b8b0e45e))
+
 # [2.126.0](https://github.com/planetaryescape/gbfm/compare/v2.125.0...v2.126.0) (2026-11-06)
 
 

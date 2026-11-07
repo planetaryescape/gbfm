@@ -6,6 +6,7 @@ import type { EntityReference } from './repository'
 const SafeTaggedErrorSchema = Schema.Struct({
   _tag: Schema.Literals([
     'MusicSourceInvalid',
+    'MusicIdentityAuthorizationFailed',
     'MusicIdentityBusy',
     'MusicIdentityAliasCollision',
     'MusicIdentityArtworkDeliveryFailed',

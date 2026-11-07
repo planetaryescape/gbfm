@@ -48,6 +48,12 @@ export const projectImportPersistence = (
   }
 
   return Match.value(result.failure).pipe(
+    Match.tag('MusicIdentityAuthorizationFailed', (error) =>
+      failure(
+        error.reason === 'denied' ? 'access_denied' : 'unavailable',
+        'Music operation authorization failed.',
+      ),
+    ),
     Match.tag('MusicIdentityArtworkDeliveryFailed', (error) =>
       Effect.succeed({
         status: 'partial' as const,

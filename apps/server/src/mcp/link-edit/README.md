@@ -4,7 +4,7 @@ This is the manual **3/5** delivery slice, not completion of all selected U1 beh
 P1 relayed Guide Fari's implementation/integration approval; no merge, auto-merge,
 deployment, production migration or live-policy/data activation is authorized.
 
-Base: P1 PR575 exact `6d76116b5407026b53390f85e4bf6eed8a809032`. The isolated
+Base: P1 PR575 exact `aa3396668b79a6401cf21f68711933cf10e70091`. The isolated
 `feat/526-link-commands` worktree contains only this module and the new pure
 `services/canonical-music-identity/link-statements.ts`. No R4/Q1 history, shared
 registry, schema, legacy factory, inference, metadata refresh or artwork edits.
@@ -17,13 +17,14 @@ registry, schema, legacy factory, inference, metadata refresh or artwork edits.
 | `reject_music_link` | Persist rejected evidence, never implicitly restore it |
 | `remove_music_link` | Explicit physical deletion of one link, not its catalogue entity |
 | `discover_music_links` | Still selected, unavailable/not registered: no admitted provider transport |
-| `refresh_music_links` | Still selected, unavailable/not registered: no admitted provider transport; truthful receipt lookup adoption pending |
+| `refresh_music_links` | Still selected, unavailable/not registered: no admitted provider transport; receipt lookup alone does not authorize fetching |
 
 `LinkEditToolkit` and `LinkEditHandlersLayer` are exported for P1 composition,
 not centrally registered here. Each command independently calls the required
 request-scoped `CommandAuthority.checkpoint(['catalogue:write'])`. P1 owns actual
-OAuth/session/PAT composition. Tests' explicit SQL grant fixture is not production
-OAuth proof. Playlists need their distinct owner/privacy contract; labels are not
+OAuth/session/PAT composition. Dense tests use persisted session and disposable
+OAuth authority, not production-route composition proof. Playlists need their
+distinct owner/privacy contract; labels are not
 accepted by the existing canonical source writer. Neither is silently routed
 through these three canonical kinds.
 
@@ -86,7 +87,7 @@ hosts and redirects, credential/data disclosure, bounded input/result/time,
 cancellation and ambiguous effects, and pure snapshot versus guarded persistence.
 Until then discovery/refresh have no active outbound implementation.
 
-The operations owner is delivering truthful `lookup`: only an exact `miss` may
+The named base includes truthful `lookup`: only an exact `miss` may
 permit authorized bounded provider work outside the database. Storage failure
 must never become a miss. Miss is neither a reservation nor ongoing authority.
 After fetch, normal execute uses the same normalized user intent/revisions (not
@@ -104,6 +105,8 @@ fresh replay authority and original revisions. Adversarial plan tests exercise
 opaque OR guards, stale revisions, authority revoked after root CAS and lost
 physical winners; all domain/receipt state must roll back. Actual MCP HTTP tests
 exercise object-root tools/list, all three commands, replay and authorization
-denial. No production or remote D1 is used. Full server tests, bun precommit and
-independent Sol actual-PR review are required before handoff; persisted OAuth and
-composed cross-lane proof remain P1's responsibility.
+denial. Dense16-platform commands run through persisted session and disposable
+OAuth auth-code/token authority; D1 enforces its SQL binding limit on execution.
+No production or remote D1 is used. Full server tests, bun precommit and
+independent Sol actual-PR review are required before handoff; production-route
+OAuth composition and cross-lane proof remain P1's responsibility.

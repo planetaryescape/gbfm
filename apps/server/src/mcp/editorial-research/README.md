@@ -36,6 +36,10 @@ or URL. Ineligible target display is explicit and is not negative evidence.
 
 Every successful tool now requires the request's actual `CommandAuthority` checkpoint
 before disclosure. Context also checkpoints before reading the explicit source.
+Context and post-seeded connections then check current target policy and the returned
+credential SQL fence in one final statement, without replacing the original snapshot
+or version. Original private sources still require current ownership; newly private
+sources additionally require a fresh posts:read checkpoint and another target check.
 There is no injected-principal-only production fallback. Request authority is resolved
 at execution, not captured while constructing shared layers.
 

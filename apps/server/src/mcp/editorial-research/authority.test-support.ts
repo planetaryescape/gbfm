@@ -14,7 +14,8 @@ export const domainReadAuthority = (actor: McpPrincipal) =>
             actorId: actor.userId,
             clientId: actor.clientId,
             resource: 'https://api.example.test/mcp',
-            liveGuard: sql`0`,
+            // The fixture admits these domain reads; real credential guards are tested separately.
+            liveGuard: sql`1`,
           })
         : Effect.fail(
             new McpToolError({ code: 'access_denied', message: 'Fixture scope denied.' }),

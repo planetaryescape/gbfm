@@ -22,6 +22,7 @@ import { withTestLayer } from '@/test/effect'
 
 import { McpActor } from '../authorization'
 import { CommandAuthority, makeOAuthCommandAuthority } from '../command-authority'
+import type { EditorialToolError } from '../contracts'
 import { EditorialMcpConfig } from '../editorial'
 import { loadEditorialSnapshot } from '../editorial-music/snapshot'
 import { EditorialMcpSettings, projectPost } from '../model'
@@ -38,6 +39,12 @@ import { EditorialContextService, EditorialContextServiceLayer } from './context
 import { EditorialContextResult } from './contracts'
 import { EditorialResearchServiceLayer } from './service'
 import { EditorialResearchHandlersLayer, EditorialResearchToolkit } from './toolkit'
+
+type SourceRead = Effect.Effect<
+  void,
+  EditorialToolError,
+  EditorialContextService | MusicRecommendationService
+>
 
 const harness = async () => {
   const fixture = await createEditorialOAuthFixture()
@@ -330,4 +337,199 @@ test('revocation after preflight blocks the completed sequence before disclosure
         .orderBy(musicPlaylistTracksTable.position)
     ).map((member) => member.trackId),
   ).toEqual([h.trackId, h.secondId])
+}, 15_000)
+
+test('valid OAuth cannot disclose an original private source after creator removal', async () => {
+  await using h = await harness()
+
+  const operations: ReadonlyArray<SourceRead> = [
+    Effect.flatMap(EditorialContextService, (service) =>
+      service.getDraftMusicContext({ postId: h.postId }).pipe(Effect.asVoid),
+    ),
+    Effect.flatMap(EditorialContextService, (service) =>
+      service.getEditorialContext({ postId: h.postId }).pipe(Effect.asVoid),
+    ),
+    Effect.flatMap(MusicRecommendationService, (service) =>
+      service.suggestEditorialConnections({ postId: h.postId }).pipe(Effect.asVoid),
+    ),
+  ]
+
+  for (const operation of operations) {
+    await h.fixture.db.delete(postCreators).where(eq(postCreators.postId, h.postId))
+    await h.fixture.db.insert(postCreators).values({
+      postId: h.postId,
+      creatorId: h.fixture.userId,
+    })
+    let checks = 0
+
+    const authority = CommandAuthority.of({
+      checkpoint: (scopes) =>
+        Effect.gen(function* () {
+          checks += 1
+
+          if (checks === 2)
+            yield* Effect.promise(() =>
+              h.fixture.db.delete(postCreators).where(eq(postCreators.postId, h.postId)),
+            )
+
+          return yield* h.authority.checkpoint(scopes)
+        }),
+    })
+
+    const denied = await h.run(operation.pipe(Effect.flip), authority)
+    expect(denied.code).toBe('not_found')
+    expect(
+      await h.fixture.db.select().from(postCreators).where(eq(postCreators.postId, h.postId)),
+    ).toEqual([])
+  }
+}, 15_000)
+
+test('public sources becoming private deny non-owners while readable edits keep the original coherent result', async () => {
+  await using h = await harness()
+
+  const original = await Effect.runPromise(
+    projectPost(await Effect.runPromise(loadEditorialSnapshot(h.fixture.db, h.postId)), h.config),
+  )
+
+  let checks = 0
+
+  const editAuthority = CommandAuthority.of({
+    checkpoint: (scopes) =>
+      Effect.gen(function* () {
+        checks += 1
+
+        if (checks === 2)
+          yield* Effect.promise(() =>
+            h.fixture.db
+              .update(postsTable)
+              .set({ content: 'LATER SOURCE' })
+              .where(eq(postsTable.id, h.postId)),
+          )
+
+        return yield* h.authority.checkpoint(scopes)
+      }),
+  })
+
+  const readable = await h.run(
+    Effect.flatMap(EditorialContextService, (service) =>
+      service.getEditorialContext({ postId: h.postId }),
+    ),
+    editAuthority,
+  )
+
+  expect(readable.post).toMatchObject({ source: 'PRIVATE SOURCE', version: original.version })
+
+  await h.fixture.db.delete(postCreators).where(eq(postCreators.postId, h.postId))
+
+  const operations: ReadonlyArray<SourceRead> = [
+    Effect.flatMap(EditorialContextService, (service) =>
+      service.getEditorialContext({ postId: h.postId }).pipe(Effect.asVoid),
+    ),
+    Effect.flatMap(MusicRecommendationService, (service) =>
+      service.suggestEditorialConnections({ postId: h.postId }).pipe(Effect.asVoid),
+    ),
+  ]
+
+  for (const operation of operations) {
+    await h.fixture.db.update(postsTable).set({ draft: false }).where(eq(postsTable.id, h.postId))
+    let checks = 0
+
+    const authority = CommandAuthority.of({
+      checkpoint: (scopes) =>
+        Effect.gen(function* () {
+          checks += 1
+
+          if (checks === 2)
+            yield* Effect.promise(() =>
+              h.fixture.db
+                .update(postsTable)
+                .set({ draft: true })
+                .where(eq(postsTable.id, h.postId)),
+            )
+
+          return yield* h.authority.checkpoint(scopes)
+        }),
+    })
+
+    expect((await h.run(operation.pipe(Effect.flip), authority)).code).toBe('not_found')
+  }
+}, 15_000)
+
+test('new private source access needs the live posts grant and ownership after scope escalation', async () => {
+  await using h = await harness()
+
+  for (const scenario of ['missing_scope', 'readable', 'revoked_during_escalation'] as const) {
+    await h.fixture.db.delete(postCreators).where(eq(postCreators.postId, h.postId))
+    await h.fixture.db
+      .insert(postCreators)
+      .values({ postId: h.postId, creatorId: h.fixture.userId })
+    await h.fixture.db
+      .update(postsTable)
+      .set({ draft: false, content: 'PUBLIC CONTROL' })
+      .where(eq(postsTable.id, h.postId))
+    await h.fixture.db
+      .update(oauthAccessToken)
+      .set({
+        scopes: JSON.stringify(
+          scenario === 'missing_scope'
+            ? ['catalogue:read', 'content:read', 'offline_access']
+            : ['catalogue:read', 'content:read', 'posts:read', 'offline_access'],
+        ),
+      })
+      .where(eq(oauthAccessToken.clientId, h.clientId))
+    let checks = 0
+
+    const authority = CommandAuthority.of({
+      checkpoint: (scopes) =>
+        Effect.gen(function* () {
+          checks += 1
+
+          if (checks === 2)
+            yield* Effect.promise(() =>
+              h.fixture.db
+                .update(postsTable)
+                .set({ draft: true })
+                .where(eq(postsTable.id, h.postId)),
+            )
+
+          if (checks === 3 && scenario === 'revoked_during_escalation')
+            yield* Effect.promise(() =>
+              h.fixture.db.delete(postCreators).where(eq(postCreators.postId, h.postId)),
+            )
+
+          return yield* h.authority.checkpoint(scopes)
+        }),
+    })
+
+    const read = Effect.flatMap(EditorialContextService, (service) =>
+      service.getEditorialContext({ postId: h.postId }),
+    )
+
+    h.queries.length = 0
+
+    const result = await h.run(
+      read.pipe(
+        Effect.match({
+          onSuccess: (output) => ({
+            status: 'success',
+            draft: output.post.draft,
+            source: output.post.source,
+          }),
+          onFailure: (error) => ({ status: error.code, draft: null, source: null }),
+        }),
+      ),
+      authority,
+    )
+
+    expect(result).toEqual(
+      scenario === 'readable'
+        ? { status: 'success', draft: false, source: 'PUBLIC CONTROL' }
+        : {
+            status: scenario === 'missing_scope' ? 'access_denied' : 'not_found',
+            draft: null,
+            source: null,
+          },
+    )
+    expect(h.queries.length).toBeLessThanOrEqual(16)
+  }
 }, 15_000)

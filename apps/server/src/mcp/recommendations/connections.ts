@@ -4,7 +4,7 @@ import { McpAuthorization } from '../authorization'
 import { EndpointIdentity } from '../contracts'
 import { EditorialMcpConfig } from '../editorial'
 import { checkpointEditorialCommand } from '../editorial-music/save'
-import { readResearchEditorial } from '../editorial-research/context'
+import { checkpointResearchEditorial, readResearchEditorial } from '../editorial-research/context'
 import type { EditorialContextInput } from '../editorial-research/contracts'
 import { EditorialEvidenceStore, researchUnavailable } from '../editorial-research/evidence'
 import { compareEvidenceKeys, evidenceFingerprint } from '../editorial-research/fingerprint'
@@ -207,7 +207,8 @@ export const suggestEditorialConnections = Effect.fn('MusicRecommendations.conne
     }),
   }).pipe(Effect.mapError(researchUnavailable), Effect.flatMap(boundEvidenceResult))
 
-  yield* checkpointEditorialCommand(scopes, actor.userId)
+  if (source) yield* checkpointResearchEditorial(source.snapshot, actor.userId, scopes)
+  else yield* checkpointEditorialCommand(scopes, actor.userId)
 
   return output
 }, withinEvidenceBudget)

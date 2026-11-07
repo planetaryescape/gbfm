@@ -100,6 +100,8 @@ export const musicArtistsTable = sqliteTable(
       .$defaultFn(() => crypto.randomUUID()),
     name: text().notNull(),
     bio: text(),
+    revision: integer('revision').notNull().default(0),
+    lastOperationId: text('last_operation_id'),
     imageUrl: text(),
     slug: text().notNull().unique(),
     publishedAt: integer({ mode: 'timestamp_ms' }),
@@ -111,7 +113,17 @@ export const musicArtistsTable = sqliteTable(
       .notNull()
       .$defaultFn(() => new Date()),
   },
-  (table) => [index('music_artists_slug_idx').on(table.slug)],
+  (table) => [
+    index('music_artists_slug_idx').on(table.slug),
+    check(
+      'music_artists_revision_check',
+      sql`typeof(${table.revision}) = 'integer' AND ${table.revision} BETWEEN 0 AND 9007199254740991`,
+    ),
+    check(
+      'music_artists_operation_check',
+      sql`${table.lastOperationId} IS NULL OR length(${table.lastOperationId}) = 36`,
+    ),
+  ],
 )
 
 export const musicAlbumsTable = sqliteTable(
@@ -121,6 +133,8 @@ export const musicAlbumsTable = sqliteTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     title: text().notNull(),
+    revision: integer('revision').notNull().default(0),
+    lastOperationId: text('last_operation_id'),
     // Denormalized artist names for fast display without joins
     artistNames: text({ mode: 'json' }).$type<Array<string>>(),
     releaseDate: integer({ mode: 'timestamp_ms' }),
@@ -136,7 +150,17 @@ export const musicAlbumsTable = sqliteTable(
       .notNull()
       .$defaultFn(() => new Date()),
   },
-  (table) => [index('music_albums_slug_idx').on(table.slug)],
+  (table) => [
+    index('music_albums_slug_idx').on(table.slug),
+    check(
+      'music_albums_revision_check',
+      sql`typeof(${table.revision}) = 'integer' AND ${table.revision} BETWEEN 0 AND 9007199254740991`,
+    ),
+    check(
+      'music_albums_operation_check',
+      sql`${table.lastOperationId} IS NULL OR length(${table.lastOperationId}) = 36`,
+    ),
+  ],
 )
 
 export const musicTracksTable = sqliteTable(
@@ -146,6 +170,8 @@ export const musicTracksTable = sqliteTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     title: text().notNull(),
+    revision: integer('revision').notNull().default(0),
+    lastOperationId: text('last_operation_id'),
     // Denormalized artist names for fast display without joins
     artistNames: text({ mode: 'json' }).$type<Array<string>>(),
     coverImageUrl: text(),
@@ -163,7 +189,17 @@ export const musicTracksTable = sqliteTable(
       .notNull()
       .$defaultFn(() => new Date()),
   },
-  (table) => [index('music_tracks_slug_idx').on(table.slug)],
+  (table) => [
+    index('music_tracks_slug_idx').on(table.slug),
+    check(
+      'music_tracks_revision_check',
+      sql`typeof(${table.revision}) = 'integer' AND ${table.revision} BETWEEN 0 AND 9007199254740991`,
+    ),
+    check(
+      'music_tracks_operation_check',
+      sql`${table.lastOperationId} IS NULL OR length(${table.lastOperationId}) = 36`,
+    ),
+  ],
 )
 
 export const musicPlaylistsTable = sqliteTable(
@@ -197,6 +233,8 @@ export const musicLabelsTable = sqliteTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     name: text().notNull(),
+    revision: integer('revision').notNull().default(0),
+    lastOperationId: text('last_operation_id'),
     description: text(),
     imageUrl: text('image_url'),
     bannerImageUrl: text('banner_image_url'),
@@ -211,7 +249,17 @@ export const musicLabelsTable = sqliteTable(
       .notNull()
       .$defaultFn(() => new Date()),
   },
-  (table) => [index('music_labels_slug_idx').on(table.slug)],
+  (table) => [
+    index('music_labels_slug_idx').on(table.slug),
+    check(
+      'music_labels_revision_check',
+      sql`typeof(${table.revision}) = 'integer' AND ${table.revision} BETWEEN 0 AND 9007199254740991`,
+    ),
+    check(
+      'music_labels_operation_check',
+      sql`${table.lastOperationId} IS NULL OR length(${table.lastOperationId}) = 36`,
+    ),
+  ],
 )
 
 export const musicLabelCreatorsTable = sqliteTable(

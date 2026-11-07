@@ -2074,6 +2074,8 @@ const createEffect = (
                     musicEntityId: sql<string | null>`${dataWithSlug.musicEntityId ?? null}`.as(
                       'musicEntityId',
                     ),
+                    lastOperationId: sql`NULL`.as('lastOperationId'),
+                    musicReferencesManaged: sql`0`.as('musicReferencesManaged'),
                     parentPostId: sql<string | null>`${dataWithSlug.parentPostId ?? null}`.as(
                       'parentPostId',
                     ),

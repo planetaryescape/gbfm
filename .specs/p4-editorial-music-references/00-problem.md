@@ -1,6 +1,6 @@
 # Multiple structured music references in an editorial draft
 
-Status: **review-ready design proposal; consolidated implementation gate remains open**. Design only for #517, under #512. The purpose of separate references is accepted. The recommendations below are reviewable defaults, not recorded owner approval of storage, privacy, schema or the narrow read-result amendment. Document delivery is authorized; no runtime or schema work is authorized.
+Status: **P4 consolidated design approved; E3 implementation allocation pending**. Design for #517, under #512. Guide Fari's approval below covers the surfaced recommended model, bounds, storage direction, privacy/read amendment and published managed-state compatibility rule. Runtime work belongs to E3 #532 after its technical prerequisites and serialized P1 allocations. Production migration, deploy and live-policy/data activation remain excluded.
 
 ## Summary
 
@@ -137,3 +137,13 @@ Only this design folder is changed by P4; runtime files are unchanged. The first
 Guide Fari must record approval of the P4 model, its public-target/draft privacy boundary and the narrow `get_post` amendment, and select storage/integrity direction. Recommend the five answers above as one design package, rather than five serial checkpoints. Without an approved reference read, keep the complete-replacement MCP write unregistered. Recommend freezing primary and collection on published posts with managed reference state, rejecting legacy pair changes there rather than splitting their meaning; existing published single-pair behavior remains unchanged. This compatibility restriction also belongs to this gate. Exact DDL/migration, legacy-row preservation and a named migration coordinator still need explicit schema authority before any schema edit. Production migration/activation, merge and deployment remain excluded even after design approval. PL1 #533 must deliver verified shared playlist visibility before affected reads/consumers enable; P1 must coordinate shared result/version ownership and E1's save seam. These are implementation prerequisites, not reasons to withhold this document PR.
 
 Owner response on 2026-11-07: Guide Fari said, “ok this seems okay” after the explanation of separate draft-to-music connections. This accepts the purpose, not every rule or schema work. Later direction authorizes completing the review-ready document PR with conservative recommendations and one explicit gate. #517 remains open until recorded owner design approval. E1's actual save exports, P1 shared-file coordination and the migration owner remain implementation gates. Do not infer approval from document publication or reviewer approval.
+
+### Superseding recorded approval — 2026-11-07
+
+Guide Fari's direct approval, relayed by [the Space coordinator](https://ampcode.com/threads/T-01a1b54f-7ac1-7503-9b0f-ffaf3fbc6c3e):
+
+> everything that needs my approval, you have my thumbs up; the claude threads that got stuck because of limits, you can take that wrok over as a medium sol thing instead
+
+The coordinator explicitly applies this approval to the consolidated P4 recommendations already surfaced. It resolves the owner design gate for ordered album/track/playlist references, optional independent primary, maximum 50, public catalogue targets/private draft associations, ordered-relation/integrity direction, optional scope-gated get_post enrichment, and published managed-state freeze with no backfill-induced freeze. Earlier unapproved/proposed labels record the review history; this approval supersedes their owner-decision status, not technical prerequisites.
+
+E3 implementation is authorized within the lane, but P1 still serializes exact migration filenames/replay/exports, durable managed representation, shared save/version/get_post/receipt seams and file allocations. No shared-file edits precede that allocation. E1 #530 and P1 #514 remain hard technical dependencies; PL1 shared playlist privacy consistency must be verified before affected consumers enable. Keep MCP PRs open and unmerged with no auto-merge. No production migration, deployment or live-policy/data activation is authorized. The completed #557 Claude review has no remaining findings and is not limit-blocked; no replacement reviewer is needed for it.

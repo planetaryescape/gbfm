@@ -1,18 +1,18 @@
 # P4 editorial music references — Progress
 
-## Status: Review-ready proposal; consolidated implementation gate open
+## Status: Consolidated design approved; E3 allocation requested
 
-- [ ] Layer 0: Problem frame and proposed behavioral contract (drafted; not approved)
-- [ ] Layer 1: Shape (drafted)
-- [ ] Layer 2: Alternatives (drafted in 01-shape.md)
-- [ ] Layer 3: Detailed typed contracts (drafted)
-- [ ] Layer 4: Detailed flows (drafted)
-- [ ] Layer 5: Implementation file map (drafted; no code reservations)
-- [ ] Layer 6: Executable test plan (drafted; future feature tests not run)
-- [ ] Layer 7: PR delivery slices (single vertical slice proposed)
-- [ ] Owner design approval (not implied by document or code-review approval)
+- [x] Layer 0: Problem frame and behavioral contract (design approved)
+- [x] Layer 1: Shape (design approved)
+- [x] Layer 2: Alternatives (ordered relation selected)
+- [x] Layer 3: Detailed typed contracts (design approved)
+- [x] Layer 4: Detailed flows (design approved)
+- [x] Layer 5: Implementation file map (allocation still required)
+- [x] Layer 6: Executable test plan (approved plan; future feature tests not run)
+- [x] Layer 7: PR delivery slices (normal OPEN PRs, unmerged)
+- [x] Owner design approval (exact relayed quote recorded in 00-problem.md)
 
-Unchecked means not owner-approved, not unwritten. See [00-problem.md](00-problem.md) for the five plain-English recommendations and single implementation gate, and [08-validation.md](08-validation.md) for current-code checks and environment diagnosis. Actual independent PR review evidence is recorded on the PR.
+Checked means design complete/approved, not implementation complete. See [00-problem.md](00-problem.md) for the superseding approval and remaining technical allocations, and [08-validation.md](08-validation.md) for current-code checks and environment diagnosis. Actual independent PR review evidence is recorded on the PR.
 
 ## Log
 
@@ -25,6 +25,7 @@ Unchecked means not owner-approved, not unwritten. See [00-problem.md](00-proble
 - 2026-11-07 — Diagnosed initial root-only dependency link failure. Proper isolated frozen install resolved it; bun precommit passed, and 3 existing D1 suites / 14 tests passed on the unchanged runtime baseline.
 - 2026-11-07 — Recorded corrected standing delivery rule: all MCP/doc delivery uses dependent stacked GitHub PRs coordinated by P1, left unmerged with no auto-merge; each actual PR requires its own anthropic/claude-opus-5-5 code-review thread and inline findings. No P4 PR or reviewer thread authorized/created while owner choices remain pending.
 - 2026-11-07 — Superseding direction authorizes completing the document PR without serial owner checkpoints. Consolidated storage/privacy/read-amendment/schema gate; ordinary bounds/order/primary details have explicit recommendations. Delivery base is P0 #547, head `78701b3e52d4a4b64a2d66482c1f2a7d982c7f5a`; P1 notified. No runtime prerequisite is needed for the document layer. Recorded current P0 playlist consistency and strict whole-token rules.
+- 2026-11-07 — Recorded Guide Fari's blanket approval relayed by P1 in [00-problem.md](00-problem.md). Consolidated surfaced recommendations are approved. Resuming E3 #532 in this thread subject to P1/E1/PL1 technical prerequisites. Requested exact E1 head, migration/coordinator allocation, shared post/save/version/get_post/receipt/registry exports and browser serialization before shared edits. Existing final Claude review is healthy; no replacement needed. Production activation remains excluded.
 
 ## Ownership and integration
 

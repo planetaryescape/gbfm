@@ -50,16 +50,18 @@ Claude review evidence for the prior read-only head remains valid for that head.
 
 ### Command implementation checkpoint
 
-The command follow-up is rooted on P1's named combined prerequisite
-`695bb12d2149bcbe123f0b6e7661909c4c3ea5ee` (`feat/514-command-foundation`,
-PR #575), not woven from sibling schema/receipt branches. The earlier read-only
+The command follow-up was rooted on P1's named combined prerequisite
+`695bb12d2149bcbe123f0b6e7661909c4c3ea5ee` and adopts the authorized authority
+delta through `6410b0958f920edeff317c860e8b167b970b6aca`
+(`feat/514-command-foundation`, PR #575), not sibling schema/receipt branches. The earlier read-only
 PR #564 remains at `77cd30c3bd9abb1270be6c4c84cba9edc850e561`.
 
 `ReminderCommandService` and `ReminderCommandServiceLayer` in `./service.ts`
 require `Database` and `McpOperationStore`; they do not broaden the read service.
-`execute(raw, authority)` accepts only trusted request composition for the
-checkpoint closure. P1 must supply its credential-bound `CommandAuthority`,
-including the live SQL predicate. The disposable persisted-account test authority
+`execute(raw)` requires the request-local `CommandAuthority` Context service.
+The HTTP handlers supply the actual `makeSessionCommandAuthority`; P1's MCP
+transport supplies OAuth authority, including the live SQL predicate.
+The disposable persisted-account test authority
 is **not** evidence of production OAuth, session or PAT authorization.
 
 The service atomically saves create/reschedule/cancel outcomes with the common
@@ -82,10 +84,30 @@ fully migrated local D1 and recording-only delivery, covering both commands on
 both sides of the fence. Existing provider/terminal-write crash procedures use
 local fault triggers and a recording transport; no real email is sent.
 
-This checkpoint does **not** expose command tools or replace existing HTTP
-writers. The allocated guarded HTTP/API cutover, removal of unsafe service
-writers, P1 dashboard/runtime/authority integration, actual-PR review and exact
-updated-head CI remain required before command activation.
+The guarded HTTP/API cutover now replaces the old create/update/delete service
+writers. POST requires UUIDv4 `requestId`; PUT/DELETE require it plus the revision
+observed by the caller. Missing revision returns 428; stale intent or fenced
+delivery returns typed 409 (including a truthful non-recall message). DELETE
+requires a JSON body; bodyless requests return 400. GET exposes commandRevision
+and dispatchState. POST/PUT/DELETE return a bounded original command receipt
+`{reminderId, commandRevision, dispatchState, reminderDate}`, not mutable full
+metadata. Clients reload GET after success; a replay intentionally returns its
+original receipt even after a later cancellation. The browser-only metadata
+update intent preserves omitted fields and supports null to clear notes/cover.
+It is not a new registered MCP tool. No PAT capability is added to session routes.
+
+`http/music-reminders.d1.test.ts` exercises real AuthLive/AuthMiddlewareLive,
+persisted sessions, makeSessionCommandAuthority, atomic receipts and migrated D1.
+It proves missing/stale revisions, ownership, null/omission, tombstones, original
+replay, non-recall conflicts and revoked sessions. Email delivery fails the test
+if invoked; no provider or scheduler is started.
+
+This checkpoint does **not** expose command tools. P1 dashboard/runtime
+composition, cumulative precommit, actual updated-PR review and exact-head CI
+remain required. Runtime composition must provide ReminderCommandServiceLayer
+with Database and McpOperationStore backed by the identical D1 binding, while
+keeping those services visible to request handlers. P1 also owns the shared
+dashboard required-field fixture and stable request-ID/observed-revision plumbing.
 
 ## Capability mapping
 
@@ -134,10 +156,13 @@ smaller-page instruction rather than reaching the outer untyped HTTP 413.
 
 Five deterministic probes ran against real migrated disposable D1 on 2026-11-07,
 using the existing writers at exact P1 base above and recording-only
-`EmailDelivery`. Reproducible code is retained in `storage-gates.repro.ts`,
-excluded from normal tests because its assertions describe current failures,
+`EmailDelivery`. Historical code is retained in `storage-gates.repro.ts.txt`,
+excluded from typecheck because the obsolete unsafe writer API has been removed.
+Run it only at pinned read-only head `77cd30c3bd9abb1270be6c4c84cba9edc850e561`
+in a disposable checkout, where its filename is `storage-gates.repro.ts`;
+its assertions describe historical failures,
 not a contract that unsafe behavior must preserve. No notification or remote
-provider was invoked. Reproduce from the repository root (temporary test removed
+provider was invoked. Reproduce from that pinned checkout's root (temporary test removed
 on exit):
 
 ```sh

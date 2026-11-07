@@ -98,6 +98,17 @@ export const CancelReminderCommandInput = Schema.Struct({
   expectedRevision: ReminderCommandRevision,
 })
 
+/** Existing browser PUT intent; not an additional exposed MCP capability. */
+export const UpdateReminderCommandInput = Schema.Struct({
+  ...CancelReminderCommandInput.fields,
+  musicTitle: Schema.optionalKey(ReminderText),
+  artistName: Schema.optionalKey(ReminderText),
+  musicUrl: Schema.optionalKey(ReminderHttpUrl),
+  albumCoverUrl: Schema.optionalKey(Schema.NullOr(ReminderHttpUrl)),
+  reminderDate: Schema.optionalKey(ReminderUtcInstant),
+  notes: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMaxLength(2000)))),
+})
+
 /** Saved original command outcome, not a claim about provider acceptance. */
 export const ReminderCommandResult = Schema.Struct({
   reminderId: ReminderId,

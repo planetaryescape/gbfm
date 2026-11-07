@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest'
 import { user } from '@/db/auth.schema'
 import { Database, DatabaseLayer } from '@/db/layer'
 import { musicReminder } from '@/db/music-reminder.schema'
+import { CommandAuthority } from '@/mcp/command-authority'
 import { McpToolError } from '@/mcp/contracts'
 import { McpOperationStoreLayer } from '@/mcp/operations/store'
 import { EmailDelivery } from '@/services/email-delivery.service'
@@ -22,11 +23,7 @@ import { gatedPostDatabase } from '@/test/gated-post-database'
 import { createMigratedD1Database } from '@/test/migrate-d1'
 import { reminderClock } from '@/test/reminder-clock'
 
-import {
-  ReminderCommandService,
-  ReminderCommandServiceLayer,
-  type ReminderAuthority,
-} from './service'
+import { ReminderCommandService, ReminderCommandServiceLayer } from './service'
 
 const create = (requestId = crypto.randomUUID()) => ({
   operation: 'create_music_reminder',
@@ -61,7 +58,7 @@ const fixture = async () => {
 
   // Disposable request authority over real persisted account state. Production
   // transport must supply its credential-bound P1 CommandAuthority, not this fixture.
-  const authority = (actorId = 'owner'): ReminderAuthority => ({
+  const authority = (actorId = 'owner'): CommandAuthority['Service'] => ({
     checkpoint: () =>
       Effect.gen(function* () {
         const rows = yield* Effect.promise(() =>
@@ -83,7 +80,9 @@ const fixture = async () => {
   const run = (raw: Schema.Json, actor = authority()) =>
     Effect.runPromise(
       withTestLayer(
-        Effect.flatMap(ReminderCommandService, (service) => service.execute(raw, actor)),
+        Effect.flatMap(ReminderCommandService, (service) => service.execute(raw)).pipe(
+          Effect.provideService(CommandAuthority, actor),
+        ),
         layer,
       ),
     )
@@ -92,7 +91,9 @@ const fixture = async () => {
     Effect.runPromise(
       withTestLayer(
         Effect.flip(
-          Effect.flatMap(ReminderCommandService, (service) => service.execute(raw, actor)),
+          Effect.flatMap(ReminderCommandService, (service) => service.execute(raw)).pipe(
+            Effect.provideService(CommandAuthority, actor),
+          ),
         ),
         layer,
       ),
@@ -400,7 +401,7 @@ describe('atomic reminder commands on fully migrated D1', () => {
       withTestLayer(
         Effect.flip(
           Effect.flatMap(ReminderCommandService, (service) =>
-            service.execute(input, f.authority()),
+            service.execute(input).pipe(Effect.provideService(CommandAuthority, f.authority())),
           ),
         ),
         layer,
@@ -434,7 +435,7 @@ describe('atomic reminder commands on fully migrated D1', () => {
     const input = create()
     const checkpoint = f.authority().checkpoint
 
-    const revokedAtCommit: ReminderAuthority = {
+    const revokedAtCommit: CommandAuthority['Service'] = {
       checkpoint: () =>
         checkpoint(['reminders:write']).pipe(
           Effect.map((identity) => ({

@@ -7,9 +7,14 @@ import {
   CancelReminderCommandInput,
   CreateReminderCommandInput,
   RescheduleReminderCommandInput,
+  UpdateReminderCommandInput,
 } from './contracts'
 
 const Command = Schema.Union([
+  Schema.Struct({
+    operation: Schema.Literal('update_music_reminder'),
+    input: UpdateReminderCommandInput,
+  }),
   Schema.Struct({
     operation: Schema.Literal('create_music_reminder'),
     input: CreateReminderCommandInput,
@@ -29,6 +34,7 @@ const Envelope = Schema.Struct({
     'create_music_reminder',
     'reschedule_music_reminder',
     'cancel_music_reminder',
+    'update_music_reminder',
   ]),
   input: Schema.Struct({ expectedRevision: Schema.optionalKey(Schema.Unknown) }),
 })
@@ -60,6 +66,31 @@ export const prepareReminderCommand = Effect.fn('prepareReminderCommand')(functi
   ).pipe(Effect.mapError(invalid))
 
   switch (command.operation) {
+    case 'update_music_reminder': {
+      const input = command.input
+
+      const payload = omitUndefined({
+        reminderId: input.reminderId.toLowerCase(),
+        expectedRevision: input.expectedRevision,
+        musicTitle: input.musicTitle,
+        artistName: input.artistName,
+        musicUrl: input.musicUrl,
+        albumCoverUrl: input.albumCoverUrl,
+        notes: input.notes,
+        reminderDate:
+          input.reminderDate === undefined ? undefined : new Date(input.reminderDate).toISOString(),
+      })
+
+      if (Object.keys(payload).length === 2) return yield* invalid()
+
+      return {
+        operation: command.operation,
+        requestId: input.requestId.toLowerCase(),
+        payload,
+        canonicalPayload: JSON.stringify([command.operation, payload]),
+      }
+    }
+
     case 'create_music_reminder': {
       const input = command.input
 

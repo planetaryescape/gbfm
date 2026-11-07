@@ -1,14 +1,15 @@
-import { REMINDER_STATUS } from '@gbfm/core/status'
+import { eq, sql } from 'drizzle-orm'
 import { Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
 import { Database, DatabaseLayer } from '@/db/layer'
 import { musicReminder } from '@/db/music-reminder.schema'
+import { CommandAuthority } from '@/mcp/command-authority'
+import { McpOperationStoreLayer } from '@/mcp/operations/store'
+import { ReminderCommandService, ReminderCommandServiceLayer } from '@/mcp/reminders/service'
 import { EmailDelivery, EmailDeliveryUnavailable } from '@/services/email-delivery.service'
-import { MusicReminderService, MusicReminderServiceLayer } from '@/services/music-reminder.service'
 import {
-  claimReminder,
   processReminderJob,
   queryDueReminders,
   sendClaimedReminder,
@@ -18,45 +19,70 @@ import { gatedPostDatabase } from '@/test/gated-post-database'
 import { createMigratedD1Database } from '@/test/migrate-d1'
 import { reminderClock } from '@/test/reminder-clock'
 
-const fixture = {
-  id: 'scheduled',
-  userId: 'listener',
-  musicTitle: 'Mix',
-  artistName: 'Artist',
-  musicUrl: 'https://example.test/mix',
-  reminderDate: new Date(0),
-  updatedAt: new Date(0),
-}
+const id = '11111111-1111-4111-8111-111111111111'
 
 const receipt = {
-  deliveryLogId: 'fixture-delivery',
+  deliveryLogId: 'fixture',
   provider: 'cloudflare' as const,
   providerMessageId: 'accepted',
   acceptedAt: new Date(0),
 }
 
-const reschedule = (reminderDate: Date) =>
-  Effect.gen(function* () {
-    const reminders = yield* MusicReminderService
-
-    return yield* reminders.update('scheduled', 'listener', { reminderDate })
+const fixture = async () => {
+  const resource = await createMigratedD1Database()
+  const databaseLayer = DatabaseLayer(resource.database)
+  const db = Effect.runSync(withTestLayer(Database, databaseLayer))
+  const clock = reminderClock(1_000_000)
+  await db.insert(user).values({ id: 'listener', name: 'Listener', email: 'l@example.test' })
+  await db.insert(musicReminder).values({
+    id,
+    userId: 'listener',
+    musicTitle: 'Mix',
+    artistName: 'Artist',
+    musicUrl: 'https://example.test',
+    reminderDate: new Date(0),
+    updatedAt: new Date(0),
   })
 
-describe('reminder schedule ownership on local D1', () => {
+  const commands = ReminderCommandServiceLayer.pipe(
+    Layer.provide(Layer.mergeAll(databaseLayer, McpOperationStoreLayer(resource.database))),
+    Layer.provideMerge(clock.layer),
+  )
+
+  const authority = CommandAuthority.of({
+    checkpoint: () =>
+      Effect.succeed({
+        actorId: 'listener',
+        clientId: 'fixture',
+        resource: 'https://api.test/api',
+        liveGuard: sql`EXISTS (SELECT 1 FROM user WHERE id='listener')`,
+      }),
+  })
+
+  const edit = (date: Date) =>
+    Effect.flatMap(ReminderCommandService, (service) =>
+      service.execute({
+        operation: 'reschedule_music_reminder',
+        input: {
+          requestId: crypto.randomUUID(),
+          reminderId: id,
+          expectedRevision: 1,
+          reminderDate: date.toISOString(),
+        },
+      }),
+    ).pipe(Effect.provideService(CommandAuthority, authority))
+
+  return { ...resource, databaseLayer, db, clock, commands, edit }
+}
+
+describe('guarded reminder schedule ownership on local D1', () => {
   test.each([
     ['before the fresh reminder read', /^select .*from "music_reminder"/i],
-    ['after the fresh read, while loading the recipient', /^select .*from "user"/i],
+    ['before the dispatch fence', /^update "music_reminder" set "dispatch_state"/i],
   ] as const)(
-    'rescheduling %s prevents delivery and recovers at the new due time',
+    'rescheduling %s suppresses old delivery and recovers at the new due time',
     async (_, pattern) => {
-      await using resource = await createMigratedD1Database()
-      const clock = reminderClock(1_000_000)
-      const databaseLayer = DatabaseLayer(resource.database)
-      const database = Effect.runSync(withTestLayer(Database, databaseLayer))
-      await database
-        .insert(user)
-        .values({ id: 'listener', name: 'Listener', email: 'l@example.test' })
-      await database.insert(musicReminder).values(fixture)
+      await using f = await fixture()
       let deliveries = 0
 
       const delivery = Layer.succeed(EmailDelivery, {
@@ -68,19 +94,13 @@ describe('reminder schedule ownership on local D1', () => {
           }),
       })
 
-      const layer = Layer.mergeAll(databaseLayer, clock.layer, delivery)
-
-      const updates = MusicReminderServiceLayer.pipe(
-        Layer.provide(databaseLayer),
-        Layer.provideMerge(clock.layer),
-      )
-
-      const gate = gatedPostDatabase(resource.database, 'before', pattern)
+      const layer = Layer.mergeAll(f.databaseLayer, f.clock.layer, delivery)
+      const gate = gatedPostDatabase(f.database, 'before', pattern)
 
       const pending = Effect.runPromise(
         withTestLayer(
-          processReminderJob('scheduled'),
-          Layer.mergeAll(DatabaseLayer(gate.database), clock.layer, delivery),
+          processReminderJob(id),
+          Layer.mergeAll(DatabaseLayer(gate.database), f.clock.layer, delivery),
         ),
       )
 
@@ -88,47 +108,34 @@ describe('reminder schedule ownership on local D1', () => {
         await Promise.race([
           gate.reached,
           pending.then(() => {
-            throw new Error('Expected reminder delivery preparation gate')
+            throw new Error('Expected delivery preparation gate')
           }),
         ])
-        const [old] = await database.select().from(musicReminder)
+        const [old] = await f.db.select().from(musicReminder)
 
         if (!old) throw new Error('Missing old claim')
-        expect(old.status).toBe(REMINDER_STATUS.PROCESSING)
-        const future = new Date(clock.now() + 60_000)
-        const edited = await Effect.runPromise(withTestLayer(reschedule(future), updates))
-        expect(edited).toMatchObject({
-          status: REMINDER_STATUS.PENDING,
-          isSent: false,
-          reminderDate: future,
+        const future = new Date(f.clock.now() + 60_000)
+        expect(await Effect.runPromise(withTestLayer(f.edit(future), f.commands))).toMatchObject({
+          commandRevision: 2,
+          dispatchState: 'open',
         })
-        expect(edited.updatedAt.getTime()).toBeGreaterThan(old.updatedAt.getTime())
         gate.release()
         await pending
         expect(deliveries).toBe(0)
-        expect((await database.select().from(musicReminder))[0]).toEqual(edited)
         expect(await Effect.runPromise(withTestLayer(queryDueReminders, layer))).toEqual([])
-        await Effect.runPromise(withTestLayer(processReminderJob('scheduled'), layer))
-        expect(deliveries).toBe(0)
-        clock.advance(60_000)
+        f.clock.advance(60_000)
         expect(await Effect.runPromise(withTestLayer(queryDueReminders, layer))).toEqual([
-          { id: 'scheduled', reminderDate: future },
+          { id, reminderDate: future },
         ])
-        expect(await Effect.runPromise(withTestLayer(claimReminder('scheduled'), layer))).toEqual({
-          claimed: true,
-        })
-        const [current] = await database.select().from(musicReminder)
-
-        if (!current) throw new Error('Missing new claim')
-        expect(current.updatedAt.getTime()).toBeGreaterThan(edited.updatedAt.getTime())
         await Effect.runPromise(withTestLayer(sendClaimedReminder(old), layer))
         expect(deliveries).toBe(0)
-        await Effect.runPromise(withTestLayer(sendClaimedReminder(current), layer))
-        await Effect.runPromise(withTestLayer(processReminderJob('scheduled'), layer))
+        await Effect.runPromise(withTestLayer(processReminderJob(id), layer))
+        await Effect.runPromise(withTestLayer(processReminderJob(id), layer))
         expect(deliveries).toBe(1)
-        expect((await database.select().from(musicReminder))[0]).toMatchObject({
-          status: REMINDER_STATUS.SENT,
-          isSent: true,
+        expect((await f.db.select().from(musicReminder))[0]).toMatchObject({
+          status: 'sent',
+          dispatchState: 'accepted',
+          commandRevision: 2,
         })
       } finally {
         gate.release()
@@ -137,113 +144,68 @@ describe('reminder schedule ownership on local D1', () => {
     },
   )
 
-  test.each([
-    ['success', 'pending'],
-    ['failure', 'pending'],
-    ['success', 'processing'],
-    ['failure', 'processing'],
-    ['success', 'sent'],
-    ['failure', 'sent'],
-  ] as const)(
-    'an already-started provider %s cannot overwrite rescheduled %s ownership',
-    async (oldOutcome, newState) => {
-      await using resource = await createMigratedD1Database()
-      const clock = reminderClock(1_000_000)
-      const databaseLayer = DatabaseLayer(resource.database)
-      const database = Effect.runSync(withTestLayer(Database, databaseLayer))
-      await database
-        .insert(user)
-        .values({ id: 'listener', name: 'Listener', email: 'l@example.test' })
-      await database.insert(musicReminder).values(fixture)
+  test.each(['success', 'failure'] as const)(
+    'an in-flight provider %s cannot be recalled by rescheduling',
+    async (outcome) => {
+      await using f = await fixture()
       const entered = Promise.withResolvers<void>()
       const released = Promise.withResolvers<void>()
-      let deliveries = 0
 
       const delivery = Layer.succeed(EmailDelivery, {
         deliver: () =>
           Effect.gen(function* () {
-            deliveries += 1
+            entered.resolve()
+            yield* Effect.promise(() => released.promise)
 
-            if (deliveries === 1) {
-              entered.resolve()
-              yield* Effect.promise(() => released.promise)
-
-              if (oldOutcome === 'failure') return yield* new EmailDeliveryUnavailable()
-            }
+            if (outcome === 'failure') return yield* new EmailDeliveryUnavailable()
 
             return receipt
           }),
       })
 
-      const layer = Layer.mergeAll(databaseLayer, clock.layer, delivery)
-
-      const updates = MusicReminderServiceLayer.pipe(
-        Layer.provide(databaseLayer),
-        Layer.provideMerge(clock.layer),
-      )
-
-      const pending = Effect.runPromise(withTestLayer(processReminderJob('scheduled'), layer))
-
-      const outcome = pending.then(
-        () => 'success',
-        () => 'failure',
-      )
+      const layer = Layer.mergeAll(f.databaseLayer, f.clock.layer, delivery)
+      const pending = Effect.runPromise(withTestLayer(Effect.result(processReminderJob(id)), layer))
 
       try {
-        await Promise.race([
-          entered.promise,
-          pending.then(() => {
-            throw new Error('Expected provider gate')
-          }),
-        ])
-
-        const edited = await Effect.runPromise(
-          withTestLayer(reschedule(new Date(clock.now() + 60_000)), updates),
-        )
-
-        expect(edited.status).toBe(REMINDER_STATUS.PENDING)
-
-        if (newState !== 'pending') {
-          clock.advance(60_000)
-
-          if (newState === 'sent')
-            await Effect.runPromise(withTestLayer(processReminderJob('scheduled'), layer))
-          else await Effect.runPromise(withTestLayer(claimReminder('scheduled'), layer))
-        }
-
-        const [before] = await database.select().from(musicReminder)
-        expect(before?.status).toBe(newState)
+        await entered.promise
+        const [before] = await f.db.select().from(musicReminder)
+        expect(
+          await Effect.runPromise(
+            withTestLayer(Effect.flip(f.edit(new Date(f.clock.now() + 60_000))), f.commands),
+          ),
+        ).toMatchObject({
+          code: 'conflict',
+          message: expect.stringContaining('delivery_may_have_started'),
+        })
+        expect((await f.db.select().from(musicReminder))[0]).toEqual(before)
         released.resolve()
-        expect(await outcome).toBe(oldOutcome)
-        expect((await database.select().from(musicReminder))[0]).toEqual(before)
+        await pending
+        expect((await f.db.select().from(musicReminder))[0]).toMatchObject({
+          dispatchState: outcome === 'success' ? 'accepted' : 'fenced',
+          commandRevision: 1,
+        })
       } finally {
         released.resolve()
-        await outcome
+        await pending
       }
     },
   )
 
-  test('editing the schedule of a sent reminder does not reopen it', async () => {
-    await using resource = await createMigratedD1Database()
-    const clock = reminderClock(1_000_000)
-    const databaseLayer = DatabaseLayer(resource.database)
-    const database = Effect.runSync(withTestLayer(Database, databaseLayer))
-    await database
-      .insert(user)
-      .values({ id: 'listener', name: 'Listener', email: 'l@example.test' })
-    await database
-      .insert(musicReminder)
-      .values({ ...fixture, status: REMINDER_STATUS.SENT, isSent: true })
-
-    const updates = MusicReminderServiceLayer.pipe(
-      Layer.provide(databaseLayer),
-      Layer.provideMerge(clock.layer),
-    )
-
-    const edited = await Effect.runPromise(
-      withTestLayer(reschedule(new Date(clock.now() + 60_000)), updates),
-    )
-
-    expect(edited).toMatchObject({ status: REMINDER_STATUS.SENT, isSent: true })
+  test('editing a sent reminder is rejected rather than reopening it', async () => {
+    await using f = await fixture()
+    await f.db
+      .update(musicReminder)
+      .set({ status: 'sent', isSent: true, dispatchState: 'accepted' })
+      .where(eq(musicReminder.id, id))
+    expect(
+      await Effect.runPromise(
+        withTestLayer(Effect.flip(f.edit(new Date(f.clock.now() + 60_000))), f.commands),
+      ),
+    ).toMatchObject({ code: 'conflict' })
+    expect((await f.db.select().from(musicReminder))[0]).toMatchObject({
+      status: 'sent',
+      isSent: true,
+      commandRevision: 1,
+    })
   })
 })

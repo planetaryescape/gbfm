@@ -219,7 +219,7 @@ describe('makePlayerCore', () => {
     }).pipe(Effect.scoped, Effect.runPromise)
   })
 
-  it('seeks to the beginning on explicit replay and accepts the next completion once', async () => {
+  it('handles completion once per playback, re-arms on status, and restarts explicit replay', async () => {
     await Effect.gen(function* () {
       const recording = yield* makeRecordingEngine()
       const storage = makeRecordingStorage()
@@ -241,12 +241,36 @@ describe('makePlayerCore', () => {
         ),
       )
 
-      yield* recording.setStatus({ isLoaded: true, duration: 300 })
       yield* core.requestPlayOnReady(track.id)
+      yield* recording.setStatus({ isLoaded: false, duration: 0, didJustFinish: true })
       yield* core.setSource(track)
+      yield* Effect.yieldNow
+      expect(finished).toBe(0)
+      expect(storage.cleared).toEqual([])
+
+      yield* recording.emit({ isLoaded: true, duration: 300, didJustFinish: false })
+      yield* Effect.yieldNow
+      expect(finished).toBe(0)
+      expect(recording.calls.filter((call) => call === 'play')).toHaveLength(1)
+
+      yield* recording.emit({ didJustFinish: true, playing: false })
+      yield* Effect.yieldNow
+      expect(finished).toBe(1)
+      expect(storage.cleared).toEqual([track.id])
+      expect(yield* core.isDesiredPlaying).toBe(false)
+      yield* recording.emit({ didJustFinish: true, playing: false })
+      yield* Effect.yieldNow
+      expect(finished).toBe(1)
+      expect(storage.cleared).toEqual([track.id])
+
+      // A platform-originated replay re-arms completion without a UI play command.
+      yield* recording.emit({ didJustFinish: false, playing: true })
       yield* Effect.yieldNow
       yield* recording.emit({ didJustFinish: true, playing: false })
       yield* Effect.yieldNow
+      expect(finished).toBe(2)
+      expect(storage.cleared).toEqual([track.id, track.id])
+
       yield* core.play(track.id)
       yield* recording.emit({ didJustFinish: false, playing: true })
       yield* Effect.yieldNow
@@ -255,8 +279,8 @@ describe('makePlayerCore', () => {
       yield* Effect.yieldNow
       expect(recording.calls).toContain('seek:0')
       expect(recording.calls.filter((call) => call === 'play')).toHaveLength(2)
-      expect(finished).toBe(2)
-      expect(storage.cleared).toEqual([track.id, track.id])
+      expect(finished).toBe(3)
+      expect(storage.cleared).toEqual([track.id, track.id, track.id])
     }).pipe(Effect.scoped, Effect.runPromise)
   })
 
@@ -364,97 +388,6 @@ describe('makePlayerCore', () => {
     expect(calls.filter((call) => call === 'play')).toHaveLength(1)
     expect(calls).toContain('pause')
     expect(desired).toBe(false)
-  })
-
-  it('ignores completion before the source has started', async () => {
-    const program = Effect.gen(function* () {
-      const { engine, emit, setStatus } = yield* makeRecordingEngine()
-      const storage = makeRecordingStorage()
-      const reporter = makeRecordingReporter()
-      let finished = 0
-
-      const core = yield* makePlayerCore({
-        onStatus: () => {},
-        onTrackFinished: () => {
-          finished += 1
-        },
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(Layer.succeed(AudioEngine, engine), storage.layer, reporter.layer),
-        ),
-      )
-
-      yield* core.requestPlayOnReady(track.id)
-      yield* setStatus({ isLoaded: false, duration: 0, didJustFinish: true })
-      yield* core.setSource(track)
-      yield* Effect.yieldNow
-
-      const beforeReadyFinish = finished
-      yield* emit({ isLoaded: true, duration: 300, didJustFinish: false })
-      yield* Effect.yieldNow
-
-      const beforeCompletionFinish = finished
-      yield* emit({ didJustFinish: true, playing: false })
-      yield* Effect.yieldNow
-
-      return {
-        beforeReadyFinish,
-        beforeCompletionFinish,
-        finished,
-        cleared: storage.cleared,
-      }
-    }).pipe(Effect.scoped)
-
-    const { beforeReadyFinish, beforeCompletionFinish, finished, cleared } =
-      await Effect.runPromise(program)
-
-    expect(beforeReadyFinish).toBe(0)
-    expect(beforeCompletionFinish).toBe(0)
-    expect(finished).toBe(1)
-    expect(cleared).toEqual([track.id])
-  })
-
-  it('consumes completion exactly once and re-arms after replay', async () => {
-    const program = Effect.gen(function* () {
-      const { engine, emit, setStatus } = yield* makeRecordingEngine()
-      const storage = makeRecordingStorage()
-      const reporter = makeRecordingReporter()
-      let finished = 0
-
-      const core = yield* makePlayerCore({
-        onStatus: () => {},
-        onTrackFinished: () => {
-          finished += 1
-        },
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(Layer.succeed(AudioEngine, engine), storage.layer, reporter.layer),
-        ),
-      )
-
-      yield* core.requestPlayOnReady(track.id)
-      yield* setStatus({ isLoaded: true, duration: 300 })
-      yield* core.setSource(track)
-      yield* Effect.yieldNow
-      yield* emit({ didJustFinish: true, playing: false })
-      yield* Effect.yieldNow
-
-      const afterCompletionDesired = yield* core.isDesiredPlaying
-      yield* emit({ didJustFinish: true, playing: false })
-      yield* Effect.yieldNow
-      yield* emit({ playing: true, didJustFinish: false })
-      yield* Effect.yieldNow
-      yield* emit({ didJustFinish: true, playing: false })
-      yield* Effect.yieldNow
-
-      return { afterCompletionDesired, finished, cleared: storage.cleared }
-    }).pipe(Effect.scoped)
-
-    const { afterCompletionDesired, finished, cleared } = await Effect.runPromise(program)
-
-    expect(afterCompletionDesired).toBe(false)
-    expect(finished).toBe(2)
-    expect(cleared).toEqual([track.id, track.id])
   })
 
   it('does not re-arm or finish a detached source after completion', async () => {
@@ -608,41 +541,6 @@ describe('makePlayerCore', () => {
     expect(errors).toContain('Playback was refused by the platform')
   })
 
-  it('tears down the source and clears it when set to null', async () => {
-    const program = Effect.gen(function* () {
-      const { engine, calls, setStatus } = yield* makeRecordingEngine()
-      const storage = makeRecordingStorage()
-      const reporter = makeRecordingReporter()
-
-      const core = yield* makePlayerCore({
-        onStatus: () => {},
-        onTrackFinished: () => {},
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(Layer.succeed(AudioEngine, engine), storage.layer, reporter.layer),
-        ),
-      )
-
-      yield* setStatus({ isLoaded: true, duration: 300 })
-      yield* core.setSource(track)
-      yield* Effect.yieldNow
-
-      yield* core.setSource(null)
-      yield* Effect.yieldNow
-
-      return { calls, trackId: yield* core.currentTrackId }
-    }).pipe(Effect.scoped)
-
-    const { calls, trackId } = await Effect.runPromise(program)
-
-    expect(trackId).toBeNull()
-    expect(calls).toContain('nowPlaying:null')
-    expect(calls).toContain('clearSource')
-    expect(calls.lastIndexOf('pause')).toBeLessThan(calls.indexOf('clearSource'))
-    expect(calls.indexOf('clearSource')).toBeLessThan(calls.indexOf('nowPlaying:null'))
-    expect(calls.lastIndexOf('clearSource')).toBeGreaterThan(calls.indexOf('replace:' + track.url))
-  })
-
   it('ignores delayed statuses from the previous source', async () => {
     const nextTrack: QueueTrackType = {
       ...track,
@@ -714,9 +612,9 @@ describe('makePlayerCore', () => {
     expect(result.trackId).toBe(nextTrack.id)
   })
 
-  it('ignores late non-null statuses after the source is cleared', async () => {
+  it('clears the source in order and ignores its late non-null statuses', async () => {
     const program = Effect.gen(function* () {
-      const { engine, emit, setStatus } = yield* makeRecordingEngine()
+      const { engine, calls, emit, setStatus } = yield* makeRecordingEngine()
       const storage = makeRecordingStorage()
       const reporter = makeRecordingReporter()
       const observed: Array<EngineStatus> = []
@@ -738,6 +636,15 @@ describe('makePlayerCore', () => {
       yield* Effect.yieldNow
       yield* core.setSource(null)
       yield* Effect.yieldNow
+      expect(yield* core.currentTrackId).toBeNull()
+      expect(calls).toContain('nowPlaying:null')
+      expect(calls).toContain('pause')
+      expect(calls).toContain('clearSource')
+      expect(calls.lastIndexOf('pause')).toBeLessThan(calls.indexOf('clearSource'))
+      expect(calls.indexOf('clearSource')).toBeLessThan(calls.indexOf('nowPlaying:null'))
+      expect(calls.lastIndexOf('clearSource')).toBeGreaterThan(
+        calls.indexOf('replace:' + track.url),
+      )
       const beforeLateStatus = observed.length
 
       yield* emit({

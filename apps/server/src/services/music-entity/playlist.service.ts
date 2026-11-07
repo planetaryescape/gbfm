@@ -1,6 +1,7 @@
-import { and, asc, desc, eq } from 'drizzle-orm'
-import { Effect } from 'effect'
+import { and, asc, desc, eq, isNotNull, lte, or } from 'drizzle-orm'
+import { Clock, Effect } from 'effect'
 
+import { user } from '@/db/auth.schema'
 import { Database } from '@/db/layer'
 import { musicEntityLinksTable, musicPlaylistsTable } from '@/db/music-entity.schema'
 import { DatabaseError, getErrorMessage } from '@/errors'
@@ -22,6 +23,96 @@ export interface CreatePlaylistInput {
   publishedAt?: Date | null
   createdById?: string | null
 }
+
+/** Only trusted browser session readers may see their own unpublished playlists. */
+export interface PlaylistReader {
+  readonly id: string
+  readonly role: string
+}
+
+/** D3: catalogue timestamps are not privacy gates; playlist timestamps are. */
+export const publicPlaylistPredicate = (now: Date) =>
+  and(isNotNull(musicPlaylistsTable.publishedAt), lte(musicPlaylistsTable.publishedAt, now))
+
+export const readablePlaylistPredicate = (now: Date, reader?: PlaylistReader) =>
+  reader?.role === 'admin'
+    ? undefined
+    : reader
+      ? or(publicPlaylistPredicate(now), eq(musicPlaylistsTable.createdById, reader.id))
+      : publicPlaylistPredicate(now)
+
+/** Shared anonymous/browser read policy. Never pass an MCP principal as reader. */
+export const getReadablePlaylistsEffect = (reader?: PlaylistReader, id?: string) =>
+  Effect.gen(function* () {
+    const db = yield* Database
+    const now = new Date(yield* Clock.currentTimeMillis)
+
+    return yield* Effect.tryPromise({
+      try: async () => {
+        const [account] = reader
+          ? await db
+              .select({ role: user.role, banned: user.banned })
+              .from(user)
+              .where(eq(user.id, reader.id))
+              .limit(1)
+          : []
+
+        const currentReader =
+          reader && account && !account.banned
+            ? { id: reader.id, role: account.role ?? 'user' }
+            : undefined
+
+        const rows = await db
+          .select({ playlist: musicPlaylistsTable, spotifyUrl: musicEntityLinksTable.url })
+          .from(musicPlaylistsTable)
+          .leftJoin(
+            musicEntityLinksTable,
+            and(
+              eq(musicEntityLinksTable.entityType, 'playlist'),
+              eq(musicEntityLinksTable.entityId, musicPlaylistsTable.id),
+              eq(musicEntityLinksTable.platform, 'spotify'),
+              eq(musicEntityLinksTable.status, 'verified'),
+            ),
+          )
+          .where(
+            and(
+              readablePlaylistPredicate(now, currentReader),
+              id ? eq(musicPlaylistsTable.id, id) : undefined,
+            ),
+          )
+          .orderBy(desc(musicPlaylistsTable.createdAt), asc(musicPlaylistsTable.id))
+
+        return rows.map(({ playlist, spotifyUrl }) => ({ ...playlist, spotifyUrl }))
+      },
+      catch: () =>
+        new DatabaseError({
+          message: 'Could not read playlists',
+          operation: 'select',
+          table: 'music_playlists',
+        }),
+    })
+  })
+
+export const getReadablePlaylistByIdEffect = (id: string, reader?: PlaylistReader) =>
+  getReadablePlaylistsEffect(reader, id).pipe(
+    Effect.flatMap((rows) => requireOne(rows, 'MusicPlaylist', id)),
+  )
+
+/** Explicit public projection, reusable by editorial validation and public MCP reads. */
+export const getPublicPlaylistEffect = (id: string) =>
+  getReadablePlaylistByIdEffect(id).pipe(
+    Effect.map((row) => ({
+      id: row.id,
+      title: row.title,
+      slug: row.slug,
+      description: row.description,
+      coverImageUrl: row.coverImageUrl,
+      publishedAt: row.publishedAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      revision: row.revision,
+    })),
+  )
 
 export const createPlaylistEffect = Effect.fn('musicEntity.createPlaylist')(function* (
   data: CreatePlaylistInput,

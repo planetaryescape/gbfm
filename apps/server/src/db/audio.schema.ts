@@ -1,6 +1,14 @@
 import type { RichContentDocument } from '@gbfm/rich-content/schema'
-import { type InferInsertModel, type InferSelectModel, relations } from 'drizzle-orm'
-import { index, integer, sqliteTable, primaryKey, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { type InferInsertModel, type InferSelectModel, relations, sql } from 'drizzle-orm'
+import {
+  check,
+  index,
+  integer,
+  sqliteTable,
+  primaryKey,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core'
 
 import { user } from './auth.schema'
 import { musicArtistsTable } from './music-entity.schema'
@@ -21,8 +29,18 @@ export const audioTable = sqliteTable(
     showId: text().references(() => showsTable.id, { onDelete: 'set null' }),
     episodeNumber: integer(),
     playCount: integer().notNull().default(0),
+    revision: integer().notNull().default(0),
+    lastOperationId: text('last_operation_id'),
   },
   (table) => [
+    check(
+      'audio_revision_check',
+      sql`typeof(${table.revision}) = 'integer' AND ${table.revision} BETWEEN 0 AND 9007199254740991`,
+    ),
+    check(
+      'audio_operation_check',
+      sql`${table.lastOperationId} IS NULL OR length(${table.lastOperationId}) = 36`,
+    ),
     index('audio_slug_idx').on(table.slug),
     uniqueIndex('audio_type_slug_unique').on(table.type, table.slug),
     uniqueIndex('audio_actor_idempotency_unique').on(

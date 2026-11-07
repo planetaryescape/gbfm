@@ -1,0 +1,31 @@
+CREATE TABLE music_metadata_proposals (
+  id TEXT PRIMARY KEY NOT NULL,
+  actor_id TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  client_id TEXT NOT NULL REFERENCES oauth_client(client_id) ON DELETE CASCADE,
+  resource TEXT NOT NULL REFERENCES oauth_resource(identifier) ON DELETE CASCADE,
+  target_type TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  target_revision INTEGER NOT NULL,
+  field TEXT NOT NULL,
+  current_value TEXT NOT NULL,
+  proposed_value TEXT NOT NULL,
+  evidence TEXT NOT NULL,
+  proposal_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  revision INTEGER NOT NULL DEFAULT 0,
+  last_operation_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  CHECK (target_type IN ('artist','album','track','label') AND length(target_id) > 0),
+  CHECK ((target_type = 'artist' AND field IN ('name','bio')) OR (target_type IN ('album','track') AND field = 'title') OR (target_type = 'label' AND field IN ('name','description'))),
+  CHECK (json_valid(current_value) AND json_valid(proposed_value) AND json_type(current_value) IN ('text','null') AND json_type(proposed_value) IN ('text','null') AND current_value <> proposed_value),
+  CHECK (CASE WHEN field IN ('name','title') THEN json_type(current_value) = 'text' AND length(trim(json_extract(current_value, '$'))) > 0 AND length(json_extract(current_value, '$')) <= 500 AND json_type(proposed_value) = 'text' AND length(trim(json_extract(proposed_value, '$'))) > 0 AND length(json_extract(proposed_value, '$')) <= 500 ELSE (json_type(current_value) = 'null' OR length(json_extract(current_value, '$')) <= 2000) AND (json_type(proposed_value) = 'null' OR length(json_extract(proposed_value, '$')) <= 2000) END),
+  CHECK (json_valid(evidence) AND json_type(evidence) = 'array' AND json_array_length(evidence) BETWEEN 1 AND 5),
+  CHECK (length(proposal_hash) = 64 AND proposal_hash NOT GLOB '*[^0-9a-f]*'),
+  CHECK (status IN ('pending','accepted','rejected')),
+  CHECK (typeof(revision) = 'integer' AND revision BETWEEN 0 AND 9007199254740991 AND typeof(target_revision) = 'integer' AND target_revision BETWEEN 0 AND 9007199254740991),
+  CHECK (last_operation_id IS NULL OR length(last_operation_id) = 36),
+  CHECK (typeof(created_at) = 'integer' AND created_at BETWEEN 0 AND 9007199254740991 AND typeof(updated_at) = 'integer' AND updated_at BETWEEN created_at AND 9007199254740991)
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX music_metadata_proposals_pending_uq ON music_metadata_proposals(actor_id,client_id,resource,target_type,target_id,target_revision,field,proposal_hash) WHERE status = 'pending';

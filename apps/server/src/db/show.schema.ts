@@ -1,6 +1,14 @@
 import type { RichContentDocument } from '@gbfm/rich-content/schema'
-import { type InferInsertModel, type InferSelectModel, relations } from 'drizzle-orm'
-import { index, integer, primaryKey, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
+import { type InferInsertModel, type InferSelectModel, relations, sql } from 'drizzle-orm'
+import {
+  check,
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  unique,
+} from 'drizzle-orm/sqlite-core'
 
 import { user } from './auth.schema'
 import { defaultContentFields } from './util'
@@ -9,8 +17,20 @@ export const showsTable = sqliteTable(
   'shows',
   {
     ...defaultContentFields,
+    revision: integer().notNull().default(0),
+    lastOperationId: text('last_operation_id'),
   },
-  (table) => [index('shows_slug_idx').on(table.slug)],
+  (table) => [
+    index('shows_slug_idx').on(table.slug),
+    check(
+      'shows_revision_check',
+      sql`typeof(${table.revision}) = 'integer' AND ${table.revision} BETWEEN 0 AND 9007199254740991`,
+    ),
+    check(
+      'shows_operation_check',
+      sql`${table.lastOperationId} IS NULL OR length(${table.lastOperationId}) = 36`,
+    ),
+  ],
 )
 
 export type SelectShow = InferSelectModel<typeof showsTable> & { tags: Array<string> | null }

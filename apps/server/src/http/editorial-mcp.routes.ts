@@ -1,10 +1,11 @@
 import { oauthProviderAuthServerMetadata } from '@better-auth/oauth-provider'
 import { Context, Effect, Layer, Match, Option, Redacted, Schema, Stream } from 'effect'
-import type { Tool, Toolkit } from 'effect/ai'
+import { McpSchema, type Tool, type Toolkit } from 'effect/ai'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
 
 import { Auth } from '@/lib/auth'
 import { McpPermission } from '@/mcp/authorization'
+import { EditorialToolError } from '@/mcp/contracts'
 import { EditorialDraftServiceLayer } from '@/mcp/drafts'
 import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from '@/mcp/editorial'
 import { EditorialMcpSettings } from '@/mcp/model'
@@ -74,6 +75,12 @@ const boundMcpBody = Effect.fn('EditorialMcp.boundBody')(function* <E>(
 
 const MAX_MCP_JSON_BYTES = 256 * 1024
 
+const ToolCallRequest = Schema.Struct({
+  ...McpSchema.JsonRpcRequest.fields,
+  method: Schema.Literal('tools/call'),
+  params: Schema.Struct({ name: Schema.String }),
+})
+
 const ToolListing = Schema.StructWithRest(
   Schema.Struct({
     result: Schema.StructWithRest(
@@ -115,7 +122,7 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>>(
       const origin = new URL(settings.resourceUrl).origin
       const origins = [origin, new URL(config.urls.frontend).origin]
       const resourceMetadata = `${origin}/.well-known/oauth-protected-resource/mcp`
-      const challenge = `Bearer resource_metadata="${resourceMetadata}"`
+      const challenge = `Bearer resource_metadata="${resourceMetadata}", scope="posts:read"`
 
       const unauthorized = Effect.succeed(
         HttpServerResponse.empty({
@@ -164,6 +171,53 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>>(
                         if (Option.isNone(bounded))
                           return noStore(HttpServerResponse.empty({ status: 413 }))
 
+                        const visible = new Set(
+                          Object.values(toolkit.tools)
+                            .filter((tool) => {
+                              const permission = Context.getOption(tool.annotations, McpPermission)
+
+                              return (
+                                Option.isSome(permission) &&
+                                permission.value.scopes.every((scope) =>
+                                  principal.scopes.includes(scope),
+                                )
+                              )
+                            })
+                            .map((tool) => tool.name),
+                        )
+
+                        const call = Schema.decodeUnknownOption(
+                          Schema.fromJsonString(ToolCallRequest),
+                        )(new TextDecoder().decode(bounded.value))
+
+                        // Unknown/malformed calls stay with MCP's protocol validator. Registered
+                        // tools cannot bypass declared permission by guessing a hidden wire name.
+                        if (
+                          Option.isSome(call) &&
+                          Object.values(toolkit.tools).some(
+                            (tool) => tool.name === call.value.params.name,
+                          ) &&
+                          !visible.has(call.value.params.name)
+                        )
+                          return yield* HttpServerResponse.json({
+                            jsonrpc: '2.0',
+                            id: call.value.id,
+                            result: {
+                              isError: true,
+                              content: [
+                                {
+                                  type: 'text',
+                                  text: JSON.stringify(
+                                    new EditorialToolError({
+                                      code: 'access_denied',
+                                      message: 'MCP access denied.',
+                                    }),
+                                  ),
+                                },
+                              ],
+                            },
+                          }).pipe(Effect.map(noStore), Effect.orDie)
+
                         const response = yield* httpEffect.pipe(
                           Effect.provideService(EditorialActor, principal),
                           Effect.provideService(
@@ -203,21 +257,6 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>>(
                             ),
                           )
                         const text = new TextDecoder().decode(body.value)
-
-                        const visible = new Set(
-                          Object.values(toolkit.tools)
-                            .filter((tool) => {
-                              const permission = Context.getOption(tool.annotations, McpPermission)
-
-                              return (
-                                Option.isSome(permission) &&
-                                permission.value.scopes.every((scope) =>
-                                  principal.scopes.includes(scope),
-                                )
-                              )
-                            })
-                            .map((tool) => tool.name),
-                        )
 
                         const filterListing = (json: string) => {
                           const listing = Schema.decodeUnknownOption(

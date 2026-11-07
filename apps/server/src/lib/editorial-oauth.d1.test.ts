@@ -8,6 +8,7 @@ import { Database } from '@/db/layer'
 import {
   oauthAccessToken,
   oauthClient,
+  oauthConsent,
   oauthRefreshToken,
   oauthResource,
   rateLimit,
@@ -19,6 +20,24 @@ import { createEditorialOAuthFixture, OAuthTokens } from '@/test/editorial-oauth
 import { withTestLayer } from '@/test/effect'
 
 describe('editorial OAuth provider on migrated D1', () => {
+  test('default resource policy rejects expanded listener scopes before consent', async () => {
+    await using fixture = await createEditorialOAuthFixture()
+    const clientId = await fixture.register('catalogue:read offline_access')
+
+    const authorization = await fixture.request(
+      `/oauth2/authorize?${fixture.authorizationQuery(clientId, 'catalogue:read offline_access')}`,
+      undefined,
+      'reader',
+    )
+
+    expect(authorization.status).toBe(400)
+    expect(await authorization.json()).toMatchObject({ error: 'invalid_scope' })
+    expect(await fixture.db.select().from(oauthConsent)).toHaveLength(0)
+    expect(
+      await Effect.runPromise(fixture.service.listConnections(UserId.make('reader'))),
+    ).toHaveLength(0)
+  })
+
   test('listener-only scopes require fresh consent and an explicitly enabled disposable resource', async () => {
     await using fixture = await createEditorialOAuthFixture()
     const scope = 'catalogue:read offline_access'
@@ -48,6 +67,15 @@ describe('editorial OAuth provider on migrated D1', () => {
         'offline_access',
       ]),
     })
+
+    const expandedAuthorization = await fixture.request(
+      `/oauth2/authorize?${fixture.authorizationQuery(clientId, 'posts:read catalogue:read offline_access')}`,
+      undefined,
+      'owner',
+    )
+
+    const expandedLocation = new URL(expandedAuthorization.headers.get('location') ?? '')
+    expect(expandedLocation.pathname).toBe('/connect/gbfm/consent')
 
     const authorization = await fixture.request(
       `/oauth2/authorize?${fixture.authorizationQuery(clientId, scope)}`,

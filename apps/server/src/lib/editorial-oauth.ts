@@ -19,6 +19,7 @@ import {
   editorialOAuthEpoch,
   editorialOAuthRevokedGrant,
   oauthRefreshToken,
+  oauthResource,
 } from '@/db/oauth.schema'
 import {
   BoundedOAuthRegistrationPayload,
@@ -45,6 +46,41 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
   const GrantSession = Schema.Struct({ impersonatedBy: Schema.optional(Schema.NullOr(UserId)) })
 
   const authorizeAccount = async (userId: UserId, scopes: McpScopes = ['posts:read']) => {
+    const [resource] = await db
+      .select({ disabled: oauthResource.disabled, allowedScopes: oauthResource.allowedScopes })
+      .from(oauthResource)
+      .where(eq(oauthResource.identifier, mcp.resourceUrl))
+      .limit(1)
+      .catch(() => {
+        throw new APIError('SERVICE_UNAVAILABLE', { message: 'MCP resource unavailable' })
+      })
+
+    const policy = Schema.decodeUnknownOption(
+      Schema.Struct({
+        disabled: Schema.NullOr(Schema.Boolean),
+        allowedScopes: Schema.NullOr(Schema.fromJsonString(Schema.Array(McpScope))),
+      }),
+    )(resource).pipe(
+      Option.getOrThrowWith(
+        () => new APIError('SERVICE_UNAVAILABLE', { message: 'MCP resource unavailable' }),
+      ),
+    )
+
+    // Preserve legacy drafts:write downscoping, but never consent to disabled new capabilities.
+    if (
+      policy.disabled ||
+      scopes.some(
+        (scope) =>
+          scope !== 'drafts:write' &&
+          policy.allowedScopes !== null &&
+          !policy.allowedScopes.includes(scope),
+      )
+    )
+      throw new APIError('BAD_REQUEST', {
+        error: 'invalid_scope',
+        error_description: 'Requested MCP scope is not enabled for this resource',
+      })
+
     const [row] = await db
       .select({ role: userTable.role, banned: userTable.banned })
       .from(userTable)

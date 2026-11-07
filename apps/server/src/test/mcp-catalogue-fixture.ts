@@ -32,6 +32,13 @@ const CatalogueFixture = Toolkit.make(
   })
     .annotate(McpPermission, { scopes: ['catalogue:read'] })
     .annotate(Tool.Readonly, true),
+  // Deliberately lacks a handler check: the transport must enforce declared scopes too.
+  Tool.make('fixture_declared_permission', {
+    parameters: Schema.Struct({ nonce: Schema.String }),
+    success: Schema.Struct({ nonce: Schema.String }),
+    failure: EditorialToolError,
+    failureMode: 'return',
+  }).annotate(McpPermission, { scopes: ['catalogue:write'] }),
 )
 
 const handlers = CatalogueFixture.toLayer(
@@ -40,6 +47,7 @@ const handlers = CatalogueFixture.toLayer(
     const db = yield* Database
 
     return {
+      fixture_declared_permission: ({ nonce }) => Effect.succeed({ nonce }),
       fixture_catalogue_artist: ({ id }) =>
         Effect.gen(function* () {
           yield* authorization.catalogue

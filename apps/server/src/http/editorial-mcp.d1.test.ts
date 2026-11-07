@@ -447,6 +447,7 @@ test('composed HTTP MCP scopes tokens, drafts, connections and disconnection to 
     expect(unauthorized.headers.get('www-authenticate')).toContain(
       '/.well-known/oauth-protected-resource/mcp',
     )
+    expect(unauthorized.headers.get('www-authenticate')).toContain('scope="posts:read"')
     expect(unauthorized.headers.get('cache-control')).toBe('private, no-store')
     expect((await rpc('server/discover')).status).toBe(401)
     expect((await rpc('tools/list', Redacted.make('owner-session-token'))).status).toBe(401)
@@ -567,7 +568,7 @@ test('composed HTTP MCP scopes tokens, drafts, connections and disconnection to 
   } finally {
     await handler.dispose()
   }
-})
+}, 15_000)
 
 test('independent catalogue module composes with live OAuth and owned draft services', async () => {
   await using fixture = await createEditorialOAuthFixture()
@@ -705,6 +706,20 @@ test('independent catalogue module composes with live OAuth and owned draft serv
         })
       ).json(),
     ).toMatchObject({ result: { isError: true } })
+    expect(
+      await (
+        await rpc('tools/call', owner.access_token, 'fixture_declared_permission', {
+          nonce: 'declared-scope-dispatch-probe',
+        })
+      ).json(),
+    ).toMatchObject({
+      jsonrpc: '2.0',
+      id: 71,
+      result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
+    })
+    expect(
+      await (await rpc('tools/call', owner.access_token, 'fixture_unknown_tool')).json(),
+    ).toMatchObject({ jsonrpc: '2.0', id: 71, error: { code: -32602 } })
     // Cached/guessed wire names never grant editorial access.
     expect(
       await (

@@ -2,7 +2,7 @@ import { McpPrincipal } from '@gbfm/core/editorial-mcp'
 import { UserId } from '@gbfm/core/identity'
 import { eq } from 'drizzle-orm'
 import { Effect, Layer, Schema } from 'effect'
-import { HttpRouter, HttpServer } from 'effect/http'
+import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
@@ -106,6 +106,9 @@ test('missing targets/references, unsupported fields and unauthorized accounts d
   await expect(
     preview({ operation: 'set_album_type', entityId: 'missing', albumType: 'LP' }),
   ).rejects.toMatchObject({ code: 'not_found' })
+  await expect(
+    preview({ operation: 'set_track_album', entityId: 'missing', albumId: null }),
+  ).rejects.toMatchObject({ code: 'not_found' })
 
   for (const input of [
     { operation: 'set_album_type', entityId: 'm1-album', albumType: 'bogus' },
@@ -118,11 +121,15 @@ test('missing targets/references, unsupported fields and unauthorized accounts d
   await expect(preview({}, { ...actor, scopes: ['catalogue:read'] })).rejects.toMatchObject({
     code: 'access_denied',
   })
-  await db.update(user).set({ role: 'creator' }).where(eq(user.id, actorId))
-  await expect(preview({})).rejects.toMatchObject({ code: 'access_denied' })
-  await db.update(user).set({ role: 'admin', banned: true }).where(eq(user.id, actorId))
-  await expect(preview({})).rejects.toMatchObject({ code: 'access_denied' })
-  await db.update(user).set({ banned: false }).where(eq(user.id, actorId))
+
+  try {
+    await db.update(user).set({ role: 'creator' }).where(eq(user.id, actorId))
+    await expect(preview({})).rejects.toMatchObject({ code: 'access_denied' })
+    await db.update(user).set({ role: 'admin', banned: true }).where(eq(user.id, actorId))
+    await expect(preview({})).rejects.toMatchObject({ code: 'access_denied' })
+  } finally {
+    await db.update(user).set({ role: 'admin', banned: false }).where(eq(user.id, actorId))
+  }
 })
 
 const app = HttpRouter.toWebHandler(
@@ -133,14 +140,24 @@ const app = HttpRouter.toWebHandler(
   ),
   {
     disableLogger: true,
-    middleware: (effect) => effect.pipe(Effect.provideService(McpActor, actor)),
+    middleware: (effect) =>
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+
+        const principal =
+          request.headers['x-fixture-scope'] === 'read'
+            ? { ...actor, scopes: ['catalogue:read'] as const }
+            : actor
+
+        return yield* effect.pipe(Effect.provideService(McpActor, principal))
+      }),
   },
 )
 
 afterAll(() => app.dispose())
 
-test('real MCP 2026-07-28 tools/call returns the bounded read-only result', async () => {
-  const response = await app.handler(
+const callPreview = (change: Schema.Json, scope: 'read' | 'write' = 'write') =>
+  app.handler(
     new Request('https://m1.example.test/mcp', {
       method: 'POST',
       headers: {
@@ -149,6 +166,7 @@ test('real MCP 2026-07-28 tools/call returns the bounded read-only result', asyn
         'mcp-protocol-version': '2026-07-28',
         'mcp-method': 'tools/call',
         'mcp-name': 'preview_metadata_changes',
+        'x-fixture-scope': scope,
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
@@ -156,13 +174,7 @@ test('real MCP 2026-07-28 tools/call returns the bounded read-only result', asyn
         method: 'tools/call',
         params: {
           name: 'preview_metadata_changes',
-          arguments: {
-            change: {
-              operation: 'set_track_album',
-              entityId: 'm1-track',
-              albumId: 'm1-other-album',
-            },
-          },
+          arguments: { change },
           _meta: {
             'io.modelcontextprotocol/protocolVersion': '2026-07-28',
             'io.modelcontextprotocol/clientCapabilities': {},
@@ -171,6 +183,13 @@ test('real MCP 2026-07-28 tools/call returns the bounded read-only result', asyn
       }),
     }),
   )
+
+test('real MCP 2026-07-28 tools/call returns the bounded read-only result', async () => {
+  const response = await callPreview({
+    operation: 'set_track_album',
+    entityId: 'm1-track',
+    albumId: 'm1-other-album',
+  })
 
   expect(response.status).toBe(200)
 
@@ -186,5 +205,54 @@ test('real MCP 2026-07-28 tools/call returns the bounded read-only result', asyn
     after: 'm1-other-album',
     applyAvailable: false,
   })
-  expect((await db.select().from(musicTracksTable))[0]?.albumId).toBe('m1-album')
+  expect(
+    (await db.select().from(musicTracksTable).where(eq(musicTracksTable.id, 'm1-track')))[0]
+      ?.albumId,
+  ).toBe('m1-album')
+})
+
+test('protocol validates before service authorization and uses framework errors for malformed parameters', async () => {
+  const response = await callPreview(
+    {
+      operation: 'set_album_type',
+      entityId: 'm1-album',
+      albumType: 'LP',
+      publishedAt: 'now',
+    },
+    'read',
+  )
+
+  const envelope = Schema.decodeUnknownSync(
+    Schema.Struct({
+      result: Schema.Struct({
+        isError: Schema.Boolean,
+        content: Schema.Array(Schema.Struct({ type: Schema.Literal('text'), text: Schema.String })),
+      }),
+    }),
+  )(await response.json())
+
+  expect(envelope.result.isError).toBe(true)
+  expect(envelope.result.content[0]?.text).toContain('Invalid parameters')
+  expect(envelope.result.content[0]?.text).toContain('publishedAt')
+
+  const valid = await callPreview(
+    {
+      operation: 'set_album_type',
+      entityId: 'm1-album',
+      albumType: 'LP',
+    },
+    'read',
+  )
+
+  const denied = Schema.decodeUnknownSync(
+    Schema.Struct({
+      result: Schema.Struct({
+        isError: Schema.Boolean,
+        content: Schema.Array(Schema.Struct({ type: Schema.Literal('text'), text: Schema.String })),
+      }),
+    }),
+  )(await valid.json())
+
+  expect(denied.result.isError).toBe(true)
+  expect(denied.result.content[0]?.text).toContain('access_denied')
 })

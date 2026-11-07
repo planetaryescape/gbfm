@@ -54,10 +54,15 @@ Central transport must retain its full 256 KiB envelope ceiling and lower reques
 limits. Real HTTP tests exercise ordinary, escaped and multibyte names on both sides
 of the budget; the failure retains the smaller-page/batch guidance.
 
-## Query admission and index scope — integration/production HOLD
+## Query admission and index scope — reviewed integration authorized; production HOLD
 
-Guide Fari authorized scoped query/index implementation, not integration, production
-migration or policy activation. Migration `0015_music_catalogue_read_indexes.sql`
+Guide Fari authorized scoped query/index implementation, then lifted the integration
+hold for reviewed incorporation, as relayed by Space/P1 on 7 November 2026. P1 remains
+the sole shared migration/integration coordinator; actual-head review and composed
+R1/R3/legacy proof are still required. This is not a testing waiver or permission to
+merge, enable auto-merge, deploy, migrate production, or activate live policy/data.
+The documented availability/resource limitations remain real. Both R1 PRs stay normal
+OPEN, unmerged, with auto-merge off. Migration `0015_music_catalogue_read_indexes.sql`
 adds six relationship access paths and four exact-name expression keys; two existing
 reverse-label indexes are widened, not duplicated. No tables/columns, FTS or data
 policy change. SQLite maintains these indexes on existing insert/update/delete writers.

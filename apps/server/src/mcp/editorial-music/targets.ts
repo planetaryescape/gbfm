@@ -1,5 +1,5 @@
 import type { DraftMusicTarget } from '@gbfm/core/post-music-references'
-import { and, eq, exists, sql } from 'drizzle-orm'
+import { sql } from 'drizzle-orm'
 import { Clock, Effect } from 'effect'
 
 import { canonicalPostMusicTarget } from '@/db/guarded-post-update'
@@ -83,37 +83,34 @@ export const draftMusicTargetsGuard = (
   db: DatabaseClient,
   targets: ReadonlyArray<DraftMusicTarget>,
   now: Date,
-) =>
-  and(
-    ...targets.map((target) => {
-      if (target.entityType === 'playlist')
-        return exists(
-          db
-            .select({ id: musicPlaylistsTable.id })
-            .from(musicPlaylistsTable)
-            .where(
-              and(
-                eq(musicPlaylistsTable.id, target.entityId),
-                sql`(SELECT count(*) FROM music_playlists WHERE lower(id) = ${target.entityId.toLowerCase()}) = 1`,
-                publicPlaylistPredicate(now),
-              ),
-            ),
-        )
-      const table = target.entityType === 'album' ? musicAlbumsTable : musicTracksTable
+) => {
+  // One collection bind regardless of cardinality. Count all case-equivalent rows before applying
+  // exact stored spelling/visibility, so a hidden case collision cannot pick an arbitrary identity.
+  const id = sql`json_extract(submitted.value, '$.entityId')`
 
-      return exists(
-        db
-          .select({ id: table.id })
-          .from(table)
-          .where(
-            and(
-              eq(table.id, target.entityId),
-              sql`(SELECT count(*) FROM ${table} WHERE lower(id) = ${target.entityId.toLowerCase()}) = 1`,
-            ),
-          ),
-      )
-    }),
-  )
+  const canonical = (table: typeof musicAlbumsTable | typeof musicTracksTable) =>
+    db
+      .select({ eligible: sql`count(*) = 1 AND min(${table.id}) = ${id}` })
+      .from(table)
+      .where(sql`lower(${table.id}) = lower(${id})`)
+
+  const playlist = db
+    .select({
+      eligible: sql`count(*) = 1 AND min(${musicPlaylistsTable.id}) = ${id}
+      AND min(CASE WHEN ${publicPlaylistPredicate(now)} THEN 1 ELSE 0 END) = 1`,
+    })
+    .from(musicPlaylistsTable)
+    .where(sql`lower(${musicPlaylistsTable.id}) = lower(${id})`)
+
+  return sql`NOT EXISTS (
+    SELECT 1 FROM json_each(${JSON.stringify(targets)}) AS submitted
+    WHERE (CASE json_extract(submitted.value, '$.entityType')
+      WHEN 'album' THEN (${canonical(musicAlbumsTable)})
+      WHEN 'track' THEN (${canonical(musicTracksTable)})
+      WHEN 'playlist' THEN (${playlist})
+      ELSE 0 END) IS NOT 1
+  )`
+}
 
 /** Privacy can only subtract from the original result; replay never enriches old display metadata. */
 export const maskReferenceWriteResult = (

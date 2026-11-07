@@ -1,8 +1,14 @@
 import { ListeningDocument } from '@gbfm/api/listening'
+import { eq } from 'drizzle-orm'
 import { Schema } from 'effect'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 
 import { session, user } from '@/db/auth.schema'
+import {
+  listeningCollectionsTable as collections,
+  listeningMembershipsTable as memberships,
+  savedMixesTable as mixes,
+} from '@/db/listening.schema'
 import { db, d1 } from '@/test/database'
 import { createTestWebHandler } from '@/test/http-handler'
 
@@ -93,9 +99,18 @@ test('ordinary users own independent libraries; collection visibility never expo
   if (!mix || !draft || !collection || !privateCollection || !otherCollection)
     throw new Error('Missing fixtures')
 
-  for (const item of [mix, draft])
-    await write(`/collections/${collection.id}/mixes/${item.id}`, aya, 'PUT', { included: true })
-  await write(`/collections/${collection.id}/mixes/${mix.id}`, aya, 'PUT', { included: true })
+  expect(mix.version).toBe('revision:1')
+  expect(collection.version).toBe('revision:1')
+
+  for (const [index, item] of [mix, draft].entries())
+    await write(`/collections/${collection.id}/mixes/${item.id}`, aya, 'PUT', {
+      included: true,
+      expectedVersion: `revision:${index + 1}`,
+    })
+  await write(`/collections/${collection.id}/mixes/${mix.id}`, aya, 'PUT', {
+    included: true,
+    expectedVersion: 'revision:3',
+  })
   expect((await document('', aya)).memberships).toHaveLength(2)
   expect((await document(`/public/${collection.id}`)).mixes).toEqual([])
   expect((await request(`/public/${privateCollection.id}`, aya)).status).toBe(404)
@@ -104,6 +119,7 @@ test('ordinary users own independent libraries; collection visibility never expo
   )
 
   const edit = {
+    expectedVersion: 'revision:1',
     title: 'Opening frequencies',
     notes: 'The bass enters at 14:20. <script>not HTML</script>',
     status: 'listening',
@@ -116,6 +132,8 @@ test('ordinary users own independent libraries; collection visibility never expo
   expect(published.mixes[0]?.notes).toBe(edit.notes)
   expect(JSON.stringify(published)).not.toContain('Secret backlog')
   expect(published.mixes[0]).not.toHaveProperty('userId')
+  expect(published.mixes[0]).not.toHaveProperty('version')
+  expect(published.collections[0]).not.toHaveProperty('version')
   await save(
     aya,
     'https://www.youtube.com/watch?v=abcdefghijk&utm_source=repeat',
@@ -125,23 +143,38 @@ test('ordinary users own independent libraries; collection visibility never expo
   expect((await document('', ben)).mixes[0]?.notes).toBe('')
 
   await write(`/mixes/${mix.id}`, ben, 'PUT', edit, 404)
-  await write(`/mixes/${mix.id}`, ben, 'DELETE', undefined, 404)
+  await write(`/mixes/${mix.id}`, ben, 'DELETE', { expectedVersion: 'revision:1' }, 404)
   await write(
     `/collections/${collection.id}`,
     ben,
     'PUT',
-    { title: 'stolen', description: '', published: true },
+    { title: 'stolen', description: '', published: true, expectedVersion: 'revision:1' },
     404,
   )
-  await write(`/collections/${collection.id}`, ben, 'DELETE', undefined, 404)
+  await write(
+    `/collections/${collection.id}`,
+    ben,
+    'DELETE',
+    { expectedVersion: 'revision:1' },
+    404,
+  )
   await write(
     `/collections/${otherCollection.id}/mixes/${mix.id}`,
     ben,
     'PUT',
-    { included: true },
+    { included: true, expectedVersion: 'revision:1' },
     404,
   )
-  await write(`/collections/${collection.id}/mixes/${mix.id}`, ben, 'PUT', { included: false })
+  await write(
+    `/collections/${collection.id}/mixes/${mix.id}`,
+    ben,
+    'PUT',
+    {
+      included: false,
+      expectedVersion: 'revision:4',
+    },
+    404,
+  )
   expect((await document('', aya)).memberships).toHaveLength(2)
 
   await write(
@@ -157,11 +190,27 @@ test('ordinary users own independent libraries; collection visibility never expo
     400,
   )
   expect((await document('', aya)).mixes).toHaveLength(2)
-  await write(`/mixes/${mix.id}`, aya, 'PUT', { ...edit, published: false })
+  await write(`/mixes/${mix.id}`, aya, 'PUT', { ...edit, published: false }, 409)
+  expect((await document('', aya)).mixes.find((item) => item.id === mix.id)?.published).toBe(true)
+  await write(`/mixes/${mix.id}`, aya, 'PUT', {
+    ...edit,
+    published: false,
+    expectedVersion: 'revision:2',
+  })
   expect((await document(`/public/${collection.id}`)).mixes).toEqual([])
-  await write(`/mixes/${mix.id}`, aya, 'DELETE')
+  await write(`/mixes/${mix.id}`, aya, 'DELETE', { expectedVersion: 'revision:3' })
   expect((await document('', aya)).memberships).toHaveLength(1)
-  await write(`/collections/${collection.id}`, aya, 'DELETE')
+  expect(
+    (await document('', aya)).collections.find((item) => item.id === collection.id)?.version,
+  ).toBe('revision:5')
+  await write(
+    `/collections/${collection.id}`,
+    aya,
+    'DELETE',
+    { expectedVersion: 'revision:4' },
+    409,
+  )
+  await write(`/collections/${collection.id}`, aya, 'DELETE', { expectedVersion: 'revision:5' })
   expect((await request(`/public/${collection.id}`)).status).toBe(404)
   expect((await document('', aya)).mixes).toHaveLength(1)
   expect((await document('', aya)).memberships).toEqual([])
@@ -194,4 +243,41 @@ test('bulk capture handles the maximum batch without losing rows and validates b
     { title: '   ', description: '', published: false },
     400,
   )
+})
+
+test('delete fanout fails atomically at revision overflow and no-op membership consumes its observed version', async () => {
+  const mixId = crypto.randomUUID()
+  const collectionIds = [crypto.randomUUID(), crypto.randomUUID()] as const
+  await db.insert(mixes).values({
+    id: mixId,
+    userId: 'listener-aya',
+    url: 'https://soundcloud.com/fanout/overflow',
+    title: 'Overflow control',
+    platform: 'soundcloud',
+  })
+  await db.insert(collections).values(
+    collectionIds.map((id, index) => ({
+      id,
+      userId: 'listener-aya',
+      title: id,
+      revision: index === 0 ? 7 : Number.MAX_SAFE_INTEGER,
+    })),
+  )
+  await db
+    .insert(memberships)
+    .values(collectionIds.map((collectionId) => ({ collectionId, mixId })))
+  await write(`/mixes/${mixId}`, 'listener-aya', 'DELETE', { expectedVersion: 'revision:1' }, 409)
+  expect(await db.select().from(mixes).where(eq(mixes.id, mixId))).toHaveLength(1)
+  expect(await db.select().from(memberships).where(eq(memberships.mixId, mixId))).toHaveLength(2)
+  expect(
+    (await db.select().from(collections).where(eq(collections.id, collectionIds[0])))[0]?.revision,
+  ).toBe(7)
+
+  const path = `/collections/${collectionIds[0]}/mixes/${mixId}`
+  await write(path, 'listener-aya', 'PUT', { included: true, expectedVersion: 'revision:7' })
+  await write(path, 'listener-aya', 'PUT', { included: false, expectedVersion: 'revision:7' }, 409)
+  expect(await db.select().from(memberships).where(eq(memberships.mixId, mixId))).toHaveLength(2)
+  expect(
+    (await db.select().from(collections).where(eq(collections.id, collectionIds[0])))[0]?.revision,
+  ).toBe(8)
 })

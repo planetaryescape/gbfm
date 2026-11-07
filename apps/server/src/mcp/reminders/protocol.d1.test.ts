@@ -92,12 +92,10 @@ test('reminder discovery, owner reads, denial and byte budget through persisted 
   )
 
   const app = HttpRouter.toWebHandler(
-    makeMcpRoutes(ReminderToolkit).pipe(
-      Layer.provide(ReminderToolHandlersLayer),
-      Layer.provide(ReminderReadServiceLayer),
-      Layer.provide(services),
-      Layer.provide(HttpServer.layerServices),
-    ),
+    makeMcpRoutes(
+      ReminderToolkit,
+      ReminderToolHandlersLayer.pipe(Layer.provide(ReminderReadServiceLayer)),
+    ).pipe(Layer.provide(services), Layer.provide(HttpServer.layerServices)),
     { disableLogger: true },
   )
 

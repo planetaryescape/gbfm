@@ -123,6 +123,19 @@ resource-policy authorization are separate requirements. Canonical-music catalog
 tools and read_micro_thread are not registered; thread privacy and playlist rendering
 remain gated.
 
+Six owner/admin reads are registered but require fresh consent and an explicitly
+enabled resource policy; production allowedScopes remains unchanged:
+- list_saved_mixes: your saved mix metadata and private notes; requires listening:read.
+- list_collections: your collection metadata; requires listening:read.
+- list_favorites: your favorites pointing to currently public audio; requires favorites:read.
+- list_show_subscriptions: your subscriptions to currently public shows; requires subscriptions:read.
+- list_music_reminders: your reminder summaries, without notes or source URLs; requires reminders:read.
+- get_admin_overview: fixed draft/published publishing counts; requires admin:read and a current admin role.
+These reads do not change library state or send notifications. Listening, favorite,
+subscription and reminder commands are not registered, even with write grants.
+Existing grants do not gain these permissions automatically. Admin access is checked
+live; demotion, bans and connection revocation do not wait for token expiry.
+
 ## Other clients, including Claude Code
 
 Use the server URL above only with a client that supports Streamable HTTP, OAuth

@@ -84,8 +84,10 @@ const setup = async () => {
   )
 
   const app = HttpRouter.toWebHandler(
-    makeMcpRoutes(composeMcpToolkits(EditorialToolkit, AdminReadToolkit)).pipe(
-      Layer.provide(AdminReadToolHandlersLayer),
+    makeMcpRoutes(
+      composeMcpToolkits(EditorialToolkit, AdminReadToolkit),
+      AdminReadToolHandlersLayer,
+    ).pipe(
       Layer.provide(services),
       Layer.provide(HttpServer.layerServices),
       Layer.provide(Logger.layer([Logger.make(({ message }) => logs.push(message))])),

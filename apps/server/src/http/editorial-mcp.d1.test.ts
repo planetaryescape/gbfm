@@ -1088,7 +1088,19 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
     // the existing drafts:write admission/downscoping exception.
     for (const [allowedScopes, expected] of [
       [JSON.stringify(['posts:read', 'offline_access']), ['drafts:write', 'posts:read']],
-      [null, ['content:read', 'drafts:write', 'posts:read']],
+      [
+        null,
+        [
+          'admin:read',
+          'content:read',
+          'drafts:write',
+          'favorites:read',
+          'listening:read',
+          'posts:read',
+          'reminders:read',
+          'subscriptions:read',
+        ],
+      ],
     ] as const) {
       await fixture.db.update(oauthResource).set({ allowedScopes })
 

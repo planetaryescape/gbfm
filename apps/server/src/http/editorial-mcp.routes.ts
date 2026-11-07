@@ -8,7 +8,12 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
 import { Database } from '@/db/layer'
 import { oauthResource } from '@/db/oauth.schema'
 import { Auth } from '@/lib/auth'
-import { McpPermission } from '@/mcp/authorization'
+import {
+  AdminReadServiceLayer,
+  AdminReadToolHandlersLayer,
+  AdminReadToolkit,
+} from '@/mcp/admin-read'
+import { McpAuthorizationLive, McpPermission } from '@/mcp/authorization'
 import { PublicResearchServiceLayer } from '@/mcp/content-read/research-service'
 import {
   PublicResearchHandlersLayer,
@@ -19,7 +24,13 @@ import { ContentReadHandlersLayer, ContentReadToolkit } from '@/mcp/content-read
 import { EditorialToolError } from '@/mcp/contracts'
 import { EditorialDraftServiceLayer } from '@/mcp/drafts'
 import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from '@/mcp/editorial'
+import { FavoritesMcpServiceLayer } from '@/mcp/favorites/service'
+import { FavoritesToolkit, FavoritesToolHandlersLayer } from '@/mcp/favorites/toolkit'
+import { ListeningReadServiceLive } from '@/mcp/listening/reads'
+import { ListeningToolkit, ListeningToolHandlersLayer } from '@/mcp/listening/tools'
 import { EditorialMcpSettings } from '@/mcp/model'
+import { ReminderReadServiceLayer } from '@/mcp/reminders/reads'
+import { ReminderToolkit, ReminderToolHandlersLayer } from '@/mcp/reminders/toolkit'
 import {
   composeMcpToolkits,
   EditorialToolkit,
@@ -423,10 +434,25 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
   )
 
 export const EditorialMcpRoutesLive = makeMcpRoutes(
-  composeMcpToolkits(EditorialToolkit, ContentReadToolkit, PublicResearchToolkit),
+  composeMcpToolkits(
+    EditorialToolkit,
+    ContentReadToolkit,
+    PublicResearchToolkit,
+    ListeningToolkit,
+    FavoritesToolkit,
+    ReminderToolkit,
+    AdminReadToolkit,
+  ),
   Layer.mergeAll(
     ContentReadHandlersLayer.pipe(Layer.provide(ContentReadServiceLayer)),
     PublicResearchHandlersLayer.pipe(Layer.provide(PublicResearchServiceLayer)),
+    ListeningToolHandlersLayer.pipe(Layer.provide(ListeningReadServiceLive)),
+    FavoritesToolHandlersLayer.pipe(
+      Layer.provide(FavoritesMcpServiceLayer),
+      Layer.provide(McpAuthorizationLive),
+    ),
+    ReminderToolHandlersLayer.pipe(Layer.provide(ReminderReadServiceLayer)),
+    AdminReadToolHandlersLayer.pipe(Layer.provide(AdminReadServiceLayer)),
   ),
 )
 

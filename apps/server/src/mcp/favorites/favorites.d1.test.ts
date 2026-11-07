@@ -79,11 +79,10 @@ const setup = (fixture: Awaited<ReturnType<typeof createEditorialOAuthFixture>>)
   )
 
   const app = HttpRouter.toWebHandler(
-    makeMcpRoutes(composeMcpToolkits(EditorialToolkit, FavoritesToolkit)).pipe(
-      Layer.provide(FavoritesToolHandlersLayer.pipe(Layer.provide(reads))),
-      Layer.provide(services),
-      Layer.provide(HttpServer.layerServices),
-    ),
+    makeMcpRoutes(
+      composeMcpToolkits(EditorialToolkit, FavoritesToolkit),
+      FavoritesToolHandlersLayer.pipe(Layer.provide(reads)),
+    ).pipe(Layer.provide(services), Layer.provide(HttpServer.layerServices)),
     { disableLogger: true },
   )
 

@@ -17,7 +17,7 @@ export const recordingCreditStatements = (
   target: typeof SetRecordingCreditsInput.Type.target,
   rows: ReadonlyArray<typeof musicRecordingCreditsTable.$inferSelect>,
 ) => {
-  const guard = sql`${context.fence} AND ${winner}`
+  const guard = sql`(${context.fence}) AND (${winner})`
   const column = sql.identifier(target.type === 'track' ? 'track_id' : 'album_id')
 
   const statements = [
@@ -50,7 +50,7 @@ export const artistAliasStatements = (
   artistId: string,
   rows: ReadonlyArray<typeof musicArtistAliasesTable.$inferSelect>,
 ) => {
-  const guard = sql`${context.fence} AND ${winner}`
+  const guard = sql`(${context.fence}) AND (${winner})`
 
   const statements = [
     context.prepare(sql`DELETE FROM music_artist_aliases WHERE artist_id=${artistId} AND ${guard}`),

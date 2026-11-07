@@ -35,6 +35,14 @@ expiresAt}`. Failures contain only `status`: `conflict`, `expired`,
 Postcommit access loss can return denial after a successful mutation. A later
 authorized same-key retry recovers the saved result.
 
+Unavailable paths emit `mcp.operation.unavailable` through the Effect logger,
+with fixed operation/dependency/coarse-code fields for lookup, decoding, batch,
+authorization callback and expiry cleanup failures. The optional second factory
+argument is an intentional `OperationDiagnostic` reporter seam for composition
+and recording tests. It receives no raw error, SQL, key, IDs or receipt data;
+reporter failure cannot alter the committed outcome. Expected CAS conflicts do
+not report an outage, and batch-failure diagnostics preserve lost-response recovery.
+
 The key is SHA-256 of the canonical JSON tuple actor/client/trusted configured
 resource audience/operation/UUIDv4 request ID. Request UUID hex case is normalized.
 Resource/client/actor come from trusted composition, not command fields. Browser

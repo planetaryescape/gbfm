@@ -11,6 +11,7 @@ import {
   createMcpOperationStore,
   type ExecuteOperation,
   type OperationContext,
+  type OperationDiagnostic,
   type OperationOutcome,
 } from './store'
 
@@ -239,8 +240,10 @@ describe('shared durable atomic operations', () => {
 
   test('statement failure rolls domain and receipt back, identical key can retry', async () => {
     const input = command()
+    const events: Array<OperationDiagnostic> = []
+    const observed = createMcpOperationStore(database, (event) => events.push(event))
     expect(
-      await store.execute({
+      await observed.execute({
         ...input,
         build: (ctx) => {
           const plan = input.build(ctx)
@@ -255,9 +258,63 @@ describe('shared durable atomic operations', () => {
         },
       }),
     ).toEqual({ status: 'unavailable' })
+    expect(events).toEqual([
+      { operation: 'receipt.batch', dependency: 'database', code: 'storage_failed' },
+    ])
     expect(await target()).toMatchObject({ revision: 0, value: 'initial' })
     expect(await coupled()).toBeNull()
     expect((await store.execute(input)).status).toBe('applied')
+  })
+
+  test('reports only safe categories for real lookup, decode, authorization and cleanup failures', async () => {
+    const events: Array<OperationDiagnostic> = []
+
+    const report = (event: OperationDiagnostic) => {
+      events.push(event)
+    }
+
+    await using empty = await createMigratedD1Database([])
+    const missing = createMcpOperationStore(empty.database, report)
+    const input = { ...command(), authorize: async () => true }
+    expect(await missing.execute(input)).toEqual({ status: 'unavailable' })
+    expect(await missing.pruneExpired(now)).toEqual({ status: 'unavailable' })
+    const observed = createMcpOperationStore(database, report)
+    expect(
+      await observed.execute({
+        ...input,
+        authorize: async () => {
+          throw new Error('PRIVATE_AUTH SQL actor token')
+        },
+      }),
+    ).toEqual({ status: 'unavailable' })
+    await observed.execute(command())
+    await database
+      .prepare('UPDATE mcp_operations SET outcome = ?')
+      .bind(JSON.stringify({ private: 'PRIVATE_OUTCOME' }))
+      .run()
+    expect(await observed.execute(command())).toEqual({ status: 'unavailable' })
+    await database
+      .prepare(
+        "CREATE TRIGGER operation_test_cleanup_failure BEFORE UPDATE ON mcp_operations WHEN NEW.state = 'expired' BEGIN SELECT RAISE(ABORT, 'PRIVATE_CLEANUP_SQL'); END",
+      )
+      .run()
+
+    try {
+      expect(await observed.pruneExpired(now + 86400000)).toEqual({ status: 'unavailable' })
+    } finally {
+      await database.prepare('DROP TRIGGER operation_test_cleanup_failure').run()
+    }
+
+    expect(events).toEqual([
+      { operation: 'receipt.lookup', dependency: 'database', code: 'storage_failed' },
+      { operation: 'receipt.prune', dependency: 'database', code: 'storage_failed' },
+      { operation: 'receipt.authorize', dependency: 'authorization', code: 'authorization_failed' },
+      { operation: 'receipt.decode', dependency: 'codec', code: 'decode_failed' },
+      { operation: 'receipt.prune', dependency: 'database', code: 'storage_failed' },
+    ])
+    expect(JSON.stringify(events)).not.toMatch(
+      /PRIVATE|SELECT|mcp_operations|operation-owner|operation-client|private-target|a9fc2be4/,
+    )
   })
 
   test('rechecks live role, ban, client and saved target access before replay disclosure', async () => {

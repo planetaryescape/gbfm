@@ -1,11 +1,11 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, sql, type SQL } from 'drizzle-orm'
 import { Effect, Option } from 'effect'
 
 import { audioTable } from '@/db/audio.schema'
 import { Database } from '@/db/layer'
 import { showsTable } from '@/db/show.schema'
 import { entityLabelsTable } from '@/db/tags.schema'
-import { ConflictError, DatabaseError, UnauthorizedError } from '@/errors'
+import { ConflictError, DatabaseError, UnauthorizedError, getErrorMessage } from '@/errors'
 import { CommandAuthority } from '@/mcp/command-authority'
 import { prepareOperationStatement } from '@/mcp/operations/persistence'
 import { ConfigService } from '@/services/config.service'
@@ -13,6 +13,11 @@ import { attachedMediaUrls } from '@/services/media-publication'
 import { keyFromAssetUrl } from '@/services/upload-asset.service'
 
 import { buildCreatorUpdate } from './guarded-update'
+
+// SQLite CASE evaluates only the selected branch. Integer overflow aborts D1's entire batch,
+// including earlier writes and trigger effects; a returned false/zero-row SELECT would not.
+const assertBatch = (predicate: SQL) =>
+  sql`SELECT CASE WHEN (${predicate}) THEN 1 ELSE abs(-9223372036854775808) END`
 
 /** Legacy callers omit expectedRevision and receive source-load CAS, not stale-intent protection. */
 export const saveCreatorBrowserUpdate = Effect.fn('CreatorCommand.browserSave')(function* (
@@ -57,22 +62,22 @@ export const saveCreatorBrowserUpdate = Effect.fn('CreatorCommand.browserSave')(
     }),
   })
 
-  const [updated] = yield* Effect.tryPromise({
+  yield* Effect.tryPromise({
     try: () =>
       db.$client.batch(
-        [save.update.getSQL(), ...save.writes].map((statement) =>
-          prepareOperationStatement(db.$client, statement),
+        [save.update.getSQL(), ...save.writes, assertBatch(sql`${save.authorized}`)].map(
+          (statement) => prepareOperationStatement(db.$client, statement),
         ),
       ),
-    catch: () =>
-      new DatabaseError({
-        message: 'Failed atomic content save',
-        operation: 'transaction',
-        table: kind,
-      }),
+    catch: (cause) =>
+      getErrorMessage(cause).includes('integer overflow')
+        ? conflict()
+        : new DatabaseError({
+            message: 'Failed atomic content save',
+            operation: 'transaction',
+            table: kind,
+          }),
   })
-
-  if (updated?.results.length !== 1) return yield* conflict()
 
   return undefined
 })
@@ -134,28 +139,31 @@ export const deleteCreatorBrowserShow = Effect.fn('CreatorCommand.browserDeleteS
       })
       .where(and(eq(audioTable.showId, previous.id), save.authorized))
       .getSQL(),
+    assertBatch(sql`${save.authorized}`),
     db
       .delete(showsTable)
       .where(and(eq(showsTable.id, previous.id), save.authorized))
       .returning({ id: showsTable.id })
       .getSQL(),
+    assertBatch(
+      sql`${checkpoint.liveGuard} AND NOT EXISTS(SELECT 1 FROM shows WHERE id=${previous.id})`,
+    ),
   ]
 
-  const results = yield* Effect.tryPromise({
+  yield* Effect.tryPromise({
     try: () =>
       db.$client.batch(
         statements.map((statement) => prepareOperationStatement(db.$client, statement)),
       ),
-    catch: () =>
-      new DatabaseError({
-        message: 'Failed atomic show deletion',
-        operation: 'transaction',
-        table: 'shows',
-      }),
+    catch: (cause) =>
+      getErrorMessage(cause).includes('integer overflow')
+        ? conflict()
+        : new DatabaseError({
+            message: 'Failed atomic show deletion',
+            operation: 'transaction',
+            table: 'shows',
+          }),
   })
-
-  if (results[0]?.results.length !== 1 || results.at(-1)?.results.length !== 1)
-    return yield* conflict()
 
   return undefined
 })

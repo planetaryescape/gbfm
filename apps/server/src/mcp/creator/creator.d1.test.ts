@@ -1,3 +1,4 @@
+import { AuthSession } from '@gbfm/api/middleware/auth'
 import { PostId } from '@gbfm/core/editorial-mcp'
 import { eq } from 'drizzle-orm'
 import { Effect, Layer, Redacted, Schema } from 'effect'
@@ -5,9 +6,10 @@ import { HttpRouter, HttpServer } from 'effect/http'
 import { expect, test } from 'vitest'
 
 import { audioCreators, audioTable } from '@/db/audio.schema'
-import { user } from '@/db/auth.schema'
+import { user, session } from '@/db/auth.schema'
 import { favoritesTable } from '@/db/favorites.schema'
 import { Database } from '@/db/layer'
+import { mcpOperations } from '@/db/mcp-operation.schema'
 import { oauthClient, oauthResource } from '@/db/oauth.schema'
 import { postCreators, postsTable } from '@/db/post.schema'
 import { showCreators, showsTable } from '@/db/show.schema'
@@ -17,12 +19,17 @@ import { makeMcpRoutes } from '@/http/editorial-mcp.routes'
 import { AuthLive } from '@/lib/auth'
 import { MdxServiceLayer } from '@/lib/mdx'
 import { McpActor, McpAuthorizationLive } from '@/mcp/authorization'
-import { CommandAuthority, makeOAuthCommandAuthority } from '@/mcp/command-authority'
+import {
+  CommandAuthority,
+  makeOAuthCommandAuthority,
+  makeSessionCommandAuthority,
+} from '@/mcp/command-authority'
 import { EditorialMcpConfig } from '@/mcp/editorial'
 import { loadEditorialSnapshot } from '@/mcp/editorial-music/snapshot'
 import { EditorialMcpSettings, projectPost } from '@/mcp/model'
 import { McpOperationStore, createMcpOperationStore, type JsonValue } from '@/mcp/operations/store'
 import { composeMcpToolkits, EditorialToolkit } from '@/mcp/server'
+import { McpWireResponse, makeMcpWireResponse } from '@/mcp/wire-response'
 import { AudioService, AudioServiceLayer } from '@/services/audio.service'
 import { ConfigService } from '@/services/config.service'
 import {
@@ -106,6 +113,7 @@ const harness = async () => {
     Effect.runPromise(
       withTestLayer(effect.pipe(Effect.provideService(CommandAuthority, authority)), service).pipe(
         Effect.provideService(McpActor, principal),
+        Effect.provideService(McpWireResponse, makeMcpWireResponse(1, 'json')),
       ),
     )
 
@@ -117,8 +125,30 @@ const harness = async () => {
     Layer.provide(database),
   )
 
+  const [account] = await fixture.db.select().from(user).where(eq(user.id, 'owner'))
+
+  const [ownerSession] = await fixture.db
+    .select()
+    .from(session)
+    .where(eq(session.id, 'owner-session'))
+
+  if (!account || !ownerSession) throw new Error('Missing real session fixture')
+
+  const sessionAuthority = await Effect.runPromise(
+    makeSessionCommandAuthority.pipe(
+      Effect.provideService(AuthSession, { user: account, session: ownerSession }),
+      Effect.provideService(Database, fixture.db),
+      Effect.provideService(ConfigService, fixture.config),
+    ),
+  )
+
   const runBrowser = <A, E>(effect: Effect.Effect<A, E, AudioService | ShowService>) =>
-    Effect.runPromise(withTestLayer(effect, browser))
+    Effect.runPromise(
+      withTestLayer(
+        effect.pipe(Effect.provideService(CommandAuthority, sessionAuthority)),
+        browser,
+      ),
+    )
 
   const base = Layer.mergeAll(
     Layer.succeed(ConfigService, {
@@ -154,7 +184,7 @@ const harness = async () => {
     { disableLogger: true },
   )
 
-  const call = async (name: string, input: JsonValue) => {
+  const call = async (name: string, input: JsonValue, rpcId: string | number = 1) => {
     const response = await app.handler(
       new Request(fixture.config.mcp.resourceUrl, {
         method: 'POST',
@@ -168,7 +198,7 @@ const harness = async () => {
         },
         body: JSON.stringify({
           jsonrpc: '2.0',
-          id: 1,
+          id: rpcId,
           method: 'tools/call',
           params: {
             name,
@@ -184,7 +214,15 @@ const harness = async () => {
 
     const body = await response.text()
 
-    return { status: response.status, body: body.length === 0 ? null : JSON.parse(body) }
+    return {
+      status: response.status,
+      body:
+        body.length === 0
+          ? null
+          : response.headers.get('content-type')?.includes('json')
+            ? JSON.parse(body)
+            : body,
+    }
   }
 
   return {
@@ -233,6 +271,245 @@ test('real OAuth HTTP composes public micro creation and separately consented de
     .set({ disabled: true })
     .where(eq(oauthClient.clientId, h.clientId))
   expect((await h.call('delete_content', request)).status).toBe(401)
+}, 20_000)
+
+test('actual RPC ID acknowledgement overflow refuses creator writes and bounds replay disclosure', async () => {
+  await using h = await harness()
+
+  const decode = Schema.decodeUnknownSync(
+    Schema.Struct({ result: Schema.Struct({ structuredContent: CreatorCommandResult }) }),
+  )
+
+  const input = { requestId: crypto.randomUUID(), content: 'Wire budget probe' }
+
+  for (const rpcId of ['a'.repeat(261500), '"'.repeat(130750)]) {
+    const response = await h.call('create_micro_post', input, rpcId)
+    expect(await h.fixture.db.select().from(postsTable)).toEqual([])
+    expect(await h.fixture.db.select().from(mcpOperations)).toEqual([])
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({ result: { isError: true } })
+  }
+
+  const response = await h.call('create_micro_post', input, 'a'.repeat(260000))
+  expect(response.status).toBe(200)
+  const created = decode(response.body).result.structuredContent
+
+  const before = {
+    posts: await h.fixture.db.select().from(postsTable),
+    receipts: await h.fixture.db.select().from(mcpOperations),
+  }
+
+  expect(before.posts).toHaveLength(1)
+  const oversizedReplay = await h.call('create_micro_post', input, 'a'.repeat(261500))
+  expect(oversizedReplay.body).toMatchObject({ result: { isError: true } })
+  expect({
+    posts: await h.fixture.db.select().from(postsTable),
+    receipts: await h.fixture.db.select().from(mcpOperations),
+  }).toEqual(before)
+  expect(
+    decode((await h.call('create_micro_post', input)).body).result.structuredContent,
+  ).toMatchObject({ target: created.target, replayed: true })
+}, 20_000)
+
+test('actual-ID sizing precedes metadata and every lifecycle target write and bounds draft listing', async () => {
+  await using h = await harness()
+
+  const mixId = crypto.randomUUID(),
+    showId = crypto.randomUUID(),
+    postId = Schema.decodeUnknownSync(PostId)(crypto.randomUUID())
+
+  await h.fixture.db.insert(audioTable).values({
+    id: mixId,
+    slug: mixId,
+    title: 'Mix',
+    content: '',
+    url: 'https://example.test/mix',
+    type: 'mix',
+    draft: true,
+  })
+  await h.fixture.db.insert(audioCreators).values({ audioId: mixId, creatorId: 'owner' })
+  await h.fixture.db
+    .insert(showsTable)
+    .values({ id: showId, slug: showId, title: 'Show', content: '', draft: false })
+  await h.fixture.db.insert(showCreators).values({ showId, creatorId: 'owner' })
+  await h.fixture.db.insert(postsTable).values({
+    id: postId,
+    slug: postId,
+    title: 'Post',
+    content: 'Prose',
+    type: 'post',
+    draft: true,
+  })
+  await h.fixture.db.insert(postCreators).values({ postId, creatorId: 'owner' })
+
+  const settings = Schema.decodeUnknownSync(EditorialMcpSettings)({
+    readScope: 'posts:read',
+    environment: 'test',
+    resourceUrl: h.fixture.config.mcp.resourceUrl,
+    frontendUrl: h.fixture.config.urls.frontend,
+  })
+
+  const post = await Effect.runPromise(
+    Effect.flatMap(loadEditorialSnapshot(h.fixture.db, postId), (snapshot) =>
+      projectPost(snapshot, settings),
+    ),
+  )
+
+  const micro = Schema.decodeUnknownSync(
+    Schema.Struct({ result: Schema.Struct({ structuredContent: CreatorCommandResult }) }),
+  )(
+    (
+      await h.call('create_micro_post', {
+        requestId: crypto.randomUUID(),
+        content: 'Public control',
+      })
+    ).body,
+  ).result.structuredContent
+
+  if (!('version' in micro.target)) throw new Error('Expected micro version')
+
+  const snapshot = async () => ({
+    audio: await h.fixture.db.select().from(audioTable),
+    shows: await h.fixture.db.select().from(showsTable),
+    posts: await h.fixture.db.select().from(postsTable),
+    receipts: await h.fixture.db.select().from(mcpOperations),
+  })
+
+  const before = await snapshot()
+
+  const commands: ReadonlyArray<{ name: string; input: JsonValue }> = [
+    { name: 'list_creator_drafts', input: {} },
+    {
+      name: 'update_creator_metadata',
+      input: {
+        kind: 'mix',
+        targetId: mixId,
+        expectedRevision: 0,
+        title: 'Refuse',
+        requestId: crypto.randomUUID(),
+      },
+    },
+    {
+      name: 'publish_editorial',
+      input: { postId, expectedVersion: post.version, requestId: crypto.randomUUID() },
+    },
+    ...['mix', 'show'].flatMap((kind) => [
+      {
+        name: 'delete_content',
+        input: {
+          requestId: crypto.randomUUID(),
+          target: { kind, targetId: kind === 'mix' ? mixId : showId, expectedRevision: 0 },
+        },
+      },
+    ]),
+    {
+      name: 'unpublish_content',
+      input: {
+        requestId: crypto.randomUUID(),
+        target: { kind: 'show', targetId: showId, expectedRevision: 0 },
+      },
+    },
+    {
+      name: 'unpublish_content',
+      input: {
+        requestId: crypto.randomUUID(),
+        target: {
+          kind: 'micro',
+          targetId: micro.target.targetId,
+          expectedVersion: micro.target.version,
+        },
+      },
+    },
+    {
+      name: 'delete_content',
+      input: {
+        requestId: crypto.randomUUID(),
+        target: { kind: 'post', targetId: postId, expectedVersion: post.version },
+      },
+    },
+  ]
+
+  for (const command of commands) {
+    const response = await h.call(command.name, command.input, 'a'.repeat(261500))
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({ result: { isError: true } })
+    expect(await snapshot()).toEqual(before)
+  }
+}, 20_000)
+
+test('genuine session browser save and delete roll back all writes when authority is lost inside the batch', async () => {
+  await using h = await harness()
+
+  const mixId = crypto.randomUUID(),
+    showId = crypto.randomUUID(),
+    labelId = crypto.randomUUID()
+
+  await h.fixture.db
+    .insert(showsTable)
+    .values({ id: showId, slug: showId, title: 'Original show', content: '', draft: true })
+  await h.fixture.db.insert(showCreators).values({ showId, creatorId: 'owner' })
+  await h.fixture.db.insert(audioTable).values({
+    id: mixId,
+    slug: mixId,
+    title: 'Original mix',
+    content: 'Body',
+    type: 'mix',
+    url: 'https://example.test/audio',
+    showId,
+  })
+  await h.fixture.db.insert(audioCreators).values({ audioId: mixId, creatorId: 'owner' })
+  await h.fixture.db.insert(labelsTable).values({ id: labelId, kind: 'tag', name: 'original' })
+  await h.fixture.db.insert(entityLabelsTable).values([
+    { entityType: 'audio', entityId: mixId, labelId, position: 0 },
+    { entityType: 'show', entityId: showId, labelId, position: 0 },
+  ])
+
+  const snapshot = async () => ({
+    audio: await h.fixture.db.select().from(audioTable),
+    shows: await h.fixture.db.select().from(showsTable),
+    audioOwners: await h.fixture.db.select().from(audioCreators),
+    showOwners: await h.fixture.db.select().from(showCreators),
+    labels: await h.fixture.db.select().from(entityLabelsTable),
+    tags: await h.fixture.db.select().from(labelsTable),
+    accounts: await h.fixture.db.select().from(user),
+  })
+
+  const before = await snapshot()
+  await h.fixture.database
+    .prepare(
+      "CREATE TRIGGER creator_browser_ban AFTER UPDATE ON audio BEGIN UPDATE user SET banned=1 WHERE id='owner'; END",
+    )
+    .run()
+  expect(
+    await h.runBrowser(
+      Effect.result(
+        Effect.flatMap(AudioService, (s) =>
+          s.update('mix', mixId, 'owner', 'editor', {
+            title: 'After',
+            tags: ['required tag'],
+            expectedRevision: 0,
+          }),
+        ),
+      ),
+    ),
+  ).toMatchObject({ failure: expect.any(ConflictError) })
+  expect(await snapshot()).toEqual(before)
+  await h.fixture.database.prepare('DROP TRIGGER creator_browser_ban').run()
+
+  for (const boundary of ['UPDATE', 'DELETE']) {
+    await h.fixture.database
+      .prepare(
+        `CREATE TRIGGER creator_browser_ban AFTER ${boundary} ON shows BEGIN UPDATE user SET banned=1 WHERE id='owner'; END`,
+      )
+      .run()
+    expect(
+      await h.runBrowser(
+        Effect.result(Effect.flatMap(ShowService, (s) => s.delete(showId, 'owner', 'editor'))),
+      ),
+    ).toMatchObject({ failure: expect.any(ConflictError) })
+    expect(await snapshot()).toEqual(before)
+    await h.fixture.database.prepare('DROP TRIGGER creator_browser_ban').run()
+  }
 }, 20_000)
 
 test('live OAuth account authority is enforced inside the creation batch, not just at preflight', async () => {

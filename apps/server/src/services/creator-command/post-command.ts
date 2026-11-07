@@ -17,6 +17,7 @@ import {
   PublishEditorialInput,
   UnpublishContentInput,
 } from '@/mcp/creator/contracts'
+import { checkCreatorResponse, creatorResultFits, requireCreatorWire } from '@/mcp/creator/wire'
 import { EditorialMcpConfig } from '@/mcp/editorial'
 import { editorialSnapshotGuard } from '@/mcp/editorial-music/snapshot'
 import {
@@ -61,6 +62,8 @@ const make = Effect.gen(function* () {
       | typeof UnpublishContentInput.Type
     readonly scopes: ReadonlyArray<McpScope>
   }) {
+    const wire = yield* requireCreatorWire
+
     const actor = yield* authorization
       .requireScopes(options.scopes)
       .pipe(
@@ -209,6 +212,16 @@ const make = Effect.gen(function* () {
                 }
               const { data, id, version } = prepared.success
 
+              if (
+                !creatorResultFits(wire, endpoint, {
+                  kind: 'micro',
+                  targetId: id,
+                  version,
+                  state: 'published',
+                })
+              )
+                return { status: 'invalid_input' }
+
               return {
                 status: 'ready',
                 build: (ctx) => {
@@ -287,6 +300,16 @@ const make = Effect.gen(function* () {
                 row.revision === Number.MAX_SAFE_INTEGER
               )
                 return { status: 'conflict' }
+
+              if (
+                !creatorResultFits(wire, endpoint, {
+                  kind: target.kind,
+                  targetId: row.id,
+                  revision: row.revision + 1,
+                  state: 'unpublished',
+                })
+              )
+                return { status: 'invalid_input' }
 
               return {
                 status: 'ready',
@@ -373,6 +396,16 @@ const make = Effect.gen(function* () {
               return { status: 'not_found' }
             const kind = snapshot.type === 'micro' ? 'micro' : 'post'
 
+            if (
+              !creatorResultFits(wire, endpoint, {
+                kind,
+                targetId: snapshot.id,
+                version,
+                state: unpublish ? 'unpublished' : 'published',
+              })
+            )
+              return { status: 'invalid_input' }
+
             return {
               status: 'ready',
               build: (ctx) => {
@@ -429,7 +462,7 @@ const make = Effect.gen(function* () {
       status: 'applied',
       replayed: result.status === 'replayed',
       target: result.outcome.result,
-    }).pipe(Effect.mapError(unavailable))
+    }).pipe(Effect.mapError(unavailable), Effect.flatMap(checkCreatorResponse))
   })
 
   return {

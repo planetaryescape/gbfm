@@ -14,6 +14,7 @@ import { McpAuthorization } from '@/mcp/authorization'
 import { CommandAuthority } from '@/mcp/command-authority'
 import { EndpointIdentity, McpToolError } from '@/mcp/contracts'
 import { CreatorCommandResult, DeleteContentInput } from '@/mcp/creator/contracts'
+import { checkCreatorResponse, creatorResultFits, requireCreatorWire } from '@/mcp/creator/wire'
 import { EditorialMcpConfig } from '@/mcp/editorial'
 import { editorialSnapshotGuard } from '@/mcp/editorial-music/snapshot'
 import { McpOperationStore, type OperationPreparation } from '@/mcp/operations/store'
@@ -72,6 +73,8 @@ const make = Effect.gen(function* () {
   const deleteContent = Effect.fn('CreatorCommand.delete')(function* (
     raw: typeof DeleteContentInput.Type,
   ) {
+    const wire = yield* requireCreatorWire
+
     const input = yield* Schema.decodeUnknownEffect(DeleteContentInput, {
       onExcessProperty: 'error',
     })(raw).pipe(Effect.mapError(invalid))
@@ -236,6 +239,16 @@ const make = Effect.gen(function* () {
               )
                 return { status: 'not_found' }
 
+              if (
+                !creatorResultFits(wire, endpoint, {
+                  kind: target.kind,
+                  targetId: target.targetId,
+                  version,
+                  state: 'deleted',
+                })
+              )
+                return { status: 'invalid_input' }
+
               return {
                 status: 'ready',
                 build: (ctx) => {
@@ -347,6 +360,16 @@ const make = Effect.gen(function* () {
             )
               return { status: 'conflict' }
 
+            if (
+              !creatorResultFits(wire, endpoint, {
+                kind: target.kind,
+                targetId: row.id,
+                revision: row.revision + 1,
+                state: 'deleted',
+              })
+            )
+              return { status: 'invalid_input' }
+
             return {
               status: 'ready',
               build: (ctx) => {
@@ -450,7 +473,7 @@ const make = Effect.gen(function* () {
       status: 'applied',
       replayed: result.status === 'replayed',
       target: result.outcome.result,
-    }).pipe(Effect.mapError(unavailable))
+    }).pipe(Effect.mapError(unavailable), Effect.flatMap(checkCreatorResponse))
   })
 
   return { deleteContent }

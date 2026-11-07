@@ -1,4 +1,4 @@
-import { EditorialReadScopes, OAuthClientId } from '@gbfm/core/editorial-mcp'
+import { EditorialScopes, OAuthClientId } from '@gbfm/core/editorial-mcp'
 import { Option, Schema } from 'effect'
 
 export const SignedOAuthQuery = Schema.NonEmptyString.check(Schema.isMaxLength(16384)).pipe(
@@ -8,7 +8,7 @@ export const SignedOAuthQuery = Schema.NonEmptyString.check(Schema.isMaxLength(1
 const PendingPayload = Schema.Struct({
   query: SignedOAuthQuery,
   clientId: OAuthClientId,
-  scopes: EditorialReadScopes,
+  scopes: EditorialScopes,
 })
 
 export const Continuation = Schema.TaggedUnion({

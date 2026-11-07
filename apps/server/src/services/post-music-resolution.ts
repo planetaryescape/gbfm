@@ -41,6 +41,7 @@ export const resolvePostMusic = (
   postId: string,
   actor: { readonly userId: string; readonly userRole: string },
   url?: string,
+  expectedUpdatedAt?: Date,
 ) =>
   Effect.gen(function* () {
     const db = yield* Database
@@ -56,6 +57,11 @@ export const resolvePostMusic = (
       return yield* new NotFoundError({ message: 'Post not found', resource: 'post', id: postId })
 
     yield* requireCreatorOrAdmin('post', postId, actor.userId, actor.userRole)
+
+    if (expectedUpdatedAt && expectedUpdatedAt.getTime() !== post.updatedAt.getTime())
+      return yield* new ConflictError({
+        message: 'The post changed since it was loaded. Reload and try again.',
+      })
 
     let candidate =
       url?.trim() ||
@@ -108,10 +114,10 @@ export const resolvePostMusic = (
           .set({
             musicEntityType: resolved.entityType,
             musicEntityId: resolved.entity.id,
-            updatedAt: new Date(),
+            updatedAt: new Date(Math.max(Date.now(), post.updatedAt.getTime() + 1)),
           })
           .where(and(eq(postsTable.id, postId), eq(postsTable.updatedAt, post.updatedAt)))
-          .returning({ id: postsTable.id }),
+          .returning({ id: postsTable.id, updatedAt: postsTable.updatedAt }),
       catch: () =>
         new DatabaseError({
           message: 'Could not attach music',
@@ -120,13 +126,16 @@ export const resolvePostMusic = (
         }),
     })
 
-    if (!updated.length)
+    const attached = updated[0]
+
+    if (!attached)
       return yield* new ConflictError({
         message: 'The post changed during resolution. Reload and try again.',
       })
 
     return {
       postId,
+      updatedAt: attached.updatedAt.toISOString(),
       entityType: resolved.entityType,
       entityId: resolved.entity.id,
       url: candidate,

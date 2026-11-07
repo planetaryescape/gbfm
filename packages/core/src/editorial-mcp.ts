@@ -28,6 +28,8 @@ export const PostVersion = Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9
 
 export type PostVersion = typeof PostVersion.Type
 
+export const EDITORIAL_DRAFT_RETRY_WINDOW_MS = 24 * 60 * 60 * 1000
+
 const HttpsEndpoint = Schema.String.check(
   Schema.isMaxLength(2048),
   Schema.makeFilter((value) => {
@@ -69,10 +71,22 @@ export const EditorialReadScopes = Schema.Array(EditorialReadScope).check(
 
 export type EditorialReadScopes = typeof EditorialReadScopes.Type
 
+export const EditorialScope = Schema.Literals(['posts:read', 'offline_access', 'drafts:write'])
+
+export type EditorialScope = typeof EditorialScope.Type
+
+export const EditorialScopes = Schema.Array(EditorialScope).check(
+  Schema.makeFilter(
+    (scopes) => scopes.includes('posts:read') && new Set(scopes).size === scopes.length,
+  ),
+)
+
+export type EditorialScopes = typeof EditorialScopes.Type
+
 export const EditorialPrincipal = Schema.Struct({
   userId: UserId,
   clientId: OAuthClientId,
-  scopes: EditorialReadScopes,
+  scopes: EditorialScopes,
 })
 
 export type EditorialPrincipal = typeof EditorialPrincipal.Type

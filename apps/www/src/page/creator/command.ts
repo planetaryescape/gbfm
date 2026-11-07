@@ -118,10 +118,17 @@ export const ResolveMusic = Command.define('Creator.ResolveMusic', {
 })
 
 export const ResolvePostMusic = Command.define('Creator.ResolvePostMusic', {
-  args: { postId: Schema.String, url: Schema.String, owner: SaveOwner },
+  args: {
+    postId: Schema.String,
+    url: Schema.String,
+    expectedUpdatedAt: Schema.optional(Schema.String),
+    owner: SaveOwner,
+  },
   messages: [Message.PostMusicResolved, Message.PostMusicFailed],
-  execute: ({ postId, url, owner }) =>
-    Effect.flatMap(CreatorService, (service) => service.resolvePostMusic(postId, url)).pipe(
+  execute: ({ postId, url, expectedUpdatedAt, owner }) =>
+    Effect.flatMap(CreatorService, (service) =>
+      service.resolvePostMusic(postId, url, expectedUpdatedAt),
+    ).pipe(
       Effect.map((result) => Message.PostMusicResolved({ ...result, owner, requestedUrl: url })),
       Effect.catch((error) =>
         Effect.succeed(
@@ -157,9 +164,9 @@ export const Save = Command.define('Creator.Save', {
   execute: ({ draft, creatorId, publish, owner }) =>
     Effect.gen(function* () {
       const service = yield* CreatorService
-      const { id, slug } = yield* service.save({ draft, creatorId, publish })
+      const { id, slug, updatedAt } = yield* service.save({ draft, creatorId, publish })
 
-      return Message.Saved({ owner, id, slug, published: publish })
+      return Message.Saved({ owner, id, slug, updatedAt, published: publish })
     }).pipe(
       Effect.catch((error) =>
         Effect.succeed(Message.SaveFailed({ owner, message: error.message })),
@@ -175,11 +182,12 @@ export const ReconcileLocalDraft = Command.define('Creator.ReconcileLocalDraft',
     owner: SaveOwner,
     id: Schema.String,
     slug: Schema.String,
+    updatedAt: Schema.optional(Schema.toEncoded(Schema.DateFromString)),
   },
   messages: [Message.LocalSaveReconciled, Message.LocalSaveReconcileFailed],
-  execute: ({ key, draft, retained, owner, id, slug }) =>
+  execute: ({ key, draft, retained, owner, id, slug, updatedAt }) =>
     Effect.flatMap(CreatorService, (service) =>
-      service.reconcileLocalDraft(key, draft, { id, slug }, retained),
+      service.reconcileLocalDraft(key, draft, { id, slug, updatedAt }, retained),
     ).pipe(
       Effect.as(Message.LocalSaveReconciled({ owner })),
       Effect.catch((error) =>

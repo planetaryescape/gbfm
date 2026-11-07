@@ -2,7 +2,7 @@ import { oauthProvider } from '@better-auth/oauth-provider'
 import {
   canReadEditorial,
   EditorialAccount,
-  EditorialReadScopes,
+  EditorialScopes,
   OAuthClientId,
   OAuthGrantId,
 } from '@gbfm/core/editorial-mcp'
@@ -93,7 +93,7 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
                 )(ctx.body).pipe(Option.getOrUndefined)?.scope
 
                 if (requestedScope !== undefined)
-                  Schema.decodeUnknownOption(EditorialReadScopes)(requestedScope.split(/\s+/)).pipe(
+                  Schema.decodeUnknownOption(EditorialScopes)(requestedScope.split(/\s+/)).pipe(
                     Option.getOrThrowWith(
                       () =>
                         new APIError('BAD_REQUEST', {
@@ -199,7 +199,7 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
     },
     oauthProvider({
       disableJwtPlugin: true,
-      scopes: ['posts:read', 'offline_access'],
+      scopes: ['posts:read', 'offline_access', 'drafts:write'],
       grantTypes: ['authorization_code', 'refresh_token'],
       loginPage: `${config.urls.frontend}/connect/gbfm`,
       consentPage: `${config.urls.frontend}/connect/gbfm/consent`,
@@ -209,11 +209,12 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
       clientRegistrationDefaultApplicationType: 'native',
       clientRegistrationRequirePKCE: true,
       clientRegistrationDefaultScopes: ['posts:read', 'offline_access'],
+      clientRegistrationAllowedScopes: ['drafts:write'],
       resources: [
         {
           identifier: mcp.resourceUrl,
           name: 'GBFM Editorial',
-          allowedScopes: ['posts:read', 'offline_access'],
+          allowedScopes: ['posts:read', 'offline_access', 'drafts:write'],
         },
       ],
       clientRegistrationDefaultResources: [mcp.resourceUrl],
@@ -227,7 +228,7 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
       postLogin: {
         page: `${config.urls.frontend}/connect/gbfm`,
         consentReferenceId: async ({ user, session, scopes }) => {
-          Schema.decodeUnknownOption(EditorialReadScopes)(scopes).pipe(
+          Schema.decodeUnknownOption(EditorialScopes)(scopes).pipe(
             Option.getOrThrowWith(
               () =>
                 new APIError('BAD_REQUEST', {

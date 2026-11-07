@@ -7,6 +7,8 @@ import {
   EditorialOAuthConfiguration,
   EditorialOAuthSettings,
   EditorialPrincipal,
+  EditorialReadScopes,
+  EditorialScopes,
   McpResourceUrl,
   OAuthClientId,
   PostVersion,
@@ -67,7 +69,9 @@ describe('editorial MCP domain boundaries', () => {
     { scopes: ['offline_access'] },
     { scopes: ['posts:read', 'posts:publish'] },
     { scopes: ['posts:read', 'posts:read'] },
-  ])('rejects a principal without a valid read-only permission grant: %j', ({ scopes }) => {
+    { scopes: ['drafts:write'] },
+    { scopes: ['posts:read', 'drafts:write', 'drafts:write'] },
+  ])('rejects a principal without a valid editorial permission grant: %j', ({ scopes }) => {
     expect(
       Option.isNone(
         Schema.decodeUnknownOption(EditorialPrincipal)({
@@ -77,6 +81,13 @@ describe('editorial MCP domain boundaries', () => {
         }),
       ),
     ).toBe(true)
+  })
+
+  test('draft-write is a separate permission and does not widen read-only contracts', () => {
+    const write = ['posts:read', 'offline_access', 'drafts:write']
+    expect(Schema.decodeUnknownSync(EditorialScopes)(write)).toEqual(write)
+    expect(Option.isNone(Schema.decodeUnknownOption(EditorialReadScopes)(write))).toBe(true)
+    expect(Schema.decodeUnknownSync(EditorialScopes)(['posts:read'])).toEqual(['posts:read'])
   })
 
   test('a post version cannot be confused with an arbitrary timestamp', () => {

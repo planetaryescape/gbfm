@@ -58,6 +58,7 @@ import {
   type WorkerConfigBindings,
 } from '@/services/config.service'
 import { EditorialListCacheLayer } from '@/services/editorial-list-cache'
+import { expireEditorialReceipts } from '@/services/editorial-receipt-retention'
 import {
   RecordingEmailTransportLayer,
   UnconfiguredEmailTransportLayer,
@@ -307,6 +308,17 @@ const runMaintenanceSweep = (env: ApiEnv) =>
     ),
     // Replaces the S3 lifecycle rule that expired `qr-pdfs/` after a day. R2
     // lifecycle rules cannot target a prefix, so the sweep does it instead.
+    Effect.andThen(
+      expireEditorialReceipts().pipe(
+        Effect.tap((report) =>
+          Effect.logInfo('[worker.scheduled] editorial receipt cleanup finished', report),
+        ),
+        Effect.catch((error) =>
+          Effect.logError('[worker.scheduled] editorial receipt cleanup failed', { error }),
+        ),
+        Effect.asVoid,
+      ),
+    ),
     Effect.andThen(
       cleanupExpiredQrPdfs.pipe(
         Effect.tap((report) =>

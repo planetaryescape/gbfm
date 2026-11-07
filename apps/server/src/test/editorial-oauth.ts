@@ -143,21 +143,25 @@ export const createEditorialOAuthFixture = async () => {
     .replaceAll('/', '_')
     .replace(/=+$/, '')
 
-  const authorizationQuery = (clientId: OAuthClientId) =>
+  const authorizationQuery = (clientId: OAuthClientId, scope = 'posts:read offline_access') =>
     new URLSearchParams({
       client_id: clientId,
       redirect_uri: 'http://127.0.0.1:38479/callback',
       response_type: 'code',
-      scope: 'posts:read offline_access',
+      scope,
       resource: config.mcp.resourceUrl,
       code_challenge: challenge,
       code_challenge_method: 'S256',
       state: 'disposable-state',
     })
 
-  const authorize = async (clientId: OAuthClientId, actor = 'owner') => {
+  const authorize = async (
+    clientId: OAuthClientId,
+    actor = 'owner',
+    scope = 'posts:read offline_access',
+  ) => {
     const authorization = await request(
-      `/oauth2/authorize?${authorizationQuery(clientId)}`,
+      `/oauth2/authorize?${authorizationQuery(clientId, scope)}`,
       undefined,
       actor,
     )

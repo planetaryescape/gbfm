@@ -809,7 +809,24 @@ export const view = defineView<Model, typeof Message.Type, ViewInputs>((model, i
           ),
         ],
       ),
-      model.error ? h.p([h.Class('form-error'), h.Role('alert')], [model.error]) : h.empty,
+      model.error
+        ? h.div(
+            [h.Class('form-error'), h.Role('alert')],
+            [
+              h.p([], [model.error]),
+              model.draft.kind === 'post' && model.draft.editSlug
+                ? h.a(
+                    [
+                      h.Href(`/new/editorial?edit=${encodeURIComponent(model.draft.editSlug)}`),
+                      h.Target('_blank'),
+                      h.Rel('noopener noreferrer'),
+                    ],
+                    ['Open latest saved version (new tab)'],
+                  )
+                : h.empty,
+            ],
+          )
+        : h.empty,
       model.localError
         ? h.p([h.Class('form-error'), h.Role('alert')], [model.localError])
         : h.empty,

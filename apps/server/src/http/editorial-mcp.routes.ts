@@ -1,8 +1,9 @@
 import { oauthProviderAuthServerMetadata } from '@better-auth/oauth-provider'
-import { ByteSize, Effect, Layer, Match, Option, Redacted, Schema } from 'effect'
+import { Effect, Layer, Match, Option, Redacted, Schema, Stream } from 'effect'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
 
 import { Auth } from '@/lib/auth'
+import { EditorialDraftServiceLayer } from '@/mcp/drafts'
 import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from '@/mcp/editorial'
 import { EditorialMcpSettings } from '@/mcp/model'
 import { makeEditorialMcpLayer } from '@/mcp/server'
@@ -34,6 +35,45 @@ const parseCredential = (authorization: string | undefined) =>
 
 const noStore = (response: HttpServerResponse.HttpServerResponse) =>
   HttpServerResponse.setHeader(response, 'cache-control', 'private, no-store')
+
+const boundMcpBody = Effect.fn('EditorialMcp.boundBody')(function* (
+  request: HttpServerRequest.HttpServerRequest,
+  origin: string,
+  maximum: number,
+) {
+  if (request.method !== 'POST') return Option.some(request)
+  let size = 0
+  const chunks: Array<Uint8Array> = []
+  yield* Stream.runForEachWhile(request.stream, (chunk) =>
+    Effect.sync(() => {
+      size += chunk.byteLength
+
+      if (size > maximum) return false
+      chunks.push(chunk)
+
+      return true
+    }),
+  )
+
+  if (size > maximum) return Option.none()
+  const body = new Uint8Array(size)
+  let offset = 0
+
+  for (const chunk of chunks) {
+    body.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+
+  return Option.some(
+    HttpServerRequest.fromWeb(
+      new Request(new URL(request.url, origin), {
+        method: request.method,
+        headers: request.headers,
+        body,
+      }),
+    ),
+  )
+})
 
 export const EditorialMcpRoutesLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -92,11 +132,22 @@ export const EditorialMcpRoutesLive = Layer.unwrap(
                       Match.exhaustive,
                     ),
                   onSuccess: (principal) =>
-                    httpEffect.pipe(
-                      Effect.provideService(EditorialActor, principal),
-                      Effect.provideService(HttpServerRequest.MaxBodySize, ByteSize.kibibytes(16)),
-                      Effect.map(noStore),
-                    ),
+                    Effect.gen(function* () {
+                      const bounded = yield* boundMcpBody(
+                        request,
+                        origin,
+                        (principal.scopes.includes('drafts:write') ? 640 : 16) * 1024,
+                      )
+
+                      if (Option.isNone(bounded))
+                        return noStore(HttpServerResponse.empty({ status: 413 }))
+
+                      return yield* httpEffect.pipe(
+                        Effect.provideService(EditorialActor, principal),
+                        Effect.provideService(HttpServerRequest.HttpServerRequest, bounded.value),
+                        Effect.map(noStore),
+                      )
+                    }),
                 }),
               ),
             ),
@@ -110,7 +161,7 @@ export const EditorialMcpRoutesLive = Layer.unwrap(
       HttpServerResponse.json({
         resource: settings.resourceUrl,
         authorization_servers: [settings.issuer],
-        scopes_supported: ['posts:read'],
+        scopes_supported: ['posts:read', 'drafts:write'],
         bearer_methods_supported: ['header'],
       }).pipe(Effect.map(noStore), Effect.orDie)
 
@@ -143,6 +194,7 @@ export const EditorialMcpRoutesLive = Layer.unwrap(
       HttpRouter.add('GET', '/.well-known/oauth-authorization-server', authorizationMetadata),
       HttpRouter.add('GET', '/.well-known/oauth-authorization-server/auth', authorizationMetadata),
       makeEditorialMcpLayer(origins).pipe(
+        Layer.provide(EditorialDraftServiceLayer),
         Layer.provide(EditorialReadServiceLayer),
         Layer.provide(endpointConfig),
       ),

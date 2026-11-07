@@ -2,13 +2,15 @@ import { EditorialPrincipal, PostId } from '@gbfm/core/editorial-mcp'
 import { UserId } from '@gbfm/core/identity'
 import { Role } from '@gbfm/core/roles'
 import { eq, inArray } from 'drizzle-orm'
-import { Effect, Exit, Layer, Option, Schema } from 'effect'
+import { Effect, Exit, Layer, Match, Option, Schema } from 'effect'
 import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http'
-import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
+import { editorialOperations } from '@/db/editorial-operation.schema'
 import { replaceEntityLabels } from '@/db/labels'
 import { postCreators, postsTable } from '@/db/post.schema'
+import { entityLabelsTable } from '@/db/tags.schema'
 import { DatabaseError } from '@/errors'
 import { MdxService, MdxServiceLayer } from '@/lib/mdx'
 import { ConfigServiceLayer } from '@/services/config.service'
@@ -19,8 +21,10 @@ import { DatabaseTestLayer, db } from '@/test/database'
 import { withTestLayer } from '@/test/effect'
 
 import { GetPostResult, ListDraftsResult } from './contracts'
+import { insertEditorialDraft, updateEditorialDraft } from './draft-store'
+import { EditorialDraftServiceLayer } from './drafts'
 import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from './editorial'
-import { EditorialMcpSettings } from './model'
+import { EditorialMcpSettings, PersistedPost } from './model'
 import { makeEditorialMcpLayer } from './server'
 
 const ownerId = Schema.decodeUnknownSync(UserId)('mcp-owner')
@@ -57,13 +61,11 @@ const config = Schema.decodeUnknownSync(EditorialMcpSettings)({
 const createApp = (postServiceLayer: Layer.Layer<PostService> = postLayer) =>
   HttpRouter.toWebHandler(
     makeEditorialMcpLayer(['https://example.test']).pipe(
-      Layer.provide(
-        EditorialReadServiceLayer.pipe(
-          Layer.provide(postServiceLayer),
-          Layer.provide(DatabaseTestLayer),
-          Layer.provide(Layer.succeed(EditorialMcpConfig, config)),
-        ),
-      ),
+      Layer.provide(EditorialDraftServiceLayer),
+      Layer.provide(EditorialReadServiceLayer),
+      Layer.provide(postServiceLayer),
+      Layer.provide(DatabaseTestLayer),
+      Layer.provide(Layer.succeed(EditorialMcpConfig, config)),
       Layer.provide(HttpServer.layerServices),
     ),
     {
@@ -78,7 +80,11 @@ const createApp = (postServiceLayer: Layer.Layer<PostService> = postLayer) =>
           const principal = yield* Schema.decodeUnknownEffect(EditorialPrincipal)({
             userId: actor,
             clientId: 'fixture-client',
-            scopes: request.headers['x-fixture-scope'] === 'missing' ? [] : [readScope],
+            scopes: Match.value(request.headers['x-fixture-scope']).pipe(
+              Match.when('missing', () => []),
+              Match.when('drafts:write', () => [readScope, 'drafts:write']),
+              Match.orElse(() => [readScope]),
+            ),
           }).pipe(Effect.option)
 
           if (Option.isNone(principal)) return yield* effect
@@ -171,6 +177,20 @@ const call = async (
   return Schema.decodeUnknownSync(ToolResult)(response.body.result)
 }
 
+const createDraft = async (title = 'Jazz notes', requestId = crypto.randomUUID()) => {
+  const input = {
+    requestId,
+    title,
+    content: 'Jazz crept up on me.',
+    description: 'Listening notes',
+  }
+
+  const result = await call('create_draft', input, ownerId, 'drafts:write')
+  expect(result.isError).not.toBe(true)
+
+  return { input, result: Schema.decodeUnknownSync(GetPostResult)(result.structuredContent) }
+}
+
 beforeAll(async () => {
   await db.insert(user).values([
     { id: ownerId, name: 'Owner', email: 'mcp-owner@example.test', role: 'admin' },
@@ -223,8 +243,462 @@ beforeAll(async () => {
 
 afterAll(() => app.dispose())
 
+describe('draft-only MCP writes', () => {
+  afterEach(async () => {
+    const created = (
+      await db.select({ id: editorialOperations.postId }).from(editorialOperations)
+    ).map((row) => row.id)
+
+    if (created.length === 0) return
+    await db.batch([
+      db.delete(editorialOperations).where(inArray(editorialOperations.postId, created)),
+      db.delete(entityLabelsTable).where(inArray(entityLabelsTable.entityId, created)),
+      db.delete(postCreators).where(inArray(postCreators.postId, created)),
+      db.delete(postsTable).where(inArray(postsTable.id, created)),
+    ])
+  })
+  test('requires explicit write consent, including for admins', async () => {
+    const result = await call('create_draft', {
+      requestId: crypto.randomUUID(),
+      title: 'Denied',
+      content: '',
+    })
+
+    expect(result.isError).toBe(true)
+    expect(result.content).toEqual([
+      { type: 'text', text: expect.stringContaining('access_denied') },
+    ])
+  })
+
+  test('creates an owned unpublished draft and replays without duplicating', async () => {
+    const { input, result } = await createDraft()
+    expect(
+      Schema.decodeUnknownSync(Schema.String.check(Schema.isUUID(4)))(result.post.postId),
+    ).toBe(result.post.postId)
+    expect(result.post).toMatchObject({
+      title: input.title,
+      content: input.content,
+      draft: true,
+      type: 'post',
+      creatorIds: [ownerId],
+    })
+    const replay = await call('create_draft', input, ownerId, 'drafts:write')
+    expect(Schema.decodeUnknownSync(GetPostResult)(replay.structuredContent)).toEqual(result)
+
+    const collision = await call(
+      'create_draft',
+      { ...input, title: 'Different payload' },
+      ownerId,
+      'drafts:write',
+    )
+
+    expect(collision.isError).toBe(true)
+    expect(collision.content[0]?.text).toContain('conflict')
+    expect(
+      await db.select().from(postCreators).where(eq(postCreators.postId, result.post.postId)),
+    ).toEqual([{ postId: result.post.postId, creatorId: ownerId }])
+  })
+
+  test('expired receipts reject retries without recreating posts or replaying old bodies', async () => {
+    const { input, result } = await createDraft()
+    await db
+      .update(editorialOperations)
+      .set({ createdAt: new Date(0) })
+      .where(eq(editorialOperations.postId, result.post.postId))
+    const expired = await call('create_draft', input, ownerId, 'drafts:write')
+    expect(expired.isError).toBe(true)
+    expect(expired.content[0]?.text).toContain('expired')
+    await db
+      .update(editorialOperations)
+      .set({ result: null })
+      .where(eq(editorialOperations.postId, result.post.postId))
+    expect((await call('create_draft', input, ownerId, 'drafts:write')).isError).toBe(true)
+    expect(
+      await db.select().from(postsTable).where(eq(postsTable.id, result.post.postId)),
+    ).toHaveLength(1)
+  })
+
+  test('isolates retry keys by approving account and serializes simultaneous creates', async () => {
+    const requestId = crypto.randomUUID()
+
+    const [first, second] = await Promise.all([
+      createDraft('Same operation', requestId),
+      createDraft('Same operation', requestId),
+    ])
+
+    expect(first.result.post.postId).toBe(second.result.post.postId)
+    const other = await call('create_draft', first.input, otherId, 'drafts:write')
+    const otherPost = Schema.decodeUnknownSync(GetPostResult)(other.structuredContent).post
+    expect(otherPost.postId).not.toBe(first.result.post.postId)
+    expect(otherPost.creatorIds).toEqual([otherId])
+  })
+
+  test('updates only requested fields and rejects stale revisions', async () => {
+    const { input, result } = await createDraft()
+
+    const updated = await call(
+      'update_draft',
+      {
+        requestId: crypto.randomUUID(),
+        postId: result.post.postId,
+        expectedVersion: result.post.version,
+        title: 'An ode to jazz',
+        description: null,
+      },
+      ownerId,
+      'drafts:write',
+    )
+
+    const next = Schema.decodeUnknownSync(GetPostResult)(updated.structuredContent).post
+    expect(next).toMatchObject({
+      title: 'An ode to jazz',
+      content: input.content,
+      description: null,
+      draft: true,
+      creatorIds: [ownerId],
+    })
+    expect(next.version).not.toBe(result.post.version)
+
+    const stale = await call(
+      'update_draft',
+      {
+        requestId: crypto.randomUUID(),
+        postId: next.postId,
+        expectedVersion: result.post.version,
+        content: 'Must not overwrite',
+      },
+      ownerId,
+      'drafts:write',
+    )
+
+    expect(stale.isError).toBe(true)
+    expect(stale.content[0]?.text).toContain('conflict')
+    const replay = await call('create_draft', input, ownerId, 'drafts:write')
+    expect(Schema.decodeUnknownSync(GetPostResult)(replay.structuredContent)).toEqual(result)
+  })
+
+  test('only one concurrent update using the same revision can succeed', async () => {
+    const { result } = await createDraft()
+
+    const replies = await Promise.all(
+      ['First', 'Second'].map((title) =>
+        call(
+          'update_draft',
+          {
+            requestId: crypto.randomUUID(),
+            postId: result.post.postId,
+            expectedVersion: result.post.version,
+            title,
+          },
+          ownerId,
+          'drafts:write',
+        ),
+      ),
+    )
+
+    expect(replies.filter((reply) => reply.isError === true)).toHaveLength(1)
+    expect(replies.filter((reply) => reply.isError !== true)).toHaveLength(1)
+  })
+
+  test('identical concurrent updates and later retries replay the original saved result', async () => {
+    const { result } = await createDraft()
+
+    const input = {
+      requestId: crypto.randomUUID(),
+      postId: result.post.postId,
+      expectedVersion: result.post.version,
+      title: 'Original save',
+    }
+
+    const [first, second] = await Promise.all([
+      call('update_draft', input, ownerId, 'drafts:write'),
+      call('update_draft', input, ownerId, 'drafts:write'),
+    ])
+
+    const saved = Schema.decodeUnknownSync(GetPostResult)(first.structuredContent)
+    expect(Schema.decodeUnknownSync(GetPostResult)(second.structuredContent)).toEqual(saved)
+
+    const later = await call(
+      'update_draft',
+      {
+        ...input,
+        requestId: crypto.randomUUID(),
+        expectedVersion: saved.post.version,
+        title: 'Later save',
+      },
+      ownerId,
+      'drafts:write',
+    )
+
+    expect(Schema.decodeUnknownSync(GetPostResult)(later.structuredContent).post.title).toBe(
+      'Later save',
+    )
+    const retry = await call('update_draft', input, ownerId, 'drafts:write')
+    expect(Schema.decodeUnknownSync(GetPostResult)(retry.structuredContent)).toEqual(saved)
+    expect(
+      (await call('update_draft', { ...input, description: null }, ownerId, 'drafts:write'))
+        .isError,
+    ).toBe(true)
+    const current = await call('get_post', { postId: saved.post.postId })
+    expect(Schema.decodeUnknownSync(GetPostResult)(current.structuredContent).post.title).toBe(
+      'Later save',
+    )
+  })
+
+  test('receipts do not leak after ownership loss and do not recreate deleted drafts', async () => {
+    const { input, result } = await createDraft()
+    await db.delete(postCreators).where(eq(postCreators.postId, result.post.postId))
+    expect((await call('create_draft', input, ownerId, 'drafts:write')).isError).toBe(true)
+    await db.delete(postsTable).where(eq(postsTable.id, result.post.postId))
+    expect((await call('create_draft', input, ownerId, 'drafts:write')).isError).toBe(true)
+    expect(await db.select().from(postsTable).where(eq(postsTable.id, result.post.postId))).toEqual(
+      [],
+    )
+    await db.delete(editorialOperations).where(eq(editorialOperations.postId, result.post.postId))
+  })
+
+  test('a failed receipt insert rolls back draft and creator creation', async () => {
+    const postId = `mcp-${'b'.repeat(64)}`
+    const input = { requestId: crypto.randomUUID(), title: 'Must roll back', content: '' }
+    await expect(
+      insertEditorialDraft(db, ownerId, postId, input, new Date(), {
+        id: crypto.randomUUID(),
+        actorId: 'missing-user',
+        postId,
+        inputHash: 'test',
+        result: '{}',
+        createdAt: new Date(),
+      }),
+    ).rejects.toThrow()
+    expect(await db.select().from(postsTable).where(eq(postsTable.id, postId))).toEqual([])
+    expect(await db.select().from(postCreators).where(eq(postCreators.postId, postId))).toEqual([])
+  })
+
+  test('denies cross-owner admin writes, published posts and micro posts', async () => {
+    for (const postId of [privateId, publishedId, secondDraftId]) {
+      const read = await call('get_post', { postId }, postId === privateId ? otherId : ownerId)
+      const version = Schema.decodeUnknownSync(GetPostResult)(read.structuredContent).post.version
+
+      const denied = await call(
+        'update_draft',
+        { requestId: crypto.randomUUID(), postId, expectedVersion: version, title: 'Forbidden' },
+        ownerId,
+        'drafts:write',
+      )
+
+      expect(denied.isError).toBe(true)
+    }
+
+    const { result } = await createDraft()
+    await db.update(postsTable).set({ draft: false }).where(eq(postsTable.id, result.post.postId))
+    const published = await call('get_post', { postId: result.post.postId })
+
+    const version = Schema.decodeUnknownSync(GetPostResult)(published.structuredContent).post
+      .version
+
+    expect(
+      (
+        await call(
+          'update_draft',
+          {
+            requestId: crypto.randomUUID(),
+            postId: result.post.postId,
+            expectedVersion: version,
+            title: 'No',
+          },
+          ownerId,
+          'drafts:write',
+        )
+      ).isError,
+    ).toBe(true)
+  })
+
+  test('rejects forbidden fields, empty patches, invalid content and oversized titles', async () => {
+    const { result } = await createDraft()
+
+    for (const fields of [{ draft: false }, { creatorIds: [otherId] }, { content: ' ' }]) {
+      const response = await rpc(
+        'tools/call',
+        {
+          name: 'create_draft',
+          arguments: {
+            requestId: crypto.randomUUID(),
+            title: 'Invalid',
+            content: 'Draft body',
+            ...fields,
+          },
+        },
+        ownerId,
+        'drafts:write',
+      )
+
+      expect(
+        response.body.error ?? Schema.decodeUnknownSync(ToolResult)(response.body.result).isError,
+      ).toBeTruthy()
+    }
+
+    for (const extra of [
+      { draft: false },
+      { creatorIds: [otherId] },
+      { slug: 'hijacked' },
+      { type: 'micro' },
+      { thumbnailUrl: 'https://example.test/image.png' },
+    ]) {
+      const response = await rpc(
+        'tools/call',
+        {
+          name: 'update_draft',
+          arguments: {
+            requestId: crypto.randomUUID(),
+            postId: result.post.postId,
+            expectedVersion: result.post.version,
+            title: 'No',
+            ...extra,
+          },
+        },
+        ownerId,
+        'drafts:write',
+      )
+
+      expect(
+        response.body.error ?? Schema.decodeUnknownSync(ToolResult)(response.body.result).isError,
+      ).toBeTruthy()
+    }
+
+    for (const patch of [
+      {},
+      { title: ' ' },
+      { content: '' },
+      { content: '  ' },
+      { title: 'x'.repeat(501) },
+      { content: '<Track url="https://open.spotify.com/track/abc" />' },
+    ]) {
+      const response = await rpc(
+        'tools/call',
+        {
+          name: 'update_draft',
+          arguments: {
+            requestId: crypto.randomUUID(),
+            postId: result.post.postId,
+            expectedVersion: result.post.version,
+            ...patch,
+          },
+        },
+        ownerId,
+        'drafts:write',
+      )
+
+      expect(
+        response.body.error ?? Schema.decodeUnknownSync(ToolResult)(response.body.result).isError,
+      ).toBeTruthy()
+    }
+  })
+
+  test('rechecks banned and downgraded accounts before writing', async () => {
+    const { result } = await createDraft()
+
+    try {
+      for (const change of [{ banned: true }, { banned: false, role: 'user' }]) {
+        await db.update(user).set(change).where(eq(user.id, ownerId))
+        expect(
+          (
+            await call(
+              'update_draft',
+              {
+                requestId: crypto.randomUUID(),
+                postId: result.post.postId,
+                expectedVersion: result.post.version,
+                title: 'No',
+              },
+              ownerId,
+              'drafts:write',
+            )
+          ).isError,
+        ).toBe(true)
+        expect(
+          (
+            await call(
+              'create_draft',
+              { requestId: crypto.randomUUID(), title: 'No', content: '' },
+              ownerId,
+              'drafts:write',
+            )
+          ).isError,
+        ).toBe(true)
+      }
+    } finally {
+      await db.update(user).set({ banned: false, role: 'admin' }).where(eq(user.id, ownerId))
+    }
+  })
+
+  test('atomic storage guards reject content and relation drift without timestamp changes', async () => {
+    for (const drift of ['content', 'tags', 'creators', 'published']) {
+      const { result } = await createDraft()
+
+      const previous = await Effect.runPromise(
+        withTestLayer(
+          Effect.gen(function* () {
+            const posts = yield* PostService
+
+            return yield* posts.getSourceById(
+              result.post.postId,
+              PostSourceAccess.cases.Authored.make({
+                userId: ownerId,
+                userRole: Role.make('admin'),
+              }),
+            )
+          }),
+          postLayer,
+        ),
+      )
+
+      const snapshot = Schema.decodeUnknownSync(PersistedPost)(previous)
+
+      if (drift === 'content')
+        await db
+          .update(postsTable)
+          .set({ content: 'Web editor changed content' })
+          .where(eq(postsTable.id, snapshot.id))
+
+      if (drift === 'published')
+        await db.update(postsTable).set({ draft: false }).where(eq(postsTable.id, snapshot.id))
+
+      if (drift === 'tags')
+        await replaceEntityLabels(db, 'post', snapshot.id, { tags: ['new-tag'] })
+
+      if (drift === 'creators')
+        await db.insert(postCreators).values({ postId: snapshot.id, creatorId: otherId })
+
+      const changed = await updateEditorialDraft(
+        db,
+        ownerId,
+        snapshot,
+        {
+          requestId: crypto.randomUUID(),
+          postId: snapshot.id,
+          expectedVersion: result.post.version,
+          title: 'Must not overwrite',
+        },
+        new Date(),
+        {
+          id: crypto.randomUUID(),
+          actorId: ownerId,
+          postId: snapshot.id,
+          inputHash: 'uncommitted',
+          result: '{}',
+          createdAt: new Date(),
+        },
+      )
+
+      expect(changed[0]).toEqual([])
+      const [persisted] = await db.select().from(postsTable).where(eq(postsTable.id, snapshot.id))
+      expect(persisted?.title).toBe(snapshot.title)
+    }
+  })
+})
+
 describe('request-scoped editorial MCP', () => {
-  test('advertises exactly two strictly validated read-only tools', async () => {
+  test('advertises strictly validated reads and separate draft-only writes', async () => {
     const response = await rpc('tools/list')
     expect(response.status).toBe(200)
 
@@ -243,10 +717,18 @@ describe('request-scoped editorial MCP', () => {
       }),
     )(response.body.result)
 
-    expect(result.tools.map((tool) => tool.name).toSorted()).toEqual(['get_post', 'list_drafts'])
+    expect(result.tools.map((tool) => tool.name).toSorted()).toEqual([
+      'create_draft',
+      'get_post',
+      'list_drafts',
+      'update_draft',
+    ])
 
     for (const tool of result.tools) {
-      expect(tool.annotations).toEqual({ readOnlyHint: true, destructiveHint: false })
+      expect(tool.annotations).toEqual({
+        readOnlyHint: ['get_post', 'list_drafts'].includes(tool.name),
+        destructiveHint: false,
+      })
       expect(tool.inputSchema.additionalProperties).toBe(false)
     }
   })

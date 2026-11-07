@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { Match } from 'effect'
+import { Match, Schema } from 'effect'
 
 let fixtureClient = 1
 
@@ -21,6 +21,141 @@ const signIn = async (page: Page, email = 'editor@gbfm.local') => {
 
 const consent = (page: Page) =>
   page.getByRole('heading', { name: 'Connect OpenCode?', exact: true })
+
+test('a post first saved from the new-editor URL can recover a conflict in a new tab', async ({
+  page,
+  context,
+}) => {
+  await page.goto('/api/e2e/mcp-start')
+  await signIn(page)
+  await expect(consent(page)).toBeVisible()
+  await page.goto('/new/editorial')
+  await page
+    .getByRole('textbox', { name: 'Title', exact: true })
+    .fill(`New editorial fixture ${crypto.randomUUID()}`)
+  const canvas = page.getByRole('textbox', { name: 'Writing canvas', exact: true })
+  await canvas.fill('First browser-created version')
+
+  const created = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/content/post') && response.request().method() === 'POST',
+  )
+
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+  const response = await created
+  expect(response.status()).toBe(200)
+
+  const { slug } = Schema.decodeUnknownSync(Schema.Struct({ slug: Schema.String }))(
+    await response.json(),
+  )
+
+  await expect(page.getByRole('status').filter({ hasText: 'All changes saved' })).toBeVisible()
+  await expect(page).not.toHaveURL(/edit=/)
+  await canvas.fill('Keep my local unsaved changes')
+  expect(
+    (
+      await page.request.patch(`/api/content/posts/${slug}`, {
+        data: { content: 'Latest remote version' },
+      })
+    ).ok(),
+  ).toBe(true)
+
+  const conflict = page.waitForResponse(
+    (reply) =>
+      reply.url().endsWith(`/api/content/posts/${slug}`) && reply.request().method() === 'PATCH',
+  )
+
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+  expect((await conflict).status()).toBe(409)
+  const opened = context.waitForEvent('page')
+  await page.getByRole('link', { name: 'Open latest saved version (new tab)', exact: true }).click()
+  const latest = await opened
+  const latestCanvas = latest.getByRole('textbox', { name: 'Writing canvas', exact: true })
+  await expect(latestCanvas).toHaveValue('Latest remote version')
+  await expect(canvas).toHaveValue('Keep my local unsaved changes')
+  await latestCanvas.fill('Compared and recovered text')
+
+  const saved = latest.waitForResponse(
+    (reply) =>
+      reply.url().endsWith(`/api/content/posts/${slug}`) && reply.request().method() === 'PATCH',
+  )
+
+  await latest.getByRole('button', { name: 'Save draft', exact: true }).click()
+  expect((await saved).status()).toBe(200)
+  await latest.close()
+})
+
+test('the editorial editor retains local text and reports a stale-save conflict', async ({
+  page,
+}, info) => {
+  await page.goto('/api/e2e/mcp-start')
+  await signIn(page)
+  await expect(consent(page)).toBeVisible()
+  const slug = `editor-conflict-${crypto.randomUUID()}`
+
+  const created = await page.request.post('/api/content/post', {
+    data: {
+      type: 'post',
+      title: 'Concurrent editorial fixture',
+      content: 'Initial fixture text',
+      slug,
+      draft: true,
+    },
+  })
+
+  expect(created.ok()).toBe(true)
+  await page.goto(`/new/editorial?edit=${slug}`)
+  const canvas = page.getByRole('textbox', { name: 'Writing canvas', exact: true })
+  await expect(canvas).toHaveValue('Initial fixture text')
+
+  for (const content of ['First browser save', 'Second browser save']) {
+    await canvas.fill(content)
+
+    const saved = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/api/content/posts/${slug}`) &&
+        response.request().method() === 'PATCH',
+    )
+
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+    expect((await saved).status()).toBe(200)
+    await expect(page.getByRole('status').filter({ hasText: 'All changes saved' })).toBeVisible()
+  }
+
+  await canvas.fill('My unsaved browser text')
+
+  const remote = await page.request.patch(`/api/content/posts/${slug}`, {
+    data: { content: 'Newer connected-app fixture text' },
+  })
+
+  expect(remote.ok()).toBe(true)
+
+  const conflicted = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/content/posts/${slug}`) &&
+      response.request().method() === 'PATCH',
+  )
+
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+  expect((await conflicted).status()).toBe(409)
+  await expect(
+    page
+      .getByRole('alert')
+      .filter({ hasText: 'This post changed in another editor or connected app.' }),
+  ).toBeVisible()
+  await expect(canvas).toHaveValue('My unsaved browser text')
+  const stored = await page.request.get(`/api/content/posts/${slug}/edit`)
+  expect(
+    Schema.decodeUnknownSync(Schema.Struct({ content: Schema.String }))(await stored.json())
+      .content,
+  ).toBe('Newer connected-app fixture text')
+
+  if (process.env.MCP_EVIDENCE_DIR)
+    await page.screenshot({
+      path: `${process.env.MCP_EVIDENCE_DIR}/${info.project.name}-editor-conflict.png`,
+      fullPage: true,
+    })
+})
 
 test('signed-out users see connection context, recover from a bad password and approve read-only tools', async ({
   page,
@@ -68,7 +203,42 @@ test('signed-out users see connection context, recover from a bad password and a
 
   await page.getByRole('button', { name: 'Allow connection', exact: true }).click()
   await expect(
-    page.getByText('Connected to local GBFM. Read-only tools: list_drafts, get_post.'),
+    page.getByText(
+      'Connected to local GBFM. Available tools: create_draft, update_draft, list_drafts, get_post.',
+    ),
+  ).toBeVisible()
+})
+
+test('draft-write consent accurately limits editing to owned unpublished drafts', async ({
+  page,
+}, info) => {
+  await page.goto('/api/e2e/mcp-start?write=1')
+  await signIn(page)
+  await expect(consent(page)).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Read and draft-write access', exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByText('Create and edit your own unpublished editorial drafts'),
+  ).toBeVisible()
+  await expect(
+    page.getByText('Cannot publish, delete, upload files or edit published posts.'),
+  ).toBeVisible()
+  await expect(page.getByText('Read-only access', { exact: true })).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+
+  if (process.env.MCP_EVIDENCE_DIR)
+    await page.screenshot({
+      path: `${process.env.MCP_EVIDENCE_DIR}/${info.project.name}-draft-consent.png`,
+      fullPage: true,
+    })
+  await page.getByRole('button', { name: 'Allow connection', exact: true }).click()
+  await expect(
+    page.getByText(
+      'Connected to local GBFM. Available tools: create_draft, update_draft, list_drafts, get_post.',
+    ),
   ).toBeVisible()
 })
 

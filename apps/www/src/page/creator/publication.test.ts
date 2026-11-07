@@ -6,6 +6,7 @@ import {
   PersistDraft,
   ReconcileLocalDraft,
   ResolveMusic,
+  ResolvePostMusic,
   ResolveQuote,
   Save,
   UploadArtwork,
@@ -60,6 +61,68 @@ const saved = (published = true, requestId = 1) =>
   Message.Saved({ owner: { ...owner, requestId }, id: 'post', slug: 'saved', published })
 
 describe('creator publication ownership', () => {
+  it('advances the loaded revision after music attachment before the next save', async () => {
+    const before = '2026-11-07T00:00:00.000Z'
+    const after = '2026-11-07T00:00:01.000Z'
+    const url = 'https://open.spotify.com/track/fixture'
+    const base = ready()
+
+    const model: Model = {
+      ...base,
+      postMusicRequestId: 1,
+      resolvingPostMusic: true,
+      draft: {
+        ...base.draft,
+        kind: 'post',
+        postId: 'post',
+        editSlug: 'saved',
+        musicUrl: url,
+        content: 'Unsaved text',
+        expectedUpdatedAt: before,
+      },
+    }
+
+    const revisions: Array<string | undefined> = []
+
+    const operations = service({
+      resolvePostMusic: (_id, _url, expectedUpdatedAt) =>
+        Effect.sync(() => {
+          revisions.push(expectedUpdatedAt)
+
+          return {
+            postId: 'post',
+            entityType: 'track' as const,
+            entityId: 'track',
+            url,
+            title: 'Track',
+            artistNames: [],
+            coverImageUrl: null,
+            updatedAt: after,
+          }
+        }),
+      save: ({ draft }) =>
+        Effect.sync(() => {
+          revisions.push(draft.expectedUpdatedAt)
+
+          return { id: 'post', slug: 'saved', updatedAt: after }
+        }),
+    })
+
+    const resolved = await Effect.runPromise(
+      ResolvePostMusic({ postId: 'post', url, expectedUpdatedAt: before, owner }).effect.pipe(
+        Effect.provideService(CreatorService, operations),
+      ),
+    )
+
+    const next = update(model, resolved).model
+    expect(next.draft.content).toBe('Unsaved text')
+    await Effect.runPromise(
+      Save({ draft: next.draft, creatorId: 'creator', publish: false, owner }).effect.pipe(
+        Effect.provideService(CreatorService, operations),
+      ),
+    )
+    expect(revisions).toEqual([before, after])
+  })
   it.each([false, true])(
     'clears autosave errors superseded by remote success, late=%s',
     async (late) => {
@@ -504,6 +567,28 @@ describe('creator local storage reconciliation', () => {
       },
     }
   }
+
+  it('retains newer local text with the revision returned by the completed save', async () => {
+    const local = storage()
+    const draft = { ...ready().draft, expectedUpdatedAt: '2026-11-07T00:00:00.000Z' }
+    const retained = { ...draft, content: 'Newer local text' }
+    local.setItem('draft', JSON.stringify(draft))
+    const updatedAt = '2026-11-07T00:00:01.000Z'
+    await Effect.runPromise(
+      reconcileStoredDraft(
+        local,
+        'draft',
+        draft,
+        { id: 'post', slug: 'saved', updatedAt },
+        retained,
+      ),
+    )
+    expect(JSON.parse(local.getItem('draft') ?? '{}')).toMatchObject({
+      content: retained.content,
+      expectedUpdatedAt: updatedAt,
+      editSlug: 'saved',
+    })
+  })
 
   it('removes only the saved snapshot and retains newer local edits with remote identity', async () => {
     const local = storage()

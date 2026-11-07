@@ -117,7 +117,8 @@ not establish writer coverage or permit deletion of dependent content.
 0023 exports musicMetadataProposalsTable from metadata-review.schema.ts.
 currentValue/proposedValue are raw, nonnull canonical JSON scalar TEXT: JSON null
 is the string `null`, never SQL NULL. Storage checks target/field correspondence,
-scalar types and field bounds, distinct encoded values, top-level evidence array
+scalar types and field bounds (rejecting embedded NUL before SQLite length),
+distinct encoded values, top-level evidence array
 size 1..5, lowercase hash, status, safe revisions/times and physical marker.
 The backend parses canonical scalars and strict evidence objects {linkId,reason},
 enforces their bounds and same-target public/non-rejected stored-link evidence,

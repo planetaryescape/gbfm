@@ -13,6 +13,22 @@ import { DatabaseError, getErrorMessage, NotFoundError, UnauthorizedError } from
 export interface MusicReminderService {
   readonly create: (data: NewMusicReminder) => Effect.Effect<MusicReminder, DatabaseError>
   readonly getByUserId: (userId: string) => Effect.Effect<Array<MusicReminder>, DatabaseError>
+  /** Owner predicate precedes bounded pagination; no notes, recipient or delivery data. */
+  readonly getPageByUserId: (
+    userId: string,
+    page: { readonly limit: number; readonly offset: number },
+  ) => Effect.Effect<
+    {
+      readonly reminders: ReadonlyArray<
+        Pick<
+          MusicReminder,
+          'id' | 'musicTitle' | 'artistName' | 'reminderDate' | 'status' | 'isSent'
+        >
+      >
+      readonly hasMore: boolean
+    },
+    DatabaseError
+  >
   readonly update: (
     id: string,
     userId: string,
@@ -84,6 +100,56 @@ const getByUserIdEffect = (userId: string) =>
     })
 
     return reminders
+  })
+
+const getPageByUserIdEffect = (
+  userId: string,
+  page: { readonly limit: number; readonly offset: number },
+) =>
+  Effect.gen(function* () {
+    const db = yield* Database
+
+    // The service is also callable outside MCP. Never let an invalid page become
+    // SQLite's unbounded LIMIT -1, even if a caller bypasses its input schema.
+    if (
+      !Number.isInteger(page.limit) ||
+      page.limit < 1 ||
+      page.limit > 50 ||
+      !Number.isInteger(page.offset) ||
+      page.offset < 0 ||
+      page.offset > 10_000
+    )
+      return yield* new DatabaseError({
+        message: 'Invalid reminder page',
+        operation: 'select',
+        table: 'music_reminder',
+      })
+
+    const rows = yield* Effect.tryPromise({
+      try: () =>
+        db
+          .select({
+            id: musicReminder.id,
+            musicTitle: musicReminder.musicTitle,
+            artistName: musicReminder.artistName,
+            reminderDate: musicReminder.reminderDate,
+            status: musicReminder.status,
+            isSent: musicReminder.isSent,
+          })
+          .from(musicReminder)
+          .where(eq(musicReminder.userId, userId))
+          .orderBy(musicReminder.reminderDate, musicReminder.id)
+          .limit(page.limit + 1)
+          .offset(page.offset),
+      catch: () =>
+        new DatabaseError({
+          message: 'Failed to fetch reminder page',
+          operation: 'select',
+          table: 'music_reminder',
+        }),
+    })
+
+    return { reminders: rows.slice(0, page.limit), hasMore: rows.length > page.limit }
   })
 
 const updateEffect = (id: string, userId: string, data: Partial<NewMusicReminder>) =>
@@ -231,6 +297,7 @@ export const MusicReminderServiceLayer = Layer.effect(
     return {
       create: (data) => provideDb(createEffect(data)),
       getByUserId: (userId) => provideDb(getByUserIdEffect(userId)),
+      getPageByUserId: (userId, page) => provideDb(getPageByUserIdEffect(userId, page)),
       update: (id, userId, data) => provideDb(updateEffect(id, userId, data)),
       delete: (id, userId) => provideDb(deleteEffect(id, userId)),
     }

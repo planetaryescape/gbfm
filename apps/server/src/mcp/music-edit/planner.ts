@@ -30,6 +30,23 @@ const Snapshot = Schema.Struct({
 const unavailable = () =>
   new McpToolError({ code: 'unavailable', message: 'Music metadata preview is unavailable.' })
 
+// SQLite BINARY compares UTF-8 bytes, not JavaScript's UTF-16 code units.
+const compareSqliteBinary = (left: string, right: string): number => {
+  const encoder = new TextEncoder()
+  const a = encoder.encode(left)
+  const b = encoder.encode(right)
+
+  for (const [index, byte] of a.entries()) {
+    const other = b[index]
+
+    if (other === undefined) return 1
+
+    if (byte !== other) return byte - other
+  }
+
+  return a.length - b.length
+}
+
 export const musicEditTarget = (change: MusicEditChange) => {
   switch (change.operation) {
     case 'set_album_type':
@@ -187,9 +204,7 @@ export const planMusicEdit = Effect.fn('MusicEdit.plan')(function* (change: Musi
       }
 
       credits.sort(
-        (a, b) =>
-          a.displayOrder - b.displayOrder ||
-          (a.artistId < b.artistId ? -1 : a.artistId > b.artistId ? 1 : 0),
+        (a, b) => a.displayOrder - b.displayOrder || compareSqliteBinary(a.artistId, b.artistId),
       )
 
       if (credits.length > 200) return yield* unavailable()
@@ -206,7 +221,7 @@ export const planMusicEdit = Effect.fn('MusicEdit.plan')(function* (change: Musi
       if (change.operation === 'set_label_affiliation') labels.push(change.labelId)
 
       if (labels.length > 200) return yield* unavailable()
-      after = labels.sort()
+      after = labels.sort(compareSqliteBinary)
       break
     }
   }

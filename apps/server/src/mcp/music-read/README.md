@@ -91,13 +91,16 @@ URL lookup: SEARCH music_source_identities USING INDEX sqlite_autoindex_music_so
             SEARCH music_source_identities USING INDEX music_source_identities_canonical_url_uq (canonical_url=?)
             SEARCH a USING INDEX sqlite_autoindex_music_source_aliases_1 (normalized_url=?)
             SEARCH i USING INDEX music_source_identities_resolving_audit_page_idx (state=? AND source_key=?)
-search: SCAN music_artists; SCAN music_albums; SCAN music_tracks; SCAN music_labels
-artist name filter: SCAN music_artists
+all-kind search: SCAN music_artists; SCAN music_albums; SCAN music_tracks; SCAN music_labels
+artist named filter / single-kind search: SCAN music_artists USING INDEX sqlite_autoindex_music_artists_1 (no TEMP B-TREE)
 artist kind-only filter: SCAN music_artists USING INDEX sqlite_autoindex_music_artists_1 (no TEMP B-TREE)
 ```
 
 There is no longer a global `MATERIALIZE edges` step. Source predicates apply inside
 each selected base-table branch; no `NOT MATERIALIZED` hint or extra schema is used.
+Named filters and single-kind search stop after limit + 1 matches (after offset),
+but rare or absent matches can still walk the entire kind's index. Removing the
+temporary sort does not make name matching catalogue-independent.
 
 ## Central integration handoff (P1 owns these edits)
 

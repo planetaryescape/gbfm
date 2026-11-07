@@ -66,6 +66,19 @@ test.each([
 
     expect(text).toContain('tools and read_micro_thread are not registered')
     expect(text).toContain('Production allowedScopes is unchanged')
+
+    for (const name of [
+      'list_saved_mixes',
+      'list_collections',
+      'list_favorites',
+      'list_show_subscriptions',
+      'list_music_reminders',
+      'get_admin_overview',
+    ]) {
+      expect(text).toContain(`- ${name}:`)
+    }
+
+    expect(text).toContain('reminder commands are not registered, even with write grants')
     expect(text).toContain('Existing connections remain read-only')
     expect(text).toContain(
       'never publish, delete, change creators, change media or edit published posts',

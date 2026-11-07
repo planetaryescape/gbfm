@@ -1,6 +1,6 @@
 # L1 #536: private listening
 
-Command follow-up based on P1 PR #575 at `695bb12d2149bcbe123f0b6e7661909c4c3ea5ee`,
+Command follow-up based on P1 PR #575 at `6410b0958f920edeff317c860e8b167b970b6aca`,
 including shared receipt 0016 and domain revision migrations 0017–0019.
 The reviewed read-only PR #560 remains unchanged at `628a6cde9fce9ab44f265e1737a5a016574ea07b`.
 Integration owner: P1. Keep all MCP PRs unmerged. This lane does not compose the
@@ -84,7 +84,9 @@ No global totals, membership counts, memberships, or cross-owner IDs are returne
 `command-tools.ts` exports `ListeningCommandToolkit` and
 `ListeningCommandToolHandlersLayer`. `commands.ts` exports
 `ListeningCommandService` and `ListeningCommandServiceLive`; P1 must provide
-`Database`, `EditorialMcpConfig` and `McpOperationStore` using the same D1 binding.
+`Database` and `McpOperationStore` using the same D1 binding, and supply
+`CommandAuthority` in each authenticated request's context. Missing request
+authority fails closed; it is never captured while constructing the shared layer.
 Raw D1 stays in composition. This module does not create a second ledger.
 
 The shared store scopes UUIDv4 request keys by actor/client/resource/operation,
@@ -94,7 +96,8 @@ expired keys remain nonreusable tombstones. Collection updates normalize omitted
 patch fields to null, distinct from an empty description; creation normalizes
 omitted description to its persisted empty-string default.
 
-Each mutation includes the common fence and owner/private/revision/account guards.
+Each mutation and final assertion includes the common fence and the persisted
+credential's live SQL authority guard, in addition to owner/private/revision guards.
 Coupled membership DML additionally checks the domain marker against the fresh
 physical `attemptId`. The final winner assertion aborts the whole batch on lost
 CAS. No-op membership consumes one collection revision. Browser/API metadata and
@@ -102,10 +105,14 @@ publication edits also consume versions and clear markers; mix deletion invalida
 all affected collections before FK cascades, atomically refusing overflow.
 
 Live target ownership/existence/private state is rechecked before disclosing a
-saved receipt, including the original target of a create replay. Persisted grant,
-client and scope SQL authority is a shared P1 prerequisite, not claimed by these
-injected-principal tests. Do not activate the toolkit until P1 supplies that seam
-and proves its authenticated composition.
+saved receipt, including the original target of a create replay. Each replay
+recheck obtains a fresh authority checkpoint and preserves the actor/client/resource
+namespace. Existing session-only HTTP writers construct P1's real session
+authority, retain their observed-version CAS, and guard DML with live SQL; they do
+not accept PATs. Coupled browser batches end with an SQL assertion that aborts
+the transaction on authority loss, including session expiry between statements.
+P1 still owns authenticated central transport composition and
+activation; this lane does not register the toolkit.
 
 ## Verification boundary
 
@@ -113,7 +120,13 @@ and proves its authenticated composition.
 and MCP 2026-07-28 with an explicitly injected principal, not persisted OAuth.
 `commands.d1.test.ts` exercises the six commands against migrated D1, including
 replay, contention, changed retries, expiry, private/owner guards and browser-writer
-invalidation. `commands.protocol.d1.test.ts` composes all eight capabilities locally
+invalidation with persisted session authority, and denial without request authority.
+`commands.oauth.d1.test.ts` registers a disposable OAuth client, performs real
+consent/code exchange for an ordinary listener, and checks scope loss and token
+revocation against receipt disclosure. A deliberately stale checkpoint exercises
+all six commands' live SQL guards after persisted scope removal, proving zero
+new receipts or mutations. Only the disposable resource policy enables listening
+scopes for this test. `commands.protocol.d1.test.ts` composes all eight capabilities locally
 and rejects `published`/`userId` excess on every command with `Tool.Strict`.
 `bun run test:unit src/mcp/listening/contracts.test.ts` covers command
 decoding. P1 must still prove composition with persisted OAuth grants, consent,

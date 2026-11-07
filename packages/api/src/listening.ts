@@ -95,6 +95,7 @@ const success = Schema.Struct({ success: Schema.Boolean })
 
 const errors = [
   HttpApiError.BadRequest,
+  HttpApiError.Forbidden,
   HttpApiError.NotFound,
   HttpApiError.Conflict,
   HttpApiError.ServiceUnavailable,

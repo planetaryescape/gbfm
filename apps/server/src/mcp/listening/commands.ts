@@ -1,7 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm'
-import { Clock, Context, Effect, Layer, Match, Schema } from 'effect'
+import { Clock, Context, Effect, Layer, Match, Option, Schema } from 'effect'
 
-import { user } from '@/db/auth.schema'
 import { Database } from '@/db/layer'
 import {
   listeningCollectionsTable as collections,
@@ -9,9 +8,8 @@ import {
 } from '@/db/listening.schema'
 import { parseListeningSource } from '@/services/listening-import'
 
-import { McpAuthorization, McpAuthorizationLive } from '../authorization'
+import { CommandAuthority } from '../command-authority'
 import { McpToolError } from '../contracts'
-import { EditorialMcpConfig } from '../editorial'
 import {
   McpOperationStore,
   type AtomicOperationPlan,
@@ -54,13 +52,15 @@ const failure = (code: typeof McpToolError.Type.code) =>
 
 const makeCommands = Effect.gen(function* () {
   const db = yield* Database
-  const authorization = yield* McpAuthorization
   const operations = yield* McpOperationStore
-  const config = yield* EditorialMcpConfig
 
-  const authorize = authorization
-    .listener(['listening:read', 'listening:write'])
-    .pipe(Effect.mapError((error) => failure(error.code)))
+  const authorize = Effect.gen(function* () {
+    const authority = yield* Effect.serviceOption(CommandAuthority)
+
+    if (Option.isNone(authority)) return yield* failure('access_denied')
+
+    return yield* authority.value.checkpoint(['listening:read', 'listening:write'])
+  })
 
   const execute = Effect.fn('ListeningMcp.execute')(function* (
     operation: string,
@@ -76,9 +76,9 @@ const makeCommands = Effect.gen(function* () {
       try: () =>
         operations.execute({
           key: {
-            actorId: actor.userId,
+            actorId: actor.actorId,
             clientId: actor.clientId,
-            resource: config.resourceUrl,
+            resource: actor.resource,
             operation,
             requestId,
           },
@@ -87,7 +87,14 @@ const makeCommands = Effect.gen(function* () {
           authorize: (outcome?: OperationOutcome) =>
             runPromise(
               Effect.gen(function* () {
-                yield* authorize
+                const current = yield* authorize
+
+                if (
+                  current.actorId !== actor.actorId ||
+                  current.clientId !== actor.clientId ||
+                  current.resource !== actor.resource
+                )
+                  return false
 
                 if (!outcome) return true
                 const access = yield* Schema.decodeUnknownEffect(Access)(outcome.access)
@@ -99,7 +106,13 @@ const makeCommands = Effect.gen(function* () {
                       db
                         .select({ published: mixes.published })
                         .from(mixes)
-                        .where(and(eq(mixes.id, mixId), eq(mixes.userId, actor.userId)))
+                        .where(
+                          and(
+                            eq(mixes.id, mixId),
+                            eq(mixes.userId, actor.actorId),
+                            current.liveGuard,
+                          ),
+                        )
                         .limit(1),
                     catch: () => failure('unavailable'),
                   })
@@ -116,7 +129,8 @@ const makeCommands = Effect.gen(function* () {
                         .where(
                           and(
                             eq(collections.id, collectionId),
-                            eq(collections.userId, actor.userId),
+                            eq(collections.userId, actor.actorId),
+                            current.liveGuard,
                           ),
                         )
                         .limit(1),
@@ -133,7 +147,12 @@ const makeCommands = Effect.gen(function* () {
                 ),
               ),
             ),
-          build: (context) => build(context, actor.userId),
+          build: (context) => {
+            const fence = sql`(${context.fence}) AND (${actor.liveGuard})`
+            const plan = build({ ...context, fence }, actor.actorId)
+
+            return { ...plan, assertApplied: sql`(${plan.assertApplied}) AND (${fence})` }
+          },
         }),
       catch: () => failure('unavailable'),
     })
@@ -148,10 +167,6 @@ const makeCommands = Effect.gen(function* () {
     return response.outcome.result
   })
 
-  // Also checked in SQL: a live ban between preflight and the batch cannot win a mutation.
-  const active = (actorId: string) =>
-    sql`exists (select 1 from ${user} where ${user.id} = ${actorId} and coalesce(${user.banned}, 0) = 0)`
-
   const saveMix = Effect.fn('ListeningMcp.saveMix')(function* (input: typeof SaveMixInput.Type) {
     const actor = yield* authorize
 
@@ -164,7 +179,7 @@ const makeCommands = Effect.gen(function* () {
         db
           .select({ id: mixes.id, revision: mixes.revision })
           .from(mixes)
-          .where(and(eq(mixes.userId, actor.userId), eq(mixes.url, source.url)))
+          .where(and(eq(mixes.userId, actor.actorId), eq(mixes.url, source.url), actor.liveGuard))
           .limit(1),
       catch: () => failure('unavailable'),
     })
@@ -182,10 +197,10 @@ const makeCommands = Effect.gen(function* () {
         statements: [
           ctx.prepare(sql`insert into saved_mixes (id,user_id,url,platform,embed_url,title,notes,status,published,created_at,revision,last_operation_id)
           select ${mixId},${actorId},${source.url},${source.platform},${source.embedUrl},${input.title.trim()},'','to-listen',0,${now},1,${ctx.attemptId}
-          where ${ctx.fence} and ${active(actorId)}
+          where ${ctx.fence}
           on conflict(user_id,url) do update set last_operation_id=${ctx.attemptId}
           where saved_mixes.id=${mixId} and saved_mixes.user_id=${actorId} and saved_mixes.revision=${revision}
-          and ${ctx.fence} and ${active(actorId)}`),
+          and ${ctx.fence}`),
         ],
         assertApplied: sql`exists(select 1 from saved_mixes where id=${mixId} and user_id=${actorId} and last_operation_id=${ctx.attemptId})`,
         outcome: { result, revision: result.version, access: { mixId, privateOnly: false } },
@@ -214,7 +229,7 @@ const makeCommands = Effect.gen(function* () {
       statements: [
         ctx.prepare(sql`update saved_mixes set ${patch},revision=revision+1,last_operation_id=${ctx.attemptId}
         where id=${input.mixId} and user_id=${actorId} and published=0 and revision=${revision} and revision<${maximumRevision}
-        and ${ctx.fence} and ${active(actorId)}`),
+        and ${ctx.fence}`),
       ],
       assertApplied: sql`exists(select 1 from saved_mixes where id=${input.mixId} and user_id=${actorId} and last_operation_id=${ctx.attemptId})`,
       outcome: {
@@ -245,7 +260,7 @@ const makeCommands = Effect.gen(function* () {
         statements: [
           ctx.prepare(sql`insert into listening_collections (id,user_id,title,description,published,created_at,revision,last_operation_id)
         select ${collectionId},${actorId},${input.title.trim()},${input.description ?? ''},0,${now},1,${ctx.attemptId}
-        where ${ctx.fence} and ${active(actorId)}`),
+        where ${ctx.fence}`),
         ],
         assertApplied: sql`exists(select 1 from listening_collections where id=${collectionId} and user_id=${actorId} and last_operation_id=${ctx.attemptId})`,
         outcome: { result, revision: result.version, access: { collectionId, privateOnly: true } },
@@ -284,7 +299,7 @@ const makeCommands = Effect.gen(function* () {
         statements: [
           ctx.prepare(sql`update listening_collections set ${sql.join(fields, sql`, `)},last_operation_id=${ctx.attemptId}
         where id=${input.collectionId} and user_id=${actorId} and published=0 and revision=${revision} and revision<${maximumRevision}
-        and ${ctx.fence} and ${active(actorId)}`),
+        and ${ctx.fence}`),
         ],
         assertApplied: sql`exists(select 1 from listening_collections where id=${input.collectionId} and user_id=${actorId} and last_operation_id=${ctx.attemptId})`,
         outcome: {
@@ -323,13 +338,13 @@ const makeCommands = Effect.gen(function* () {
           statements: [
             ctx.prepare(sql`update listening_collections set revision=revision+1,last_operation_id=${ctx.attemptId}
             where id=${input.collectionId} and user_id=${actorId} and published=0 and revision=${revision} and revision<${maximumRevision}
-            and ${ownedMix} and ${ctx.fence} and ${active(actorId)}`),
+            and ${ownedMix} and ${ctx.fence}`),
             ctx.prepare(
               input.included
                 ? sql`insert into listening_memberships(collection_id,mix_id) select ${input.collectionId},${input.mixId}
-                where ${ctx.fence} and ${winner} and ${ownedMix} and ${active(actorId)} on conflict do nothing`
+                where ${ctx.fence} and ${winner} and ${ownedMix} on conflict do nothing`
                 : sql`delete from listening_memberships where collection_id=${input.collectionId} and mix_id=${input.mixId}
-                and ${ctx.fence} and ${winner} and ${ownedMix} and ${active(actorId)}`,
+                and ${ctx.fence} and ${winner} and ${ownedMix}`,
             ),
           ],
           assertApplied: winner,
@@ -359,12 +374,10 @@ const makeCommands = Effect.gen(function* () {
   }
 })
 
-/** Private commands use only P1's common atomic receipt store; no process-local replay state. */
+/** Private commands require request-scoped authority and the common atomic receipt store. */
 export class ListeningCommandService extends Context.Service<
   ListeningCommandService,
   Effect.Success<typeof makeCommands>
 >()('gbfm/mcp/ListeningCommandService') {}
 
-export const ListeningCommandServiceLive = Layer.effect(ListeningCommandService, makeCommands).pipe(
-  Layer.provide(McpAuthorizationLive),
-)
+export const ListeningCommandServiceLive = Layer.effect(ListeningCommandService, makeCommands)

@@ -179,6 +179,32 @@ test('metadata proposals preserve scalar null and pending-only owner-scoped dupl
   ).rejects.toThrow()
 })
 
+test('metadata scalar bounds cannot be bypassed by embedded NUL in either JSON scalar', async () => {
+  await using resource = await createMigratedD1Database()
+  const db = drizzle(resource.database)
+  await db.insert(user).values({ id: 'actor', name: 'Actor', email: 'actor@example.test' })
+  await db.insert(oauthClient).values({ id: 'client-row', clientId: 'client', redirectUris: '[]' })
+  await db
+    .insert(oauthResource)
+    .values({ id: 'resource', identifier: proposal.resource, name: 'MCP' })
+
+  for (const field of ['name', 'bio'] as const) {
+    for (const scalar of ['currentValue', 'proposedValue'] as const) {
+      for (const value of ['A\u0000' + 'x'.repeat(10000), 'A\u0000B']) {
+        await expect(
+          db.insert(musicMetadataProposalsTable).values({
+            ...proposal,
+            field,
+            currentValue: JSON.stringify('Current'),
+            proposedValue: JSON.stringify('Proposed'),
+            [scalar]: JSON.stringify(value),
+          }),
+        ).rejects.toThrow()
+      }
+    }
+  }
+})
+
 test.each(['actor', 'client', 'resource'] as const)(
   'metadata proposals erase private content on %s deletion',
   async (dependency) => {

@@ -18,7 +18,7 @@ CREATE TABLE music_metadata_proposals (
   updated_at INTEGER NOT NULL,
   CHECK (target_type IN ('artist','album','track','label') AND length(target_id) > 0),
   CHECK ((target_type = 'artist' AND field IN ('name','bio')) OR (target_type IN ('album','track') AND field = 'title') OR (target_type = 'label' AND field IN ('name','description'))),
-  CHECK (json_valid(current_value) AND json_valid(proposed_value) AND json_type(current_value) IN ('text','null') AND json_type(proposed_value) IN ('text','null') AND current_value <> proposed_value),
+  CHECK (json_valid(current_value) AND json_valid(proposed_value) AND json_type(current_value) IN ('text','null') AND json_type(proposed_value) IN ('text','null') AND instr(coalesce(json_extract(current_value, '$'), ''), char(0)) = 0 AND instr(coalesce(json_extract(proposed_value, '$'), ''), char(0)) = 0 AND current_value <> proposed_value),
   CHECK (CASE WHEN field IN ('name','title') THEN json_type(current_value) = 'text' AND length(trim(json_extract(current_value, '$'))) > 0 AND length(json_extract(current_value, '$')) <= 500 AND json_type(proposed_value) = 'text' AND length(trim(json_extract(proposed_value, '$'))) > 0 AND length(json_extract(proposed_value, '$')) <= 500 ELSE (json_type(current_value) = 'null' OR length(json_extract(current_value, '$')) <= 2000) AND (json_type(proposed_value) = 'null' OR length(json_extract(proposed_value, '$')) <= 2000) END),
   CHECK (json_valid(evidence) AND json_type(evidence) = 'array' AND json_array_length(evidence) BETWEEN 1 AND 5),
   CHECK (length(proposal_hash) = 64 AND proposal_hash NOT GLOB '*[^0-9a-f]*'),

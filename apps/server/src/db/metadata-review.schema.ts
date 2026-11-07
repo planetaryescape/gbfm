@@ -50,7 +50,7 @@ export const musicMetadataProposalsTable = sqliteTable(
     ),
     check(
       'music_metadata_proposals_values_check',
-      sql`json_valid(${t.currentValue}) AND json_valid(${t.proposedValue}) AND json_type(${t.currentValue}) IN ('text','null') AND json_type(${t.proposedValue}) IN ('text','null') AND ${t.currentValue} <> ${t.proposedValue}`,
+      sql`json_valid(${t.currentValue}) AND json_valid(${t.proposedValue}) AND json_type(${t.currentValue}) IN ('text','null') AND json_type(${t.proposedValue}) IN ('text','null') AND instr(coalesce(json_extract(${t.currentValue}, '$'), ''), char(0)) = 0 AND instr(coalesce(json_extract(${t.proposedValue}, '$'), ''), char(0)) = 0 AND ${t.currentValue} <> ${t.proposedValue}`,
     ),
     check(
       'music_metadata_proposals_bounds_check',

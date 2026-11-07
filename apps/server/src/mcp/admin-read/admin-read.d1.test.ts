@@ -1,6 +1,6 @@
 import { McpPrincipal } from '@gbfm/core/editorial-mcp'
 import { eq } from 'drizzle-orm'
-import { Effect, Layer, Redacted, Schema } from 'effect'
+import { Effect, Layer, Logger, Redacted, Schema } from 'effect'
 import { HttpRouter, HttpServer } from 'effect/http'
 import { expect, test } from 'vitest'
 
@@ -8,7 +8,7 @@ import { audioTable } from '@/db/audio.schema'
 import { user } from '@/db/auth.schema'
 import { DatabaseLayer } from '@/db/layer'
 import { musicLabelsTable } from '@/db/music-entity.schema'
-import { oauthResource } from '@/db/oauth.schema'
+import { oauthAccessToken, oauthConsent, oauthRefreshToken, oauthResource } from '@/db/oauth.schema'
 import { postsTable } from '@/db/post.schema'
 import { releasesTable } from '@/db/release.schema'
 import { showsTable } from '@/db/show.schema'
@@ -49,6 +49,7 @@ const ToolEnvelope = Schema.Struct({
 
 const setup = async () => {
   const fixture = await createEditorialOAuthFixture()
+  const logs: Array<unknown> = []
 
   const endpoint = Schema.decodeUnknownSync(EditorialMcpSettings)({
     readScope: 'posts:read',
@@ -87,11 +88,17 @@ const setup = async () => {
       Layer.provide(AdminReadToolHandlersLayer),
       Layer.provide(services),
       Layer.provide(HttpServer.layerServices),
+      Layer.provide(Logger.layer([Logger.make(({ message }) => logs.push(message))])),
     ),
     { disableLogger: true },
   )
 
-  const rpc = (token: Redacted.Redacted, method = 'tools/call', args: Schema.Json = {}) =>
+  const rpc = (
+    token: Redacted.Redacted,
+    method = 'tools/call',
+    args: Schema.Json = {},
+    name = 'get_admin_overview',
+  ) =>
     app.handler(
       new Request(fixture.config.mcp.resourceUrl, {
         method: 'POST',
@@ -100,7 +107,7 @@ const setup = async () => {
           'content-type': 'application/json',
           'mcp-protocol-version': '2026-07-28',
           'mcp-method': method,
-          'mcp-name': 'get_admin_overview',
+          'mcp-name': name,
           authorization: `Bearer ${Redacted.value(token)}`,
         },
         body: JSON.stringify({
@@ -108,7 +115,7 @@ const setup = async () => {
           id: 1,
           method,
           params: {
-            name: 'get_admin_overview',
+            name,
             arguments: args,
             _meta: {
               'io.modelcontextprotocol/protocolVersion': '2026-07-28',
@@ -123,6 +130,7 @@ const setup = async () => {
     fixture,
     base,
     rpc,
+    logs,
     [Symbol.asyncDispose]: async () => {
       await app.dispose()
       await fixture[Symbol.asyncDispose]()
@@ -133,12 +141,30 @@ const setup = async () => {
 test('live OAuth, role and scope checks protect discovery, cached calls and revoked grants', async () => {
   await using context = await setup()
   const { fixture, rpc } = context
-  await fixture.db.update(user).set({ role: 'admin' }).where(eq(user.id, 'owner'))
   // Test-only resource policy. Never change the production allowedScopes.
   await fixture.db.update(oauthResource).set({
     allowedScopes: JSON.stringify(['admin:read', 'catalogue:read', 'posts:read', 'offline_access']),
   })
   const client = await fixture.register('admin:read catalogue:read posts:read offline_access')
+
+  // Real consent admission must reject both editor and creator, independently
+  // of the defense-in-depth service check below.
+  for (const actor of ['owner', 'other']) {
+    const denied = await fixture.request(
+      `/oauth2/authorize?${fixture.authorizationQuery(client, 'admin:read offline_access')}`,
+      undefined,
+      actor,
+    )
+
+    expect(denied.status).toBe(403)
+    expect(denied.headers.get('location')).toBeNull()
+    expect(await denied.json()).toMatchObject({ code: 'EDITORIAL_PERMISSION_REQUIRED' })
+  }
+
+  expect(await fixture.db.$count(oauthConsent)).toBe(0)
+  expect(await fixture.db.$count(oauthAccessToken)).toBe(0)
+  expect(await fixture.db.$count(oauthRefreshToken)).toBe(0)
+  await fixture.db.update(user).set({ role: 'admin' }).where(eq(user.id, 'owner'))
 
   const issue = async (actor: string, scope: string) =>
     Schema.decodeUnknownSync(OAuthTokens)(
@@ -227,14 +253,14 @@ test('exact aggregate projection is fixed-size, empty-safe, redacted and fails c
   await fixture.db.update(user).set({ role: 'admin' }).where(eq(user.id, 'owner'))
   await fixture.db
     .update(oauthResource)
-    .set({ allowedScopes: JSON.stringify(['admin:read', 'offline_access']) })
-  const client = await fixture.register('admin:read offline_access')
+    .set({ allowedScopes: JSON.stringify(['admin:read', 'posts:read', 'offline_access']) })
+  const client = await fixture.register('admin:read posts:read offline_access')
 
   const tokens = Schema.decodeUnknownSync(OAuthTokens)(
     await (
       await fixture.exchange(
         client,
-        await fixture.authorize(client, 'owner', 'admin:read offline_access'),
+        await fixture.authorize(client, 'owner', 'admin:read posts:read offline_access'),
       )
     ).json(),
   )
@@ -252,6 +278,16 @@ test('exact aggregate projection is fixed-size, empty-safe, redacted and fails c
   }
 
   const empty = await read()
+  const editorialResponse = await rpc(tokens.access_token, 'tools/call', {}, 'list_drafts')
+  const editorial = Schema.decodeUnknownSync(ToolEnvelope)(await editorialResponse.json()).result
+  expect(editorial.isError).not.toBe(true)
+
+  const editorialEndpoint = Schema.decodeUnknownSync(
+    Schema.Struct({ endpoint: AdminOverviewResult.fields.endpoint }),
+  )(editorial.structuredContent)
+
+  const adminEndpoint = Schema.decodeUnknownSync(AdminOverviewResult)(empty.structuredContent)
+  expect(adminEndpoint.endpoint).toEqual(editorialEndpoint.endpoint)
   expect(empty.structuredContent).toEqual({
     endpoint: {
       environment: 'local',
@@ -360,6 +396,7 @@ test('exact aggregate projection is fixed-size, empty-safe, redacted and fails c
   expect(Schema.decodeUnknownSync(ToolEnvelope)(await invalid.json()).result.isError).toBe(true)
 
   // Real disposable storage failure, not a mocked service or driver.
+  context.logs.length = 0
   await fixture.db.$client.prepare('DROP TABLE releases').run()
   const failed = await rpc(tokens.access_token)
   const failure = Schema.decodeUnknownSync(ToolEnvelope)(await failed.json()).result
@@ -369,4 +406,14 @@ test('exact aggregate projection is fixed-size, empty-safe, redacted and fails c
   })
   expect(failure.structuredContent).toBeUndefined()
   expect(JSON.stringify(failure)).not.toMatch(/PRIVATE_|SQL|releases/)
+  expect(context.logs).toEqual([
+    [
+      'mcp.admin_read.unavailable',
+      {
+        operation: 'publishing.count',
+        category: 'releases',
+        dependency: 'database',
+      },
+    ],
+  ])
 }, 30_000)

@@ -46,6 +46,7 @@ const makeAdminRead = Effect.gen(function* () {
   // Same draft/published predicate as the browser overview. Aggregate in storage;
   // never load the dashboard DTO or any content/account/provider rows.
   const counts = (
+    category: keyof typeof AdminOverviewResult.Type.publishing,
     table: typeof audioTable | typeof postsTable | typeof showsTable | typeof releasesTable,
     where?: SQL,
   ) =>
@@ -67,6 +68,13 @@ const makeAdminRead = Effect.gen(function* () {
       catch: unavailable,
     }).pipe(
       Effect.flatMap((rows) => Schema.decodeUnknownEffect(ContentCounts)(rows[0])),
+      Effect.tapError(() =>
+        Effect.logError('mcp.admin_read.unavailable', {
+          operation: 'publishing.count',
+          category,
+          dependency: 'database',
+        }),
+      ),
       Effect.mapError(unavailable),
     )
 
@@ -78,13 +86,13 @@ const makeAdminRead = Effect.gen(function* () {
       )
 
     const publishing = yield* Effect.all({
-      mixes: counts(audioTable, eq(audioTable.type, 'mix')),
-      tracks: counts(audioTable, eq(audioTable.type, 'track')),
-      miscAudio: counts(audioTable, eq(audioTable.type, 'misc')),
-      shows: counts(showsTable),
-      posts: counts(postsTable, eq(postsTable.type, 'post')),
-      micros: counts(postsTable, eq(postsTable.type, 'micro')),
-      releases: counts(releasesTable),
+      mixes: counts('mixes', audioTable, eq(audioTable.type, 'mix')),
+      tracks: counts('tracks', audioTable, eq(audioTable.type, 'track')),
+      miscAudio: counts('miscAudio', audioTable, eq(audioTable.type, 'misc')),
+      shows: counts('shows', showsTable),
+      posts: counts('posts', postsTable, eq(postsTable.type, 'post')),
+      micros: counts('micros', postsTable, eq(postsTable.type, 'micro')),
+      releases: counts('releases', releasesTable),
     })
 
     return {

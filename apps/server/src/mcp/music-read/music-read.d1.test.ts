@@ -36,6 +36,7 @@ import {
   MusicRef,
   MusicRelationshipsResult,
   SearchMusicInput,
+  SearchMusicResult,
 } from './contracts'
 import { MusicReadService, MusicReadServiceLayer } from './service'
 import { MusicReadHandlersLayer, MusicReadToolkit } from './toolkit'
@@ -80,7 +81,7 @@ const Envelope = Schema.Struct({
   }),
 })
 
-const exchange = async (name: string, args: Schema.Json) => {
+const exchange = async (name: string, args: Schema.Json, id: string | number = 1) => {
   const response = await app.handler(
     new Request('https://api.example.test/mcp', {
       method: 'POST',
@@ -93,7 +94,7 @@ const exchange = async (name: string, args: Schema.Json) => {
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
-        id: 1,
+        id,
         method: 'tools/call',
         params: {
           name,
@@ -132,6 +133,17 @@ const success = async <A>(name: string, args: Schema.Json, schema: Schema.Codec<
   expect(result.isError).not.toBe(true)
 
   return Schema.decodeUnknownSync(schema)(result.structuredContent)
+}
+
+const search = async (args: Schema.Json) =>
+  (await success('search_music', args, SearchMusicResult)).result
+
+const completeSearch = async (args: Schema.Json) => {
+  const result = await search(args)
+
+  if (result.status !== 'complete') throw new Error('Expected proved search page')
+
+  return result
 }
 
 beforeAll(async () => {
@@ -282,31 +294,77 @@ beforeAll(async () => {
 
 afterAll(() => app.dispose())
 
+test('tool discovery publishes object-root output schemas for every catalogue tool', async () => {
+  const response = await app.handler(
+    new Request('https://api.example.test/mcp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        'mcp-protocol-version': '2026-07-28',
+        'mcp-method': 'tools/list',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/list',
+        params: {
+          _meta: {
+            'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+            'io.modelcontextprotocol/clientCapabilities': {},
+          },
+        },
+      }),
+    }),
+  )
+
+  expect(response.status).toBe(200)
+  const body = await response.text()
+
+  const data =
+    body.startsWith('event:') || body.startsWith('data:')
+      ? body
+          .split('\n')
+          .find((line) => line.startsWith('data:'))
+          ?.slice(5)
+      : body
+
+  if (!data) throw new Error('Missing MCP discovery response')
+
+  const discovery = Schema.decodeUnknownSync(
+    Schema.Struct({
+      result: Schema.Struct({
+        tools: Schema.Array(
+          Schema.Struct({
+            name: Schema.String,
+            outputSchema: Schema.Struct({ type: Schema.Literal('object') }),
+          }),
+        ),
+      }),
+    }),
+  )(JSON.parse(data))
+
+  expect(discovery.result.tools).toHaveLength(9)
+  expect(discovery.result.tools.map((tool) => tool.name)).toContain('search_music')
+})
+
 test('search/filter/get expose all four kinds with safe null/future catalogue projections and literal search', async () => {
-  const first = await success('search_music', { query: 'r1 shared', limit: 2 }, MusicListResult)
+  const first = await completeSearch({ query: 'r1 shared', limit: 2 })
   expect(first.entities.map((row) => [row.entityType, row.entityId])).toEqual([
     ['album', 'album-a'],
     ['artist', 'artist-a'],
   ])
   expect(first.pagination).toEqual({ limit: 2, offset: 0, hasMore: true })
 
-  const second = await success(
-    'search_music',
-    { query: 'r1 shared', limit: 2, offset: 2 },
-    MusicListResult,
-  )
+  const second = await completeSearch({ query: 'r1 shared', limit: 2, offset: 2 })
 
   expect(second.entities.map((row) => row.entityId)).toEqual(['artist-z', 'label-a'])
 
-  const last = await success(
-    'search_music',
-    { query: 'r1 shared', limit: 2, offset: 4 },
-    MusicListResult,
-  )
+  const last = await completeSearch({ query: 'r1 shared', limit: 2, offset: 4 })
 
   expect(last.entities.map((row) => row.entityId)).toEqual(['track-a'])
   expect(last.pagination.hasMore).toBe(false)
-  expect((await success('search_music', { query: '%' }, MusicListResult)).entities).toEqual([])
+  expect((await completeSearch({ query: '%' })).entities).toEqual([])
   expect(
     (await success('filter_music', { entityType: 'artist', name: 'R1' }, MusicListResult)).entities,
   ).toEqual([])
@@ -365,6 +423,78 @@ test('batch preserves order, duplicates, wrong-kind and missing references', asy
   ])
   expect(batch.results[0]).toEqual(batch.results[3])
 })
+
+test('search proves pages or explicitly exhausts without partial results, preserving literal matching', async () => {
+  await db.run(sql`with recursive n(i) as (
+    select 0 union all select i+1 from n where i<8189
+  ) insert into music_artists(id,name,slug,createdAt,updatedAt)
+    select printf('budget-%05d',i),'Needle',printf('budget-%05d',i),0,0 from n`)
+
+  try {
+    const page = await search({ entityType: 'artist', query: 'nEeDlE', limit: 2, offset: 3 })
+    expect(page.status).toBe('complete')
+
+    if (page.status !== 'complete') throw new Error('Expected proved page')
+    expect(page.entities.map((row) => row.entityId)).toEqual(['budget-00003', 'budget-00004'])
+    expect(page.pagination.hasMore).toBe(true)
+
+    // Exactly 8192 artists: equality at the cap cannot prove EOF or a final page.
+    for (const args of [
+      { entityType: 'artist', query: 'absent' },
+      { entityType: 'artist', query: 'Needle', limit: 2, offset: 8188 },
+    ]) {
+      const exhausted = await search(args)
+      expect(exhausted).toEqual({
+        status: 'budget_exhausted',
+        requestedPage: {
+          limit: 'limit' in args ? args.limit : 20,
+          offset: 'offset' in args ? args.offset : 0,
+        },
+        guidance:
+          'Search budget exhausted; refine query, specify a kind, or lower the offset. Unchanged retries may exhaust again.',
+      })
+    }
+
+    await db.delete(musicArtistsTable).where(eq(musicArtistsTable.id, 'budget-08189'))
+    const empty = await search({ entityType: 'artist', query: '%', offset: 10000 })
+    expect(empty).toMatchObject({
+      status: 'complete',
+      entities: [],
+      pagination: { hasMore: false },
+    })
+
+    // With the two fixture albums, 2045 more proves album EOF at 2047.
+    await db.run(sql`with recursive n(i) as (
+      select 0 union all select i+1 from n where i<2044
+    ) insert into music_albums(id,title,slug,createdAt,updatedAt)
+      select printf('budget-%05d',i),'Other',printf('budget-%05d',i),0,0 from n`)
+    expect((await completeSearch({ query: 'Needle', limit: 1 })).entities[0]?.entityType).toBe(
+      'artist',
+    )
+    await db
+      .insert(musicAlbumsTable)
+      .values({ id: 'budget-edge', title: 'Other', slug: 'budget-edge' })
+    // At 2048 albums, later artist matches cannot bridge the unproved album gap.
+    expect((await search({ query: 'Needle', limit: 1 })).status).toBe('budget_exhausted')
+    expect(
+      (await completeSearch({ entityType: 'artist', query: 'Needle', limit: 1 })).entities[0]
+        ?.entityType,
+    ).toBe('artist')
+
+    // UTF-8 bytes, not characters: 65536 emoji exceed the admitted byte allowance.
+    await db.insert(musicArtistsTable).values({
+      id: '000-byte-budget',
+      name: '😀'.repeat(65536),
+      slug: '000-byte-budget',
+    })
+    expect((await search({ entityType: 'artist', query: 'Needle', limit: 1 })).status).toBe(
+      'budget_exhausted',
+    )
+  } finally {
+    await db.delete(musicArtistsTable).where(sql`id like 'budget-%' or id='000-byte-budget'`)
+    await db.delete(musicAlbumsTable).where(sql`id like 'budget-%'`)
+  }
+}, 60000)
 
 test('asymmetric relationships retain roles, direction and bounded album track order without graph expansion', async () => {
   const discography = await success(
@@ -528,10 +658,10 @@ test('default/max pages, max batch, invalid bounds and encoded response ceiling 
   for (const row of rows) await db.insert(musicArtistsTable).values(row)
 
   try {
-    const first = await success('search_music', { query: 'Boundary' }, MusicListResult)
+    const first = await completeSearch({ query: 'Boundary' })
     expect(first.entities).toHaveLength(20)
     expect(first.pagination).toEqual({ limit: 20, offset: 0, hasMore: true })
-    const max = await success('search_music', { query: 'Boundary', limit: 50 }, MusicListResult)
+    const max = await completeSearch({ query: 'Boundary', limit: 50 })
     expect(max.entities).toHaveLength(50)
     expect(max.pagination.hasMore).toBe(true)
 
@@ -582,11 +712,13 @@ test('the duplicated MCP text/structured result stays inside D5 and oversized re
     await db.insert(musicArtistsTable).values({ id, name: `Wire ${'x'.repeat(2000)}`, slug: id })
 
   try {
-    const below = await exchange('search_music', { query: 'Wire ', limit: 50 })
+    const below = await exchange('search_music', { query: 'Wire ', limit: 50 }, 'x'.repeat(15500))
     expect(below.result.isError).not.toBe(true)
-    expect(
-      Schema.decodeUnknownSync(MusicListResult)(below.result.structuredContent).entities,
-    ).toHaveLength(50)
+    const decoded = Schema.decodeUnknownSync(SearchMusicResult)(below.result.structuredContent)
+    expect(decoded.endpoint.environment).toBe('disposable-r1')
+
+    if (decoded.result.status !== 'complete') throw new Error('Expected proved search page')
+    expect(decoded.result.entities).toHaveLength(50)
     expect(below.bytes).toBeLessThan(256 * 1024)
 
     // 150KiB structured JSON used to pass the module but exceed 300KiB on the wire.
@@ -637,6 +769,22 @@ test('the duplicated MCP text/structured result stays inside D5 and oversized re
       'Request a smaller page or batch',
     )
     expect(unicodeAbove.bytes).toBeLessThan(256 * 1024)
+
+    for (const char of ['\u0001', '😀']) {
+      await db
+        .update(musicArtistsTable)
+        .set({ name: `Wire ${char.repeat(250)}` })
+        .where(sql`id like 'wire-%'`)
+
+      const accepted = await exchange(
+        'search_music',
+        { query: 'Wire ', limit: 50 },
+        'x'.repeat(15500),
+      )
+
+      expect(accepted.result.isError).not.toBe(true)
+      expect(accepted.bytes).toBeLessThan(256 * 1024)
+    }
   } finally {
     await db.delete(musicArtistsTable).where(sql`id like 'wire-%'`)
   }

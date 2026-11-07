@@ -11,7 +11,7 @@ and `catalogue:read`, including service calls outside the MCP transport.
 
 | Tool | Input | Structured success |
 | --- | --- | --- |
-| `search_music` | query; optional kind, limit, offset | `MusicListResult` |
+| `search_music` | query; optional kind, limit, offset | `SearchMusicResult`: complete page or explicit exhaustion |
 | `filter_music` | kind; optional exact name, limit, offset | `MusicListResult` |
 | `get_music_entity` | kind + stable ID | `GetMusicEntityResult` |
 | `get_music_entities` | ordered references, 1–50 | `GetMusicEntitiesResult` |
@@ -23,7 +23,8 @@ and `catalogue:read`, including service calls outside the MCP transport.
 
 Contracts live in `contracts.ts`. Shared failures use `EditorialToolError` with
 `failureMode: return`: access denied, not found, invalid input or unavailable.
-Empty lists succeed. Unknown/unresolved/orphaned/gated URL identities return a
+Proved empty lists succeed; exhausted search is not an empty list.
+Unknown/unresolved/orphaned/gated URL identities return a
 successful `not_found` result. No fetch-on-miss or implicit canonical identity write.
 URL candidates are deduplicated and ordered by kind/ID, not source-key/canonical/alias
 precedence; if stored identities disagree, the first existing entity in that order wins.
@@ -53,54 +54,73 @@ Central transport must retain its full 256 KiB envelope ceiling and lower reques
 limits. Real HTTP tests exercise ordinary, escaped and multibyte names on both sides
 of the budget; the failure retains the smaller-page/batch guidance.
 
-## Query cost limitation — integration HOLD
+## Query admission and index scope — reviewed integration authorized; production HOLD
 
-**Bounded output is not bounded rows examined.** Application materialization is at
-most 51 list/relationship rows, 50 batch references, three URL identity candidates
-and 21 link candidates per returned entity. Database scans and temporary sort work
-can still grow with catalogue size. This does **not** satisfy #518's bounded-query
-acceptance by disclosure alone. Integration stays HOLD until Guide Fari explicitly
-accepts this limitation for the slice or authorizes separately coordinated index
-work. No migration is included or authorized. Substring/name search needs its own
-decision: the three relationship indexes below would not solve it.
+Guide Fari authorized scoped query/index implementation, then lifted the integration
+hold for reviewed incorporation, as relayed by Space/P1 on 7 November 2026. P1 remains
+the sole shared migration/integration coordinator; actual-head review and composed
+R1/R3/legacy proof are still required. This is not a testing waiver or permission to
+merge, enable auto-merge, deploy, migrate production, or activate live policy/data.
+The documented availability/resource limitations remain real. Both R1 PRs stay normal
+OPEN, unmerged, with auto-merge off. Migration `0015_music_catalogue_read_indexes.sql`
+adds six relationship access paths and four exact-name expression keys; two existing
+reverse-label indexes are widened, not duplicated. No tables/columns, FTS or data
+policy change. SQLite maintains these indexes on existing insert/update/delete writers.
 
-`EXPLAIN QUERY PLAN` captured on migrated Miniflare D1, 2026-11-07, by instrumenting
-the real service's Database adapter to explain each statement before executing it:
+Search keeps `instr(lower(name),lower(query))>0`, including short and literal Unicode/
+punctuation inputs. One selection statement admits at most **8192 candidate records**
+and **262144 UTF-8 matching-input bytes**. For all kinds, each receives 2048 slots;
+a single kind receives 8192. Materialized ID prefixes precede matching. Count below
+quota proves EOF; equality does not. Only the contiguous global prefix through the
+first unproved kind can prove a page; later-kind matches cannot bypass an earlier gap.
+In particular, at **2048 or more albums**, every all-kind search is restricted to the
+admitted album prefix or exhausts: it cannot return artists, labels or tracks. An
+artist-only match returns complete with 2047 nonmatching albums but exhausts at 2048.
+Specify `entityType` to search a later kind independently (with its own 8192-row cap).
+The same prefix barrier applies to later kinds in album < artist < label < track order.
+This is an explicit availability limitation, not a claim that all-kind search is
+adequate for production catalogue sizes; no production-size acceptance is implied.
+Running name+query bytes stop admission before the first over-budget record, without
+truncation/skipping. The guarded matcher runs only on admitted rows. Temporary sorts
+and materialization operate on these capped stages, not unrestricted name matches.
 
-| Operations | Source-kind predicates and remaining cost |
+The object-root response is `{ endpoint, result }`; branch on `result.status`.
+`result.status: complete` adds the existing entities/pagination payload. A matching sentinel
+proves `hasMore: true`; full EOF with no admission gap proves final/empty output.
+Otherwise `result.status: budget_exhausted` returns resolved requestedPage and fixed
+guidance only: no entities, pagination, count, query echo or continuation cursor.
+Exactly limit apparent matches without sentinel/EOF still exhaust. No automatic retry,
+cap increase, scan fallback, provider work or hidden progress state exists. Rare/missing
+queries and deep offsets can repeatedly exhaust even when matches exist.
+
+| Operation | Source predicate and ordered access |
 | --- | --- |
-| `get_artist_discography`; artist `get_music_relationships` | `artistId = ?` on `music_album_artists` and `music_track_artists`: **SCAN both full tables**, absent artistId indexes. General relationships also search indexed `music_label_artists.artist_id`. |
-| `get_album_tracks`; album `get_music_relationships` | `albumId = ?` on `music_tracks`: **SCAN full track table**, absent albumId index. General relationships search indexed album credits and `music_label_albums.album_id`. |
-| `get_label_catalogue`; label `get_music_relationships` | `label_id = ?` on both label edge tables: covering PK **SEARCH**, no catalogue-wide edge-table scan. Sorting still depends on this label's matching edges. |
-| Track `get_music_relationships` | `trackId = ?` credit PK **SEARCH** and `id = ?` track PK **SEARCH** for album membership. No unrelated artist/album/label edge-table scan. |
-| `lookup_music_url` | UNION of source-key PK, canonical-URL unique index, normalized-alias PK and state+source-key identity **SEARCH**. At most three candidates; skip orphaned targets rather than hiding a live alias. |
-| `get_music_entity` / batch / relationship target projection | Choose the exact kind's table, **SEARCH** by ID PK, then bounded link lookup by entity. No four-kind projection scan. |
-| `search_music` | `instr(lower(name), lower(?))`: **SCAN** all four catalogue tables when no kind supplied, or only the specified kind's table. No name index supports substring search. |
-| `filter_music` with name | Exact `lower(name) = lower(?)`: **SCAN** the specified kind's table, absent matching expression index. |
-| Kind-only `filter_music` | Order only by ID, not the constant kind: walk the ID PK index without a temporary sort, stopping after offset + limit + 1 (offset ≤10000, limit ≤50). This avoids a full-table sort/scan; name predicates do not gain this rows-examined bound. |
+| Artist relationships/discography | Reverse `(artistId,albumId)` and `(artistId,trackId)` SEARCH; optional `(artist_id,label_id)` SEARCH |
+| Album relationships | `(albumId,id)` track SEARCH; source-leading credit PK and `(album_id,label_id)` SEARCH |
+| Album tracks | `(albumId,(trackNumber IS NULL),trackNumber,id)` SEARCH preserves null-last order |
+| Label catalogue | Existing label-leading junction PK SEARCH |
+| Track relationships | Existing track-credit PK and exact track PK SEARCH |
+| Named filter | `(lower(name/title),id)` expression-index SEARCH, unchanged equality and ID order |
+| Kind-only filter | ID PK walk stopping after offset + limit + 1 |
+| Search | ID PK walks selecting capped prefixes, then bounded-stage matching/sorts; not an indexed substring lookup |
+| URL/entity/link projection | Existing unique/PK point lookups and bounded stored-link projection, unchanged |
 
-Representative actual plan lines (temporary sort/subquery scans are not base-table
-index searches, and do not establish a fixed rows-examined bound):
+Each relationship branch selects its first `p = offset + limit + 1` rows in the real
+target order before UNION ALL; at most three p-sized prefixes feed the final sort.
+Constant relationship/kind keys are omitted inside each branch so index order can
+stop early. Album-track and general relationship order need separate track indexes.
+Application decoding receives at most 51 relationship/filter rows, 50 batch references,
+three URL candidates, or the search page only; search candidates stay in SQL.
 
-```text
-discography: SCAN music_album_artists; SCAN music_track_artists
-album tracks: SCAN music_tracks; USE TEMP B-TREE FOR ORDER BY
-label catalogue: SEARCH music_label_artists USING COVERING INDEX sqlite_autoindex_music_label_artists_1 (label_id=?)
-                 SEARCH music_label_albums USING COVERING INDEX sqlite_autoindex_music_label_albums_1 (label_id=?)
-URL lookup: SEARCH music_source_identities USING INDEX sqlite_autoindex_music_source_identities_1 (source_key=?)
-            SEARCH music_source_identities USING INDEX music_source_identities_canonical_url_uq (canonical_url=?)
-            SEARCH a USING INDEX sqlite_autoindex_music_source_aliases_1 (normalized_url=?)
-            SEARCH i USING INDEX music_source_identities_resolving_audit_page_idx (state=? AND source_key=?)
-all-kind search: SCAN music_artists; SCAN music_albums; SCAN music_tracks; SCAN music_labels
-artist named filter / single-kind search: SCAN music_artists USING INDEX sqlite_autoindex_music_artists_1 (no TEMP B-TREE)
-artist kind-only filter: SCAN music_artists USING INDEX sqlite_autoindex_music_artists_1 (no TEMP B-TREE)
-```
-
-There is no longer a global `MATERIALIZE edges` step. Source predicates apply inside
-each selected base-table branch; no `NOT MATERIALIZED` hint or extra schema is used.
-Named filters and single-kind search stop after limit + 1 matches (after offset),
-but rare or absent matches can still walk the entire kind's index. Removing the
-temporary sort does not make name matching catalogue-independent.
+**These are admission bounds, not universal physical resource guarantees.** Selected
+records are not engine rows_read: repeated CTE passes cost additional reads. The byte
+cap covers admitted match input, not total bytes fetched or inspected. A stored name
+larger than the cap must still be fetched/materialized before exhaustion; no writer
+length restriction is added. Index seeks, deep offsets, large stored values, output
+projection, physical pages, CPU and latency remain separate costs. Do not describe the
+whole request as catalogue-independent. Local rows_read is post-execution evidence,
+not a live cancellation mechanism. Search selection/proof has one statement snapshot;
+later link queries and separate requests have no new snapshot guarantee.
 
 ## Central integration handoff (P1 owns these edits)
 

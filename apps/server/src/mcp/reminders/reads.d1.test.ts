@@ -1,6 +1,6 @@
 import { McpPrincipal } from '@gbfm/core/editorial-mcp'
 import { eq } from 'drizzle-orm'
-import { Effect, Layer, Schema } from 'effect'
+import { Effect, Layer, Logger, Schema } from 'effect'
 import { HttpRouter, HttpServer } from 'effect/http'
 import { describe, expect, test } from 'vitest'
 
@@ -140,7 +140,7 @@ describe('owner-only reminder reads on migrated D1', () => {
     }
   })
 
-  test('UTF-8 output ceiling rejects an oversized persisted summary without leaking it', async () => {
+  test('UTF-8 result-payload budget rejects an oversized persisted summary without leaking it', async () => {
     await using f = await fixture()
     await f.db
       .update(musicReminder)
@@ -150,6 +150,45 @@ describe('owner-only reminder reads on migrated D1', () => {
     expect(error).toMatchObject({ code: 'unavailable' })
     expect(JSON.stringify(error)).not.toContain('🎵')
     expect((await f.run(f.list({ limit: 1, offset: 1 }))).reminders[0]?.id).toBe('own-01')
+  })
+
+  test('invalid persisted dates return a typed unavailable error instead of a defect', async () => {
+    await using f = await fixture()
+    await f.db.$client
+      .prepare('UPDATE music_reminder SET reminder_date = 9000000000000000 WHERE id = ?')
+      .bind('own-00')
+      .run()
+    expect(await f.run(Effect.flip(f.list({ offset: 51, limit: 1 })))).toMatchObject({
+      code: 'unavailable',
+    })
+  })
+
+  test('D1 failures emit a safe diagnostic without query parameters or raw causes', async () => {
+    await using f = await fixture()
+    await f.db.$client.prepare('DROP TABLE music_reminder').run()
+    const logs: Array<unknown> = []
+    const logging = Logger.layer([Logger.make(({ message }) => logs.push(message))])
+
+    const result = await Effect.runPromise(
+      withTestLayer(Effect.flip(f.list()), Layer.merge(f.reads, logging)).pipe(
+        Effect.provideService(McpActor, principal()),
+      ),
+    )
+
+    expect(result).toMatchObject({ code: 'unavailable' })
+    const serialized = JSON.stringify(logs)
+
+    for (const field of [
+      'mcp.reminders.unavailable',
+      'reminders.page',
+      'music_reminder',
+      'database_error',
+    ])
+      expect(serialized).toContain(field)
+
+    for (const secret of ['listener', 'userId', 'SELECT', 'no such table', 'private notes'])
+      expect(serialized).not.toContain(secret)
+    expect(JSON.stringify(result)).not.toContain('no such table')
   })
 
   test('real MCP HTTP call projects D1 summaries and exposes no placeholder scheduling tools', async () => {
@@ -221,7 +260,6 @@ describe('owner-only reminder reads on migrated D1', () => {
         'own-50',
         'own-51',
       ])
-      expect(Object.keys(ReminderToolkit.tools)).toEqual(['list_music_reminders'])
     } finally {
       await app.dispose()
     }

@@ -4,7 +4,16 @@ import { McpAuthorization, McpAuthorizationLive } from '@/mcp/authorization'
 import { McpToolError } from '@/mcp/contracts'
 import { MusicReminderService } from '@/services/music-reminder.service'
 
-import { ListMusicRemindersInput, ListMusicRemindersResult } from './contracts'
+import {
+  ListMusicRemindersInput,
+  ListMusicRemindersResult,
+  MusicReminderSummary,
+} from './contracts'
+
+const PersistedSummary = Schema.Struct({
+  ...MusicReminderSummary.fields,
+  reminderDate: Schema.Date,
+})
 
 const unavailable = () =>
   new McpToolError({ code: 'unavailable', message: 'Music reminders are unavailable.' })
@@ -47,22 +56,37 @@ export const ReminderReadServiceLayer = Layer.effect(
       const limit = input.limit ?? 20
       const offset = input.offset ?? 0
 
-      const page = yield* reminders
-        .getPageByUserId(actor.userId, { limit, offset })
-        .pipe(Effect.mapError(unavailable))
+      const page = yield* reminders.getPageByUserId(actor.userId, { limit, offset }).pipe(
+        Effect.tapError(() =>
+          Effect.logError('mcp.reminders.unavailable', {
+            operation: 'reminders.page',
+            table: 'music_reminder',
+            dependency: 'database',
+            code: 'database_error',
+          }),
+        ),
+        Effect.mapError(unavailable),
+      )
+
+      const persisted = yield* Schema.decodeUnknownEffect(Schema.Array(PersistedSummary))(
+        page.reminders,
+      ).pipe(Effect.mapError(unavailable))
 
       const result = yield* Schema.decodeUnknownEffect(ListMusicRemindersResult)({
-        reminders: page.reminders.map((reminder) => ({
+        reminders: persisted.map((reminder) => ({
           ...reminder,
           reminderDate: reminder.reminderDate.toISOString(),
         })),
         pagination: { limit, offset, hasMore: page.hasMore },
       }).pipe(Effect.mapError(unavailable))
 
-      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 256 * 1024)
+      // MCP repeats this JSON as structured content and escaped text. A 64 KiB
+      // result budget leaves room for both copies and framing under P1's final
+      // 256 KiB transport cap, rather than letting ordinary pages hit outer 413.
+      if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 64 * 1024)
         return yield* new McpToolError({
           code: 'unavailable',
-          message: 'Reminder page exceeds the response limit. Request a smaller page.',
+          message: 'Reminder page exceeds the result-payload limit. Request a smaller page.',
         })
 
       return result

@@ -1,7 +1,8 @@
 import { LINK_STATUS } from '@gbfm/core/status'
-import { and, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 
+import { guardedPostUpdate } from '@/db/guarded-post-update'
 import { Database } from '@/db/layer'
 import { postsTable } from '@/db/post.schema'
 import { ConflictError, DatabaseError, NotFoundError, ValidationError } from '@/errors'
@@ -58,6 +59,12 @@ export const resolvePostMusic = (
 
     yield* requireCreatorOrAdmin('post', postId, actor.userId, actor.userRole)
 
+    // Refuse before any provider/import work: a legacy resolver cannot unfreeze a managed collection.
+    if (post.musicReferencesManaged && !post.draft)
+      return yield* new ValidationError({
+        message: 'Managed published music associations are frozen',
+      })
+
     if (expectedUpdatedAt && expectedUpdatedAt.getTime() !== post.updatedAt.getTime())
       return yield* new ConflictError({
         message: 'The post changed since it was loaded. Reload and try again.',
@@ -109,15 +116,18 @@ export const resolvePostMusic = (
 
     const updated = yield* Effect.tryPromise({
       try: () =>
-        db
-          .update(postsTable)
-          .set({
+        guardedPostUpdate(
+          db,
+          post,
+          actor.userId,
+          {
             musicEntityType: resolved.entityType,
             musicEntityId: resolved.entity.id,
-            updatedAt: new Date(Math.max(Date.now(), post.updatedAt.getTime() + 1)),
-          })
-          .where(and(eq(postsTable.id, postId), eq(postsTable.updatedAt, post.updatedAt)))
-          .returning({ id: postsTable.id, updatedAt: postsTable.updatedAt }),
+          },
+          undefined,
+          [],
+          { allowAdmin: actor.userRole === 'admin' },
+        ),
       catch: () =>
         new DatabaseError({
           message: 'Could not attach music',

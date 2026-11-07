@@ -1,18 +1,19 @@
 import type { UserId } from '@gbfm/core/identity'
-import { and, eq, exists, inArray, sql } from 'drizzle-orm'
+import { and, eq, exists, inArray, sql, type SQL } from 'drizzle-orm'
+import { Effect } from 'effect'
 
 import { user } from '@/db/auth.schema'
 import { editorialOperations } from '@/db/editorial-operation.schema'
 import type { DatabaseClient } from '@/db/layer'
 import { postCreators, postsTable } from '@/db/post.schema'
-import { entityLabelsTable, labelsTable } from '@/db/tags.schema'
 
 import type { CreateDraftInput, UpdateDraftInput } from './contracts'
-import type { PersistedPost } from './model'
+import { saveEditorialChange } from './editorial-music/save'
+import type { EditorialSnapshot } from './editorial-music/snapshot'
 
 type Receipt = typeof editorialOperations.$inferInsert & { readonly result: string }
 
-const insertReceipt = (db: DatabaseClient, receipt: Receipt) =>
+const insertReceipt = (db: DatabaseClient, receipt: Receipt, winner: SQL) =>
   db.insert(editorialOperations).select(
     db
       .select({
@@ -24,7 +25,7 @@ const insertReceipt = (db: DatabaseClient, receipt: Receipt) =>
         createdAt: sql<Date>`${receipt.createdAt.getTime()}`.as('created_at'),
       })
       .from(postsTable)
-      .where(and(eq(postsTable.id, receipt.postId), sql`changes() > 0`)),
+      .where(and(eq(postsTable.id, receipt.postId), winner)),
   )
 
 const unusedOperation = (id: string) => sql`NOT EXISTS (
@@ -59,8 +60,11 @@ export const insertEditorialDraft = (
   input: typeof CreateDraftInput.Type,
   now: Date,
   receipt: Receipt,
-) =>
-  db.batch([
+) => {
+  const attemptId = crypto.randomUUID()
+  const winner = eq(postsTable.lastOperationId, attemptId)
+
+  return db.batch([
     db
       .insert(postsTable)
       .select(
@@ -79,7 +83,7 @@ export const insertEditorialDraft = (
             type: sql`'post'`.as('type'),
             musicEntityType: sql`NULL`.as('musicEntityType'),
             musicEntityId: sql`NULL`.as('musicEntityId'),
-            lastOperationId: sql`NULL`.as('lastOperationId'),
+            lastOperationId: sql<string>`${attemptId}`.as('lastOperationId'),
             musicReferencesManaged: sql`0`.as('musicReferencesManaged'),
             parentPostId: sql`NULL`.as('parentPostId'),
             rootPostId: sql`NULL`.as('rootPostId'),
@@ -104,73 +108,38 @@ export const insertEditorialDraft = (
           creatorId: sql<string>`${userId}`.as('creatorId'),
         })
         .from(postsTable)
-        .where(and(eq(postsTable.id, id), sql`changes() > 0`)),
+        .where(and(eq(postsTable.id, id), winner)),
     ),
-    insertReceipt(db, receipt),
+    insertReceipt(db, receipt, winner),
+    db
+      .select({
+        assertion: sql<number>`CASE WHEN NOT EXISTS (
+      SELECT 1 FROM ${postsTable} WHERE ${postsTable.id} = ${id} AND ${winner}
+    ) OR EXISTS (SELECT 1 FROM ${editorialOperations} WHERE ${editorialOperations.id} = ${receipt.id}
+      AND ${editorialOperations.inputHash} = ${receipt.inputHash}) THEN 1 ELSE json('editorial create receipt assertion failed') END`,
+      })
+      .from(sql`(SELECT 1)`),
   ])
+}
 
 export const updateEditorialDraft = (
   db: DatabaseClient,
   userId: UserId,
-  previous: typeof PersistedPost.Type,
+  previous: EditorialSnapshot,
   input: typeof UpdateDraftInput.Type,
   now: Date,
   receipt: Receipt,
-) => {
-  const creators = (previous.creators ?? []).map((creator) => creator.id)
-  const tags = previous.tags ?? []
-
-  const predicate = and(
-    eq(postsTable.id, previous.id),
-    eq(postsTable.draft, true),
-    sql`${postsTable.type} IS ${previous.type}`,
-    eq(postsTable.slug, previous.slug),
-    sql`${postsTable.title} IS ${previous.title}`,
-    sql`${postsTable.content} IS ${previous.content}`,
-    sql`${postsTable.description} IS ${previous.description}`,
-    eq(postsTable.createdAt, previous.createdAt),
-    eq(postsTable.updatedAt, previous.updatedAt),
-    sql`${postsTable.thumbnailUrl} IS ${previous.thumbnailUrl}`,
-    sql`${postsTable.bannerImageUrl} IS ${previous.bannerImageUrl}`,
-    sql`${postsTable.musicEntityType} IS ${previous.musicEntityType}`,
-    sql`${postsTable.musicEntityId} IS ${previous.musicEntityId}`,
-    sql`${postsTable.parentPostId} IS ${previous.parentPostId}`,
-    sql`${postsTable.rootPostId} IS ${previous.rootPostId}`,
-    sql`${postsTable.quotedPostId} IS ${previous.quotedPostId}`,
-    eq(postsTable.depth, previous.depth),
-    eligibleAccount(db, userId),
-    unusedOperation(receipt.id),
-    exists(
-      db
-        .select()
-        .from(postCreators)
-        .where(and(eq(postCreators.postId, previous.id), eq(postCreators.creatorId, userId))),
+) =>
+  Effect.runPromise(
+    saveEditorialChange(
+      db,
+      userId,
+      previous,
+      {
+        title: input.title,
+        content: input.content,
+        description: input.description,
+      },
+      { ...receipt, createdAt: now },
     ),
-    sql`(SELECT count(*) FROM ${postCreators} WHERE ${postCreators.postId} = ${previous.id}) = ${creators.length}`,
-    sql`NOT EXISTS (SELECT 1 FROM ${postCreators}
-      WHERE ${postCreators.postId} = ${previous.id}
-      AND ${postCreators.creatorId} NOT IN (SELECT value FROM json_each(${JSON.stringify(creators)})))`,
-    sql`(SELECT count(*) FROM ${entityLabelsTable}
-      INNER JOIN ${labelsTable} ON ${labelsTable.id} = ${entityLabelsTable.labelId}
-      WHERE ${entityLabelsTable.entityType} = 'post' AND ${entityLabelsTable.entityId} = ${previous.id}
-      AND ${labelsTable.kind} = 'tag') = ${tags.length}`,
-    sql`NOT EXISTS (SELECT 1 FROM ${entityLabelsTable}
-      INNER JOIN ${labelsTable} ON ${labelsTable.id} = ${entityLabelsTable.labelId}
-      WHERE ${entityLabelsTable.entityType} = 'post' AND ${entityLabelsTable.entityId} = ${previous.id}
-      AND ${labelsTable.kind} = 'tag'
-      AND ${labelsTable.name} NOT IN (SELECT value FROM json_each(${JSON.stringify(tags)})))`,
   )
-
-  const update = db
-    .update(postsTable)
-    .set({
-      title: input.title,
-      content: input.content,
-      description: input.description,
-      updatedAt: now,
-    })
-    .where(predicate)
-    .returning({ id: postsTable.id })
-
-  return db.batch([update, insertReceipt(db, receipt)])
-}

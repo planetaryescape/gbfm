@@ -23,7 +23,7 @@ import {
   or,
   sql,
 } from 'drizzle-orm'
-import { Context, Effect, Layer, Match, Schema } from 'effect'
+import { Clock, Context, Effect, Layer, Match, Schema } from 'effect'
 
 import { user as usersTable } from '@/db/auth.schema'
 import { postIdsForCreator } from '@/db/creator-membership'
@@ -78,6 +78,7 @@ import {
   type MediaActor,
   type MediaPublication,
 } from '@/services/media-publication'
+import { publicPlaylistPredicate } from '@/services/music-entity/playlist.service'
 import { SentryService } from '@/services/sentry.service'
 import { ObjectStoreClient } from '@/services/storage/object-store-client'
 import { toSlug } from '@/services/to-slug'
@@ -1747,6 +1748,8 @@ const getTweetCardEntity = (type: string | null, id: string | null) =>
     }
 
     if (type === 'playlist') {
+      const now = new Date(yield* Clock.currentTimeMillis)
+
       const rows = yield* Effect.tryPromise({
         try: () =>
           db
@@ -1755,7 +1758,7 @@ const getTweetCardEntity = (type: string | null, id: string | null) =>
               coverImageUrl: musicPlaylistsTable.coverImageUrl,
             })
             .from(musicPlaylistsTable)
-            .where(eq(musicPlaylistsTable.id, id))
+            .where(and(eq(musicPlaylistsTable.id, id), publicPlaylistPredicate(now)))
             .limit(1),
         catch: (error) =>
           new DatabaseError({
@@ -1838,6 +1841,7 @@ const getMicroPostScreenMusicEffect = (posts: ReadonlyArray<SelectMdxCompiledMic
     const trackIds = references.flatMap(({ id, type }) => (type === 'track' ? [id] : []))
     const playlistIds = references.flatMap(({ id, type }) => (type === 'playlist' ? [id] : []))
     const entityIds = references.map(({ id }) => id)
+    const now = new Date(yield* Clock.currentTimeMillis)
 
     const [albums, tracks, playlists, links] = yield* Effect.tryPromise({
       try: () =>
@@ -1867,7 +1871,12 @@ const getMicroPostScreenMusicEffect = (posts: ReadonlyArray<SelectMdxCompiledMic
               coverImageUrl: musicPlaylistsTable.coverImageUrl,
             })
             .from(musicPlaylistsTable)
-            .where(inArray(musicPlaylistsTable.id, playlistIds.length > 0 ? playlistIds : [''])),
+            .where(
+              and(
+                inArray(musicPlaylistsTable.id, playlistIds.length > 0 ? playlistIds : ['']),
+                publicPlaylistPredicate(now),
+              ),
+            ),
           db
             .select({
               entityType: musicEntityLinksTable.entityType,
@@ -2672,6 +2681,21 @@ const updateEffect = (
 
     yield* validateCanonicalContent(rawData.content)
 
+    // A legacy primary edit may not bypass the deliberate collection's published freeze.
+    if (
+      existingPost.musicReferencesManaged &&
+      !existingPost.draft &&
+      (rawData.musicEntityId !== undefined || rawData.musicEntityType !== undefined)
+    )
+      return yield* new ValidationError({
+        message: 'Managed published music associations are frozen',
+      })
+
+    if ((rawData.musicEntityId === undefined) !== (rawData.musicEntityType === undefined))
+      return yield* new ValidationError({
+        message: 'Music primary must be supplied as a complete pair',
+      })
+
     // Thread structure (parentPostId/rootPostId/depth) must never be
     // mutable via update, even though InsertPost's type allows it -- the
     // HTTP schema (UpdatePostInput) already omits these fields, but this
@@ -2712,28 +2736,17 @@ const updateEffect = (
 
     if (
       Object.keys(normalizedUpdateData).length > 0 ||
+      tags !== undefined ||
+      (creatorIds !== undefined && creatorIds.length > 0) ||
       credential?._tag === 'PersonalAccessKey' ||
       expectedUpdatedAt !== undefined
     ) {
       const updatedRecords = yield* Effect.tryPromise({
         try: () =>
-          credential?._tag === 'PersonalAccessKey'
-            ? guardedPostUpdate(db, existingPost, userId, normalizedUpdateData, tags, assetKeys)
-            : db
-                .update(postsTable)
-                .set({
-                  ...normalizedUpdateData,
-                  updatedAt: new Date(Math.max(Date.now(), existingPost.updatedAt.getTime() + 1)),
-                })
-                .where(
-                  and(
-                    eq(postsTable.id, existingPost.id),
-                    expectedUpdatedAt === undefined
-                      ? undefined
-                      : eq(postsTable.updatedAt, expectedUpdatedAt),
-                  ),
-                )
-                .returning(),
+          guardedPostUpdate(db, existingPost, userId, normalizedUpdateData, tags, assetKeys, {
+            allowAdmin: credential?._tag !== 'PersonalAccessKey' && userRole === 'admin',
+            creatorIds,
+          }),
         catch: (error) =>
           new DatabaseError({
             message: `Failed to update post: ${getErrorMessage(error)}`,
@@ -2743,62 +2756,13 @@ const updateEffect = (
       })
 
       if (!updatedRecords[0]) {
-        if (credential?._tag === 'PersonalAccessKey' || expectedUpdatedAt !== undefined)
-          return yield* new ConflictError({
-            message: 'Post changed during update',
-            resource: 'post',
-          })
-
-        return yield* new DatabaseError({
-          message: 'Failed to update post',
-          operation: 'update',
-          table: 'posts',
+        return yield* new ConflictError({
+          message: 'Post changed during update',
+          resource: 'post',
         })
       }
 
       updatedPost = updatedRecords[0]
-
-      // An image attached via an edit form (not just at create time) still
-      // needs its upload_assets row moved out of 'pending', or it looks
-      // reclaimable to a future cleanup job despite being in use.
-      if (credential?._tag !== 'PersonalAccessKey')
-        yield* markAttachedAssets('posts', updatedPost.id, [
-          updatedPost.thumbnailUrl,
-          updatedPost.bannerImageUrl,
-        ])
-    }
-
-    if (creatorIds && creatorIds.length > 0) {
-      yield* Effect.tryPromise({
-        try: () =>
-          db.batch([
-            db.delete(postCreators).where(eq(postCreators.postId, updatedPost.id)),
-            db.insert(postCreators).values(
-              creatorIds.map((creatorId) => ({
-                postId: updatedPost.id,
-                creatorId,
-              })),
-            ),
-          ]),
-        catch: (error) =>
-          new DatabaseError({
-            message: `Failed to update creators: ${getErrorMessage(error)}`,
-            operation: 'update',
-            table: 'post_creators',
-          }),
-      })
-    }
-
-    if (tags !== undefined && credential?._tag !== 'PersonalAccessKey') {
-      yield* Effect.tryPromise({
-        try: () => replaceEntityLabels(db, 'post', updatedPost.id, { tags }),
-        catch: (error) =>
-          new DatabaseError({
-            message: getErrorMessage(error),
-            operation: 'update',
-            table: 'labels',
-          }),
-      })
     }
 
     yield* publication.publish

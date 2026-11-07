@@ -128,9 +128,18 @@ artists/albums/tracks/labels; use an explicit approved public catalogue projecti
 that omits actor IDs and internal provenance. GBFM playlists differ: require a
 non-null publication instant not in the future for public reads. Null/future
 playlists appear only in the A curation surface, never recommendations. This
-distinction needs owner approval and consistent application-service behavior;
-do not implement a new privacy policy in MCP alone. Alternative: treat every
-catalogue timestamp as a visibility gate; owner must choose before R1/PL1.
+distinction is approved by D3, but its application-service/API behavior change
+still requires an explicit implementation approval and named owner. PL1 #533
+is the proposed owner of shared public playlist service/API/embed visibility
+reconciliation, not an assignment of runtime authority. Before its MCP reads or
+playlist consumers (including R2 and E1 embeds) enable, that owner must establish
+the same predicate for browser, public HTTP, embeds and MCP, with distinct
+authorized admin curation access. Existing unfiltered services are not evidence
+of compliance. Until that prerequisite is delivered and verified, affected
+consumers stay blocked. P1 must not implement the visibility change as foundation
+work or add an MCP-only filter that leaves the public API/embed path exposed.
+If shared public behavior conflicts with an owner requirement, record the conflict
+for owner decision rather than invent an exception to D3.
 
 Public posts/shows/mixes/profile/collection projections use their actual domain
 publication predicates. A published parent never makes a private child public.
@@ -144,7 +153,14 @@ in the wider public catalogue. P3 must settle its evidence eligibility against
 that rule before R2 registration; P0 does not choose its ranking algorithm.
 
 Discovery is deterministic and per-request: show only currently enabled tools
-whose scope and role requirements are met. A dual-mode recommendation tool may
+whose scope and role requirements are met, including the four editorial tools.
+Their unchanged wire names, input schemas and result schemas do not promise
+unconditional discovery: hiding registered write tools from a read-only grant is
+an intentional change from the baseline's static four-tool listing. A valid
+guessed/cached call to a registered tool hidden by missing scope/role reaches the
+service authorization boundary and returns `access_denied`; it is not an unknown
+tool. A truly unregistered name remains a protocol unknown-tool error. A
+dual-mode recommendation tool may
 remain listed for its public mode; its private-seed path checks extra scope and
 authorship at invocation. Cached lists never authorize calls. Check every call,
 including receipt/status lookups, with fresh account and persisted grant state.
@@ -152,6 +168,14 @@ No automatic upgrade of existing grants; new scopes need fresh consent. Do not
 require `posts:read` for a future listener-only grant or repurpose it for public
 content. P1 must add a separate expanded scope-set validation path while retaining
 existing editorial scope semantics. `offline_access` only permits refresh.
+Mixed editorial/expanded grants are eligible only while the account satisfies
+every granted capability's admission requirements. Preserve fail-closed whole-token
+validation: if a creator is downgraded to listener and its token includes
+`posts:read` plus `catalogue:read`, reject the entire token at the HTTP OAuth
+boundary. Do not silently downscope it or serve catalogue calls under that token.
+A separately consented catalogue-only listener grant remains eligible, provided
+all its own account, revocation, audience and resource checks pass. Neither refresh
+nor discovery repairs an ineligible mixed grant; a new consented grant is separate.
 
 ## Command and projection contracts
 
@@ -173,7 +197,11 @@ type Recommendation<Candidate> =
   | { readonly status: 'insufficient_evidence'; readonly candidates: ReadonlyArray<Candidate>; readonly limitations: ReadonlyArray<string> }
 ```
 
-Existing editorial inputs/results stay unchanged. New results include endpoint
+The four editorial wire names (`list_drafts`, `get_post`, `create_draft`,
+`update_draft`), input schemas and result schemas stay unchanged. Filtered discovery
+and the encoded JSON ceiling below are intentional compatibility changes, not
+exceptions that preserve the baseline's listing or accepted payload sizes.
+New results include endpoint
 identity (environment, resource URL, frontend URL), canonical IDs, observed
 revision/version, explicit completion state and safe review URLs. Domain-specific
 results must not be forced through this illustrative union if their existing
@@ -183,8 +211,15 @@ claim for enrichment that is unavailable or still queued.
 Proposed bounds: default list 20, max 50; explicit batch max 50 IDs/URLs;
 request and response JSON max 256 KiB; one default relationship hop, never an
 unbounded graph. Existing draft content retains its 100,000-character field
-limit (both field and byte limits apply). Oversize full bodies return a typed
-failure, not silently truncated content. Lists return explicit pagination;
+limit (both field and byte limits apply). D5 intentionally tightens the baseline
+`drafts:write` request ceiling from 640 KiB to 256 KiB; it does not raise existing
+lower read-request limits. The cap measures encoded JSON bytes, not schema string
+length. Thus schema-valid content, including the baseline's 100,000 U+0001
+character fixture or 100,000 CJK characters, can fail the byte ceiling. Existing
+schemas stay unchanged, but not every previously accepted request/result size
+remains supported. The response ceiling applies too. Oversize full bodies return
+an explicit bounded failure (HTTP 413 for request admission), not silently
+truncated content. Lists return explicit pagination;
 exports use pages, not an unbounded string. Provider probes: max 10 targets,
 concurrency 2, 5 seconds each and 15 seconds total, no redirects to private IPs,
 no credentials, allowlisted hosts. Import jobs use #200's bounded service contract,
@@ -207,7 +242,25 @@ are the only external-read exception. `lookup_music_url` is stored lookup only.
   operation + requestId identify a receipt; normalized payload hash includes
   expected versions and explicit null/omitted semantics. Identical retries replay
   the original authorized result; changed payload conflicts. Parallel retries
-  apply once. Recheck current grant, role and target access before replay.
+  apply once. Recheck current actor, grant, role and receipt actor/client/operation
+  ownership before replay; a stored receipt never substitutes for current
+  authority. Existing create/update draft replay still rechecks current authored
+  draft access; its receipt key and response behavior are unchanged.
+- Future delete/publish/unpublish commands need post-transition replay
+  authorization, not a copied unpublished-only `loadDraft` check. After delete,
+  the row may be gone; after publish, the row is no longer a draft. Verify the
+  current live actor/grant/role, the matching owned receipt and its evidence of
+  authorization at commit time, then replay the bounded saved operation outcome
+  without repeating the mutation. Do not require the removed row or pre-transition
+  visibility state to exist. Receipt evidence permits only acknowledging that
+  operation, not reading newly private state, undoing a transition or acting on a
+  target whose ownership has changed. Private payload fields still require current
+  read authority; without it, return only a safe saved acknowledgement if the
+  operation's result contract supports one, otherwise deny the private payload.
+  If existing persistence cannot prove these guarantees without an unapproved
+  schema change, keep that consumer blocked; do not add a second ledger or weaken
+  authorization. The existing draft receipts are not claimed to meet this future
+  lifecycle-command contract.
 - Expired keys never apply again. Clients reconcile status/current state, then
   use a new key only for a new intended command. A new key is not a timeout retry.
   Retain enough expiry evidence to prevent duplicate creates after pruning;
@@ -231,7 +284,9 @@ add `rate_limited` (bounded retry delay) and `precondition_required` (missing
 version). Reasons distinguish stale revision, changed retry payload and blocked
 dependency without leaking unauthorized target state. Domain failures use
 `isError: true` with safe typed data; structured success matches `outputSchema`.
-Malformed JSON-RPC/unknown tool remains a protocol error; invalid/expired/revoked
+Malformed JSON-RPC/truly unregistered tool remains a protocol error;
+registered-but-hidden calls use the service `access_denied` contract above.
+Invalid/expired/revoked or role-ineligible mixed-grant
 bearer credentials fail at the HTTP OAuth boundary, not as a successful tool call.
 Valid grant but missing scope/role yields `access_denied`; other-owner/hidden ID
 yields `not_found`. Transport scope challenges follow the OAuth contract.
@@ -262,6 +317,11 @@ checks in its server service → atomic revision/receipt transition or bounded r
 - P1 owns shared principal/scope/error exports, registry, OAuth/consent composition
   and shared fixtures (`apps/server/src/mcp/`, core editorial scope contracts,
   API connection contracts and OAuth modules). Agree exact exports before edits.
+- PL1 #533 is the proposed owner of D3 public playlist service/API/embed
+  reconciliation under separate implementation approval; named ownership and
+  verified shared visibility behavior are prerequisites to its MCP reads and
+  playlist consumers. This is not P1 runtime scope. Track the gate in #533 before
+  enabling those consumers; the D3 design approval alone does not authorize it.
 - P2 owns credit/alias design; P3 owns recommendation evidence/algorithm; P4 owns
   draft reference design. This document does not select their schemas/algorithms.
   P3's public-only/no-provider/no-model/no-mutation requirements are adopted as
@@ -283,6 +343,9 @@ with registry metadata or domain mocks alone. Required distinguishing cases:
 
 1. Listener grant with only catalogue scope versus listener using `posts:read`;
    revoked grant, disabled client/resource, banned/deleted/downgraded account.
+   After creator-to-listener downgrade, a mixed `posts:read`/`catalogue:read`
+   token fails entirely at the HTTP boundary; an independently consented
+   catalogue-only grant remains eligible. No silent token downscoping.
 2. Creator with catalogue write scope still denied shared mutation under D2;
    admin with missing scope denied; admin cannot fetch someone else's private ID.
 3. Null/future playlist versus published playlist; public collection with private
@@ -294,8 +357,16 @@ with registry metadata or domain mocks alone. Required distinguishing cases:
    or playlist membership changes invalidate the same corresponding version.
 6. Lost-response create retry and concurrent retry return one identity; changed
    payload conflicts; 24-hour boundary expires; revoked replay cannot leak data.
+   Add lost-response delete and publish retries: after the row is removed or
+   its draft state changes, the owned authorized receipt acknowledges the same
+   completed operation without repeating it. Revoked/downgraded actors and
+   other-owner/operation receipts fail; private payload access is checked anew.
 7. Accepted import/provider failure remains honest; bounded work, cancellation,
    no private-network fetch and no public URL before draft-byte privacy gates.
+8. Read-only grants omit registered write tools from discovery; valid guessed
+   calls still return service `access_denied`; unregistered names return protocol
+   errors. Separate below/above encoded-byte tests from draft character bounds;
+   the baseline's escaped 100,000-character fixture now fails request admission.
 
 Run `bun precommit` and targeted protocol/OAuth/D1 tests at the final integrated
 head. For this design-only proposal, source inspection establishes current-state

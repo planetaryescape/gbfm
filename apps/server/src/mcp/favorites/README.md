@@ -3,15 +3,16 @@
 Base: P1 #548, `feat/514-mcp-foundation` at
 `2d1b5592826e66e3a198dc117c153e062264fc5c`. Merge order: P0 → P1 → L2.
 Reservation: issue #537 comment 6709187485. Integration owner: P1.
-This module is not registered in production and #537 is not complete.
+The two reads are composed centrally in P1 #568. Production resource policy is
+not activated and #537 is not complete.
 
 ## All four selected capabilities
 
 | Capability | State | Scope | Contract / effects |
 | --- | --- | --- | --- |
-| `list_favorites` | Implemented, tested, awaiting P1 integration | `favorites:read` | Actor-owned public mix/track/misc audio and show favorites; no private reference visibility |
+| `list_favorites` | Implemented, tested, centrally integrated in #568 | `favorites:read` | Actor-owned public mix/track/misc audio and show favorites; no private reference visibility |
 | `set_favorite` | **NOT delivered; gated** | `favorites:write`; show coupling additionally needs `subscriptions:write` | Must use desired state, durable receipt and shared revision; show favorites currently change subscriptions |
-| `list_show_subscriptions` | Implemented, tested, awaiting P1 integration | `subscriptions:read` | Actor-owned subscriptions to public shows; no subscriber identities |
+| `list_show_subscriptions` | Implemented, tested, centrally integrated in #568 | `subscriptions:read` | Actor-owned subscriptions to public shows; no subscriber identities |
 | `set_show_subscription` | **NOT delivered; gated** | `subscriptions:write`; any favorite coupling additionally needs `favorites:write` | Must use desired state, durable receipt and shared revision; no delivery claim |
 
 Only the two real read operations are in `FavoritesToolkit`. Neither setter has
@@ -51,7 +52,7 @@ labels/content internally; MCP projects only summaries and starts no extra work.
 Malformed favorites referencing both audio and show are omitted. Public audio
 cannot inherit artwork from a private parent show, including for browser callers.
 
-## Exact P1 integration recipe (not applied here)
+## Exact P1 integration recipe
 
 Exports from this lane (direct leaf imports, no shared export edits):
 
@@ -68,19 +69,22 @@ const reads = FavoritesMcpServiceLayer.pipe(
   Layer.provide(FavoriteServiceLayer),
   Layer.provide(ShowSubscriptionServiceLayer),
   Layer.provide(McpAuthorizationLive),
-  Layer.provide(endpointConfig),
-  Layer.provide(databaseLayer),
 )
 const handlers = FavoritesToolHandlersLayer.pipe(Layer.provide(reads))
-// Provide handlers alongside the existing handlers to makeMcpRoutes(toolkit).
+const routes = makeMcpRoutes(toolkit, handlers).pipe(
+  Layer.provide(applicationServices),
+  Layer.provide(databaseLayer),
+)
 ```
 
-`endpointConfig` must supply `EditorialMcpConfig` with the same endpoint identity
-as the route; `databaseLayer` supplies `Database`. Route-private configuration
-does not automatically flow into a separately constructed handler layer. Existing
-application service layers may be reused rather than constructed twice. The
-isolated test `setup` shows the full working composition through `makeMcpRoutes`,
-persisted OAuth, existing draft handlers and migrated D1 without central edits.
+`makeMcpRoutes` supplies its single private, validated `EditorialMcpConfig` to
+the supplied handlers internally; do not separately construct `endpointConfig`.
+`databaseLayer` supplies `Database`; `applicationServices` supplies the route's
+existing auth, OAuth, configuration and editorial dependencies. Existing service
+layers may be reused rather than constructed twice. The isolated test `setup`
+shows the full composition through `makeMcpRoutes`, persisted OAuth, existing
+draft handlers and migrated D1. Central composition also includes the other
+reviewed read toolkits; this example isolates the favorites integration seam.
 
 P1 owns registry composition and permitted OAuth/consent scope exposure. No new
 scope literals or central exports are required; the pinned P1 already defines all

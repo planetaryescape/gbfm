@@ -10,6 +10,7 @@ import { McpAuthorization, McpAuthorizationLive, McpPermission } from '@/mcp/aut
 import { CommandAuthority } from '@/mcp/command-authority'
 import { EditorialToolError, McpToolError } from '@/mcp/contracts'
 import { composeMcpToolkits, EditorialToolkit } from '@/mcp/server'
+import { MAX_MCP_RESPONSE_BYTES, McpWireResponse } from '@/mcp/wire-response'
 import { ConfigService } from '@/services/config.service'
 import { EditorialOAuthLive } from '@/services/editorial-oauth.service'
 import { EmailDeliveryLive } from '@/services/email-delivery.service'
@@ -46,6 +47,12 @@ const CatalogueFixture = Toolkit.make(
     failure: McpToolError,
     failureMode: 'return',
   }).annotate(McpPermission, { scopes: ['drafts:write'] }),
+  Tool.make('fixture_wire_budget', {
+    parameters: Schema.Struct({ nonce: Schema.String }),
+    success: Schema.Struct({ nonce: Schema.String }),
+    failure: McpToolError,
+    failureMode: 'return',
+  }).annotate(McpPermission, { scopes: ['drafts:write'] }),
 )
 
 const handlers = CatalogueFixture.toLayer(
@@ -54,6 +61,19 @@ const handlers = CatalogueFixture.toLayer(
     const db = yield* Database
 
     return {
+      fixture_wire_budget: ({ nonce }) =>
+        Effect.gen(function* () {
+          const wire = yield* Effect.serviceOption(McpWireResponse)
+          const result = { nonce }
+
+          if (Option.isNone(wire) || wire.value.successBytes(result) > MAX_MCP_RESPONSE_BYTES)
+            return yield* new McpToolError({
+              code: 'invalid_input',
+              message: 'Response too large.',
+            })
+
+          return result
+        }),
       fixture_command_checkpoint: () =>
         Effect.gen(function* () {
           // Resolve request context inside the handler, not at layer construction.

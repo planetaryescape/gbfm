@@ -286,7 +286,7 @@ const requestJson = <A>(
 
         if (operation === 'save content' && response.status === 409)
           message =
-            'This post changed in another editor or connected app. Your text is still here. Copy your changes before reloading the latest version.'
+            'This post changed in another editor or connected app. Your text is still here. Open the latest saved version in a new tab to compare and copy your changes.'
 
         if (operation === 'resolve post music') {
           if (response.status === 503 || response.status === 429) {

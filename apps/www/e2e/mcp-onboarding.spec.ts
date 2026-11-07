@@ -22,6 +22,69 @@ const signIn = async (page: Page, email = 'editor@gbfm.local') => {
 const consent = (page: Page) =>
   page.getByRole('heading', { name: 'Connect OpenCode?', exact: true })
 
+test('a post first saved from the new-editor URL can recover a conflict in a new tab', async ({
+  page,
+  context,
+}) => {
+  await page.goto('/api/e2e/mcp-start')
+  await signIn(page)
+  await expect(consent(page)).toBeVisible()
+  await page.goto('/new/editorial')
+  await page
+    .getByRole('textbox', { name: 'Title', exact: true })
+    .fill(`New editorial fixture ${crypto.randomUUID()}`)
+  const canvas = page.getByRole('textbox', { name: 'Writing canvas', exact: true })
+  await canvas.fill('First browser-created version')
+
+  const created = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/content/post') && response.request().method() === 'POST',
+  )
+
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+  const response = await created
+  expect(response.status()).toBe(200)
+
+  const { slug } = Schema.decodeUnknownSync(Schema.Struct({ slug: Schema.String }))(
+    await response.json(),
+  )
+
+  await expect(page.getByRole('status').filter({ hasText: 'All changes saved' })).toBeVisible()
+  await expect(page).not.toHaveURL(/edit=/)
+  await canvas.fill('Keep my local unsaved changes')
+  expect(
+    (
+      await page.request.patch(`/api/content/posts/${slug}`, {
+        data: { content: 'Latest remote version' },
+      })
+    ).ok(),
+  ).toBe(true)
+
+  const conflict = page.waitForResponse(
+    (reply) =>
+      reply.url().endsWith(`/api/content/posts/${slug}`) && reply.request().method() === 'PATCH',
+  )
+
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+  expect((await conflict).status()).toBe(409)
+  const opened = context.waitForEvent('page')
+  await page.getByRole('link', { name: 'Open latest saved version (new tab)', exact: true }).click()
+  const latest = await opened
+  const latestCanvas = latest.getByRole('textbox', { name: 'Writing canvas', exact: true })
+  await expect(latestCanvas).toHaveValue('Latest remote version')
+  await expect(canvas).toHaveValue('Keep my local unsaved changes')
+  await latestCanvas.fill('Compared and recovered text')
+
+  const saved = latest.waitForResponse(
+    (reply) =>
+      reply.url().endsWith(`/api/content/posts/${slug}`) && reply.request().method() === 'PATCH',
+  )
+
+  await latest.getByRole('button', { name: 'Save draft', exact: true }).click()
+  expect((await saved).status()).toBe(200)
+  await latest.close()
+})
+
 test('the editorial editor retains local text and reports a stale-save conflict', async ({
   page,
 }, info) => {

@@ -96,7 +96,9 @@ Updates compare the caller's original version and atomically require that the po
 
 The web editorial editor submits its loaded `expectedUpdatedAt` on saves and
 saved-post music resolution. Stale saves receive HTTP 409, retain local text and
-ask the user to copy their edits before reloading. Successful saves and music
+offer the latest saved version in a new tab so the user can compare and copy
+their edits without discarding the original tab. This also works for a post first
+saved from `/new/editorial`, whose original URL has no edit slug. Successful saves and music
 attachments advance the editor's revision. The API field is optional so existing
 clients retain their current contract; clients omitting it still use last-save-wins.
 

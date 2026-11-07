@@ -27,6 +27,8 @@ const basePost: SelectMdxCompiledPost = {
   type: 'post',
   musicEntityType: null,
   musicEntityId: null,
+  lastOperationId: null,
+  musicReferencesManaged: false,
   parentPostId: null,
   rootPostId: null,
   depth: 0,

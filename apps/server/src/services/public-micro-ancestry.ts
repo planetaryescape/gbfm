@@ -1,7 +1,7 @@
 import { type SQL, sql } from 'drizzle-orm'
 
-// All references are local to the query's p alias, never an enclosing caller's
-// table/relational-query alias. There is no actor or authored-draft override.
+// Policy references are local to the query's p alias. The caller's ID expression
+// is resolved separately before entering that scope. No actor/draft override.
 const visibleMicro = sql`p.type = 'micro' AND p.draft = 0 AND NOT EXISTS (
   SELECT 1 FROM post_creators pc JOIN user u ON u.id = pc.creatorId
   WHERE pc.postId = p.id AND u.banned = 1
@@ -15,23 +15,25 @@ const visibleMicro = sql`p.type = 'micro' AND p.draft = 0 AND NOT EXISTS (
  * sentinel makes overflow fail closed; recursion never walks an unbounded chain.
  * SQL expressions allow a caller's lookup and this projection to share one read
  * snapshot. Strings are bound parameters, not SQL identifiers or raw fragments.
+ * The alias-free distance -1 input row resolves caller expressions before any
+ * local table scope; only validated distance 0..8 rows can be focus/root output.
  * A preflight result never authorizes a later write: use the predicate below in
  * the same INSERT statement. No body, renderer, provider or mutation is invoked.
  */
 export const publicMicroAncestorQuery = (postId: string | SQL): SQL => sql`
   WITH RECURSIVE ancestor_chain(id, parent_post_id, root_post_id, distance) AS (
-    SELECT p.id, p.parent_post_id, p.root_post_id, 0 FROM posts p
-    WHERE p.id = ${postId} AND ${visibleMicro}
+    SELECT ${postId}, NULL, NULL, -1
     UNION ALL
     SELECT p.id, p.parent_post_id, p.root_post_id, a.distance + 1
-    FROM posts p JOIN ancestor_chain a ON p.id = a.parent_post_id
+    FROM posts p JOIN ancestor_chain a
+      ON p.id = CASE WHEN a.distance = -1 THEN a.id ELSE a.parent_post_id END
     WHERE a.distance < 9 AND ${visibleMicro}
   )
   SELECT focus.id, focus.parent_post_id AS parentPostId,
     focus.root_post_id AS rootPostId, root.distance AS depth
   FROM ancestor_chain focus CROSS JOIN ancestor_chain root
   WHERE focus.distance = 0 AND root.parent_post_id IS NULL
-    AND root.root_post_id IS NULL AND root.distance <= 8
+    AND root.root_post_id IS NULL AND root.distance BETWEEN 0 AND 8
     AND NOT EXISTS (
       SELECT 1 FROM ancestor_chain path
       WHERE path.distance > 8

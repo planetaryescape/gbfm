@@ -78,6 +78,7 @@ import {
   type MediaActor,
   type MediaPublication,
 } from '@/services/media-publication'
+import { getPublicMicroThreadEffect, type PublicMicroThread } from '@/services/public-micro-thread'
 import { SentryService } from '@/services/sentry.service'
 import { ObjectStoreClient } from '@/services/storage/object-store-client'
 import { toSlug } from '@/services/to-slug'
@@ -125,6 +126,11 @@ export type SourcePost = SelectPost & {
 }
 
 export interface PostService {
+  /** Anonymous bounded topology/source-prose read; no body compilation or embed resolution. */
+  readonly getPublicMicroThread: (
+    slug: string,
+    options: { limit: number; offset: number },
+  ) => Effect.Effect<PublicMicroThread, DatabaseError | NotFoundError>
   readonly getSourcesForEdit: (
     options: { limit: number; offset: number; draft?: boolean; type?: PostType },
     reader: typeof PostSourceAccess.cases.Authored.Type,
@@ -2816,6 +2822,7 @@ export const PostServiceLayer = Layer.effect(
     const provideDb = Effect.provideService(Database, db)
 
     return {
+      getPublicMicroThread: (slug, options) => provideDb(getPublicMicroThreadEffect(slug, options)),
       getSourcesForEdit: (opts, reader) => provideDb(getSourcesForEditEffect(opts, reader)),
       getSourceById: (postId, access) => provideDb(getSourceByIdEffect(postId, access)),
       getAll: (opts) => provideDb(getAllEffect(opts, mdx)),

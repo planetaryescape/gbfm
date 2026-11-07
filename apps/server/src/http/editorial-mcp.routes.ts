@@ -9,6 +9,11 @@ import { Database } from '@/db/layer'
 import { oauthResource } from '@/db/oauth.schema'
 import { Auth } from '@/lib/auth'
 import { McpPermission } from '@/mcp/authorization'
+import { PublicResearchServiceLayer } from '@/mcp/content-read/research-service'
+import {
+  PublicResearchHandlersLayer,
+  PublicResearchToolkit,
+} from '@/mcp/content-read/research-toolkit'
 import { ContentReadServiceLayer } from '@/mcp/content-read/service'
 import { ContentReadHandlersLayer, ContentReadToolkit } from '@/mcp/content-read/toolkit'
 import { EditorialToolError } from '@/mcp/contracts'
@@ -103,8 +108,9 @@ const ToolListing = Schema.StructWithRest(
   [Schema.Record(Schema.String, Schema.Unknown)],
 )
 
-export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>>(
+export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, RIn>(
   toolkit: Toolkit.Toolkit<Tools>,
+  handlers: Layer.Layer<ROut, E, RIn>,
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -406,8 +412,7 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>>(
           authorizationMetadata,
         ),
         makeMcpLayer(origins, toolkit).pipe(
-          Layer.provide(ContentReadHandlersLayer),
-          Layer.provide(ContentReadServiceLayer),
+          Layer.provide(handlers),
           Layer.provide(EditorialToolHandlersLayer),
           Layer.provide(EditorialDraftServiceLayer),
           Layer.provide(EditorialReadServiceLayer),
@@ -418,7 +423,11 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>>(
   )
 
 export const EditorialMcpRoutesLive = makeMcpRoutes(
-  composeMcpToolkits(EditorialToolkit, ContentReadToolkit),
+  composeMcpToolkits(EditorialToolkit, ContentReadToolkit, PublicResearchToolkit),
+  Layer.mergeAll(
+    ContentReadHandlersLayer.pipe(Layer.provide(ContentReadServiceLayer)),
+    PublicResearchHandlersLayer.pipe(Layer.provide(PublicResearchServiceLayer)),
+  ),
 )
 
 export function privateEditorialResponse(request: Request, response: Response): Response {

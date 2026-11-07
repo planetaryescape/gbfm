@@ -67,12 +67,17 @@ cost estimates; they demonstrate why a one-row page is not a bounded-work promis
 - Keep production allowedScopes unchanged. P1 owns the registry/shared fixture
   edits and final persisted-OAuth + R1 + R3 + legacy integrated-head proof.
 
-### Four-tool continuation (separate proposed registration, not applied here)
+### Four-tool continuation (centrally registered by P1)
+
+P1 now composes all seven R3 reads in the production route manifest. Registration
+does not enable production resource scopes. The real persisted-OAuth HTTP fixture
+in `http/editorial-mcp.d1.test.ts` covers this composition; the recipe below also
+documents the service dependencies. R1 and `read_micro_thread` remain unregistered.
 
 - Import `PublicResearchToolkit`, `PublicResearchHandlersLayer` from
   `@/mcp/content-read/research-toolkit`; `PublicResearchServiceLayer` from
   `@/mcp/content-read/research-service`. Contracts live in `research-contracts.ts`.
-- Compose `PublicResearchToolkit` alongside `ContentReadToolkit`, R1 and legacy.
+- Compose `PublicResearchToolkit` alongside `ContentReadToolkit` and legacy.
   Provide its handlers then service layer, with real `SearchService`, `AudioService`,
   `ProfileService`, `Database`, `EditorialMcpConfig`. Use their updated production
   layers (AudioServiceLayer still needs its normal renderer/storage/config/crypto

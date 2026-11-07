@@ -40,14 +40,24 @@ const emptyForm = {
   tags: '',
 }
 
+const Editor = Schema.TaggedUnion({
+  Listing: {},
+  Creating: {},
+  Editing: { slug: Schema.String },
+})
+
+const editingSlug = (model: Model) =>
+  Editor.guards.Editing(model.editor) ? model.editor.slug : null
+
+const busy = (model: Model) => model.operation !== 'idle'
+
 export const Model = Schema.Struct({
   listing: Schema.optional(GetAllShowsResponse),
   form: Form,
   draft: Schema.Boolean,
-  creating: Schema.Boolean,
-  editing: Schema.NullOr(Schema.String),
+  editor: Editor,
   deleting: Schema.NullOr(Schema.String),
-  busy: Schema.Boolean,
+  operation: Schema.Literals(['idle', 'loading', 'saving', 'deleting']),
   error: Schema.NullOr(Schema.String),
   notice: Schema.String,
 })
@@ -57,10 +67,9 @@ export type Model = typeof Model.Type
 export const initialModel: Model = {
   form: emptyForm,
   draft: true,
-  creating: false,
-  editing: null,
+  editor: Editor.cases.Listing.make({}),
   deleting: null,
-  busy: false,
+  operation: 'idle',
   error: null,
   notice: '',
 }
@@ -155,22 +164,27 @@ export const update = (
 ): Update.Return<Model, Message, DashboardService> =>
   Message.match<Update.Return<Model, Message, DashboardService>>(message, {
     FieldChanged: ({ field, value }) =>
-      model.busy ? { model } : { model: { ...model, form: { ...model.form, [field]: value } } },
-    DraftChanged: () => (model.busy ? { model } : { model: { ...model, draft: !model.draft } }),
+      busy(model) ? { model } : { model: { ...model, form: { ...model.form, [field]: value } } },
+    DraftChanged: () => (busy(model) ? { model } : { model: { ...model, draft: !model.draft } }),
     New: () =>
-      model.busy
+      busy(model)
         ? { model }
-        : { model: { ...initialModel, listing: model.listing, creating: true } },
+        : {
+            model: {
+              ...initialModel,
+              listing: model.listing,
+              editor: Editor.cases.Creating.make({}),
+            },
+          },
     Edit: ({ slug }) => {
       const show = model.listing?.data.find((show) => show.slug === slug)
 
-      if (!show || model.busy) return { model }
+      if (!show || busy(model)) return { model }
 
       return {
         model: {
           ...model,
-          creating: false,
-          editing: slug,
+          editor: Editor.cases.Editing.make({ slug }),
           deleting: null,
           error: null,
           notice: '',
@@ -187,36 +201,41 @@ export const update = (
         },
       }
     },
-    Clear: () => (model.busy ? { model } : { model: { ...initialModel, listing: model.listing } }),
+    Clear: () => (busy(model) ? { model } : { model: { ...initialModel, listing: model.listing } }),
     Save: () =>
-      model.busy
+      busy(model)
         ? { model }
         : {
-            model: { ...model, busy: true, error: null },
-            commands: [Save({ form: model.form, draft: model.draft, editing: model.editing })],
+            model: { ...model, operation: 'saving', error: null },
+            commands: [Save({ form: model.form, draft: model.draft, editing: editingSlug(model) })],
           },
     AskDelete: ({ slug }) =>
-      model.busy || !model.listing?.data.some((show) => show.slug === slug)
+      busy(model) || !model.listing?.data.some((show) => show.slug === slug)
         ? { model }
         : { model: { ...model, deleting: slug } },
-    CancelDelete: () => (model.busy ? { model } : { model: { ...model, deleting: null } }),
+    CancelDelete: () => (busy(model) ? { model } : { model: { ...model, deleting: null } }),
     ConfirmDelete: () =>
-      model.busy || !model.deleting
+      busy(model) || !model.deleting
         ? { model }
         : {
-            model: { ...model, busy: true, error: null },
+            model: { ...model, operation: 'deleting', error: null },
             commands: [Delete({ slug: model.deleting })],
           },
     Load: ({ offset }) =>
-      model.busy
+      busy(model)
         ? { model }
-        : { model: { ...model, busy: true, error: null }, commands: [Load({ offset })] },
-    Loaded: ({ listing }) => ({ model: { ...model, listing, busy: false, error: null } }),
+        : { model: { ...model, operation: 'loading', error: null }, commands: [Load({ offset })] },
+    Loaded: ({ listing }) => ({ model: { ...model, listing, operation: 'idle', error: null } }),
     Saved: () => ({
-      model: { ...initialModel, listing: model.listing, busy: true, notice: 'Show changes saved.' },
+      model: {
+        ...initialModel,
+        listing: model.listing,
+        operation: 'loading',
+        notice: model.operation === 'deleting' ? 'Show deleted.' : 'Show changes saved.',
+      },
       commands: [Load({ offset: 0 })],
     }),
-    Failed: ({ message }) => ({ model: { ...model, busy: false, error: message } }),
+    Failed: ({ message }) => ({ model: { ...model, operation: 'idle', error: message } }),
   })
 
 const labels = {
@@ -230,8 +249,8 @@ const labels = {
 }
 
 const showForm = (model: Model, h: HtmlBuilder<Message>) => {
-  const editing = model.editing
-    ? model.listing?.data.find((show) => show.slug === model.editing)
+  const editing = editingSlug(model)
+    ? model.listing?.data.find((show) => show.slug === editingSlug(model))
     : undefined
 
   return h.form(
@@ -246,13 +265,13 @@ const showForm = (model: Model, h: HtmlBuilder<Message>) => {
             field === 'content' || field === 'description'
               ? h.textarea([
                   h.Value(model.form[field]),
-                  h.Disabled(model.busy),
+                  h.Disabled(busy(model)),
                   h.Rows(field === 'content' ? 6 : 3),
                   h.OnInput((value) => Message.FieldChanged({ field, value })),
                 ])
               : h.input([
                   h.Value(model.form[field]),
-                  h.Disabled(model.busy),
+                  h.Disabled(busy(model)),
                   h.Required(field === 'title' || field === 'slug'),
                   h.OnInput((value) => Message.FieldChanged({ field, value })),
                 ]),
@@ -266,7 +285,7 @@ const showForm = (model: Model, h: HtmlBuilder<Message>) => {
           h.input([
             h.Type('checkbox'),
             h.Checked(model.draft),
-            h.Disabled(model.busy),
+            h.Disabled(busy(model)),
             h.OnClick(Message.DraftChanged()),
           ]),
         ],
@@ -275,11 +294,17 @@ const showForm = (model: Model, h: HtmlBuilder<Message>) => {
         [h.Class('admin-form-actions')],
         [
           h.button(
-            [h.Type('submit'), h.Class('dashboard-button-primary'), h.Disabled(model.busy)],
-            [model.busy ? 'Saving' : model.editing ? 'Save changes' : 'Create show'],
+            [h.Type('submit'), h.Class('dashboard-button-primary'), h.Disabled(busy(model))],
+            [
+              model.operation === 'saving'
+                ? 'Saving'
+                : editingSlug(model)
+                  ? 'Save changes'
+                  : 'Create show',
+            ],
           ),
           h.button(
-            [h.Type('button'), h.Disabled(model.busy), h.OnClick(Message.Clear())],
+            [h.Type('button'), h.Disabled(busy(model)), h.OnClick(Message.Clear())],
             ['Cancel'],
           ),
         ],
@@ -290,7 +315,7 @@ const showForm = (model: Model, h: HtmlBuilder<Message>) => {
 
 export const view = defineView<Model, Message>((model, h) => {
   const page = model.listing?.pagination
-  const formOpen = model.creating || model.editing !== null
+  const formOpen = !Editor.guards.Listing(model.editor)
 
   return h.section(
     [h.Class('admin-page')],
@@ -300,7 +325,7 @@ export const view = defineView<Model, Message>((model, h) => {
           [
             h.Type('button'),
             h.Class('dashboard-button-primary'),
-            h.Disabled(model.busy || formOpen),
+            h.Disabled(busy(model) || formOpen),
             h.OnClick(Message.New()),
           ],
           ['New show'],
@@ -312,7 +337,7 @@ export const view = defineView<Model, Message>((model, h) => {
       frame(h, [
         dataTable(h, {
           label: 'Shows',
-          loading: !model.listing && model.busy,
+          loading: !model.listing && busy(model),
           minWidth: '40rem',
           columns: [
             { label: 'Title' },
@@ -339,11 +364,11 @@ export const view = defineView<Model, Message>((model, h) => {
                       )
                     : h.empty,
                   h.button(
-                    [h.Disabled(model.busy), h.OnClick(Message.Edit({ slug: show.slug }))],
+                    [h.Disabled(busy(model)), h.OnClick(Message.Edit({ slug: show.slug }))],
                     ['Edit'],
                   ),
                   h.button(
-                    [h.Disabled(model.busy), h.OnClick(Message.AskDelete({ slug: show.slug }))],
+                    [h.Disabled(busy(model)), h.OnClick(Message.AskDelete({ slug: show.slug }))],
                     ['Delete'],
                   ),
                 ],
@@ -356,11 +381,11 @@ export const view = defineView<Model, Message>((model, h) => {
                     [
                       h.p([], [`Permanently delete ${show.title}? This cannot be undone.`]),
                       h.button(
-                        [h.Disabled(model.busy), h.OnClick(Message.ConfirmDelete())],
+                        [h.Disabled(busy(model)), h.OnClick(Message.ConfirmDelete())],
                         ['Confirm delete'],
                       ),
                       h.button(
-                        [h.Disabled(model.busy), h.OnClick(Message.CancelDelete())],
+                        [h.Disabled(busy(model)), h.OnClick(Message.CancelDelete())],
                         ['Keep show'],
                       ),
                     ],
@@ -374,11 +399,11 @@ export const view = defineView<Model, Message>((model, h) => {
               label: 'Show pages',
               summary: pageRange(page.offset, model.listing?.data.length ?? 0, page.total),
               previous:
-                page.offset > 0 && !model.busy
+                page.offset > 0 && !busy(model)
                   ? { onClick: Message.Load({ offset: Math.max(0, page.offset - 25) }) }
                   : null,
               next:
-                page.hasMore && !model.busy
+                page.hasMore && !busy(model)
                   ? { onClick: Message.Load({ offset: page.offset + 25 }) }
                   : null,
             })

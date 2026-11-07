@@ -1,4 +1,4 @@
-import { Effect, Redacted } from 'effect'
+import { Effect, Predicate, Redacted } from 'effect'
 import { randomUUID } from 'expo-crypto'
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 
@@ -12,8 +12,19 @@ import {
 import { env } from '@/env'
 import { haptics } from '@/feedback/haptics'
 
+import { createComposerLoadOwner, type ComposerLoadAttempt } from './composerLoad'
+import { ComposerReceiptStorage } from './composerReceipts'
+import { ComposerSubmission } from './composerSubmission'
 import { emptyTweetDraft, musicCandidate, type TweetDraft, withText } from './draft'
-import { readTweetDraft, removeTweetDraft, restoreTweetDraft, saveTweetDraft } from './draftStorage'
+import { TweetDraftStorage } from './draftRestore'
+import {
+  composerReceiptStorage,
+  readTweetDraft,
+  removeTweetDraft,
+  restoreTweetDraft,
+  saveTweetDraft,
+} from './draftStorage'
+import { useComposerSession } from './useComposerSession'
 import { useMusicLookup } from './useMusicLookup'
 
 const connection = (sessionToken: string | null) =>
@@ -52,88 +63,136 @@ export function useTweetComposer({
       ? `${identity}/reply/${replyTo}`
       : identity
 
-  const [draft, setDraft] = useState<TweetDraft | null>(null)
-  const latest = useRef<TweetDraft | null>(null)
+  const [snapshot, setSnapshot] = useState<{
+    readonly storageKey: string
+    readonly draft: TweetDraft
+  } | null>(null)
+
+  const draft = snapshot?.storageKey === storageKey ? snapshot.draft : null
+  const setDraft = (value: TweetDraft) => setSnapshot({ storageKey, draft: value })
+  const latest = useRef<{ readonly storageKey: string; readonly draft: TweetDraft } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const locked = useRef(false)
-  const controller = useRef<AbortController | null>(null)
+  const session = useComposerSession(identity, storageKey)
+  const { owner, publication } = session
+  const [loads] = useState(createComposerLoadOwner)
+  const editable = Predicate.isTagged(publication, 'Writable')
+  const cleanupPending = Predicate.isTagged(publication, 'CleanupPending')
 
   const accept = (restored: TweetDraft) => {
-    latest.current = restored
-    setDraft(restored)
-    setError(null)
+    owner.change(storageKey, () => {
+      latest.current = { storageKey, draft: restored }
+      setDraft(restored)
+      setError(null)
+
+      return true
+    })
   }
 
-  const loadRemote = (slug: string) => {
-    const abort = new AbortController()
-    controller.current = abort
-
-    const work = Effect.suspend(() => connection(sessionToken)).pipe(
+  const loadRemote = (slug: string, attempt: ComposerLoadAttempt) => {
+    const request = Effect.suspend(() => connection(sessionToken)).pipe(
       Effect.flatMap((connected) => loadTweetForEdit(connected, slug)),
       Effect.timeout('20 seconds'),
-      Effect.match({
-        onSuccess: ({ draft: loaded }) => accept(loaded),
-        onFailure: (cause) =>
-          setError(
-            cause instanceof TweetAuthoringFailed ? cause.message : 'Could not load this tweet.',
-          ),
-      }),
     )
 
-    void Effect.runPromiseExit(work, { signal: abort.signal })
+    const work = attempt.run(
+      request,
+      ({ draft: loaded }) => accept(loaded),
+      (cause) =>
+        setError(
+          cause instanceof TweetAuthoringFailed ? cause.message : 'Could not load this tweet.',
+        ),
+    )
+
+    void Effect.runPromiseExit(work, { signal: attempt.signal })
   }
 
-  const load = () =>
-    Effect.runSync(
-      (editSlug || replyTo ? readTweetDraft(storageKey) : restoreTweetDraft(identity)).pipe(
-        Effect.match({
-          onSuccess: (stored) => {
-            if (stored) accept(stored)
-            else if (editSlug) loadRemote(editSlug)
-            else accept(emptyTweetDraft(randomUUID()))
-          },
-          onFailure: (cause) => setError(cause.message),
-        }),
-      ),
-    )
-
-  const restore = useEffectEvent(load)
-
-  useEffect(() => {
-    restore()
-
-    return () => controller.current?.abort()
-  }, [])
-
-  const change = (next: TweetDraft) => {
-    latest.current = next
-    setDraft(next)
-    setNotice(null)
+  const load = () => {
+    if (!session.available()) return
+    const attempt = loads.start()
 
     return Effect.runSync(
-      saveTweetDraft(storageKey, next).pipe(
+      owner.restore(storageKey).pipe(
+        Effect.provideService(ComposerReceiptStorage, composerReceiptStorage),
+        Effect.flatMap((restoredPublication) => {
+          if (
+            Predicate.isTagged(restoredPublication, 'CleanupPending') ||
+            Predicate.isTagged(restoredPublication, 'PublicationUncertain')
+          ) {
+            attempt.commit(() => {
+              latest.current = { storageKey, draft: restoredPublication.draft }
+              setDraft(restoredPublication.draft)
+              setError(
+                Predicate.isTagged(restoredPublication, 'PublicationUncertain')
+                  ? restoredPublication.message
+                  : 'Already published. Retry local cleanup without publishing again.',
+              )
+            })
+
+            return Effect.succeed(null)
+          }
+
+          return editSlug || replyTo ? readTweetDraft(storageKey) : restoreTweetDraft(identity)
+        }),
         Effect.match({
-          onSuccess: () => {
-            setError(null)
+          onSuccess: (stored) => {
+            attempt.commit(() => {
+              if (!Predicate.isTagged(owner.state(storageKey), 'Writable')) return
 
-            return true
+              if (stored) accept(stored)
+              else if (editSlug) loadRemote(editSlug, attempt)
+              else accept(emptyTweetDraft(randomUUID()))
+            })
           },
-          onFailure: () => {
-            setError(
-              'Could not save your draft on this device. Keep this screen open and try again.',
-            )
-
-            return false
-          },
+          onFailure: (cause) => attempt.commit(() => setError(cause.message)),
         }),
       ),
     )
+  }
+
+  const restore = useEffectEvent((principal: string, key: string) => {
+    if (identity === principal && storageKey === key) load()
+  })
+
+  useEffect(() => {
+    restore(identity, storageKey)
+
+    return () => {
+      loads.cancel()
+    }
+  }, [loads, identity, storageKey])
+
+  const change = (next: TweetDraft) => {
+    if (!session.available()) return false
+
+    return owner.change(storageKey, () => {
+      latest.current = { storageKey, draft: next }
+      setDraft(next)
+      setNotice(null)
+
+      return Effect.runSync(
+        saveTweetDraft(storageKey, next).pipe(
+          Effect.match({
+            onSuccess: () => {
+              setError(null)
+
+              return true
+            },
+            onFailure: () => {
+              setError(
+                'Could not save your draft on this device. Keep this screen open and try again.',
+              )
+
+              return false
+            },
+          }),
+        ),
+      )
+    })
   }
 
   const discard = (onDone: () => void) => {
-    if (locked.current) return
+    if (!session.available() || !Predicate.isTagged(owner.state(storageKey), 'Writable')) return
     Effect.runSync(
       removeTweetDraft(storageKey).pipe(
         Effect.match({
@@ -144,88 +203,104 @@ export function useTweetComposer({
     )
   }
 
-  const save = (publish: boolean, onPublished: (slug: string) => void) => {
-    if (!draft || locked.current || !change(draft)) return
-    locked.current = true
-    setBusy(true)
-    const abort = new AbortController()
-    controller.current = abort
+  const recover = () => {
+    if (!session.available()) return
+    Effect.runSync(
+      owner.recover(storageKey).pipe(
+        Effect.provideService(ComposerReceiptStorage, composerReceiptStorage),
+        Effect.provideService(TweetDraftStorage, {
+          read: readTweetDraft,
+          save: saveTweetDraft,
+          remove: removeTweetDraft,
+        }),
+        Effect.match({
+          onFailure: ({ message }) => setError(message),
+          onSuccess: (cleared) => {
+            if (cleared) {
+              load()
+              setNotice(
+                'Recovery record cleared. Your draft was kept. Nothing was sent. Check publication before choosing to send again.',
+              )
+            }
+          },
+        }),
+      ),
+    )
+  }
 
-    const work = connection(sessionToken).pipe(
+  const save = (publish: boolean, onPublished: (slug: string) => void) => {
+    if (!draft || !session.available()) return
+
+    if (!publish && !editable) return
+
+    if (!cleanupPending && !change(draft)) return
+    loads.cancel()
+
+    const request = connection(sessionToken).pipe(
       Effect.flatMap((connected) =>
         replyTo
           ? publishReply(connected, replyTo, draft)
           : saveTweet(connected, draft, publish, knownTags),
       ),
-      Effect.timeoutOrElse({
-        duration: '30 seconds',
-        orElse: () =>
-          Effect.fail(
-            new TweetAuthoringFailed({
-              message: replyTo
-                ? 'The request timed out. Check the thread before retrying, so you do not reply twice.'
-                : 'The request timed out. Retry to check and save the same tweet, without creating a second one.',
-            }),
-          ),
-      }),
-      Effect.tap((saved) =>
-        Effect.sync(() => {
-          if (publish) {
-            Effect.runSync(
-              removeTweetDraft(storageKey).pipe(
-                Effect.match({
-                  onSuccess: () => onPublished(saved.slug),
-                  onFailure: () => {
-                    latest.current = { ...draft, remote: true }
-                    setDraft(latest.current)
-                    setError(
-                      'Your tweet was published, but the local draft could not be cleared. Close this screen and check your tweet before trying again.',
-                    )
-                  },
-                }),
-              ),
-            )
-          } else {
-            change({ ...draft, remote: true })
-            setNotice('Draft saved to your account. It is not public.')
-          }
-        }),
-      ),
-      Effect.catch((cause) =>
-        Effect.sync(() => {
-          void haptics.failure()
-          setError(
-            cause instanceof TweetAuthoringFailed
-              ? cause.message
-              : 'Could not connect. Your local draft is safe.',
-          )
-        }),
-      ),
-      Effect.ensuring(
-        Effect.sync(() => {
-          locked.current = false
-          setBusy(false)
-        }),
-      ),
     )
 
-    void Effect.runPromiseExit(work, { signal: abort.signal })
+    const work = owner.submit(storageKey, draft, publish, Boolean(replyTo), request).pipe(
+      Effect.provideService(TweetDraftStorage, {
+        read: readTweetDraft,
+        save: saveTweetDraft,
+        remove: removeTweetDraft,
+      }),
+      Effect.provideService(ComposerReceiptStorage, composerReceiptStorage),
+    )
+
+    void session.run(work, (outcome) => {
+      if (!outcome) return
+      ComposerSubmission.$match(outcome, {
+        Published: ({ slug }) => onPublished(slug),
+        PublishedNotCleared: ({ draft: remote }) => {
+          latest.current = { storageKey, draft: remote }
+          setDraft(remote)
+          setError(
+            'Published, but local recovery or cleanup could not finish. Retry cleanup without publishing again. If you close now, this device may ask you to check publication.',
+          )
+        },
+        RemoteDraftSaved: ({ draft: remote, localSaved }) => {
+          latest.current = { storageKey, draft: remote }
+          setDraft(remote)
+          setNotice('Draft saved to your account. It is not public.')
+          setError(
+            localSaved
+              ? null
+              : 'Could not save your draft on this device. Keep this screen open and try again.',
+          )
+        },
+        RequestFailed: ({ message }) => {
+          void haptics.failure()
+          setError(message)
+        },
+        PublicationOutcomeUncertain: ({ message }) => {
+          void haptics.failure()
+          setError(message)
+        },
+      })
+    })
   }
 
-  const candidate = draft && resolvesMusic && sessionToken ? musicCandidate(draft) : null
+  const candidate =
+    editable && draft && resolvesMusic && sessionToken ? musicCandidate(draft) : null
 
   const musicLoading = useMusicLookup(candidate, sessionToken, (music) => {
-    const current = latest.current
+    const current = latest.current?.storageKey === storageKey ? latest.current.draft : null
 
     if (current && musicCandidate(current) === candidate) change({ ...current, music })
   })
 
   const setText = (text: string) => {
-    if (latest.current) change(withText(latest.current, text))
+    if (latest.current?.storageKey === storageKey) change(withText(latest.current.draft, text))
   }
 
   const dismissMusic = () => {
-    const current = latest.current
+    const current = latest.current?.storageKey === storageKey ? latest.current.draft : null
 
     if (current?.music)
       change({ ...current, music: null, dismissedMusicUrl: current.music.url ?? null })
@@ -235,12 +310,14 @@ export function useTweetComposer({
     draft,
     error,
     notice,
-    busy,
+    busy: session.busy,
+    publication,
     musicLoading,
     change,
     setText,
     dismissMusic,
     discard,
+    recover,
     save,
     retry: load,
     editing: editSlug !== null,

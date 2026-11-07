@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { init } from './init'
 import { Message } from './message'
 import type { Flags } from './model'
+import { readerViewState } from './observability/reader-state'
 import { isCacheable, seedCache } from './page-cache'
 import { Message as CreatorMessage } from './page/creator/message'
 import { Message as DashboardMessage } from './page/dashboard/message'
@@ -81,6 +82,201 @@ const tweetFlags = (slug: string): Flags => {
 }
 
 const changed = (href: string) => Message.ChangedUrl({ url: Option.getOrThrow(fromString(href)) })
+
+describe('reader observability projection at the real model transition boundary', () => {
+  it('keeps the owned request loading until content commits and ignores stale completions', () => {
+    const initial = init({ ...flags, url: 'https://gbfm.co.za/about' }).model
+    const loading = update(initial, changed('https://gbfm.co.za/tweet/first')).model
+    expect(readerViewState(loading)).toEqual({
+      active: true,
+      request: loading.navigationId,
+      status: 'loading',
+    })
+    const next = update(loading, changed('https://gbfm.co.za/tweet/second')).model
+
+    const stale = update(
+      next,
+      Message.LoadedPage({
+        flags: tweetFlags('first'),
+        key: '/tweet/first',
+        navigationId: loading.navigationId,
+      }),
+    ).model
+
+    expect(readerViewState(stale)).toEqual({
+      active: true,
+      request: next.navigationId,
+      status: 'loading',
+    })
+
+    const committed = update(
+      stale,
+      Message.LoadedPage({
+        flags: tweetFlags('second'),
+        key: '/tweet/second',
+        navigationId: next.navigationId,
+      }),
+    ).model
+
+    expect(readerViewState(committed)).toEqual({
+      active: true,
+      request: next.navigationId,
+      status: 'ready',
+    })
+  })
+
+  it('distinguishes empty committed content from failed navigation', () => {
+    const initial = init({ ...flags, url: 'https://gbfm.co.za/about' }).model
+    const loading = update(initial, changed('https://gbfm.co.za/tweet/missing')).model
+
+    const failed = update(
+      loading,
+      Message.FailedPage({ key: '/tweet/missing', navigationId: loading.navigationId }),
+    ).model
+
+    expect(readerViewState(failed).status).toBe('error')
+
+    const empty = update(
+      loading,
+      Message.LoadedPage({
+        flags: { ...flags, url: 'https://gbfm.co.za/tweet/missing', status: 404 },
+        key: '/tweet/missing',
+        navigationId: loading.navigationId,
+      }),
+    ).model
+
+    expect(readerViewState(empty)).toEqual({
+      active: true,
+      request: loading.navigationId,
+      status: 'empty',
+    })
+  })
+})
+
+describe('page navigation and cached revalidation', () => {
+  const about: Flags = { ...flags, url: 'https://gbfm.co.za/about', title: 'About' }
+  const mixes: Flags = { ...flags, url: 'https://gbfm.co.za/mixes', title: 'Mixes' }
+
+  it('keeps the visible page during a cold load and rejects out-of-order success and failure', () => {
+    const initial = init(about).model
+    const first = update(initial, changed(mixes.url)).model
+    expect(first.flags).toBe(initial.flags)
+    expect(first.loading).toBe(true)
+    expect(first.pendingPath).toBe('/mixes')
+    const second = update(first, changed('https://gbfm.co.za/editorial')).model
+    expect(
+      update(
+        second,
+        Message.LoadedPage({ flags: mixes, key: '/mixes', navigationId: first.navigationId }),
+      ),
+    ).toEqual({ model: second })
+    expect(
+      update(second, Message.FailedPage({ key: '/mixes', navigationId: first.navigationId })),
+    ).toEqual({ model: second })
+
+    const failed = update(
+      second,
+      Message.FailedPage({ key: '/editorial', navigationId: second.navigationId }),
+    ).model
+
+    expect(failed.flags).toBe(initial.flags)
+    expect(failed.loading).toBe(false)
+    expect(failed.pendingPath).toBeNull()
+    expect(failed.error).toContain('could not be loaded')
+  })
+
+  it('shows cached content immediately and keeps it after failed revalidation', () => {
+    const initial = update(
+      init(about).model,
+      Message.PrefetchedPage({ flags: mixes, key: '/mixes' }),
+    ).model
+
+    const navigation = update(initial, changed(mixes.url)).model
+    expect(navigation.flags).toEqual(mixes)
+    expect(navigation.loading).toBe(false)
+    expect(
+      AsyncData.isRefreshing(Option.getOrThrow(HashMap.get(navigation.pageCache, '/mixes'))),
+    ).toBe(true)
+
+    const failed = update(
+      navigation,
+      Message.FailedPage({ key: '/mixes', navigationId: navigation.navigationId }),
+    ).model
+
+    const entry = Option.getOrThrow(HashMap.get(failed.pageCache, '/mixes'))
+    expect(AsyncData.isStale(entry)).toBe(true)
+    expect(Option.getOrThrow(AsyncData.getData(entry))).toEqual(mixes)
+    expect(failed.flags).toEqual(mixes)
+    expect(failed.error).toBeNull()
+  })
+
+  it('does not display cached content from another principal and clears it on identity change', () => {
+    const principal = { id: 'account-a', name: null, username: null, role: null }
+
+    const otherMixes: Flags = {
+      ...mixes,
+      principal: { ...principal, id: 'account-b' },
+      title: 'Account B mixes',
+    }
+
+    const initial = update(
+      init({ ...about, principal }).model,
+      Message.PrefetchedPage({ flags: otherMixes, key: '/mixes' }),
+    ).model
+
+    expect(
+      Option.getOrThrow(
+        AsyncData.getData(Option.getOrThrow(HashMap.get(initial.pageCache, '/mixes'))),
+      ),
+    ).toEqual(otherMixes)
+    const navigation = update(initial, changed(mixes.url)).model
+    expect(navigation.loading).toBe(true)
+    expect(navigation.flags).toBe(initial.flags)
+    expect(navigation.pendingPath).toBe('/mixes')
+
+    const loaded = update(
+      navigation,
+      Message.LoadedPage({
+        flags: { ...mixes, principalKnown: true },
+        key: '/mixes',
+        navigationId: navigation.navigationId,
+      }),
+    ).model
+
+    expect(loaded.tweetReader.identity).toBe('anonymous')
+    expect(HashMap.has(loaded.pageCache, '/about')).toBe(false)
+    expect(
+      Option.getOrThrow(
+        AsyncData.getData(Option.getOrThrow(HashMap.get(loaded.pageCache, '/mixes'))),
+      ).principal,
+    ).toBeNull()
+    expect(loaded.player.favorite.principalId).toBeNull()
+    expect(loaded.player.favorite.principalKnown).toBe(true)
+  })
+
+  it.each(['https://gbfm.co.za/mixes', 'https://gbfm.co.za/tweets'])(
+    'requests upload suspension before leaving for %s without discarding the draft',
+    (href) => {
+      const initial = init(flags).model
+
+      const running: typeof initial = {
+        ...initial,
+        creator: {
+          ...initial.creator,
+          uploadState: 'running',
+          draft: { ...initial.creator.draft, content: 'Keep this draft' },
+        },
+      }
+
+      const leaving = update(running, changed(href))
+      expect(leaving.commands?.map((command) => command.name)).toContain(
+        'Application.PauseCreatorUpload',
+      )
+      expect(leaving.model.creator).toBe(running.creator)
+      expect(leaving.model.creator.draft.content).toBe('Keep this draft')
+    },
+  )
+})
 
 it('reveals preview denial outside the player overlays without losing playback position', () => {
   const initial = init(flags).model

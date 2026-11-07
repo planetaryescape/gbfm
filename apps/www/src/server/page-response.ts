@@ -10,6 +10,7 @@ import * as Server from 'foldkit/experimental/server'
 
 import { applicationConfig } from '../config'
 import type { Flags } from '../model'
+import { loginOAuthQuery } from '../page/connect/continuation'
 import { isEntry } from '../page/tweet/reader'
 import { Route } from '../route'
 import { apiRequest } from './api'
@@ -53,6 +54,9 @@ export const createPageResponse = async (
     'x-request-id': requestId,
     'server-timing': `foldkit;dur=${(performance.now() - startedAt).toFixed(1)}`,
   })
+
+  if (loginOAuthQuery(url.searchParams.get('returnTo') ?? '', url.origin))
+    headers.set('referrer-policy', 'strict-origin')
 
   if (containsDraft) headers.set('x-robots-tag', 'noindex, nofollow')
 

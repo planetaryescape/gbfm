@@ -1,10 +1,15 @@
-import { Effect } from 'effect'
+import { Cause, Data, Effect, Exit, Fiber, Option } from 'effect'
 import type { ManagedRuntime } from 'effect'
 import type { Scope } from 'effect/Scope'
 
 import type { VolumeRecordType } from './audioStorage'
 import { AudioEngine, type EngineStatus } from './engine'
-import { hasCompleteCreators, type QueueTrackType } from './persistedQueue'
+import {
+  hasCompleteCreators,
+  type AudioStorageError,
+  type PersistedQueueType,
+  type QueueTrackType,
+} from './persistedQueue'
 import { playerCore } from './playerCore'
 import { PlayerStorage } from './playerStorage'
 import type { PlayReporter } from './playReporter'
@@ -86,6 +91,18 @@ const initialTransport: PlaybackTransportSnapshot = {
 }
 
 const defaultVolume: VolumeRecordType = { volume: 100, isMuted: false }
+
+type QueueHydration =
+  | { readonly _tag: 'Hydrating'; readonly pending: Array<QueueActionType> }
+  | { readonly _tag: 'Hydrated' }
+
+const QueueHydration = Data.taggedEnum<QueueHydration>()
+
+type VolumeHydration =
+  | { readonly _tag: 'Hydrating'; pending: VolumeRecordType | null }
+  | { readonly _tag: 'Hydrated' }
+
+const VolumeHydration = Data.taggedEnum<VolumeHydration>()
 
 const noopReporter: Required<AudioPlaybackReporter> = {
   onTrackPlayed: () => Effect.void,
@@ -178,21 +195,8 @@ export const makeAudioPlayback = (
     let queueState = initialQueueState
     let transportState = initialTransport
     let volumeState = defaultVolume
-    const queueHydrationToken = Symbol('queue hydration')
-    const volumeHydrationToken = Symbol('volume hydration')
-
-    let queueHydration: { token: symbol; pending: Array<QueueActionType> } | null = {
-      token: queueHydrationToken,
-      pending: [],
-    }
-
-    let volumeHydration: {
-      token: symbol
-      pending: VolumeRecordType | null
-    } | null = {
-      token: volumeHydrationToken,
-      pending: null,
-    }
+    let queueHydration: QueueHydration = QueueHydration.Hydrating({ pending: [] })
+    let volumeHydration: VolumeHydration = VolumeHydration.Hydrating({ pending: null })
 
     let queueWriteTail: Promise<void> = Promise.resolve()
     let volumeWriteTail: Promise<void> = Promise.resolve()
@@ -356,7 +360,7 @@ export const makeAudioPlayback = (
         const next = reduceQueue(queueState, action)
         updateQueue(next)
 
-        if (queueHydration) queueHydration.pending.push(action)
+        if (QueueHydration.$is('Hydrating')(queueHydration)) queueHydration.pending.push(action)
         else persistQueue(next)
         yield* core.setSource(target)
       })
@@ -438,58 +442,96 @@ export const makeAudioPlayback = (
 
     updateTransport({ ...transportState, isInitialized: true })
 
-    const loadQueue = Effect.gen(function* () {
-      const persisted = yield* storage.loadQueue.pipe(
-        Effect.catchCause((cause) =>
-          reportError(
-            'Unable to hydrate audio queue',
-            new Error('Unable to hydrate audio queue', { cause }),
-          ).pipe(Effect.as(null)),
+    const readHydration = <A>(read: Effect.Effect<A, AudioStorageError>, message: string) =>
+      read.pipe(
+        Effect.exit,
+        Effect.tap((result) =>
+          Exit.isFailure(result) && !Cause.hasInterrupts(result.cause)
+            ? reportError(message, new Error(message, { cause: result.cause }))
+            : Effect.void,
         ),
       )
 
-      if (queueHydration?.token !== queueHydrationToken) return
-      // No Effect yield here: merge, clear hydration, and publish are one
-      // cooperatively atomic step.
+    const queueRead = yield* Effect.forkScoped(
+      readHydration(storage.loadQueue, 'Unable to hydrate audio queue'),
+    )
+
+    const volumeRead = yield* Effect.forkScoped(
+      readHydration(storage.loadVolume, 'Unable to hydrate audio volume'),
+    )
+
+    const mergeQueue = (persisted: PersistedQueueType | null) => {
+      if (!QueueHydration.$is('Hydrating')(queueHydration)) return null
       const next = mergeHydratedQueue(persisted ?? initialQueueState, queueHydration.pending)
-      queueHydration = null
+      queueHydration = QueueHydration.Hydrated()
       updateQueue(next)
+
+      if (next !== persisted) persistQueue(next)
+
+      return next
+    }
+
+    const loadQueue = Effect.gen(function* () {
+      const result = yield* Fiber.join(queueRead)
+
+      if (Exit.isFailure(result)) return
+      const next = mergeQueue(result.value)
+
+      if (!next) return
       const currentId = yield* core.currentTrackId
       const nextCurrent = selectQueueView(next).current
 
       if (nextCurrent?.id !== currentId) {
         yield* core.setSource(nextCurrent)
       }
-
-      if (next !== persisted) persistQueue(next)
     })
 
     const loadVolume = Effect.gen(function* () {
-      const persisted = yield* storage.loadVolume.pipe(
-        Effect.catchCause((cause) =>
-          reportError(
-            'Unable to hydrate audio volume',
-            new Error('Unable to hydrate audio volume', { cause }),
-          ).pipe(Effect.as(null)),
-        ),
-      )
+      const result = yield* Fiber.join(volumeRead)
 
-      if (volumeHydration?.token !== volumeHydrationToken) return
+      if (!VolumeHydration.$is('Hydrating')(volumeHydration)) return
+
+      if (Exit.isFailure(result) && volumeHydration.pending === null) {
+        volumeHydration = VolumeHydration.Hydrated()
+
+        return
+      }
+
+      const persisted = Exit.isSuccess(result) ? result.value : null
       const next = volumeHydration.pending ?? persisted ?? defaultVolume
-      volumeHydration = null
+      volumeHydration = VolumeHydration.Hydrated()
       updateVolume(next)
-      yield* applyVolumeToEngine(next)
 
       if (next !== persisted) persistVolume(next)
+      yield* applyVolumeToEngine(next)
     })
 
-    yield* Effect.forkScoped(loadQueue)
-    yield* Effect.forkScoped(loadVolume)
+    const queueApplication = yield* Effect.forkScoped(loadQueue)
+    const volumeApplication = yield* Effect.forkScoped(loadVolume)
 
     yield* Effect.addFinalizer(() =>
-      Effect.promise(() =>
-        Promise.allSettled([queueWriteTail, volumeWriteTail]).then(() => undefined),
-      ),
+      Effect.gen(function* () {
+        yield* Fiber.interruptAll([queueApplication, volumeApplication])
+
+        if (QueueHydration.$is('Hydrating')(queueHydration) && queueHydration.pending.length > 0) {
+          const result = yield* Fiber.join(queueRead).pipe(
+            Effect.interruptible,
+            Effect.timeoutOption('1 second'),
+          )
+
+          if (Option.isSome(result) && Exit.isSuccess(result.value)) mergeQueue(result.value.value)
+        }
+
+        if (VolumeHydration.$is('Hydrating')(volumeHydration) && volumeHydration.pending) {
+          persistVolume(volumeHydration.pending)
+          volumeHydration = VolumeHydration.Hydrated()
+        }
+
+        yield* Fiber.interruptAll([queueRead, volumeRead])
+        yield* Effect.promise(() =>
+          Promise.allSettled([queueWriteTail, volumeWriteTail]).then(() => undefined),
+        )
+      }),
     )
 
     yield* engine.setCommandHandlers({
@@ -526,7 +568,7 @@ export const makeAudioPlayback = (
         updateVolume(next)
         yield* applyVolumeToEngine(next)
 
-        if (volumeHydration) {
+        if (VolumeHydration.$is('Hydrating')(volumeHydration)) {
           volumeHydration.pending = next
 
           return
@@ -540,7 +582,7 @@ export const makeAudioPlayback = (
       updateVolume(next)
       yield* applyVolumeToEngine(next)
 
-      if (volumeHydration) {
+      if (VolumeHydration.$is('Hydrating')(volumeHydration)) {
         volumeHydration.pending = next
 
         return
@@ -572,7 +614,7 @@ export const makeAudioPlayback = (
         yield* core.detachCurrentSource
         updateQueue(next)
 
-        if (queueHydration) queueHydration.pending.push(action)
+        if (QueueHydration.$is('Hydrating')(queueHydration)) queueHydration.pending.push(action)
         else persistQueue(next)
         yield* core.setSource(track)
       })
@@ -589,7 +631,7 @@ export const makeAudioPlayback = (
         yield* core.detachCurrentSource
         updateQueue(next)
 
-        if (queueHydration) queueHydration.pending.push(action)
+        if (QueueHydration.$is('Hydrating')(queueHydration)) queueHydration.pending.push(action)
         else persistQueue(next)
         yield* core.setSource(first)
       })
@@ -602,7 +644,7 @@ export const makeAudioPlayback = (
         if (next === queueState) return
         updateQueue(next)
 
-        if (queueHydration) queueHydration.pending.push(action)
+        if (QueueHydration.$is('Hydrating')(queueHydration)) queueHydration.pending.push(action)
         else persistQueue(next)
         yield* (
           reporter.onQueueAction?.({
@@ -621,7 +663,7 @@ export const makeAudioPlayback = (
         if (next === queueState) return
         updateQueue(next)
 
-        if (queueHydration) queueHydration.pending.push(action)
+        if (QueueHydration.$is('Hydrating')(queueHydration)) queueHydration.pending.push(action)
         else persistQueue(next)
         yield* (
           reporter.onQueueAction?.({ action: 'add', queueLength: queueLength(next) }) ?? Effect.void
@@ -636,7 +678,7 @@ export const makeAudioPlayback = (
         if (next === queueState) return
         updateQueue(next)
 
-        if (queueHydration) queueHydration.pending.push(action)
+        if (QueueHydration.$is('Hydrating')(queueHydration)) queueHydration.pending.push(action)
         else persistQueue(next)
         yield* (
           reporter.onQueueAction?.({ action: 'reorder', queueLength: queueLength(next) }) ??
@@ -659,7 +701,7 @@ export const makeAudioPlayback = (
         const shouldAutoplay = previousCurrentId === removed?.id && (yield* core.isDesiredPlaying)
         updateQueue(next)
 
-        if (queueHydration) queueHydration.pending.push(action)
+        if (QueueHydration.$is('Hydrating')(queueHydration)) queueHydration.pending.push(action)
         else persistQueue(next)
         yield* (
           reporter.onQueueAction?.({
@@ -689,7 +731,8 @@ export const makeAudioPlayback = (
     const clearQueue = Effect.gen(function* () {
       updateQueue(initialQueueState)
 
-      if (queueHydration) queueHydration.pending.push(QueueAction.clear())
+      if (QueueHydration.$is('Hydrating')(queueHydration))
+        queueHydration.pending.push(QueueAction.clear())
       else persistQueue(initialQueueState)
       yield* reporter.onQueueAction?.({ action: 'clear', queueLength: 0 }) ?? Effect.void
       yield* core.detachCurrentSource
@@ -730,7 +773,7 @@ export const makeAudioPlayback = (
           const repaired = next.tracks.find((track) => track.id === original.id)
           updateQueue(next)
 
-          if (queueHydration) queueHydration.pending.push(action)
+          if (QueueHydration.$is('Hydrating')(queueHydration)) queueHydration.pending.push(action)
           else persistQueue(next)
 
           if (repaired && currentTrack(queueState) === repaired)

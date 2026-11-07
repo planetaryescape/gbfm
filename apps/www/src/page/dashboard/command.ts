@@ -18,13 +18,22 @@ export type Services =
   | ApiKeys.KeyService
 
 export const SpotifyRequest = Command.define('Spotify.Connection', {
-  args: { action: Schema.Literals(['status', 'connect', 'disconnect', 'completeCallback']) },
-  messages: [Message.SpotifyLoaded, Message.Failed],
-  execute: ({ action }) =>
+  args: {
+    action: Schema.Literals(['status', 'connect', 'disconnect', 'completeCallback']),
+    requestId: Schema.Number,
+  },
+  messages: [Message.SpotifyLoaded, Message.SpotifyFailed],
+  execute: ({ action, requestId }) =>
     SpotifyConnection.pipe(
-      Effect.flatMap((service) => service[action]),
-      Effect.map((status) => Message.SpotifyLoaded({ status: status ?? disconnected })),
-      Effect.catch((error) => Effect.succeed(Message.Failed({ message: error.message }))),
+      Effect.flatMap((service) =>
+        action === 'connect' || action === 'completeCallback'
+          ? service[action].pipe(Effect.andThen(service.status))
+          : service[action],
+      ),
+      Effect.map((status) => Message.SpotifyLoaded({ requestId, status: status ?? disconnected })),
+      Effect.catch((error) =>
+        Effect.succeed(Message.SpotifyFailed({ requestId, message: error.message })),
+      ),
     ),
 })
 
@@ -65,12 +74,18 @@ export const ApplyTheme = Command.define('Appearance.Apply', {
 
 export const Load = Command.define('DashboardLoad', {
   args: { path: Schema.String },
-  messages: [Message.Loaded, Message.Failed],
+  messages: [Message.Loaded, Message.Failed, Message.ConnectionsUnavailable],
   execute: ({ path }) =>
     DashboardService.pipe(
       Effect.flatMap((service) => service.request({ path })),
       Effect.map((document) => Message.Loaded({ document })),
-      Effect.catch((error) => Effect.succeed(Message.Failed({ message: error.message }))),
+      Effect.catch((error) =>
+        Effect.succeed(
+          path === '/api/user/mcp-connections' && [403, 503].includes(error.status ?? 0)
+            ? Message.ConnectionsUnavailable()
+            : Message.Failed({ message: error.message }),
+        ),
+      ),
     ),
 })
 

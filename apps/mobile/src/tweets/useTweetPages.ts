@@ -1,49 +1,69 @@
 import { Effect, Exit } from 'effect'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef } from 'react'
 
-import { getTweetsPage, type Tweet } from '@/api/tweets'
+import { getTweetsPage } from '@/api/tweets'
 
-import { appendTweets } from './appendTweets'
+import {
+  reduceTweetPages,
+  tweetPagesView,
+  TweetPagesEvent,
+  TweetPagesState,
+  type TweetPage,
+} from './tweetPagesState'
 
-type Page = { readonly tweets: ReadonlyArray<Tweet>; readonly hasMore: boolean }
+const initial = TweetPagesState.Initial()
 
-type MoreState = Page & {
-  readonly source: Page
-  readonly status: 'idle' | 'loading' | 'failed'
+type PageLifetime = {
+  readonly source: TweetPage | null
+  request: AbortController | null
 }
 
-export function useTweetPages(firstPage: Page | null) {
-  const [state, setState] = useState<MoreState | null>(null)
-  const loading = useRef(false)
-  const more = state && state.source === firstPage ? state : null
+export function useTweetPages(
+  firstPage: TweetPage | null,
+  getPage: (
+    offset: number,
+  ) => Effect.Effect<TweetPage, Effect.Error<ReturnType<typeof getTweetsPage>>> = getTweetsPage,
+) {
+  const [state, dispatch] = useReducer(reduceTweetPages, initial)
+  const owner = useRef<PageLifetime | null>(null)
+  const { tweets, loaded, hasMore, status } = tweetPagesView(state, firstPage)
 
-  const tweets = firstPage ? appendTweets(firstPage.tweets, more?.tweets ?? []) : []
-  const hasMore = more ? more.hasMore : (firstPage?.hasMore ?? false)
+  useEffect(() => {
+    const lifetime: PageLifetime = { source: firstPage, request: null }
+    owner.current = lifetime
+
+    return () => {
+      if (owner.current === lifetime) owner.current = null
+      lifetime.request?.abort()
+    }
+  }, [firstPage])
 
   const loadMore = useCallback(() => {
-    if (!firstPage || !hasMore || loading.current) return
-    loading.current = true
-    const loaded = more?.tweets ?? []
-    setState({ source: firstPage, tweets: loaded, hasMore, status: 'loading' })
+    const lifetime = owner.current
 
-    void Effect.runPromiseExit(getTweetsPage(firstPage.tweets.length + loaded.length)).then(
-      (exit) => {
-        loading.current = false
-        setState((current) => {
-          if (current?.source !== firstPage) return current
+    if (!firstPage || !hasMore || !lifetime || lifetime.source !== firstPage || lifetime.request)
+      return
+    const controller = new AbortController()
+    lifetime.request = controller
+    dispatch(TweetPagesEvent.Started({ source: firstPage, tweets: loaded, hasMore }))
 
-          return Exit.isSuccess(exit)
-            ? {
-                source: firstPage,
-                tweets: [...current.tweets, ...exit.value.tweets],
-                hasMore: exit.value.hasMore,
-                status: 'idle',
-              }
-            : { ...current, status: 'failed' }
-        })
-      },
-    )
-  }, [firstPage, hasMore, more])
+    void Effect.runPromiseExit(getPage(firstPage.tweets.length + loaded.length), {
+      signal: controller.signal,
+    }).then((exit) => {
+      if (
+        owner.current !== lifetime ||
+        lifetime.request !== controller ||
+        controller.signal.aborted
+      )
+        return
+      lifetime.request = null
+      dispatch(
+        Exit.isSuccess(exit)
+          ? TweetPagesEvent.Loaded({ source: firstPage, page: exit.value })
+          : TweetPagesEvent.Failed({ source: firstPage }),
+      )
+    })
+  }, [firstPage, hasMore, loaded, getPage])
 
-  return { tweets, hasMore, status: more?.status ?? 'idle', loadMore }
+  return { tweets, hasMore, status, loadMore }
 }

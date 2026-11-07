@@ -9,6 +9,7 @@ import * as Path from 'effect/Path'
 import { AdminHandlersLive } from '@/http/admin.handlers'
 import { AudioHandlersLive } from '@/http/audio.handlers'
 import { DocsLive } from '@/http/docs'
+import { EditorialMcpRoutesLive, privateEditorialResponse } from '@/http/editorial-mcp.routes'
 import { EmailHandlersLive } from '@/http/email.handlers'
 import { FavoritesHandlersLive } from '@/http/favorites.handlers'
 import { FileManagerHandlersLive } from '@/http/file-manager.handlers'
@@ -17,6 +18,8 @@ import { checkDatabase, makeHealthHandlers } from '@/http/health.handlers'
 import { InternalHandlersLive } from '@/http/internal.handlers'
 import { InviteHandlersLive } from '@/http/invite.handlers'
 import { ListeningHandlersLive } from '@/http/listening.handlers'
+import { McpConnectionsHandlersLive } from '@/http/mcp-connections.handlers'
+import { McpGuideRoutesLive } from '@/http/mcp-guide.routes'
 import { MusicRemindersHandlersLive } from '@/http/music-reminders.handlers'
 import { MusicHandlersLive } from '@/http/music.handlers'
 import { NavigationHandlersLive } from '@/http/navigation.handlers'
@@ -110,7 +113,7 @@ export const createWebHandler = (options: {
 
   const ApiLive = HttpApiBuilder.layer(Api).pipe(
     Layer.provide(makeHealthHandlers(options?.healthDatabaseCheck ?? checkDatabase)),
-    Layer.provide(InternalHandlersLive),
+    Layer.provide(Layer.mergeAll(InternalHandlersLive, McpConnectionsHandlersLive)),
     Layer.provide(MusicHandlersLive),
     Layer.provide(SearchHandlersLive),
     Layer.provide(SiteMetadataHandlersLive),
@@ -159,6 +162,8 @@ export const createWebHandler = (options: {
       SiteRoutesLive,
       DocsLive,
       CorsLive.pipe(Layer.provide(appServices)),
+      EditorialMcpRoutesLive,
+      McpGuideRoutesLive,
       RequestLoggerLive,
       SentryDefectLive,
     ).pipe(
@@ -199,7 +204,10 @@ export const createWebHandler = (options: {
       return rejection
     }
 
-    return privateKeyResponse(request, await web.handler(request, ...args))
+    return privateEditorialResponse(
+      request,
+      privateKeyResponse(request, await web.handler(request, ...args)),
+    )
   }
 
   return { ...web, handler }

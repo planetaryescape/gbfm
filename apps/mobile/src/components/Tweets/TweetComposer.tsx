@@ -16,8 +16,10 @@ import { SafeAreaView } from 'react-native-screens/experimental'
 import { haptics } from '@/feedback/haptics'
 import { useAuthStore } from '@/store/auth'
 import { useThemeColors } from '@/theme/colors'
+import { composerControls } from '@/tweets/composerOwner'
 import { draftError, replyError, tweetLength } from '@/tweets/draft'
 import { completions } from '@/tweets/tagSuggestions'
+import { useComposerRemoval } from '@/tweets/useComposerRemoval'
 import { useKnownTags } from '@/tweets/useKnownTags'
 import { useTweetComposer } from '@/tweets/useTweetComposer'
 
@@ -26,6 +28,7 @@ import { ComposerFooter } from './ComposerFooter'
 import { ComposerHeader } from './ComposerHeader'
 import { ComposerInput } from './ComposerInput'
 import { ComposerMusicPreview } from './ComposerMusicPreview'
+import { ComposerRecovery } from './ComposerRecovery'
 import { ComposerTagSuggestions } from './ComposerTagSuggestions'
 
 export function TweetComposer({
@@ -54,6 +57,7 @@ export function TweetComposer({
   const { draft, busy, editing, replying } = composer
   const colors = useThemeColors()
   const router = useRouter()
+  const { leave, requestRemoval } = useComposerRemoval(composer.publication)
   const headerHeight = useHeaderHeight()
   const input = useRef<ComponentRef<typeof TextInput>>(null)
   const [cursor, setCursor] = useState(0)
@@ -74,14 +78,28 @@ export function TweetComposer({
   const published = (slug: string) => {
     void haptics.success()
 
-    if (editing || replying) close()
-    else router.replace({ pathname: '/(tabs)/(tweets)/tweet/[slug]', params: { slug } })
+    leave(() => {
+      if (editing || replying) close()
+      else router.replace({ pathname: '/(tabs)/(tweets)/tweet/[slug]', params: { slug } })
+    })
   }
 
   const validation = draft ? (replying ? replyError(draft) : draftError(draft)) : null
   const canSave = Boolean(!editing && !replying && user && allowed && draft?.text.trim())
 
+  const controls = composerControls(composer.publication, {
+    canSubmit: Boolean(allowed && draft && validation === null && !composer.musicLoading),
+    canSave,
+    label: editing ? 'Save' : replying ? 'Reply' : 'Post',
+  })
+
   const cancel = () => {
+    if (!controls.editable) {
+      requestRemoval(close)
+
+      return
+    }
+
     if (!draft || !draft.text.trim()) {
       composer.discard(close)
 
@@ -122,12 +140,28 @@ export function TweetComposer({
       edges={{ bottom: true, top: false, left: true, right: true }}
       style={{ flex: 1, backgroundColor: colors.background }}>
       <ComposerHeader
-        signedIn={Boolean(user)}
+        signedIn={Boolean(user) || controls.cleanupPending || controls.requiresThreadCheck}
         busy={busy}
-        label={editing ? 'Save' : replying ? 'Reply' : 'Post'}
-        disabled={!allowed || !draft || validation !== null || composer.musicLoading}
+        label={controls.label}
+        busyLabel={controls.busyLabel}
+        disabled={!controls.canSubmit}
         onCancel={cancel}
-        onSubmit={() => composer.save(true, published)}
+        onSubmit={() => {
+          const recoveryTarget = replyTo ?? draft?.slug
+
+          if (controls.requiresThreadCheck && recoveryTarget) {
+            leave(() =>
+              router.replace({
+                pathname: '/(tabs)/(tweets)/tweet/[slug]',
+                params: { slug: recoveryTarget },
+              }),
+            )
+
+            return
+          }
+
+          composer.save(true, published)
+        }}
         onSignIn={() => router.push('/sign-in')}
       />
       <KeyboardAvoidingView
@@ -142,22 +176,29 @@ export function TweetComposer({
               <ComposerInput
                 ref={input}
                 text={draft.text}
-                editable={!busy}
+                editable={!busy && controls.editable}
                 placeholder={replying ? 'Post your reply' : 'What are you listening to?'}
                 onChangeText={composer.setText}
                 onCursorChange={setCursor}
               />
-              <ComposerTagSuggestions suggestions={tags.suggestions} onPick={pickTag} />
+              {controls.editable ? (
+                <ComposerTagSuggestions suggestions={tags.suggestions} onPick={pickTag} />
+              ) : null}
               <ComposerMusicPreview
                 music={draft.music}
-                loading={composer.musicLoading}
-                onDismiss={composer.dismissMusic}
+                loading={controls.editable && composer.musicLoading}
+                onDismiss={controls.editable ? composer.dismissMusic : undefined}
+              />
+              <ComposerRecovery
+                publication={composer.publication}
+                busy={busy}
+                onRecover={composer.recover}
               />
             </ScrollView>
             <ComposerFooter
               length={tweetLength(draft.text)}
               status={status}
-              saveLabel={canSave ? 'Save to drafts' : null}
+              saveLabel={controls.canSave ? 'Save to drafts' : null}
               onSave={() => composer.save(false, published)}
             />
           </>
@@ -167,6 +208,11 @@ export function TweetComposer({
               <>
                 <ComposerFooter length={0} status={status} saveLabel={null} onSave={close} />
                 <ComposerButton label='Retry' onPress={composer.retry} />
+                <ComposerRecovery
+                  publication={composer.publication}
+                  busy={busy}
+                  onRecover={composer.recover}
+                />
               </>
             ) : (
               <ActivityIndicator color={colors.accent} />

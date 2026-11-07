@@ -2,7 +2,15 @@ import { Effect, Schema } from 'effect'
 
 import { LocalStorageFailed, readLocal, removeLocal, writeLocal } from '@/store/localStorage'
 
-import { StoredTweetDraft, type TweetDraft, appendSharedText, normalizeStoredDraft } from './draft'
+import { receiptStorageFromLocal } from './composerReceipts'
+import { StoredTweetDraft, type TweetDraft, normalizeStoredDraft } from './draft'
+import { restoreDraft, TweetDraftStorage } from './draftRestore'
+
+export const composerReceiptStorage = receiptStorageFromLocal({
+  read: readLocal,
+  write: writeLocal,
+  remove: removeLocal,
+})
 
 const draftKey = (identity: string) => `gbfm-tweet-draft-${encodeURIComponent(identity)}.json`
 
@@ -29,18 +37,10 @@ export const saveTweetDraft = (identity: string, draft: TweetDraft) =>
 export const removeTweetDraft = (identity: string) => removeLocal(draftKey(identity))
 
 export const restoreTweetDraft = (identity: string) =>
-  Effect.gen(function* () {
-    const own = yield* readTweetDraft(identity)
-
-    if (identity === 'guest') return own
-    const guest = yield* readTweetDraft('guest')
-
-    if (!guest) return own
-
-    const draft = own ? appendSharedText(own, guest.text) : guest
-
-    yield* saveTweetDraft(identity, draft)
-    yield* removeTweetDraft('guest')
-
-    return draft
-  })
+  restoreDraft(identity).pipe(
+    Effect.provideService(TweetDraftStorage, {
+      read: readTweetDraft,
+      save: saveTweetDraft,
+      remove: removeTweetDraft,
+    }),
+  )

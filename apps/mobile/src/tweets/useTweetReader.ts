@@ -1,4 +1,5 @@
 import { useAtomSet, useAtomValue } from '@effect/atom-react'
+import { readerJourney } from '@gbfm/observability/reader'
 import { Effect, Redacted } from 'effect'
 import * as Atom from 'effect/reactivity/Atom'
 import { useFocusEffect } from 'expo-router'
@@ -8,17 +9,18 @@ import { getHttpClient } from '@/api/client'
 import {
   loadReaderNavigation,
   loadReaderPost,
-  randomReaderPost,
   recordReaderVisit,
-  resetReaderHistory,
   type ReaderConnection,
   TweetReaderUnavailable,
 } from '@/api/tweetReader'
 import { env } from '@/env'
+import { useJourneys } from '@/observability/context'
 
+import { readerAction } from './readerAction'
 import { readerCache, type ReaderCache } from './readerCache'
+import { readerOwnership } from './readerOwnership'
 import { readReaderPosition, saveReaderPosition } from './readerPosition'
-import { initialReaderState, readerAcceptsAction, ReaderEvent, reduceReader } from './readerState'
+import { initialReaderState, ReaderEvent, reduceReader } from './readerState'
 
 export const checkpoints = Atom.make<Readonly<Record<string, string>>>({}).pipe(Atom.keepAlive)
 
@@ -149,9 +151,19 @@ export function useTweetReader(
   const lastTarget = useRef<typeof target | null>(null)
 
   const [state, dispatch] = useReducer(reduceReader, initialReaderState)
-  const sequence = useRef(0)
-  const focused = useRef(false)
-  const action = useRef<AbortController | null>(null)
+  const [ownership] = useState(readerOwnership)
+  const journeys = useJourneys()
+  const [journey] = useState(() => readerJourney(journeys))
+
+  useEffect(
+    () =>
+      journey.committed({
+        request: state.request,
+        status: state.status,
+        hasContent: Boolean(state.screen),
+      }),
+    [journey, state.request, state.status, state.screen],
+  )
 
   useFocusEffect(
     useCallback(() => {
@@ -167,11 +179,8 @@ export function useTweetReader(
         return undefined
       }
 
-      focused.current = true
-      const controller = new AbortController()
-      const request = ++sequence.current
-      action.current?.abort()
-      action.current = null
+      const { controller, request } = ownership.focus()
+      const cancelJourney = journey.start(request)
       dispatch(ReaderEvent.Started({ request }))
 
       const load = loadVisit({
@@ -192,69 +201,39 @@ export function useTweetReader(
       })
 
       return () => {
-        focused.current = false
-        controller.abort()
-        const pendingAction = action.current
-        action.current = null
-        pendingAction?.abort()
+        cancelJourney()
+        ownership.blur(controller)
       }
-    }, [identity, sessionToken, initialSlug, target, remember]),
+    }, [identity, sessionToken, initialSlug, target, remember, ownership, journey]),
   )
 
   const go = (target: string | null) => {
-    if (target === null) dispatch(ReaderEvent.Latest({ request: sequence.current }))
-    action.current?.abort()
+    if (target === null) dispatch(ReaderEvent.Latest({ request: state.request }))
+    ownership.cancelAction()
     setTarget((previous) => ({ slug: target, revision: previous.revision + 1 }))
   }
 
   const runAction = (kind: 'random' | 'reset') => {
-    if (
-      !readerAcceptsAction(state, sequence.current, focused.current) ||
-      action.current ||
-      !state.screen
-    )
-      return
+    if (!state.screen) return
+    const pendingAction = ownership.beginAction(state)
 
-    const controller = new AbortController()
-    action.current = controller
-    const request = sequence.current
+    if (!pendingAction) return
+    const { controller, request } = pendingAction
     const current = state.screen.post.slug
     dispatch(ReaderEvent.Action({ request, busy: true }))
 
-    const work = readerConnection(sessionToken).pipe(
-      Effect.flatMap((connection) =>
-        kind === 'reset'
-          ? resetReaderHistory(connection).pipe(Effect.as(null))
-          : randomReaderPost(connection, current),
-      ),
-      Effect.timeoutOrElse({
-        duration: '15 seconds',
-        orElse: () => Effect.fail(new TweetReaderUnavailable()),
-      }),
-      Effect.match({
-        onSuccess: (target) => {
-          if (controller.signal.aborted || sequence.current !== request) return
-
-          if (kind === 'random' && target === null) {
-            dispatch(ReaderEvent.Notice({ request, message: 'No other unread tweets remaining.' }))
-          } else {
-            go(target)
-          }
-        },
-        onFailure: () => {
-          if (!controller.signal.aborted)
-            dispatch(
-              ReaderEvent.Notice({
-                request,
-                message: "Couldn't update reading options. Try again.",
-              }),
-            )
-        },
-      }),
+    const work = readerAction(readerConnection(sessionToken), {
+      kind,
+      current,
+      request,
+      controller,
+      acceptsResult: ownership.acceptsResult,
+      dispatch,
+      go,
+    }).pipe(
       Effect.ensuring(
         Effect.sync(() => {
-          if (action.current === controller) {
-            action.current = null
+          if (ownership.finishAction(controller)) {
             dispatch(ReaderEvent.Action({ request, busy: false }))
           }
         }),

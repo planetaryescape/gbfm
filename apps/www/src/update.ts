@@ -17,7 +17,7 @@ import {
   SaveReadMode,
   SetResolvedUrl,
 } from './command'
-import { init, type Services } from './init'
+import { initWithPlayback, type Services } from './init'
 import { Message } from './message'
 import type { Flags, Model, PageCache } from './model'
 import { isCacheable, pageKey, samePage, settlePage } from './page-cache'
@@ -112,7 +112,7 @@ const showPage = (
   navigationId: number,
   expected: string,
 ): Update.Return<Model, Message, Services> => {
-  const next = init(flags)
+  const next = initWithPlayback(flags, model.spotifyPlayback)
   const identityChanged = next.model.tweetReader.identity !== model.tweetReader.identity
 
   const keepPendingPublicAction =
@@ -141,7 +141,7 @@ const showPage = (
           : flags,
       repliesStatus: sameTweet ? model.repliesStatus : next.model.repliesStatus,
       player: model.player,
-      spotifyPlayback: model.spotifyPlayback,
+      spotifyPlayback: next.model.spotifyPlayback,
       skipSeen: model.skipSeen,
       mobileMenu: model.mobileMenu,
       menuDrag: model.menuDrag,
@@ -412,9 +412,25 @@ const updateApplication = (
         : { model },
     GotDashboardMessage: ({ message }) => {
       const child = Dashboard.update(model.dashboard, message)
+      let playback = model.spotifyPlayback
+
+      if (Predicate.isTagged(message, 'SpotifyLoaded') && child.model !== model.dashboard) {
+        const status = child.model.spotify
+
+        const unchangedRefresh =
+          model.dashboard.spotifyPending === 'status' &&
+          playback.status?.connected === status.connected &&
+          playback.status?.name === status.name
+
+        const synchronized = unchangedRefresh
+          ? SpotifyPlayback.Message.StatusRefreshed({ status })
+          : SpotifyPlayback.Message.ConnectionChanged({ status })
+
+        playback = SpotifyPlayback.update(playback, synchronized).model
+      }
 
       return {
-        model: { ...model, dashboard: child.model },
+        model: { ...model, dashboard: child.model, spotifyPlayback: playback },
         commands: Command.mapMessages(child.commands ?? [], (message) =>
           Message.GotDashboardResult({ message, navigationId: model.navigationId }),
         ),

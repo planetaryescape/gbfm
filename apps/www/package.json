@@ -11,7 +11,9 @@
     "preview": "vite preview",
     "typecheck": "tsgo --noEmit",
     "unit": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:mcp": "playwright test --config playwright.mcp.config.ts",
+    "e2e:observability": "playwright test --config playwright.observability.config.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.4",
@@ -24,6 +26,7 @@
     "@foldkit/ui": "0.169.0",
     "@gbfm/api": "workspace:*",
     "@gbfm/core": "workspace:*",
+    "@gbfm/observability": "workspace:*",
     "@gbfm/player": "workspace:*",
     "@gbfm/rich-content": "workspace:*",
     "@gbfm/server": "workspace:",
@@ -33,6 +36,7 @@
     "@gbfm/theme": "workspace:*",
     "@guide/utils": "npm:@jsr/guide__utils@0.1.1",
     "@radix-ui/colors": "3.0.0",
+    "@sentry/browser": "10.77.1",
     "better-auth": "1.7.12",
     "clsx": "2.1.1",
     "date-fns": "4.4.0",

@@ -15,7 +15,12 @@ import type {
 import { resolveRequestId } from '@gbfm/core/observability/request-id'
 import { traceSampleRate } from '@gbfm/core/observability/trace-sampling'
 import * as Sentry from '@sentry/cloudflare'
-import type { ErrorEvent, TracesSamplerSamplingContext, TransactionEvent } from '@sentry/core'
+import type {
+  ErrorEvent,
+  SpanJSON,
+  TracesSamplerSamplingContext,
+  TransactionEvent,
+} from '@sentry/core'
 import { Effect, Layer, Predicate, Redacted, Schema, Tracer } from 'effect'
 import { FetchHttpClient } from 'effect/http'
 
@@ -27,6 +32,11 @@ import { DatabaseError, getErrorMessage } from '@/errors'
 import { createWebHandler } from '@/http/routes'
 import { sanitizeDatabaseSpan } from '@/lib/database-telemetry'
 import { localTracer, traceLocalRequest } from '@/lib/local-request-tracing'
+import {
+  sanitizeOAuthBreadcrumb,
+  sanitizeOAuthEvent,
+  sanitizeOAuthSpan,
+} from '@/lib/oauth-telemetry'
 import { omitUndefined } from '@/lib/omit-undefined'
 import { hasLocalSentryContext, shouldEnableSentry } from '@/lib/sentry'
 import { regenerateSitemap } from '@/routes/redirect/seo/sitemap.service'
@@ -60,12 +70,7 @@ import {
 } from '@/services/playlist-enrichment-queue'
 import { cleanupExpiredQrPdfs } from '@/services/qr-cache-cleanup'
 import { QRCodeServiceLayer } from '@/services/qrcode.service'
-import {
-  claimReminder,
-  findReminderById,
-  queryDueReminders,
-  sendClaimedReminder,
-} from '@/services/reminder-processor'
+import { processReminderJob, queryDueReminders } from '@/services/reminder-processor'
 import { ReminderQueue, ReminderQueueLayer, type ReminderJob } from '@/services/reminder-queue'
 import { RequestTelemetryLive } from '@/services/request-telemetry.service'
 import { resolveSecretBindings } from '@/services/secrets-store.service'
@@ -245,10 +250,12 @@ const sentryOptions = (env: ApiEnv) => {
 
     sendDefaultPii: false,
     enableLogs: true,
-    beforeSendSpan: sanitizeDatabaseSpan,
-    beforeSend: (event: ErrorEvent) => (hasLocalSentryContext(event) ? null : event),
+    beforeBreadcrumb: sanitizeOAuthBreadcrumb,
+    beforeSendSpan: (span: SpanJSON) => sanitizeOAuthSpan(sanitizeDatabaseSpan(span)),
+    beforeSend: (event: ErrorEvent) =>
+      hasLocalSentryContext(event) ? null : sanitizeOAuthEvent(event),
     beforeSendTransaction: (event: TransactionEvent) =>
-      hasLocalSentryContext(event) ? null : event,
+      hasLocalSentryContext(event) ? null : sanitizeOAuthEvent(event),
   }
 }
 
@@ -319,22 +326,10 @@ const runMaintenanceSweep = (env: ApiEnv) =>
 // retry-eligible after a prior delivery invocation returns an error. Zero rows
 // means another invocation owns the reminder, so this delivery can be acked.
 const processReminderMessage = (env: ApiEnv, job: ReminderJob) =>
-  Effect.gen(function* () {
-    const claim = yield* claimReminder(job.reminderId)
-
-    if (!claim.claimed) {
-      return
-    }
-
-    const reminder = yield* findReminderById(job.reminderId)
-
-    if (!reminder) {
-      return
-    }
-
-    yield* sendClaimedReminder(reminder)
+  processReminderJob(job.reminderId).pipe(
     // oxlint-disable-next-line effecttsgo/strict-effect-provide -- Queue dispatch is an Effect application entry point.
-  }).pipe(Effect.provide(appServicesLive(env)))
+    Effect.provide(appServicesLive(env)),
+  )
 
 const processPlaylistEnrichmentMessage = (env: ApiEnv, payload: PlaylistEnrichmentJob) =>
   Effect.gen(function* () {

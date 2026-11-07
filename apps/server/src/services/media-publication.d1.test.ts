@@ -1,14 +1,16 @@
 import { Credential } from '@gbfm/api/middleware/actor'
 import { KeyId } from '@gbfm/core/personal-access-keys'
 import { eq } from 'drizzle-orm'
-import { Effect, Layer, Result, Schema } from 'effect'
+import { Effect, Exit, Layer, Result, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 
-import { audioTable } from '@/db/audio.schema'
+import { audioCreators, audioTable } from '@/db/audio.schema'
 import { user } from '@/db/auth.schema'
 import { DatabaseLayer, makeDatabaseClient } from '@/db/layer'
 import { musicLabelsTable, musicLabelCreatorsTable } from '@/db/music-entity.schema'
+import { postCreators, postsTable } from '@/db/post.schema'
 import { showsTable } from '@/db/show.schema'
+import { uploadAssetsTable } from '@/db/upload-asset.schema'
 import { DatabaseError, S3Error, UnauthorizedError, ValidationError } from '@/errors'
 import { CryptoLive } from '@/lib/crypto'
 import { MdxServiceLayer } from '@/lib/mdx'
@@ -50,6 +52,9 @@ function memoryStorage() {
   const copies: Array<{ source: string; destination: string }> = []
   const heads: Array<string> = []
   let failCopies = false
+  let copyGate: Promise<void> | undefined
+  const copyStarted = Promise.withResolvers<void>()
+  const copyFinished = Promise.withResolvers<void>()
   const unused = () => Promise.reject(new Error('Unexpected storage operation'))
 
   const store: ObjectStoreClient = {
@@ -72,11 +77,15 @@ function memoryStorage() {
     },
     copyObject: async (_bucket, source, destination) => {
       if (failCopies) throw new Error('Disposable test storage outage')
+      copyStarted.resolve()
+
+      if (copyGate) await copyGate
       const body = objects.get(source)
 
       if (body === undefined) throw new Error('Missing source')
       objects.set(destination, body)
       copies.push({ source, destination })
+      copyFinished.resolve()
     },
   }
 
@@ -87,6 +96,12 @@ function memoryStorage() {
     heads,
     fail: (value: boolean) => {
       failCopies = value
+    },
+    pauseCopies: () => {
+      const gate = Promise.withResolvers<void>()
+      copyGate = gate.promise
+
+      return { started: copyStarted.promise, release: gate.resolve, finished: copyFinished.promise }
     },
   }
 }
@@ -160,6 +175,301 @@ async function harness() {
 }
 
 describe('media publication at the content/storage seam', () => {
+  test('audio creator failure rolls back creator replacement but retains its earlier content write without copying', async () => {
+    await using h = await harness()
+
+    const audio = await Effect.runPromise(
+      h.audio.create(
+        {
+          title: 'Draft',
+          slug: 'partial-audio',
+          type: 'mix',
+          content: '',
+          draft: true,
+          url: assetUrl(audioKey),
+          thumbnailUrl: assetUrl(imageKey),
+        },
+        [actor.userId],
+        { actorId: actor.userId, idempotencyKey: 'partial-audio' },
+      ),
+    )
+
+    const result = await Effect.runPromise(
+      h.audio
+        .update('mix', 'partial-audio', actor.userId, actor.userRole, {
+          title: 'Saved before creator failure',
+          draft: false,
+          creatorIds: ['missing-creator'],
+        })
+        .pipe(Effect.result),
+    )
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(DatabaseError)
+    expect(await h.db.select().from(audioTable).where(eq(audioTable.id, audio.id))).toMatchObject([
+      {
+        title: 'Saved before creator failure',
+        draft: false,
+        url: assetUrl(publicKey(audioKey)),
+      },
+    ])
+    expect(
+      await h.db.select().from(audioCreators).where(eq(audioCreators.audioId, audio.id)),
+    ).toMatchObject([{ creatorId: actor.userId }])
+    expect(h.copies).toEqual([])
+    expect(h.objects.has(audioKey)).toBe(true)
+  })
+
+  test('audio publication continues after an informational tracking failure and attaches later originals', async () => {
+    await using h = await harness()
+    await h.db.insert(uploadAssetsTable).values(
+      [audioKey, imageKey].map((key) => ({
+        userId: actor.userId,
+        key,
+        bucket: config.buckets.userContent,
+        assetType: 'image' as const,
+        status: 'uploaded' as const,
+        expiresAt: new Date(),
+      })),
+    )
+    await h.db.$client
+      .prepare(`CREATE TRIGGER fail_audio_tracking BEFORE UPDATE ON upload_assets
+      WHEN old.key = '${audioKey}' BEGIN SELECT RAISE(ABORT, 'fixture tracking failure'); END`)
+      .run()
+
+    const audio = await Effect.runPromise(
+      h.audio.create(
+        {
+          title: 'Tracking failure',
+          slug: 'tracking',
+          type: 'mix',
+          content: '',
+          url: assetUrl(audioKey),
+          thumbnailUrl: assetUrl(imageKey),
+        },
+        [actor.userId],
+        { actorId: actor.userId, idempotencyKey: 'tracking' },
+      ),
+    )
+
+    expect(audio.url).toBe(assetUrl(publicKey(audioKey)))
+    expect(h.copies).toHaveLength(2)
+    expect(
+      await h.db.select().from(uploadAssetsTable).where(eq(uploadAssetsTable.key, audioKey)),
+    ).toMatchObject([{ status: 'uploaded', attachedToId: null }])
+    expect(
+      await h.db.select().from(uploadAssetsTable).where(eq(uploadAssetsTable.key, imageKey)),
+    ).toMatchObject([{ status: 'attached', attachedToId: audio.id, attachedToTable: 'audio' }])
+  })
+
+  test.each([
+    ['missing creator', ['missing-creator']],
+    ['mixed valid and invalid creators', [collaborator.userId, 'missing-creator']],
+    ['duplicate creators', [collaborator.userId, collaborator.userId]],
+  ])(
+    'post replacement with %s preserves existing creators and earlier content without copying',
+    async (_name, creatorIds) => {
+      await using h = await harness()
+
+      const post = await Effect.runPromise(
+        h.post.create(
+          {
+            title: 'Draft',
+            slug: 'partial',
+            type: 'post',
+            content: 'Draft content',
+            draft: true,
+            thumbnailUrl: assetUrl(imageKey),
+          },
+          [actor.userId],
+          actor,
+        ),
+      )
+
+      expect(
+        await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
+      ).toMatchObject([{ creatorId: actor.userId }])
+
+      const result = await Effect.runPromise(
+        h.post
+          .update('partial', actor.userId, actor.userRole, {
+            title: 'Saved before creator failure',
+            draft: false,
+            creatorIds,
+          })
+          .pipe(Effect.result),
+      )
+
+      expect(Result.isFailure(result) && result.failure).toBeInstanceOf(DatabaseError)
+      expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toMatchObject([
+        {
+          title: 'Saved before creator failure',
+          draft: false,
+          thumbnailUrl: assetUrl(publicKey(imageKey)),
+        },
+      ])
+      expect(
+        await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
+      ).toMatchObject([{ creatorId: actor.userId }])
+      expect(h.copies).toEqual([])
+      expect(h.objects.has(imageKey)).toBe(true)
+    },
+  )
+
+  test.each([
+    ['replacement', { creatorIds: [collaborator.userId] }, collaborator.userId],
+    ['omitted creators', {}, actor.userId],
+    ['empty creators', { creatorIds: [] }, actor.userId],
+  ])('post creator-only update preserves %s behavior', async (_name, data, expectedCreatorId) => {
+    await using h = await harness()
+
+    const post = await Effect.runPromise(
+      h.post.create(
+        {
+          title: 'Draft',
+          slug: 'creators-only',
+          type: 'post',
+          content: 'Draft content',
+          draft: true,
+        },
+        [actor.userId],
+        actor,
+      ),
+    )
+
+    const originalRows = await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))
+
+    const updated = await Effect.runPromise(
+      h.post.update(post.slug, actor.userId, actor.userRole, data),
+    )
+
+    expect(updated.creators?.map((creator) => creator.id)).toEqual([expectedCreatorId])
+    expect(
+      await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
+    ).toMatchObject([{ creatorId: expectedCreatorId }])
+    expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toEqual(
+      originalRows,
+    )
+    expect(h.copies).toEqual([])
+  })
+
+  test('unauthorized post creator replacement changes neither creators nor content', async () => {
+    await using h = await harness()
+
+    const post = await Effect.runPromise(
+      h.post.create(
+        {
+          title: 'Draft',
+          slug: 'unauthorized-creators',
+          type: 'post',
+          content: 'Draft content',
+          draft: true,
+        },
+        [actor.userId],
+        actor,
+      ),
+    )
+
+    const originalRows = await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))
+
+    const result = await Effect.runPromise(
+      h.post
+        .update(post.slug, collaborator.userId, collaborator.userRole, {
+          title: 'Unauthorized edit',
+          creatorIds: [collaborator.userId],
+        })
+        .pipe(Effect.result),
+    )
+
+    expect(Result.isFailure(result) && result.failure).toBeInstanceOf(UnauthorizedError)
+    expect(
+      await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
+    ).toMatchObject([{ creatorId: actor.userId }])
+    expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toEqual(
+      originalRows,
+    )
+    expect(h.copies).toEqual([])
+  })
+
+  test('post publication copy failure retains committed content and republishing repairs without replacing originals', async () => {
+    await using h = await harness()
+
+    const post = await Effect.runPromise(
+      h.post.create(
+        {
+          title: 'Draft',
+          slug: 'repair',
+          type: 'post',
+          content: 'Draft content',
+          draft: true,
+          thumbnailUrl: assetUrl(imageKey),
+        },
+        [actor.userId],
+        actor,
+      ),
+    )
+
+    h.fail(true)
+
+    const failed = await Effect.runPromise(
+      h.post.update('repair', actor.userId, actor.userRole, { draft: false }).pipe(Effect.result),
+    )
+
+    expect(Result.isFailure(failed) && failed.failure).toBeInstanceOf(S3Error)
+    expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toMatchObject([
+      {
+        draft: false,
+        thumbnailUrl: assetUrl(publicKey(imageKey)),
+      },
+    ])
+    expect(h.copies).toEqual([])
+    h.fail(false)
+
+    const repaired = await Effect.runPromise(
+      h.post.update('repair', actor.userId, actor.userRole, { draft: false }),
+    )
+
+    expect(repaired.thumbnailUrl).toBe(assetUrl(publicKey(imageKey)))
+    await Effect.runPromise(h.post.update('repair', actor.userId, actor.userRole, { draft: true }))
+    await Effect.runPromise(h.post.update('repair', actor.userId, actor.userRole, { draft: false }))
+    expect(h.copies).toHaveLength(1)
+    expect(h.objects.get(imageKey)).toBe('image bytes')
+    expect(h.objects.get(publicKey(imageKey))).toBe('image bytes')
+  })
+
+  test('interruption during copy leaves saved public references and does not cancel the in-flight storage promise', async () => {
+    await using h = await harness()
+    const pause = h.pauseCopies()
+    const controller = new AbortController()
+
+    const pending = Effect.runPromiseExit(
+      h.post.create(
+        {
+          title: 'Interrupted',
+          slug: 'interrupted',
+          type: 'post',
+          content: 'Published content',
+          thumbnailUrl: assetUrl(imageKey),
+        },
+        [actor.userId],
+        actor,
+      ),
+      { signal: controller.signal },
+    )
+
+    await pause.started
+    controller.abort()
+    const exit = await pending
+    const saved = await h.db.select().from(postsTable).where(eq(postsTable.slug, 'interrupted'))
+    const copiesBeforeRelease = [...h.copies]
+    pause.release()
+    await pause.finished
+    expect(Exit.hasInterrupts(exit)).toBe(true)
+    expect(saved).toMatchObject([{ draft: false, thumbnailUrl: assetUrl(publicKey(imageKey)) }])
+    expect(copiesBeforeRelease).toEqual([])
+    expect(h.objects.get(publicKey(imageKey))).toBe('image bytes')
+    expect(h.objects.get(imageKey)).toBe('image bytes')
+  })
+
   test('release drafts preserve originals and publish media only after a successful save', async () => {
     await using h = await harness()
     await h.db

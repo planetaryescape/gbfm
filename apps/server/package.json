@@ -4,6 +4,7 @@
     "./schemas": "./src/db/exports.ts"
   },
   "scripts": {
+    "dev:mcp:e2e": "bun run scripts/editorial-mcp-e2e.ts",
     "dev:e2e": "bun run scripts/local-e2e-server.ts",
     "test": "vitest run --config vitest.unit.config.ts && vitest run --config vitest.d1.config.ts",
     "test:unit": "vitest run --config vitest.unit.config.ts",
@@ -14,6 +15,7 @@
     "identity:maintain": "bun run scripts/music-identity-maintenance.ts"
   },
   "dependencies": {
+    "@better-auth/oauth-provider": "1.7.12",
     "@effect/opentelemetry": "4.0.6",
     "@effect/platform-bun": "4.0.6",
     "@gbfm/api": "workspace:*",

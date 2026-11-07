@@ -16,12 +16,14 @@ import { withTestLayer } from '@/test/effect'
 import { createTestWebHandler } from '@/test/http-handler'
 import { createMigratedD1Database } from '@/test/migrate-d1'
 
-const makeTrackingEmailTransport = () => {
+const makeTrackingEmailTransport = (sendGate: Promise<void> = Promise.resolve()) => {
   const messages: Array<OutboundEmailMessage> = []
+  const fiveAdmitted = Promise.withResolvers<void>()
   let inFlight = 0
   let maxInFlight = 0
 
   return {
+    fiveAdmitted: fiveAdmitted.promise,
     get messages(): ReadonlyArray<OutboundEmailMessage> {
       return messages
     },
@@ -36,8 +38,10 @@ const makeTrackingEmailTransport = () => {
           inFlight += 1
           maxInFlight = Math.max(maxInFlight, inFlight)
 
+          if (inFlight === 5) fiveAdmitted.resolve()
+
           try {
-            await new Promise<void>((resolve) => setTimeout(resolve, 20))
+            await sendGate
 
             return { provider: 'cloudflare' as const, messageId }
           } finally {
@@ -171,11 +175,15 @@ describe('sendMixNotification', () => {
     }
   })
 
-  test('limits delivery concurrency to five while retaining one receipt and log per recipient', async () => {
+  test('limits delivery concurrency to five while retaining one receipt and log per recipient', async ({
+    onTestFinished,
+  }) => {
     await using d1Resource = await createMigratedD1Database()
     const d1 = d1Resource.database
     const database = Effect.runSync(withTestLayer(Database, DatabaseLayer(d1)))
-    const transport = makeTrackingEmailTransport()
+    const releaseSends = Promise.withResolvers<void>()
+    onTestFinished(() => releaseSends.resolve())
+    const transport = makeTrackingEmailTransport(releaseSends.promise)
     const webHandler = createTestWebHandler(d1, transport.layer)
     const suffix = crypto.randomUUID()
     const adminId = `email-admin-${suffix}`
@@ -208,8 +216,10 @@ describe('sendMixNotification', () => {
       url: 'https://goosebumps.fm/mixes/concurrent',
     })
 
+    let pending: Promise<Response> | undefined
+
     try {
-      const response = await webHandler.handler(
+      pending = webHandler.handler(
         new Request('http://localhost/api/email/send-mix-notification', {
           method: 'POST',
           headers: {
@@ -219,6 +229,19 @@ describe('sendMixNotification', () => {
           body: JSON.stringify({ recipients, mixSlug }),
         }),
       )
+
+      await Promise.race([
+        transport.fiveAdmitted,
+        pending.then(async (response) => {
+          throw new Error(
+            `Delivery returned HTTP ${response.status} before five concurrent sends were admitted: ${await response.clone().text()}`,
+          )
+        }),
+      ])
+      expect(transport.messages).toHaveLength(5)
+      expect(transport.maxInFlight).toBe(5)
+      releaseSends.resolve()
+      const response = await pending
 
       expect(response.status).toBe(200)
       const body = Schema.decodeUnknownSync(SendMixNotificationResponse)(await response.json())
@@ -259,6 +282,8 @@ describe('sendMixNotification', () => {
       expect(filteredBody.data.map((log) => log.recipientEmail)).toEqual([recipients[0]])
       expect(filteredBody.pagination.total).toBe(1)
     } finally {
+      releaseSends.resolve()
+      await Promise.allSettled(pending ? [pending] : [])
       await webHandler.dispose()
     }
   })

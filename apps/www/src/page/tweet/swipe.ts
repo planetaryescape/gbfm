@@ -5,6 +5,7 @@ import {
   readerSwipeOffset,
   type ReaderSwipe,
 } from '@gbfm/core/reader-swipe'
+import { Data } from 'effect'
 
 import { createSwipeMotion } from './swipe-motion'
 
@@ -19,6 +20,13 @@ type ActiveSwipe = {
   readonly surface: Element
 }
 
+type Swipe =
+  | { readonly _tag: 'Idle' }
+  | { readonly _tag: 'Tracking'; readonly active: ActiveSwipe }
+  | { readonly _tag: 'AwaitingNavigation'; readonly slug: string }
+
+const Swipe = Data.taggedEnum<Swipe>()
+
 const point = (event: TouchEvent, touch: Touch, ending = false) => ({
   x: touch.clientX,
   y: touch.clientY,
@@ -27,22 +35,23 @@ const point = (event: TouchEvent, touch: Touch, ending = false) => ({
 })
 
 export const startTweetSwipes = () => {
-  let active: ActiveSwipe | null = null
-  let pendingSlug: string | null = null
+  let phase: Swipe = Swipe.Idle()
   const motion = createSwipeMotion()
 
+  const tracking = () => (Swipe.$is('Tracking')(phase) ? phase.active : null)
+  const pendingSlug = () => (Swipe.$is('AwaitingNavigation')(phase) ? phase.slug : null)
+
   const clear = () => {
-    active = null
+    if (Swipe.$is('Tracking')(phase)) phase = Swipe.Idle()
   }
 
   const navigationEnded = () => {
-    pendingSlug = null
+    if (Swipe.$is('AwaitingNavigation')(phase)) phase = Swipe.Idle()
     motion.navigationEnded()
   }
 
   const reset = () => {
-    clear()
-    pendingSlug = null
+    phase = Swipe.Idle()
     motion.reset()
   }
 
@@ -70,17 +79,21 @@ export const startTweetSwipes = () => {
 
     if (surface.getAttribute('data-swipe-ready') !== 'true') return
 
-    if (pendingSlug === slug || location.pathname !== `/tweet/${encodeURIComponent(slug)}`) return
+    if (pendingSlug() === slug || location.pathname !== `/tweet/${encodeURIComponent(slug)}`) return
 
-    pendingSlug = null
+    phase = Swipe.Idle()
 
     const gesture = beginReaderSwipe(point(event, touch), innerWidth)
 
     if (gesture)
-      active = { gesture, identifier: touch.identifier, path: location.pathname, slug, surface }
+      phase = Swipe.Tracking({
+        active: { gesture, identifier: touch.identifier, path: location.pathname, slug, surface },
+      })
   }
 
   const move = (event: TouchEvent) => {
+    const active = tracking()
+
     if (!active) return
 
     const touch = Array.from(event.touches).find((touch) => touch.identifier === active?.identifier)
@@ -93,7 +106,7 @@ export const startTweetSwipes = () => {
       return
     }
 
-    active = { ...active, gesture }
+    phase = Swipe.Tracking({ active: { ...active, gesture } })
     const offset = readerSwipeOffset(gesture)
 
     const available =
@@ -106,12 +119,12 @@ export const startTweetSwipes = () => {
   }
 
   const end = (event: TouchEvent) => {
-    const current = active
+    const current = tracking()
     clear()
 
     if (
       !current ||
-      pendingSlug === current.slug ||
+      pendingSlug() === current.slug ||
       current.path !== location.pathname ||
       !current.surface.isConnected ||
       current.surface.getAttribute('data-tweet-swipe') !== current.slug
@@ -142,7 +155,7 @@ export const startTweetSwipes = () => {
 
     if (event.cancelable) event.preventDefault()
 
-    pendingSlug = current.slug
+    phase = Swipe.AwaitingNavigation({ slug: current.slug })
     motion.commit(current.surface, current.slug, direction, () => {
       if (
         current.path === location.pathname &&

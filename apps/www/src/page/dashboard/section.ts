@@ -102,6 +102,7 @@ export const endpointFor = (section: string, query = new URLSearchParams()) => {
       admin: '/api/admin/overview',
       'featured-mix': '/api/admin/featured-mix',
       profile: '/api/user/profile',
+      connections: '/api/user/mcp-connections',
       email: '/api/user/email-preferences',
       favorites: '/api/favorites?limit=25&offset=0',
       reminders: '/api/music-reminders',

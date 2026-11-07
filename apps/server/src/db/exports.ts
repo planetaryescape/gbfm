@@ -33,3 +33,5 @@ export * from './tags.schema.ts'
 export * from './upload-asset.schema.ts'
 
 export * from './personal-access-key.schema.ts'
+
+export * from './oauth.schema'

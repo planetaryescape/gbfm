@@ -1,21 +1,12 @@
-import {
-  hasActiveSpotifyDeviceEffect,
-  playSpotifyEntityEffect,
-  queueSpotifyEntityEffect,
-  SPOTIFY_ENTITY_KIND,
-  spotifyEntityFromUrl,
-  spotifyErrorMessage,
-  type SpotifyEntityRef,
-  type SpotifyRequestError,
-} from '@gbfm/spotify'
-import * as Effect from 'effect/Effect'
-import { useState } from 'react'
+import { SPOTIFY_ENTITY_KIND, spotifyEntityFromUrl, type SpotifyEntityRef } from '@gbfm/spotify'
+import { useLayoutEffect, useState } from 'react'
 import { Linking, Text, TouchableOpacity, View } from 'react-native'
 
 import { useThemeColors } from '@/theme/colors'
 
 import { SpotifyConnectionState, useSpotifyConnection } from './connection'
-import { runSpotifyEffect } from './runtime'
+import { spotifyEntityLifetime, runSpotifyEntityAction } from './entityLifetime'
+import { spotifyLifecycle } from './runtime'
 import { SPOTIFY_GREEN, SpotifyIcon } from './SpotifyIcon'
 
 type Props = {
@@ -31,53 +22,53 @@ const entityNoun = {
 
 export function SpotifyEntityActions({ url, onNotice }: Props) {
   const connection = useSpotifyConnection((state) => state)
-  const [pending, setPending] = useState<'play' | 'queue' | null>(null)
-  const colors = useThemeColors()
-
   const entity = spotifyEntityFromUrl(url)
+  const generation = spotifyLifecycle.current()
 
   if (!entity || !SpotifyConnectionState.$is('Connected')(connection)) return null
+
+  return (
+    <EntityActions
+      key={`${generation}:${url}`}
+      url={url}
+      onNotice={onNotice}
+      entity={entity}
+      generation={generation}
+    />
+  )
+}
+
+function EntityActions({
+  url,
+  onNotice,
+  entity,
+  generation,
+}: Props & { readonly entity: SpotifyEntityRef; readonly generation: number }) {
+  const [pending, setPending] = useState<'play' | 'queue' | null>(null)
+  const colors = useThemeColors()
+  const [lifetime] = useState(() => spotifyEntityLifetime())
+
+  useLayoutEffect(() => {
+    lifetime.activate()
+
+    return lifetime.dispose
+  }, [lifetime])
 
   const openInSpotify = () => {
     void Linking.openURL(url)
   }
 
-  const run = async (action: 'play' | 'queue') => {
-    setPending(action)
-
-    await runSpotifyEffect(
-      hasActiveSpotifyDeviceEffect().pipe(
-        Effect.flatMap((hasDevice) => {
-          if (!hasDevice) {
-            return Effect.sync(() => {
-              onNotice('No active Spotify device, opening in Spotify instead')
-              openInSpotify()
-            })
-          }
-
-          if (action === 'play') {
-            return playSpotifyEntityEffect(entity).pipe(
-              Effect.map(() => {
-                onNotice(`Playing ${entityNoun[entity.kind].toLowerCase()}`)
-              }),
-            )
-          }
-
-          return queueSpotifyEntityEffect(entity).pipe(
-            Effect.map((count) => {
-              onNotice(count === 1 ? 'Added to queue' : `Added ${count} tracks to queue`)
-            }),
-          )
-        }),
-        Effect.catch((error: SpotifyRequestError) =>
-          Effect.sync(() => {
-            onNotice(spotifyErrorMessage(error))
-            openInSpotify()
-          }),
-        ),
-      ),
-    ).finally(() => setPending(null))
-  }
+  const run = (action: 'play' | 'queue') =>
+    runSpotifyEntityAction({
+      lifetime,
+      lifecycle: spotifyLifecycle,
+      generation,
+      entity,
+      action,
+      setPending,
+      notice: onNotice,
+      open: openInSpotify,
+    })
 
   return (
     <View

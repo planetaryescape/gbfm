@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 
 import { user as userTable } from '@/db/auth.schema'
 import {
@@ -11,15 +11,21 @@ import {
 import type { DatabaseClient } from '@/db/layer'
 import { newsletterSubscribersTable } from '@/db/newsletter.schema'
 
-export async function getOrCreateEmailPreferencesByUserId(
-  userId: string,
-  database: DatabaseClient,
-): Promise<SelectAuthorEmailPreferences> {
-  const [existing] = await database
+async function findEmailPreferencesByUserId(userId: string, database: DatabaseClient) {
+  const [preferences] = await database
     .select()
     .from(userEmailPreferencesTable)
     .where(eq(userEmailPreferencesTable.userId, userId))
     .limit(1)
+
+  return preferences
+}
+
+export async function getOrCreateEmailPreferencesByUserId(
+  userId: string,
+  database: DatabaseClient,
+): Promise<SelectAuthorEmailPreferences> {
+  const existing = await findEmailPreferencesByUserId(userId, database)
 
   if (existing) {
     return existing
@@ -35,13 +41,16 @@ export async function getOrCreateEmailPreferencesByUserId(
       globalUnsubscribe: false,
       unsubscribeToken: crypto.randomUUID(),
     })
+    .onConflictDoNothing({ target: userEmailPreferencesTable.userId })
     .returning()
 
-  if (!newPreferences) {
+  const preferences = newPreferences ?? (await findEmailPreferencesByUserId(userId, database))
+
+  if (!preferences) {
     throw new Error('Failed to create email preferences')
   }
 
-  return newPreferences
+  return preferences
 }
 
 export async function updateEmailPreferences(
@@ -86,16 +95,32 @@ export async function canReceiveEmail(
 }
 
 export async function globalUnsubscribe(userId: string, database: DatabaseClient) {
-  return updateEmailPreferences(
-    userId,
-    {
-      globalUnsubscribe: true,
-      mixReleaseEnabled: false,
-      promotionalEnabled: false,
-      systemEnabled: false,
-    },
-    database,
-  )
+  const updates = {
+    globalUnsubscribe: true,
+    mixReleaseEnabled: false,
+    promotionalEnabled: false,
+    systemEnabled: false,
+    updatedAt: new Date(),
+  }
+
+  const [preferences] = await database
+    .insert(userEmailPreferencesTable)
+    .values({ userId, unsubscribeToken: crypto.randomUUID(), ...updates })
+    .onConflictDoUpdate({
+      target: userEmailPreferencesTable.userId,
+      set: updates,
+      setWhere: sql`${userEmailPreferencesTable.globalUnsubscribe} = 0
+        or ${userEmailPreferencesTable.mixReleaseEnabled} = 1
+        or ${userEmailPreferencesTable.promotionalEnabled} = 1
+        or ${userEmailPreferencesTable.systemEnabled} = 1`,
+    })
+    .returning()
+
+  const persisted = preferences ?? (await findEmailPreferencesByUserId(userId, database))
+
+  if (!persisted) throw new Error('Failed to persist email opt-out')
+
+  return persisted
 }
 
 export async function getEmailPreferencesByUnsubscribeToken(

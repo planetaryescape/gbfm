@@ -3,6 +3,7 @@ import { Mount } from 'foldkit'
 
 import { Message } from '../message'
 import { Action, type Status } from './model'
+import { startSignupChallenge } from './runtime'
 
 interface Turnstile {
   render: (
@@ -43,72 +44,55 @@ export const SignupChallenge = Mount.defineStream('SignupChallenge', {
 
             if (!host) return () => {}
 
-            const controller = new AbortController()
-            let active = true
-            let widget: string | undefined
-            let token = ''
-            let submitting = false
-
             const status = (value: Status) => {
-              if (active)
-                Queue.offerUnsafe(queue, Message.ChallengeStatusChanged({ status: value }))
+              Queue.offerUnsafe(queue, Message.ChallengeStatusChanged({ status: value }))
             }
 
-            const fail = () => {
-              token = ''
-              status('failed')
-            }
+            const runtime = startSignupChallenge({
+              sitekey,
+              action,
+              status,
+              widget: () => {
+                const api = window.turnstile
 
-            const render = () => {
-              if (!active || !window.turnstile || widget !== undefined) return
+                return api
+                  ? {
+                      render: (options) => api.render(host, options),
+                      reset: (id) => api.reset(id),
+                      remove: (id) => api.remove(id),
+                    }
+                  : undefined
+              },
+              loadScript: (onLoad, fail) => {
+                const script = document.createElement('script')
 
-              try {
-                widget = window.turnstile.render(host, {
-                  sitekey,
-                  action,
-                  appearance: 'interaction-only',
-                  'response-field': false,
-                  callback: (value) => {
-                    if (!active) return
-                    token = value
-                    status('ready')
-                  },
-                  'error-callback': fail,
-                  'expired-callback': fail,
-                  'timeout-callback': fail,
-                })
-              } catch {
-                fail()
-              }
-            }
+                const loaded = () => {
+                  clearTimeout(loadTimeout)
+                  onLoad()
+                }
 
-            let script: HTMLScriptElement | undefined
-            let loadTimeout: ReturnType<typeof setTimeout> | undefined
+                script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+                script.async = true
+                script.addEventListener('load', loaded)
+                script.addEventListener('error', fail)
+                const loadTimeout = setTimeout(fail, 15_000)
+                document.head.append(script)
 
-            const loaded = () => {
-              clearTimeout(loadTimeout)
+                return () => {
+                  clearTimeout(loadTimeout)
+                  script.removeEventListener('load', loaded)
+                  script.removeEventListener('error', fail)
+                  script.remove()
+                }
+              },
+              prepare: (token, signal) => {
+                const body = new FormData(element)
+                body.set('cf-turnstile-response', token)
 
-              if (window.turnstile) render()
-              else fail()
-            }
-
-            const unloadScript = () => {
-              clearTimeout(loadTimeout)
-              script?.removeEventListener('load', loaded)
-              script?.removeEventListener('error', fail)
-              script?.remove()
-            }
-
-            const loadScript = () => {
-              unloadScript()
-              script = document.createElement('script')
-              script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
-              script.async = true
-              script.addEventListener('load', loaded)
-              script.addEventListener('error', fail)
-              loadTimeout = setTimeout(fail, 15_000)
-              document.head.append(script)
-            }
+                return () => fetch(element.action, { method: 'POST', body, signal })
+              },
+              redirect: (url) => window.location.assign(url),
+            })
 
             const retry = (event: Event) => {
               if (
@@ -116,64 +100,23 @@ export const SignupChallenge = Mount.defineStream('SignupChallenge', {
                 !event.target.closest('[data-challenge-retry]')
               )
                 return
-              token = ''
-              status('verifying')
-
-              if (widget !== undefined && window.turnstile) window.turnstile.reset(widget)
-              else if (window.turnstile) render()
-              else loadScript()
+              runtime.retry()
             }
 
             const submit = async (event: SubmitEvent) => {
               event.preventDefault()
 
-              if (!token || submitting) return
-              submitting = true
-              status('submitting')
-              const body = new FormData(element)
-              body.set('cf-turnstile-response', token)
-              token = ''
-
-              try {
-                const response = await fetch(element.action, {
-                  method: 'POST',
-                  body,
-                  signal: controller.signal,
-                })
-
-                if (!active) return
-
-                if (response.ok && response.redirected) {
-                  window.location.assign(response.url)
-
-                  return
-                }
-
-                fail()
-              } catch {
-                fail()
-              } finally {
-                submitting = false
-              }
+              await runtime.submit()
             }
 
             element.addEventListener('click', retry)
             element.addEventListener('submit', submit)
-            status(sitekey ? 'verifying' : 'unavailable')
-
-            if (sitekey) {
-              if (window.turnstile) render()
-              else loadScript()
-            }
+            runtime.start()
 
             return () => {
-              active = false
-              controller.abort()
-              unloadScript()
+              runtime.dispose()
               element.removeEventListener('click', retry)
               element.removeEventListener('submit', submit)
-
-              if (widget !== undefined) window.turnstile?.remove(widget)
             }
           }),
           (cleanup) => Effect.sync(cleanup),

@@ -3,7 +3,10 @@ import { fileURLToPath } from 'node:url'
 
 import { defineConfig } from 'vitest/config'
 
+import { repoChangelogPlugin } from './plugins/repo-changelog.ts'
+
 export default defineConfig({
+  plugins: [repoChangelogPlugin()],
   resolve: {
     alias: {
       '@': resolve(fileURLToPath(new URL('.', import.meta.url)), 'src'),

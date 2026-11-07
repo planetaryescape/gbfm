@@ -64,6 +64,54 @@ test('listeners can manage keys but cannot create them', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Create key', exact: true })).toHaveCount(0)
 })
 
+test('lists a key issued after persisted pagehide without showing its discarded secret', async ({
+  page,
+}) => {
+  await signIn(page, 'creator')
+  const requested = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  await page.route('**/api/user/api-keys', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    const response = await route.fetch()
+    requested.resolve()
+    await release.promise
+    await route.fulfill({ response })
+  })
+  const name = `Discarded secret ${crypto.randomUUID()}`
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
+  await page.getByRole('checkbox', { name: 'Read your posts' }).check()
+  await page.getByRole('button', { name: 'Create key', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Confirm your password', exact: true })
+  await dialog.getByRole('textbox', { name: 'Password', exact: true }).fill('LocalTest123!')
+  await dialog.getByRole('button', { name: 'Confirm and create key', exact: true }).click()
+  await requested.promise
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
+  })
+  release.resolve()
+  await expect(dialog).not.toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'New API key secret', exact: true })).toHaveCount(
+    0,
+  )
+  await expect(
+    page.getByText('Key created. Save the secret below before leaving this page.', { exact: true }),
+  ).toHaveCount(0)
+  await expect(page.locator('[data-key-status]')).toContainText('Revoke it from the list')
+
+  const key = page
+    .getByRole('article')
+    .filter({ has: page.getByRole('heading', { name, exact: true }) })
+
+  await expect(key).toBeVisible()
+  await page.screenshot({
+    path: test.info().outputPath('discarded-api-key-secret.png'),
+  })
+  await key.getByRole('button', { name: 'Revoke key', exact: true }).click()
+  await key.getByRole('button', { name: 'Confirm revoke', exact: true }).click()
+  await expect(key).toContainText('Revoked')
+})
+
 test('password confirmation supports cancellation and retry without losing key settings', async ({
   page,
 }) => {

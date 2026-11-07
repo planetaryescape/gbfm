@@ -11,6 +11,7 @@ import {
 import { Message } from './message'
 import type { Model, Principal } from './model'
 import * as ApiKeys from './page/api-keys'
+import * as Connections from './page/connections'
 import * as Emails from './page/emails'
 import * as Playlists from './page/playlists'
 import * as Sessions from './page/sessions'
@@ -26,11 +27,14 @@ export const initialModel = (section: string, principal: Principal): Model => ({
   toggles: {},
   error: null,
   spotify: disconnected,
+  spotifyRequestId: 0,
+  spotifyPending: null,
   emails: Emails.initialModel,
   sessions: Sessions.initialModel,
   shows: Shows.initialModel,
   playlists: Playlists.initialModel,
   apiKeys: ApiKeys.initialModel,
+  connections: Connections.initialModel,
   catalogRevision: 0,
   catalogNotice: '',
 })
@@ -65,11 +69,20 @@ export const init =
         ),
       }
 
+    if (section === 'integrations' && !principal.id) return { model: { ...model, phase: 'ready' } }
+
     if (section === 'integrations' || section === 'spotify-callback')
       return {
-        model,
+        model: {
+          ...model,
+          spotifyRequestId: 1,
+          spotifyPending: section === 'integrations' ? 'status' : 'completeCallback',
+        },
         commands: [
-          SpotifyRequest({ action: section === 'integrations' ? 'status' : 'completeCallback' }),
+          SpotifyRequest({
+            action: section === 'integrations' ? 'status' : 'completeCallback',
+            requestId: 1,
+          }),
         ],
       }
 

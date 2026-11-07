@@ -1,3 +1,205 @@
+# [2.126.0](https://github.com/planetaryescape/gbfm/compare/v2.125.0...v2.126.0) (2026-11-06)
+
+
+### Bug Fixes
+
+* **oauth:** distinguish eligibility failures from other auth denials ([923acb0](https://github.com/planetaryescape/gbfm/commit/923acb0ac2f45749a8e768c42ef3f941a1b80d55))
+* **oauth:** preserve session cookies throughout connection responses ([2ac8ae7](https://github.com/planetaryescape/gbfm/commit/2ac8ae73162f93e1e0cf783aeb5aaa46f2b11741))
+* **oauth:** protect legacy connection redirects with no-referrer ([d9071f2](https://github.com/planetaryescape/gbfm/commit/d9071f244366db7389f5d6f52af18db80e5edfc6))
+* **oauth:** reuse provider denial and configure signed-out cancellation ([015b9b2](https://github.com/planetaryescape/gbfm/commit/015b9b239ec2a1f0840880e1ffb6534d26eb0712))
+* **oauth:** reuse website sessions and explain app connections ([20d58d4](https://github.com/planetaryescape/gbfm/commit/20d58d4eed4dee03c4871184b188cbfd72d4de23))
+* **oauth:** tighten connection screen copy ([eaba2be](https://github.com/planetaryescape/gbfm/commit/eaba2be169d53972235dc5312995255e031c1a96))
+
+
+### Features
+
+* **oauth:** add brand wordmark and icons to connection screens ([a340ca2](https://github.com/planetaryescape/gbfm/commit/a340ca24a222e4342008d72cda00f8b8fbb3d938))
+
+
+### Performance Improvements
+
+* **oauth:** reject invalid actions before loading connection data ([166403a](https://github.com/planetaryescape/gbfm/commit/166403ac3ec96869a68eb8883b86ba2e05d67cf0))
+
+# [2.125.0](https://github.com/planetaryescape/gbfm/compare/v2.124.1...v2.125.0) (2026-11-06)
+
+
+### Bug Fixes
+
+* **mcp:** route website guide directly to API Worker ([16da61e](https://github.com/planetaryescape/gbfm/commit/16da61ebf44e86a01f407ce683d17d2ea39d5e32))
+* **mobile:** align task navigation and typography ([558535a](https://github.com/planetaryescape/gbfm/commit/558535af1fa48bc138601ead90c622182b820e0f))
+* **mobile:** explain unavailable Spotify configuration ([f9c5223](https://github.com/planetaryescape/gbfm/commit/f9c5223e7de5ea3b05c707dbdd8ddbe14b2779e3))
+* **mobile:** keep Settings readable at accessibility text sizes ([7bb4b7c](https://github.com/planetaryescape/gbfm/commit/7bb4b7cd74b7e0ea61cadc0b28b7fbaecb236d6c))
+* **mobile:** synchronize native chrome with appearance preference ([891c48d](https://github.com/planetaryescape/gbfm/commit/891c48dd24dbf6fe33b54705c9a2e2c5e163c0a4))
+* **www:** bypass asset classification for MCP guide ([9f8404d](https://github.com/planetaryescape/gbfm/commit/9f8404d665c405350c8d3122c6485e929fa832f1))
+
+
+### Features
+
+* **mobile:** organize settings into focused subpages ([bf60582](https://github.com/planetaryescape/gbfm/commit/bf60582655498401115f77af9cfc6230d538fe4f))
+
+## [2.124.1](https://github.com/planetaryescape/gbfm/compare/v2.124.0...v2.124.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **www:** route MCP guide before static assets ([75a89cf](https://github.com/planetaryescape/gbfm/commit/75a89cf99fa7d01aacfc6feea93285ea1c73b8e2))
+
+# [2.124.0](https://github.com/planetaryescape/gbfm/compare/v2.123.0...v2.124.0) (2026-11-06)
+
+
+### Features
+
+* **mcp:** serve plain-text connection instructions ([61a7390](https://github.com/planetaryescape/gbfm/commit/61a739004b0f5ede29ab0479005e8b136318487e))
+
+# [2.123.0](https://github.com/planetaryescape/gbfm/compare/v2.122.2...v2.123.0) (2026-11-04)
+
+
+### Bug Fixes
+
+* **ci:** bound D1 workers and use preinstalled fixture browsers ([51879bd](https://github.com/planetaryescape/gbfm/commit/51879bd289d09b8dfb717670c215276337093a8c))
+* **ci:** expose Bun package runner to browser fixtures ([bfc9284](https://github.com/planetaryescape/gbfm/commit/bfc928423cf910c954a57576fc1dece3f12b49da))
+* **ci:** install Bun archive dependency in browser container ([beb37e9](https://github.com/planetaryescape/gbfm/commit/beb37e97fbd0239914a2264da90a5a62a8945fcc))
+* **ci:** isolate browser tests from host toolchain setup ([d914540](https://github.com/planetaryescape/gbfm/commit/d9145407d4c6cd90d6f55ca590a7ebe50d7f5175))
+* **mcp:** address OAuth and editorial review findings ([c9bfee9](https://github.com/planetaryescape/gbfm/commit/c9bfee9667e0cf68f8f933c02d92f7a7ab4e9914))
+* **mcp:** resolve deployed origins and keep revocation available ([a51a91f](https://github.com/planetaryescape/gbfm/commit/a51a91f53780d7d597ca0dd9bfd0f6a09f1a9cdc))
+
+
+### Features
+
+* **mcp:** add owner-only OAuth and read-only editorial tools ([72dd3a0](https://github.com/planetaryescape/gbfm/commit/72dd3a0d42856f77e22c16f1162ff6d5105862f8))
+
+## [2.122.2](https://github.com/planetaryescape/gbfm/compare/v2.122.1...v2.122.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* **accounts:** preserve preferences across competing creation ([f53567a](https://github.com/planetaryescape/gbfm/commit/f53567ac0fab8c3ca9f94dd8f9c7b0ba20c96500))
+* **accounts:** preserve preferences across competing creation ([cc55e27](https://github.com/planetaryescape/gbfm/commit/cc55e272feea820d187f4655ae7f11db47098a71))
+* **accounts:** preserve unsubscribe consent across repeats ([4558515](https://github.com/planetaryescape/gbfm/commit/45585152c77f06f424725cbd7fdba30308d5c7b5))
+* **accounts:** preserve unsubscribe consent across repeats ([4ff6d4f](https://github.com/planetaryescape/gbfm/commit/4ff6d4f679f884be2832446c16ebd9e9d56ad484))
+* **composer:** distinguish refusals and allow explicit receipt recovery ([ee64504](https://github.com/planetaryescape/gbfm/commit/ee6450462011344c1e16c543f5349fa4c73fdc4a))
+* **creator:** fence remote saves and preserve newer local drafts ([d2b9bc8](https://github.com/planetaryescape/gbfm/commit/d2b9bc896ad209b3a3a607e4ea9d9bbb902ad55e))
+* **creator:** fence remote saves and preserve newer local drafts ([43c95d9](https://github.com/planetaryescape/gbfm/commit/43c95d9772da6d28d1beff44b76bbc2f78ce4404))
+* **creator:** reconcile latest edits and fence stale failures ([599479a](https://github.com/planetaryescape/gbfm/commit/599479a392a6d0117173a30e12b6b6585901720c))
+* **creator:** reconcile latest edits and fence stale failures ([c1901d8](https://github.com/planetaryescape/gbfm/commit/c1901d8d8bba860d35c078c95f8b4ef75f5cdbbd))
+* **mobile:** own login and reader request lifetimes ([0082262](https://github.com/planetaryescape/gbfm/commit/0082262475f3a23fd04af1e368f04a6242b51543))
+* **mobile:** own login and reader request lifetimes ([0a2aef1](https://github.com/planetaryescape/gbfm/commit/0a2aef11b2f4c8dd514b4d824e3f3fe123863dd3))
+* **mobile:** persist composer publication recovery receipts ([d353d34](https://github.com/planetaryescape/gbfm/commit/d353d34a521d4867f16294eea0bc1c9ef36101f8))
+* **mobile:** serialize owned auth storage commits ([51548e7](https://github.com/planetaryescape/gbfm/commit/51548e7240d109ec9fb55bda4ee6f2dee297efb4))
+* **player:** bound hydration recovery during shutdown ([ca01c35](https://github.com/planetaryescape/gbfm/commit/ca01c35391acbdb32fa6b2189ace5aa836eb7d81))
+* **player:** own audio instances and subscriptions per source ([6b14918](https://github.com/planetaryescape/gbfm/commit/6b149184b1676e839e080e208fa73a0264b5bf43))
+* **player:** preserve unread volume after hydration failure ([78ca8a5](https://github.com/planetaryescape/gbfm/commit/78ca8a5a2d808cbdabc65dc6115bdf5b6302b90c))
+* **publication:** preserve creators when replacement fails ([bf4e40f](https://github.com/planetaryescape/gbfm/commit/bf4e40fb383ce47db3cc27b8c2c1ea6d0c2ea44f))
+* **publication:** preserve creators when replacement fails ([c66be95](https://github.com/planetaryescape/gbfm/commit/c66be95b5a6e87b324ad8e04ec687b527e8b8243))
+* **reminders:** invalidate claims when schedules change ([2c6b186](https://github.com/planetaryescape/gbfm/commit/2c6b18643fe55c3cac4700ee47841b84c4038678))
+* **reminders:** recover stale queue work with fenced claims ([9b65bb8](https://github.com/planetaryescape/gbfm/commit/9b65bb86224e4775160f7a78fc972bc996009ed5))
+* **runtimes:** fence stale telemetry, signup and toast callbacks ([5407d71](https://github.com/planetaryescape/gbfm/commit/5407d711953389feb2a15c3cb1db4f0b83769e7e))
+* **runtimes:** fence stale telemetry, signup and toast callbacks ([7b39cab](https://github.com/planetaryescape/gbfm/commit/7b39cab4bac2344b3db49ce61195bdfca037bab5))
+* **spotify:** fence connection and entity operation lifetimes ([14a8127](https://github.com/planetaryescape/gbfm/commit/14a8127391eee7ba41a2e4c233789334062a6c03))
+* **spotify:** fence connection and entity operation lifetimes ([6561c59](https://github.com/planetaryescape/gbfm/commit/6561c59551d58c7e04af57d2487d9fdf98963c40))
+* **spotify:** recheck queued owners and fence refreshed sessions ([cd905b5](https://github.com/planetaryescape/gbfm/commit/cd905b518335993a18f8c76ee4ec237776003ae7))
+* **www:** preserve Foldkit initialization contract for Spotify SSR ([706ae9a](https://github.com/planetaryescape/gbfm/commit/706ae9ad58e177a641b36fa27bb150c6b6e59361))
+* **www:** preserve Foldkit initialization for Spotify SSR ([#500](https://github.com/planetaryescape/gbfm/issues/500)) ([0b5a4bb](https://github.com/planetaryescape/gbfm/commit/0b5a4bb86bf9d51637beaacee364bf161b84b429))
+
+## [2.122.1](https://github.com/planetaryescape/gbfm/compare/v2.122.0...v2.122.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **www:** attach reader telemetry to the real document host ([a781336](https://github.com/planetaryescape/gbfm/commit/a781336db4c0f7466f5ecc047095c30555f95088))
+
+# [2.122.0](https://github.com/planetaryescape/gbfm/compare/v2.121.3...v2.122.0) (2026-11-04)
+
+
+### Bug Fixes
+
+* **build:** refuse public source maps after authenticated upload ([5cb05a4](https://github.com/planetaryescape/gbfm/commit/5cb05a4be7cedb393de99560b998558b4fea9506))
+* **mobile:** bind observability consumers to the active provider lifetime ([0fe2e3d](https://github.com/planetaryescape/gbfm/commit/0fe2e3d189bc1e6020c5c660be08a9ba92206034))
+* **mobile:** initialize observability before Router evaluation ([083d248](https://github.com/planetaryescape/gbfm/commit/083d248a48a67a28f2c2b82c31c2ccbbca1290db))
+* **observability:** isolate signals and own in-flight journey admission ([c628d66](https://github.com/planetaryescape/gbfm/commit/c628d6624b715f40c6ba36b3371f002e905a0173))
+
+
+### Features
+
+* **mobile:** establish privacy-bounded Sentry observability ([85de466](https://github.com/planetaryescape/gbfm/commit/85de466bd1940732091d8a84dc332e85216caed4))
+* **mobile:** observe reading and native playback outcomes ([e74c334](https://github.com/planetaryescape/gbfm/commit/e74c334591d236a810ddb1fdf1ff83ddc3d14049))
+* **observability:** align web journeys and gate capture on source-map uploads ([c8d825f](https://github.com/planetaryescape/gbfm/commit/c8d825fffdb2b99f47db459a66dfa909a8dab061))
+* **www:** observe browser navigation through shared Effect services ([290a57f](https://github.com/planetaryescape/gbfm/commit/290a57f4df1a3b9901a7ddd8420ad1408c2507e6))
+
+## [2.121.3](https://github.com/planetaryescape/gbfm/compare/v2.121.2...v2.121.3) (2026-11-04)
+
+
+### Bug Fixes
+
+* **uploads:** preserve replacement ownership and confirmed completion ([ffaadec](https://github.com/planetaryescape/gbfm/commit/ffaadec8fe3841b4d6b5e2ac542a09e98cd73481))
+* **uploads:** preserve replacement ownership and confirmed completion ([#485](https://github.com/planetaryescape/gbfm/issues/485)) ([ce56be7](https://github.com/planetaryescape/gbfm/commit/ce56be7522bf0b6f6e64386e717c78ef859527c5))
+
+## [2.121.2](https://github.com/planetaryescape/gbfm/compare/v2.121.1...v2.121.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* **api-keys:** discard issuance secrets after pagehide ([d6d6ff4](https://github.com/planetaryescape/gbfm/commit/d6d6ff4e49c7af85a4510de21a0d6f454efa692c))
+* **api-keys:** recover cleared confirmation failures ([6693ba5](https://github.com/planetaryescape/gbfm/commit/6693ba52ce9903bca3b43e541009aba41800adcb))
+* **server:** fence playlist and navigation writes by attempt ownership ([eccaf03](https://github.com/planetaryescape/gbfm/commit/eccaf0324fd8a9c4f1d311ca088e9c4bcb3a6ac7))
+
+## [2.121.1](https://github.com/planetaryescape/gbfm/compare/v2.121.0...v2.121.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **api-keys:** make issuance generator exits explicit ([affdf4a](https://github.com/planetaryescape/gbfm/commit/affdf4a800fb334288f5499d311d8c12f451e17a))
+* **auth:** ignore validation results from superseded restores ([af3c2a9](https://github.com/planetaryescape/gbfm/commit/af3c2a91133aa1155f701aeac67cd285bf223763))
+* **dashboard:** report show operations accurately and verify playlist reloads ([040c6dc](https://github.com/planetaryescape/gbfm/commit/040c6dc91a7a6283c49dbe7eeaabfaa4d5ca3584))
+* **mobile:** guard uncertain replies and composer navigation ([db9f8c6](https://github.com/planetaryescape/gbfm/commit/db9f8c691dc80c36f48fb06d74927c67acebd646))
+* **mobile:** make published composer cleanup read-only ([e5a8102](https://github.com/planetaryescape/gbfm/commit/e5a8102459db197e3b6b29816b71651fe74a008e))
+* **mobile:** retry composer cleanup without duplicate content ([30d23f1](https://github.com/planetaryescape/gbfm/commit/30d23f1e66e8491c726955c5154b2c2a95f83c61))
+* **preview:** make session disposal terminal ([c55a9e5](https://github.com/planetaryescape/gbfm/commit/c55a9e5e5dd66f5c4f7d55fb81a11b2d73210ffd))
+* **reader:** short-circuit pending visits and verify identity guards ([e083258](https://github.com/planetaryescape/gbfm/commit/e083258b00db9bbd582bbc309355dfb51e336cc4))
+* **reminders:** deliver post-claim edits from the fresh row ([edd0e7d](https://github.com/planetaryescape/gbfm/commit/edd0e7db61b7cdff1d465825c597fc8074d70b68))
+* **reminders:** keep post-claim read failures retryable ([036eb73](https://github.com/planetaryescape/gbfm/commit/036eb73ed68b83eca93ac6f83e050397a5ae86f6))
+* **signup:** recover preparation failures and guard disposed retries ([99a8d19](https://github.com/planetaryescape/gbfm/commit/99a8d19196963b12b2441178e1d06e61c232e7f1))
+
+# [2.121.0](https://github.com/planetaryescape/gbfm/compare/v2.120.0...v2.121.0) (2026-11-03)
+
+
+### Bug Fixes
+
+* **mobile:** keep short tweets swipeable and show navigation readiness ([20d2234](https://github.com/planetaryescape/gbfm/commit/20d223415bcb1f9c48dfd3f028ddfc3692b33f0f))
+* **mobile:** keep tweet gestures anchored and content visible while loading ([fd9e4e0](https://github.com/planetaryescape/gbfm/commit/fd9e4e01854b13167d6a3610942e5387e42e81d1))
+* **mobile:** reject reading actions from inactive readers ([e09b734](https://github.com/planetaryescape/gbfm/commit/e09b7349217c176275393cee5813541d2dd35c70))
+* **mobile:** retain session roles and wait for auth restoration ([bcc08d2](https://github.com/planetaryescape/gbfm/commit/bcc08d25fe43e4ac314d020403169f2bf3866065))
+* **www:** confirm API key creation with a password dialog ([07beb55](https://github.com/planetaryescape/gbfm/commit/07beb554e1e97de78f28430dc2954bdcbd028f9b))
+* **www:** give archive months consistent touch-sized controls ([14f022f](https://github.com/planetaryescape/gbfm/commit/14f022f31e1225b5e3649e0c2ca4cc1a672a53dd))
+* **www:** hold the current tweet on screen until its replacement arrives ([c7773ae](https://github.com/planetaryescape/gbfm/commit/c7773aebd24e4699b0d4909220db1d28280760cd))
+* **www:** keep 1Password popups interactive during key confirmation ([84cb766](https://github.com/planetaryescape/gbfm/commit/84cb766dc72777508abdaa8e8192a92ce0cee646))
+* **www:** keep tweet prose readable in manual dark mode ([56da3c7](https://github.com/planetaryescape/gbfm/commit/56da3c7ad07a1141bd9bb4457af484dabbfe95c6))
+* **www:** let shared .btn styles apply inside the dashboard ([c52626a](https://github.com/planetaryescape/gbfm/commit/c52626a1de22e2b12920110395944bf30a517e43))
+* **www:** persist account-scoped tweet positions across restarts ([3ae9dec](https://github.com/planetaryescape/gbfm/commit/3ae9dec5221e61bca0787543bb7d2b56c859e4c7))
+* **www:** prevent autofill interactions dismissing password confirmation ([7e7790a](https://github.com/planetaryescape/gbfm/commit/7e7790a737b4dc027fa5cb7f59d3470b1d64c9f6))
+
+
+### Features
+
+* **design:** share geometry and button roles across platforms ([662c6ad](https://github.com/planetaryescape/gbfm/commit/662c6ad4cd42d8e61bddaab67545461736ed6552))
+* **mobile:** add compose tab access and refine playback styling ([93125d5](https://github.com/planetaryescape/gbfm/commit/93125d554b5c593a28e5a6b640ad2a06d208c370))
+* **mobile:** add paged reading, replies and persistent progress ([c8e8ffc](https://github.com/planetaryescape/gbfm/commit/c8e8ffc1d3f39ad4294d958d36a276c979935974))
+* **mobile:** add shared haptic feedback ([efc9437](https://github.com/planetaryescape/gbfm/commit/efc943728f3781d1c3d31d5c50f15313e7290f04))
+* **mobile:** align tweet reading and navigation with web ([3b78d51](https://github.com/planetaryescape/gbfm/commit/3b78d51408d069d9e94c4d273ca421533ec7f8ca))
+* **mobile:** browse tweet previews with separate date filters ([a118da3](https://github.com/planetaryescape/gbfm/commit/a118da323aca56f0ee3e10088084dd62533c64ab))
+* **mobile:** compose tweets from saved drafts and incoming shares ([6729342](https://github.com/planetaryescape/gbfm/commit/67293420cc4f5d2e426054042b80e185ec8037f8))
+* **mobile:** declutter tweet reading with swipe navigation ([45bd601](https://github.com/planetaryescape/gbfm/commit/45bd601f1385338a28fd04e6291efbd8eabd6d2e))
+* **mobile:** make tweet swipes track the finger on the UI thread ([a191603](https://github.com/planetaryescape/gbfm/commit/a191603e8a3e4a2100abbdd6846fdae47a659902))
+* **mobile:** unify tweet composition with tags, editing and replies ([bfac222](https://github.com/planetaryescape/gbfm/commit/bfac2227a0ba1736a7ff3b48557e298c24b83e87))
+* **mobile:** use custom angular navigation and playback icons ([f20ee37](https://github.com/planetaryescape/gbfm/commit/f20ee374d04135e49303d6734373b3d81b542807))
+* **reader:** accept swipes by distance and recent release velocity ([435e8e2](https://github.com/planetaryescape/gbfm/commit/435e8e2a6b4eeebf62472d7aad1073bf78a8eebf))
+* **reader:** replace timeline browsing with deliberate month visits ([969ef04](https://github.com/planetaryescape/gbfm/commit/969ef04e20a1c933a95c5e22c72fc34bc228f784))
+* **www:** animate tweet dragging, snap-back, and swipe transitions ([98b533e](https://github.com/planetaryescape/gbfm/commit/98b533ea18fd922e041dffae2d6da89510860a12))
+* **www:** browse tweet previews beside the swipe reader ([49d79d8](https://github.com/planetaryescape/gbfm/commit/49d79d8213ee1db43abf841979b4df50e35ab888))
+* **www:** manage personal API keys from settings ([9765b12](https://github.com/planetaryescape/gbfm/commit/9765b12f907dc10074fb7247b313ae606b4cd5ed))
+* **www:** simplify reader chrome and add touch navigation ([3958ea1](https://github.com/planetaryescape/gbfm/commit/3958ea14de0a803f19467d807c57472291c7fac6))
+* **www:** surface newer unread tweets and keep a return point ([b1c989b](https://github.com/planetaryescape/gbfm/commit/b1c989ba4be5df56b67bd34de796301ccb916c9a))
+
 # [2.120.0](https://github.com/planetaryescape/gbfm/compare/v2.119.0...v2.120.0) (2026-11-01)
 
 

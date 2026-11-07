@@ -1,13 +1,16 @@
-import { brandDark, brandLight } from '@gbfm/theme/tokens'
 import { Effect } from 'effect'
 import { useState } from 'react'
-import { Pressable, Text, useColorScheme, View } from 'react-native'
+import { Pressable, Text, View } from 'react-native'
 
 import {
   type ColorSchemePreference,
   useColorSchemePreference,
   useSetColorSchemePreference,
 } from '@/store/preferences'
+import { useThemeColors } from '@/theme/colors'
+import { fonts } from '@/theme/fonts'
+
+import { SettingsSection } from './SettingsSection'
 
 const choices: ReadonlyArray<{
   readonly value: ColorSchemePreference
@@ -23,76 +26,64 @@ export function AppearanceSection() {
   const preference = useColorSchemePreference()
   const setPreference = useSetColorSchemePreference()
   const [error, setError] = useState<string | null>(null)
-  const systemColorScheme = useColorScheme()
-  const isDark = (preference === 'system' ? systemColorScheme : preference) !== 'light'
-  const colors = isDark ? brandDark : brandLight
+  const colors = useThemeColors()
 
   return (
     <View style={{ gap: 12 }}>
-      <Text style={{ color: colors['pastel-green-1'], fontSize: 14, fontWeight: '600' }}>
-        Appearance
-      </Text>
-      {choices.map((choice) => {
-        const selected = choice.value === preference
+      <SettingsSection title='Appearance'>
+        {choices.map((choice) => {
+          const selected = choice.value === preference
 
-        return (
-          <Pressable
-            accessibilityRole='radio'
-            accessibilityState={{ selected }}
-            key={choice.value}
-            onPress={() =>
-              Effect.runSync(
-                setPreference(choice.value).pipe(
-                  Effect.match({
-                    onSuccess: () => setError(null),
-                    onFailure: () => setError('Could not save your appearance choice. Try again.'),
-                  }),
-                ),
-              )
-            }
-            style={({ pressed }) => ({
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 14,
-              padding: 16,
-              borderRadius: 4,
-              borderWidth: 1,
-              borderColor: selected ? colors['pastel-green-1'] : `${colors['pastel-green-2']}55`,
-              backgroundColor: colors.darkerBg,
-              opacity: pressed ? 0.8 : 1,
-            })}>
-            <View
-              style={{
-                width: 20,
-                height: 20,
-                borderRadius: 2,
-                borderWidth: 2,
-                borderColor: colors['pastel-green-1'],
+          return (
+            <Pressable
+              accessibilityRole='radio'
+              accessibilityState={{ selected }}
+              key={choice.value}
+              onPress={() =>
+                Effect.runSync(
+                  setPreference(choice.value).pipe(
+                    Effect.match({
+                      onSuccess: () => setError(null),
+                      onFailure: () =>
+                        setError('Could not save your appearance choice. Try again.'),
+                    }),
+                  ),
+                )
+              }
+              style={({ pressed }) => ({
+                flexDirection: 'row',
                 alignItems: 'center',
-                justifyContent: 'center',
-              }}>
-              {selected ? (
-                <View
+                gap: 14,
+                padding: 16,
+                opacity: pressed ? 0.8 : 1,
+              })}>
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text
+                  style={{ color: colors.strong, fontFamily: fonts.monoSemiBold, fontSize: 14 }}>
+                  {choice.label}
+                </Text>
+                <Text
                   style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: 1,
-                    backgroundColor: colors['pastel-green-1'],
-                  }}
-                />
-              ) : null}
-            </View>
-            <View style={{ flex: 1, gap: 3 }}>
-              <Text style={{ color: colors['pastel-green-1'], fontSize: 16, fontWeight: '600' }}>
-                {choice.label}
+                    color: colors.muted,
+                    fontFamily: fonts.mono,
+                    fontSize: 12,
+                    lineHeight: 18,
+                  }}>
+                  {choice.description}
+                </Text>
+              </View>
+              <Text
+                accessibilityElementsHidden
+                importantForAccessibility='no'
+                style={{ color: colors.accent, fontSize: 20, minWidth: 20, textAlign: 'center' }}>
+                {selected ? '✓' : ''}
               </Text>
-              <Text style={{ color: colors.defaultText, fontSize: 14 }}>{choice.description}</Text>
-            </View>
-          </Pressable>
-        )
-      })}
+            </Pressable>
+          )
+        })}
+      </SettingsSection>
       {error ? (
-        <Text accessibilityRole='alert' style={{ color: colors.error }}>
+        <Text accessibilityRole='alert' style={{ color: colors.error, fontFamily: fonts.mono }}>
           {error}
         </Text>
       ) : null}

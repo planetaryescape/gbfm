@@ -3,12 +3,16 @@ import { Option, Schema } from 'effect'
 import * as Server from 'foldkit/experimental/server'
 
 import { safeReturnPath } from '../page/auth/links'
+import { loginOAuthQuery } from '../page/connect/continuation'
+import { connectionRedirect } from '../page/connect/response'
+import { handleConnection } from '../page/connect/server'
 import { parseCheckpoint } from '../page/tweet/reader'
 import { parseRoute, Route } from '../route'
 import { handleBrowserTelemetry } from '../telemetry/server'
 import { apiRequest } from './api'
 import { handleFormAction, redirect } from './form-actions'
 import { handleMosaicGeneration } from './mosaic'
+import { forwardOAuthAuthorization } from './oauth-authorization'
 import { loadPageData } from './page-data'
 import { createPageResponse } from './page-response'
 
@@ -48,6 +52,15 @@ export const renderResponse = async (request: Request): Promise<Server.EntryResu
   const requestId = resolveRequestId(request.headers.get('x-request-id'))
   const ownedRequest = new Request(url, request)
   ownedRequest.headers.set('x-request-id', requestId)
+
+  if (url.pathname === '/connect/gbfm' || url.pathname.startsWith('/connect/gbfm/'))
+    return handleConnection(ownedRequest)
+
+  if (Route.guards.Auth(route) && isSignInOrUp(route.action) && request.method === 'GET') {
+    const continuation = loginOAuthQuery(url.searchParams.get('returnTo') ?? '', url.origin)
+
+    if (continuation) return connectionRedirect(`/connect/gbfm?${continuation}`)
+  }
 
   if (url.pathname === '/telemetry/browser') {
     if (!import.meta.env.PROD) return Server.Responded(new Response(null, { status: 204 }))
@@ -99,14 +112,24 @@ export const renderResponse = async (request: Request): Promise<Server.EntryResu
   )
     return handleFormAction(ownedRequest)
 
+  if (url.pathname === '/auth/oauth2/authorize' && request.method === 'GET')
+    return Server.Responded(await forwardOAuthAuthorization(ownedRequest))
+
   if (
     url.pathname.startsWith('/api/') ||
     url.pathname.startsWith('/s/') ||
     (url.pathname === '/auth/verify-email' && url.searchParams.has('token')) ||
     (url.pathname.startsWith('/auth/') && !Route.guards.Auth(route)) ||
-    ['/rss.xml', '/sitemap.xml'].includes(url.pathname)
+    ['/rss.xml', '/sitemap.xml', '/mcp.txt'].includes(url.pathname)
   )
-    return Server.Responded(await apiRequest(ownedRequest, `${url.pathname}${url.search}`))
+    return Server.Responded(
+      await apiRequest(
+        url.pathname.startsWith('/auth/oauth2/')
+          ? new Request(ownedRequest, { redirect: 'manual' })
+          : ownedRequest,
+        `${url.pathname}${url.search}`,
+      ),
+    )
 
   if (!['GET', 'HEAD'].includes(request.method))
     return Server.Responded(new Response(null, { status: 405 }))
@@ -154,7 +177,12 @@ export const renderResponse = async (request: Request): Promise<Server.EntryResu
 
   if (page.redirect) return redirectPage(page.redirect)
 
-  if (page.flags.principal && Route.guards.Auth(route) && isSignInOrUp(route.action))
+  if (
+    page.flags.principal &&
+    Route.guards.Auth(route) &&
+    isSignInOrUp(route.action) &&
+    !loginOAuthQuery(url.searchParams.get('returnTo') ?? '', url.origin)
+  )
     return redirectPage(safeReturnPath(url.searchParams.get('returnTo') ?? '', url.origin))
 
   return createPageResponse(ownedRequest, dataRequest, startedAt, page)

@@ -1,12 +1,19 @@
 import { PostResponse } from '@gbfm/api/post'
 import { Effect, Redacted } from 'effect'
-import { HttpClient, HttpClientResponse } from 'effect/http'
+import { HttpClient, HttpClientResponse, HttpClientError } from 'effect/http'
 import { HttpApiError } from 'effect/http-api'
 import { expect, test } from 'vitest'
 
 import { emptyTweetDraft } from '@/tweets/draft'
 
-import { saveTweet, type AuthoringConnection } from './tweetAuthoring'
+import {
+  loadTweetForEdit,
+  publishReply,
+  saveTweet,
+  type AuthoringConnection,
+  TweetAuthoringFailed,
+  TweetAuthoringUncertain,
+} from './tweetAuthoring'
 
 const post = PostResponse.make({
   id: 'saved-id',
@@ -136,4 +143,94 @@ test('malformed success payloads and transport failures remain typed failures', 
   expect(
     await Effect.runPromise(saveTweet(unavailable.connection, draft, true).pipe(Effect.isFailure)),
   ).toBe(true)
+})
+
+test('typed refusals remain definitive while transport and malformed success remain uncertain', async () => {
+  for (const refused of [
+    new HttpApiError.Unauthorized(),
+    new HttpApiError.Forbidden(),
+    new HttpApiError.BadRequest(),
+    new HttpApiError.NotFound(),
+  ]) {
+    const status =
+      refused instanceof HttpApiError.Unauthorized
+        ? 401
+        : refused instanceof HttpApiError.Forbidden
+          ? 403
+          : refused instanceof HttpApiError.NotFound
+            ? 404
+            : 400
+
+    const server = fixture(() => Response.json(refused, { status }))
+
+    const error = await Effect.runPromise(
+      publishReply(server.connection, 'parent', draft).pipe(Effect.flip),
+    )
+
+    expect(error).toBeInstanceOf(TweetAuthoringFailed)
+  }
+
+  const malformed = fixture(() => Response.json({ slug: 'already-created' }))
+  expect(
+    await Effect.runPromise(publishReply(malformed.connection, 'parent', draft).pipe(Effect.flip)),
+  ).toBeInstanceOf(TweetAuthoringUncertain)
+
+  const connection = {
+    ...malformed.connection,
+    httpClient: HttpClient.make((request) =>
+      Effect.fail(
+        new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({ request }),
+        }),
+      ),
+    ),
+  }
+
+  expect(
+    await Effect.runPromise(publishReply(connection, 'parent', draft).pipe(Effect.flip)),
+  ).toBeInstanceOf(TweetAuthoringUncertain)
+
+  const failedServer = fixture(() =>
+    Response.json(new HttpApiError.InternalServerError(), { status: 500 }),
+  )
+
+  expect(
+    await Effect.runPromise(
+      publishReply(failedServer.connection, 'parent', draft).pipe(Effect.flip),
+    ),
+  ).toBeInstanceOf(TweetAuthoringUncertain)
+})
+
+test('reply retries are independent creates, not slug-conflict recovery', async () => {
+  const server = fixture(() => Response.json(compiled))
+  await Effect.runPromise(publishReply(server.connection, 'parent', draft))
+  await Effect.runPromise(publishReply(server.connection, 'parent', draft))
+  expect(server.requests.map(({ method, path }) => [method, path])).toEqual([
+    ['POST', '/api/content/posts/micro/parent/replies'],
+    ['POST', '/api/content/posts/micro/parent/replies'],
+  ])
+})
+
+test('reply conflict is a failure without an automatic retry', async () => {
+  const server = fixture(() => Response.json(new HttpApiError.Conflict(), { status: 409 }))
+  expect(
+    await Effect.runPromise(
+      publishReply(server.connection, 'parent', draft).pipe(Effect.isFailure),
+    ),
+  ).toBe(true)
+  expect(server.requests).toHaveLength(1)
+})
+
+test('edit restore retains the slug, account-draft status and tags in composer text', async () => {
+  const server = fixture(() =>
+    Response.json({ ...compiled, draft: true, tags: ['jazz'], content: 'Notes' }),
+  )
+
+  const loaded = await Effect.runPromise(loadTweetForEdit(server.connection, draft.slug))
+  expect(loaded.draft).toEqual({ ...draft, text: 'A record\n\nNotes\n\n#jazz', remote: true })
+  expect(loaded.published).toBe(false)
+  expect(loaded.tags).toEqual(['jazz'])
+  expect(server.requests.map(({ method, path }) => [method, path])).toEqual([
+    ['GET', `/api/content/posts/${draft.slug}/edit`],
+  ])
 })

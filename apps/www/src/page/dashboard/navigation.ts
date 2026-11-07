@@ -65,6 +65,7 @@ export const workspaces = {
           { section: 'player', label: 'Player' },
           { section: 'integrations', label: 'Integrations', aliases: ['spotify-callback'] },
           { section: 'api-keys', label: 'API keys' },
+          { section: 'connections', label: 'Connections' },
         ],
       },
     ],

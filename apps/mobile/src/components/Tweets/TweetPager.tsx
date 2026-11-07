@@ -5,7 +5,7 @@ import { FlatList, View } from 'react-native'
 
 import type { Tweet } from '@/api/tweets'
 import { haptics } from '@/feedback/haptics'
-import { useAuthStore } from '@/store/auth'
+import { useAuthIdentity, useAuthStore } from '@/store/auth'
 import { readReaderPosition } from '@/tweets/readerPosition'
 import { useAnchoredFeed } from '@/tweets/useAnchoredFeed'
 import { useReaderDiscovery } from '@/tweets/useReaderDiscovery'
@@ -111,7 +111,9 @@ function Pages({
 }
 
 export function TweetPager() {
-  const identity = useAuthStore((auth) => auth.user?.id ?? 'anonymous')
+  const identity = useAuthIdentity()
+
+  if (identity === null) return <TweetsStatus kind='loading' />
 
   return <ReadingSession key={identity} identity={identity} />
 }

@@ -37,8 +37,9 @@ import {
 import {
   asResolvedReference,
   CanonicalMusicIdentityRepository,
-  type ClaimResult,
+  ClaimResult,
   type EntityReference,
+  type SettledClaim,
 } from './repository'
 import {
   hasUsableResult,
@@ -256,13 +257,13 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
       ownerToken: string,
       attempt = 0,
       observedClaim?: ClaimResult,
-    ): Effect.Effect<EntityReference | 'owned', MusicIdentityError> =>
+    ): Effect.Effect<SettledClaim, MusicIdentityError> =>
       Effect.gen(function* () {
         const claim = observedClaim ?? (yield* claimSource(source, ownerToken, attempt))
 
-        if (Predicate.isTagged(claim, 'owned')) return 'owned' as const
+        if (ClaimResult.$is('owned')(claim)) return claim
 
-        if (Predicate.isTagged(claim, 'resolved')) return claim.reference
+        if (ClaimResult.$is('resolved')(claim)) return claim
 
         if (attempt >= leaseTiming.waitAttempts) {
           return yield* new MusicIdentityBusy({ retryAfterMs: claim.retryAfterMs })
@@ -271,7 +272,7 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
         yield* Effect.sleep(`${leaseTiming.waitMs} millis`)
         const reference = yield* readReference(source)
 
-        if (reference) return reference
+        if (reference) return ClaimResult.resolved({ reference })
 
         return yield* claimWithWait(source, ownerToken, attempt + 1)
       })
@@ -305,8 +306,8 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
         const ownerToken = crypto.randomUUID()
         const claim = yield* claimWithWait(source, ownerToken)
 
-        if (claim !== 'owned') {
-          return yield* loadResolvedEntity(repository, claim, false).pipe(provideDb)
+        if (ClaimResult.$is('resolved')(claim)) {
+          return yield* loadResolvedEntity(repository, claim.reference, false).pipe(provideDb)
         }
 
         const adopted = yield* repository
@@ -405,8 +406,8 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
         const ownerToken = crypto.randomUUID()
         const firstClaim = yield* claimWithWait(initial, ownerToken)
 
-        if (firstClaim !== 'owned') {
-          return yield* loadResolvedEntity(repository, firstClaim, false).pipe(provideDb)
+        if (ClaimResult.$is('resolved')(firstClaim)) {
+          return yield* loadResolvedEntity(repository, firstClaim.reference, false).pipe(provideDb)
         }
 
         const ownedSources: Array<ParsedMusicSource> = [initial]
@@ -466,8 +467,8 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
 
             const claim = yield* claimWithWait(source, ownerToken, 0, attempted)
 
-            if (claim === 'owned') ownedSources.push(source)
-            else incumbents.set(referenceKey(claim), claim)
+            if (ClaimResult.$is('owned')(claim)) ownedSources.push(source)
+            else incumbents.set(referenceKey(claim.reference), claim.reference)
           }
 
           if (incumbents.size > 1) {

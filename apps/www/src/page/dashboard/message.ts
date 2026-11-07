@@ -36,6 +36,7 @@ export const Message = defineMessageUnion({
   LoadRequested: {},
   Loaded: { document: DashboardDocument },
   Failed: { message: Schema.String },
+  ConnectionsUnavailable: {},
   FieldChanged: { name: Schema.String, value: Schema.String },
   ToggleChanged: { name: Schema.String, value: Schema.Boolean },
   SaveProfile: {},
@@ -50,7 +51,8 @@ export const Message = defineMessageUnion({
   SpotifyRequested: {
     action: Schema.Literals(['status', 'connect', 'disconnect', 'completeCallback']),
   },
-  SpotifyLoaded: { status: SpotifyStatus },
+  SpotifyLoaded: { requestId: Schema.Number, status: SpotifyStatus },
+  SpotifyFailed: { requestId: Schema.Number, message: Schema.String },
 })
 
 export type Message = typeof Message.Type

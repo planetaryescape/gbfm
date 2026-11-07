@@ -4,7 +4,7 @@ import { RichContentDiagnostic, RichContentDocument } from '@gbfm/rich-content/s
 import { Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 
-import { Kind } from './model'
+import { Kind, SaveOwner } from './model'
 import { CreatorDraftSchema as Draft, CreatorIdentity, MusicReference } from './services'
 
 export const Message = defineMessageUnion({
@@ -59,8 +59,17 @@ export const Message = defineMessageUnion({
   ReviewClosed: {},
   ResolveMusicRequested: {},
   ResolvePostMusicRequested: {},
-  PostMusicResolved: ResolvePostMusicResponse.fields,
-  PostMusicFailed: { postId: Schema.String, message: Schema.String },
+  PostMusicResolved: {
+    ...ResolvePostMusicResponse.fields,
+    owner: SaveOwner,
+    requestedUrl: Schema.String,
+  },
+  PostMusicFailed: {
+    postId: Schema.String,
+    owner: SaveOwner,
+    requestedUrl: Schema.String,
+    message: Schema.String,
+  },
   MusicResolved: {
     entityType: Schema.Literals(['album', 'track', 'playlist']),
     entityId: Schema.String,
@@ -82,10 +91,18 @@ export const Message = defineMessageUnion({
   DiscardRequested: {},
   PublishRequested: {},
   DraftSaveRequested: {},
-  Saved: { id: Schema.String, slug: Schema.String, published: Schema.Boolean },
-  Failed: { operation: Schema.String, message: Schema.String },
-  Hydrated: { draft: Schema.NullOr(Draft), creators: Schema.Array(CreatorIdentity) },
-  LocallySaved: {},
+  Saved: { owner: SaveOwner, id: Schema.String, slug: Schema.String, published: Schema.Boolean },
+  SaveFailed: { owner: SaveOwner, message: Schema.String },
+  LocalSaveFailed: { editorId: Schema.String, revision: Schema.Number, message: Schema.String },
+  LocalSaveReconciled: { owner: SaveOwner },
+  LocalSaveReconcileFailed: { owner: SaveOwner, message: Schema.String },
+  Failed: { operation: Schema.String, editorId: Schema.String, message: Schema.String },
+  Hydrated: {
+    draft: Schema.NullOr(Draft),
+    creators: Schema.Array(CreatorIdentity),
+    source: Schema.Literals(['remote', 'local', 'empty']),
+  },
+  LocallySaved: { editorId: Schema.String, revision: Schema.Number },
   ArtworkChosen: { files: Schema.Array(Schema.instanceOf(File)) },
   ArtworkUploaded: { url: Schema.String },
   MosaicRequested: {},

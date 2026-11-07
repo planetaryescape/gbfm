@@ -4,10 +4,13 @@ import { type Context, Effect, Layer, Scope } from 'effect'
 
 import { env } from '@/env'
 
-import { SPOTIFY_REDIRECT_URI } from './constants'
+import { spotifyConnectionLifecycle } from './connectionLifecycle'
+import { SPOTIFY_CONFIGURATION_MESSAGE, SPOTIFY_REDIRECT_URI } from './constants'
 import { installSpotifyCryptoPolyfill } from './cryptoPolyfill'
 import {
   hydrateSpotifyTokensFromSecureStore,
+  guardSpotifyTokenWrites,
+  invalidateSpotifyTokens,
   spotifyHistoryStub,
   spotifyLocalStorage,
   spotifySessionStorage,
@@ -20,10 +23,8 @@ const buildSpotifyContext = () => {
 
   const clientId = env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID
 
-  if (!clientId) {
-    return Promise.reject(
-      new SpotifyConfigurationError({ message: 'Missing EXPO_PUBLIC_SPOTIFY_CLIENT_ID.' }),
-    )
+  if (!clientId?.trim()) {
+    return Promise.reject(new SpotifyConfigurationError({ message: SPOTIFY_CONFIGURATION_MESSAGE }))
   }
 
   const spotifyLayer = SpotifyBrowser.layer({
@@ -64,3 +65,13 @@ export const makeSpotifyEffectRunner = <Requirements>(
 }
 
 export const runSpotifyEffect = makeSpotifyEffectRunner(buildSpotifyContext)
+
+export const spotifyLifecycle = spotifyConnectionLifecycle(async (work, options) => {
+  guardSpotifyTokenWrites(options?.isCurrent ?? (() => true))
+
+  try {
+    return await runSpotifyEffect(work)
+  } finally {
+    guardSpotifyTokenWrites(() => true)
+  }
+}, invalidateSpotifyTokens)

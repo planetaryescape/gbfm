@@ -2,6 +2,7 @@ import { IssueKeyInput } from '@gbfm/api/personal-access-keys'
 import { Context, Effect, Layer, Queue, Redacted, Schema, Stream } from 'effect'
 import { Mount } from 'foldkit'
 
+import { createIssuanceState } from './issuance-state'
 import { Message } from './model'
 import { showSecret } from './secret-display'
 import { KeyService, KeyServiceLive } from './service'
@@ -26,7 +27,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
       Effect.gen(function* () {
         const form = element.querySelector('[data-key-create-form]')
 
-        if (!(form instanceof HTMLFormElement)) return
+        if (!(form instanceof HTMLFormElement)) return yield* Effect.void
         const context = yield* Layer.build(KeyServiceLive)
         const service = Context.get(context, KeyService)
 
@@ -43,18 +44,12 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
           !(status instanceof HTMLElement) ||
           !(submitButton instanceof HTMLButtonElement)
         )
-          return
-        let busy = false
-        let live = false
-        let secret: Redacted.Redacted | null = null
-        let pending: IssueKeyInput | null = null
-        let verifying = false
+          return yield* Effect.void
+        const lifecycle = createIssuanceState()
 
         const clear = () => {
-          secret = null
-          pending = null
-          busy = false
-          submitButton.disabled = !live || verifying
+          lifecycle.clear()
+          submitButton.disabled = !lifecycle.live() || lifecycle.verifying()
           host.replaceChildren()
           const password = element.querySelector('input[type="password"]')
 
@@ -64,7 +59,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
         const submit = (event: Event) => {
           event.preventDefault()
 
-          if (!live || secret) return
+          if (!lifecycle.live() || lifecycle.secret()) return
 
           if (
             event.target instanceof HTMLFormElement &&
@@ -72,9 +67,8 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
           ) {
             const password = event.target.querySelector('input[type="password"]')
 
-            if (!pending || verifying || !(password instanceof HTMLInputElement) || !password.value)
+            if (!(password instanceof HTMLInputElement) || !password.value || !lifecycle.verify())
               return
-            verifying = true
             const value = Redacted.make(password.value)
             password.value = ''
             Queue.offerUnsafe(requests, { password: value })
@@ -82,8 +76,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
             return
           }
 
-          if (event.target !== form || busy) return
-          busy = true
+          if (event.target !== form || !lifecycle.submit()) return
           submitButton.disabled = true
           Queue.offerUnsafe(requests, new FormData(form))
         }
@@ -92,18 +85,18 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
           if (
             !(event.target instanceof HTMLDialogElement) ||
             !event.target.matches('[data-key-password-dialog]') ||
-            verifying ||
-            secret
+            lifecycle.verifying() ||
+            lifecycle.secret() ||
+            !lifecycle.busy()
           )
             return
-          pending = null
-          busy = false
-          submitButton.disabled = !live
+          lifecycle.clear()
+          submitButton.disabled = !lifecycle.live()
           status.textContent = ''
         }
 
         const click = (event: Event) => {
-          if (!live) return
+          if (!lifecycle.live()) return
 
           if (!(event.target instanceof Element)) return
 
@@ -114,7 +107,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
 
         const keydown = (event: Event) => {
           if (
-            !live ||
+            !lifecycle.live() ||
             !(event instanceof KeyboardEvent) ||
             event.key !== 'Escape' ||
             event.defaultPrevented
@@ -154,10 +147,14 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
         yield* viewStateChanges.pipe(
           Stream.runForEach((state) =>
             Effect.sync(() => {
-              live = state === 'Live'
+              lifecycle.setLive(state === 'Live')
 
-              if (!live) clear()
-              submitButton.disabled = !live || busy || secret !== null
+              if (!lifecycle.live()) clear()
+              submitButton.disabled =
+                !lifecycle.live() ||
+                lifecycle.verifying() ||
+                lifecycle.busy() ||
+                lifecycle.secret() !== null
             }),
           ),
           Effect.forkScoped,
@@ -175,7 +172,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
               }
 
               if (request === 'copy') {
-                const value = secret
+                const value = lifecycle.secret()
 
                 if (value)
                   yield* Effect.tryPromise(() =>
@@ -209,11 +206,11 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
                   Effect.match({
                     onFailure: (error) => {
                       status.textContent = error.message
-                      busy = false
+                      lifecycle.clear()
                       submitButton.disabled = false
                     },
                     onSuccess: (input) => {
-                      pending = input
+                      lifecycle.requestPassword(input)
                       status.textContent = 'Confirm your password to create this key.'
                       Queue.offerUnsafe(messages, Message.PasswordRequested())
                     },
@@ -223,18 +220,22 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
                 return
               }
 
-              const input = pending
+              const input = lifecycle.input()
 
-              if (!input || !live) return
+              if (!input || !lifecycle.live()) return
               Queue.offerUnsafe(messages, Message.PasswordVerificationStarted())
 
               yield* service.confirmPassword(userId, request.password).pipe(
                 Effect.flatMap(() =>
-                  pending === input && live ? service.issue(input) : Effect.succeed(null),
+                  lifecycle.input() === input && lifecycle.live()
+                    ? service.issue(input)
+                    : Effect.succeed(null),
                 ),
                 Effect.match({
                   onFailure: (error) => {
-                    verifying = false
+                    lifecycle.verificationFailed()
+                    submitButton.disabled =
+                      !lifecycle.live() || lifecycle.busy() || lifecycle.secret() !== null
                     status.textContent = 'Key not created.'
                     Queue.offerUnsafe(
                       messages,
@@ -245,12 +246,11 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
                     if (password instanceof HTMLInputElement) password.focus()
                   },
                   onSuccess: (issued) => {
-                    verifying = false
-                    pending = null
+                    lifecycle.issued(issued?.secret ?? null)
+                    const secret = lifecycle.secret()
 
                     if (!issued) {
-                      busy = false
-                      submitButton.disabled = !live
+                      submitButton.disabled = !lifecycle.live()
                       Queue.offerUnsafe(
                         messages,
                         Message.PasswordVerificationFailed({
@@ -261,22 +261,18 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
                       return
                     }
 
-                    secret = issued.secret
-
-                    if (!live) {
-                      secret = null
-                      busy = false
+                    if (!secret) {
+                      submitButton.disabled = !lifecycle.live()
                       status.textContent =
-                        'A key was issued while the view was paused. Revoke it from the list and create a replacement.'
-                      Queue.offerUnsafe(messages, Message.Issued())
+                        'A key was issued after this confirmation was cleared. Revoke it from the list and create a replacement.'
+                      Queue.offerUnsafe(messages, Message.Issued({ disclosure: 'Discarded' }))
 
                       return
                     }
 
-                    showSecret(host, issued.secret)
+                    showSecret(host, secret)
                     status.textContent = 'Key created.'
-                    busy = false
-                    Queue.offerUnsafe(messages, Message.Issued())
+                    Queue.offerUnsafe(messages, Message.Issued({ disclosure: 'Shown' }))
                   },
                 }),
               )
@@ -285,7 +281,7 @@ export const IssueKey = Mount.defineStream('PersonalAccessKeys.Issue', {
           Effect.forkScoped,
         )
 
-        yield* Effect.never
+        return yield* Effect.never
       }),
     ),
 })

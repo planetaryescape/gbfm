@@ -4,6 +4,7 @@ import { Text, TextInput, View } from 'react-native'
 
 import { SpotifyEntityActions } from '@/spotify/SpotifyEntityActions'
 import { useThemeColors } from '@/theme/colors'
+import { fonts } from '@/theme/fonts'
 
 type Props = {
   onNotice: (message: string) => void
@@ -19,7 +20,9 @@ export function SpotifyPasteAndPlay({ onNotice }: Props) {
 
   return (
     <View style={{ gap: 8 }}>
-      <Text style={{ color: colors.muted, fontSize: 13 }}>Paste a Spotify link</Text>
+      <Text style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 13 }}>
+        Paste a Spotify link
+      </Text>
       <TextInput
         accessibilityLabel='Spotify track, album, or playlist link'
         autoCapitalize='none'
@@ -34,6 +37,7 @@ export function SpotifyPasteAndPlay({ onNotice }: Props) {
           minHeight: 44,
           paddingHorizontal: 12,
           color: colors.text,
+          fontFamily: fonts.mono,
           borderColor: `${colors.muted}66`,
           borderWidth: 1,
           borderRadius: 4,
@@ -42,7 +46,7 @@ export function SpotifyPasteAndPlay({ onNotice }: Props) {
       />
 
       {showUnrecognized ? (
-        <Text style={{ color: colors.muted, fontSize: 12 }}>
+        <Text style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 12 }}>
           That doesn't look like a Spotify track, album, or playlist link.
         </Text>
       ) : null}

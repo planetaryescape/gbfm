@@ -1,3 +1,4 @@
+import { Data } from 'effect'
 import { onCLS, onINP, onLCP, type Metric } from 'web-vitals'
 
 import {
@@ -39,6 +40,12 @@ type Transport = {
   readonly fetch: (body: string) => Promise<void>
 }
 
+type BatchQueue =
+  | { readonly _tag: 'Empty' }
+  | { readonly _tag: 'Scheduled'; readonly events: Array<BrowserTelemetryEvent> }
+
+const BatchQueue = Data.taggedEnum<BatchQueue>()
+
 /** A browser telemetry queue with explicit lifecycle flush control. */
 export type TelemetryBatcher = {
   readonly add: (event: BrowserTelemetryEvent) => void
@@ -63,13 +70,17 @@ export function createTelemetryBatcher(input: {
   readonly now?: () => number
   readonly schedule?: (flush: () => void, delay: number) => void
 }): TelemetryBatcher {
-  let events: Array<BrowserTelemetryEvent> = []
-  let scheduled = false
+  let state: BatchQueue = BatchQueue.Empty()
   const now = input.now ?? Date.now
   const schedule = input.schedule ?? ((flush, delay) => globalThis.setTimeout(flush, delay))
 
   const flush = () => {
-    scheduled = false
+    const events = BatchQueue.$match(state, {
+      Empty: () => [],
+      Scheduled: ({ events }) => events,
+    })
+
+    state = BatchQueue.Empty()
 
     if (events.length === 0) return
 
@@ -82,7 +93,6 @@ export function createTelemetryBatcher(input: {
       events,
     }
 
-    events = []
     const body = JSON.stringify(batch)
 
     if (!input.transport.beacon(body)) void input.transport.fetch(body).catch(() => undefined)
@@ -90,12 +100,16 @@ export function createTelemetryBatcher(input: {
 
   return {
     add(event) {
-      events.push(event)
+      if (BatchQueue.$is('Scheduled')(state)) {
+        state.events.push(event)
 
-      if (events.length >= MAX_BATCH_EVENTS) flush()
-      else if (!scheduled) {
-        scheduled = true
-        schedule(flush, FLUSH_DELAY_MS)
+        if (state.events.length >= MAX_BATCH_EVENTS) flush()
+      } else {
+        const batch = BatchQueue.Scheduled({ events: [event] })
+        state = batch
+        schedule(() => {
+          if (state === batch) flush()
+        }, FLUSH_DELAY_MS)
       }
     },
     flush,
@@ -114,6 +128,7 @@ export function startBrowserTelemetry(input: {
   readonly navigation: TelemetryNavigation
   readonly endpoint?: string
   readonly sampleRate?: number
+  readonly observeVitals?: (report: (metric: Metric) => void) => void
 }): () => void {
   const release = boundedName(input.release, 'unknown')
   const sampleRate = input.sampleRate ?? (release === 'local' ? 1 : TELEMETRY_SAMPLE_RATE)
@@ -146,6 +161,7 @@ export function startBrowserTelemetry(input: {
   )
 
   const vitalRoute = currentRoute
+  let disposed = false
   let navigationStartedAt: number | undefined
   batcher.add({
     kind: 'navigation',
@@ -156,9 +172,11 @@ export function startBrowserTelemetry(input: {
 
   const stopNavigation = input.navigation.subscribe({
     before: () => {
+      if (disposed) return
       navigationStartedAt = performance.now()
     },
     after: (route) => {
+      if (disposed) return
       currentRoute = routeTemplate(route.routeId, route.pathname)
       const startedAt = navigationStartedAt
       navigationStartedAt = undefined
@@ -172,6 +190,7 @@ export function startBrowserTelemetry(input: {
   })
 
   const reportVital = (metric: Metric) => {
+    if (disposed) return
     let name: 'cls' | 'inp' | 'lcp'
 
     switch (metric.name) {
@@ -195,9 +214,12 @@ export function startBrowserTelemetry(input: {
     })
   }
 
-  onCLS(reportVital)
-  onINP(reportVital)
-  onLCP(reportVital)
+  if (input.observeVitals) input.observeVitals(reportVital)
+  else {
+    onCLS(reportVital)
+    onINP(reportVital)
+    onLCP(reportVital)
+  }
 
   const reportError = (event: ErrorEvent) =>
     batcher.add({
@@ -233,8 +255,6 @@ export function startBrowserTelemetry(input: {
   window.addEventListener(PLAYER_EVENT, reportPlayer)
   window.addEventListener('pagehide', batcher.flush)
   document.addEventListener('visibilitychange', flushWhenHidden)
-
-  let disposed = false
 
   return () => {
     if (disposed) return

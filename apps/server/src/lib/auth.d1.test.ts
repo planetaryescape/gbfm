@@ -77,6 +77,7 @@ const authLayer = (
   d1: D1Database,
   transport: ReturnType<typeof makeDeferredTransport>['layer'],
   queries?: Array<string>,
+  bindings: WorkerConfigBindings = workerBindings(),
 ) => {
   const database =
     queries === undefined
@@ -93,7 +94,7 @@ const authLayer = (
           }),
         )
 
-  const config = Layer.succeed(ConfigService, createConfig(workerBindings()))
+  const config = Layer.succeed(ConfigService, createConfig(bindings))
 
   const clock = Layer.succeed(Clock.Clock, {
     currentTimeMillis: Effect.sync(Date.now),
@@ -153,6 +154,42 @@ describe('AuthLive password-reset delivery', () => {
       providerMessageId: 'password-reset-receipt',
     })
   })
+})
+
+test('AuthLive uses the explicit MCP issuer, durable rate limits and only trusted IP headers', async () => {
+  await using resource = await createMigratedD1Database()
+
+  const transport = Layer.succeed(EmailTransport, {
+    send: () => Effect.succeed({ provider: 'cloudflare' as const, messageId: 'local-receipt' }),
+  })
+
+  const auth = await Effect.runPromise(
+    withTestLayer(
+      Auth,
+      authLayer(resource.database, transport, undefined, {
+        ...workerBindings(),
+        SHARE_URL: 'https://editorial-test.localhost',
+      }),
+    ),
+  )
+
+  expect(auth.options.baseURL).toBe('https://editorial-test.localhost/auth')
+  expect(auth.options.basePath).toBe('/auth')
+  expect(auth.options.rateLimit).toEqual({ enabled: true, storage: 'database' })
+  expect(auth.options.advanced?.ipAddress).toEqual({ ipAddressHeaders: ['cf-connecting-ip'] })
+
+  const registration = await auth.handler(
+    new Request('https://editorial-test.localhost/auth/oauth2/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'cf-connecting-ip': '192.0.2.79' },
+      body: JSON.stringify({
+        token_endpoint_auth_method: 'none',
+        redirect_uris: ['http://127.0.0.1:38479/callback'],
+      }),
+    }),
+  )
+
+  expect(registration.status).toBe(201)
 })
 
 test('joined cookie sessions read current roles, renew cookies and reject immediate revocation', async () => {

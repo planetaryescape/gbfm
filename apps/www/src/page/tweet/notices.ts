@@ -25,7 +25,7 @@ export const readerNotices = (model: Model, h: HtmlBuilder<Message>, slug: strin
       params.get('reset') === 'failed'
         ? notice(h, 'Reading history could not be reset. Try again.')
         : h.empty,
-      model.tweetReader.failed.includes(slug)
+      Reader.VisitState.guards.Failed(Reader.visitState(model.tweetReader, slug))
         ? h.div(
             [
               h.Role('alert'),

@@ -70,12 +70,26 @@ describe('API key management', () => {
     ).toBeUndefined()
   })
 
-  it('refreshes metadata after issuance without carrying the secret', () => {
-    const result = update(initialModel, Message.Issued())
-    expect(result.commands?.[0]).toMatchObject({
-      name: 'PersonalAccessKeys.Load',
-      args: { offset: 0 },
-    })
-    expect(Object.keys(result.model)).not.toContain('secret')
-  })
+  it.each([
+    {
+      message: Message.Issued({ disclosure: 'Shown' }),
+      notice: 'Key created. Save the secret below before leaving this page.',
+    },
+    {
+      message: Message.Issued({ disclosure: 'Discarded' }),
+      notice:
+        'A key was issued after this confirmation was cleared. Revoke it from the list and create a replacement.',
+    },
+  ])(
+    'refreshes metadata without carrying the secret for $message.disclosure',
+    ({ message, notice }) => {
+      const result = update(initialModel, message)
+      expect(result.commands?.[0]).toMatchObject({
+        name: 'PersonalAccessKeys.Load',
+        args: { offset: 0 },
+      })
+      expect(Object.keys(result.model)).not.toContain('secret')
+      expect(result.model.notice).toBe(notice)
+    },
+  )
 })

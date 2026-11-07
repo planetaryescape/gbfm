@@ -13,7 +13,10 @@ import { Clock, Context, Effect, Layer } from 'effect'
 import * as authSchema from '@/db/auth.schema'
 import { EMAIL_NOTIFICATION_TYPES } from '@/db/email.schema'
 import { Database, type DatabaseClient } from '@/db/layer'
+import * as oauthSchema from '@/db/oauth.schema'
 import { browserOrigins } from '@/lib/browser-origins'
+import { editorialOAuthPlugins } from '@/lib/editorial-oauth'
+import { editorialOAuthAdapter } from '@/lib/editorial-oauth-adapter'
 import {
   getOrCreateEmailPreferencesByUserId,
   updateEmailPreferences,
@@ -48,8 +51,16 @@ const makeAuth = (
   nowIso: () => Promise<string>,
 ) =>
   betterAuth({
-    database: drizzleAdapter(database, { provider: 'sqlite', schema: authSchema }),
-    advanced: { database: { joins: true } },
+    database: editorialOAuthAdapter(
+      drizzleAdapter(database, {
+        provider: 'sqlite',
+        schema: { ...authSchema, ...oauthSchema },
+      }),
+    ),
+    advanced: {
+      database: { joins: true },
+      ipAddress: config.mcp ? { ipAddressHeaders: ['cf-connecting-ip'] } : undefined,
+    },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: false,
@@ -151,14 +162,16 @@ const makeAuth = (
     },
     trustedOrigins: browserOrigins(config.urls.frontend),
     secret: config.auth.betterAuthSecret,
-    baseURL: config.auth.betterAuthUrl,
+    baseURL: config.mcp?.issuer ?? config.auth.betterAuthUrl,
     basePath: '/auth',
+    rateLimit: config.mcp ? { enabled: true, storage: 'database' } : undefined,
     plugins: [
       bearer(),
       username({
         displayUsernameNormalization: (displayUsername) => displayUsername.toLowerCase(),
       }),
       admin({ ac, roles: { admin: adminRole, editor, creator, user: userRole } }),
+      ...editorialOAuthPlugins(config, database),
     ],
   })
 

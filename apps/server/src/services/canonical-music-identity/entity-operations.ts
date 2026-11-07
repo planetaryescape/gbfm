@@ -29,7 +29,12 @@ import {
   MusicSourceInvalid,
 } from './errors'
 import { parseMusicSource, type ParsedMusicSource } from './music-source'
-import type { CanonicalMusicIdentityRepository, EntityReference } from './repository'
+import {
+  type CanonicalMusicIdentityRepository,
+  ClaimResult,
+  type EntityReference,
+  type SettledClaim,
+} from './repository'
 import { parseDiscoveredSources, uniqueLinks } from './source-result'
 import { annotateEntity, annotateSource, withSafeTypedSpan } from './telemetry'
 
@@ -40,7 +45,7 @@ type ReadReference = (
 type ClaimWithWait = (
   source: ParsedMusicSource,
   ownerToken: string,
-) => Effect.Effect<EntityReference | 'owned', MusicIdentityError>
+) => Effect.Effect<SettledClaim, MusicIdentityError>
 
 const referenceKey = (reference: EntityReference) => `${reference.entityType}:${reference.entityId}`
 
@@ -181,11 +186,11 @@ export const buildEntityOperations = (
       const ownerToken = crypto.randomUUID()
       const claim = yield* claimWithWait(source, ownerToken)
 
-      if (claim !== 'owned') {
-        if (referenceKey(claim) !== referenceKey(reference)) {
+      if (ClaimResult.$is('resolved')(claim)) {
+        if (referenceKey(claim.reference) !== referenceKey(reference)) {
           yield* repository.recordConflict(
             source.sourceKey,
-            claim,
+            claim.reference,
             reference,
             'manual_attachment_owned',
             new Date(),
@@ -193,8 +198,8 @@ export const buildEntityOperations = (
 
           return yield* new MusicIdentityConflict({
             sourceKey: source.sourceKey,
-            incumbentEntityType: claim.entityType,
-            incumbentEntityId: claim.entityId,
+            incumbentEntityType: claim.reference.entityType,
+            incumbentEntityId: claim.reference.entityId,
             candidateEntityType: reference.entityType,
             candidateEntityId: reference.entityId,
           })
@@ -419,15 +424,15 @@ export const buildEntityOperations = (
           ),
         )
 
-        if (claim === 'owned') {
+        if (ClaimResult.$is('owned')(claim)) {
           ownedSources.push(discovered)
           continue
         }
 
-        if (referenceKey(claim) !== referenceKey(reference)) {
+        if (referenceKey(claim.reference) !== referenceKey(reference)) {
           yield* repository.recordConflict(
             discovered.sourceKey,
-            claim,
+            claim.reference,
             reference,
             'refresh_discovered_owned',
             new Date(),
@@ -439,8 +444,8 @@ export const buildEntityOperations = (
 
           return yield* new MusicIdentityConflict({
             sourceKey: discovered.sourceKey,
-            incumbentEntityType: claim.entityType,
-            incumbentEntityId: claim.entityId,
+            incumbentEntityType: claim.reference.entityType,
+            incumbentEntityId: claim.reference.entityId,
             candidateEntityType: reference.entityType,
             candidateEntityId: reference.entityId,
           })

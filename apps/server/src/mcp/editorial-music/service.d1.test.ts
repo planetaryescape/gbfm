@@ -13,10 +13,12 @@ import { musicPlaylistsTable, musicTracksTable } from '@/db/music-entity.schema'
 import { postMusicReferencesTable } from '@/db/post-music-reference.schema'
 import { postCreators, postsTable } from '@/db/post.schema'
 import { entityLabelsTable, labelsTable } from '@/db/tags.schema'
+import { ValidationError } from '@/errors'
 import { withTestLayer } from '@/test/effect'
 import { createMigratedD1Database } from '@/test/migrate-d1'
 
 import { McpActor } from '../authorization'
+import { CommandAuthority } from '../command-authority'
 import { EditorialMcpConfig } from '../editorial'
 import { EditorialMcpSettings, projectPost } from '../model'
 import { DraftReferenceDisplay } from './contracts'
@@ -77,7 +79,22 @@ const harness = async () => {
           Layer.provide(Layer.succeed(Database, db)),
           Layer.provide(Layer.succeed(EditorialMcpConfig, config)),
         ),
-      ).pipe(Effect.provideService(McpActor, actor)),
+      ).pipe(
+        Effect.provideService(McpActor, actor),
+        // Domain tests deliberately use an explicit predicate, not persisted credential proof.
+        Effect.provideService(
+          CommandAuthority,
+          CommandAuthority.of({
+            checkpoint: () =>
+              Effect.succeed({
+                actorId: actor.userId,
+                clientId: actor.clientId,
+                resource: config.resourceUrl,
+                liveGuard: sql`EXISTS (SELECT 1 FROM user WHERE id = ${actor.userId} AND coalesce(banned, 0) = 0)`,
+              }),
+          }),
+        ),
+      ),
     )
 
   const snapshot = () => Effect.runPromise(loadEditorialSnapshot(db, postId))
@@ -257,6 +274,7 @@ test.each(['content', 'tags', 'refs', 'public', 'owner', 'role', 'target'] as co
             createdAt: new Date(),
           },
           draftMusicTargetsGuard(h.db, [h.playlist], new Date()),
+          sql`1`,
         ),
       ),
     ).toBe(false)
@@ -301,6 +319,8 @@ test.each(['ABORT', 'IGNORE'] as const)(
             result: '{}',
             createdAt: new Date(),
           },
+          undefined,
+          sql`1`,
         ),
       ),
     ).toBe(true)
@@ -336,6 +356,8 @@ test.each(['ABORT', 'IGNORE'] as const)(
             result: '{}',
             createdAt: new Date(),
           },
+          undefined,
+          sql`1`,
         ),
       ),
     ).rejects.toMatchObject({ code: 'unavailable' })
@@ -467,6 +489,40 @@ test('cross-owner admin, published drafts, revoked scopes and hidden playlists c
   await expect(
     h.run(Effect.flatMap(EditorialMusicService, (s) => s.attachMusic(input))),
   ).rejects.toMatchObject({ code: 'not_found' })
+  const [published] = await h.db.select().from(postsTable).where(eq(postsTable.id, h.postId))
+
+  if (!published) throw new Error('Missing published fixture')
+  const refs = await h.db.select().from(postMusicReferencesTable)
+  expect(
+    await guardedPostUpdate(
+      h.db,
+      published,
+      ownerId,
+      {
+        title: 'Allowed title edit',
+        musicEntityType: 'playlist',
+        musicEntityId: h.playlist.entityId.toUpperCase(),
+      },
+      undefined,
+      [],
+    ),
+  ).toHaveLength(1)
+  expect(await h.db.select().from(postMusicReferencesTable)).toEqual(refs)
+  const before = await h.state()
+  await expect(
+    guardedPostUpdate(
+      h.db,
+      published,
+      ownerId,
+      {
+        musicEntityType: 'track',
+        musicEntityId: h.track.entityId,
+      },
+      undefined,
+      [],
+    ),
+  ).rejects.toBeInstanceOf(ValidationError)
+  expect(await h.state()).toEqual(before)
 })
 
 test('read snapshots enforce authored/private versus public access and legacy fallback is represented once without marker inference', async () => {
@@ -499,4 +555,96 @@ test('read snapshots enforce authored/private versus public access and legacy fa
     .set({ musicEntityType: 'track', musicEntityId: h.track.entityId })
     .where(eq(postsTable.id, h.postId))
   await expect(h.snapshot()).rejects.toMatchObject({ code: 'unavailable' })
+})
+
+test('case-insensitive target identity preserves stored UUID spelling and rejects ambiguous case collisions', async () => {
+  await using h = await harness()
+
+  const stored = DraftMusicTarget.make({
+    entityType: 'track',
+    entityId: 'AaBbCcDd-aBcD-4AbC-8dEf-aAbBcCdDeEfF',
+  })
+
+  await h.db
+    .insert(musicTracksTable)
+    .values({ id: stored.entityId, title: 'Mixed case', slug: 'mixed-case' })
+
+  const input = {
+    ...(await h.mutation()),
+    target: { ...stored, entityId: stored.entityId.toLowerCase() },
+    position: 0,
+    primary: true,
+  }
+
+  const result = await h.run(Effect.flatMap(EditorialMusicService, (s) => s.attachMusic(input)))
+  expect(result.post.musicReferences.references).toEqual([stored])
+  expect(result.post.musicReferences.primary).toEqual(stored)
+  expect((await h.db.select().from(postMusicReferencesTable))[0]?.trackId).toBe(stored.entityId)
+  expect(
+    await h.run(
+      Effect.flatMap(EditorialMusicService, (s) =>
+        s.attachMusic({ ...input, target: { ...stored, entityId: stored.entityId.toUpperCase() } }),
+      ),
+    ),
+  ).toEqual(result)
+  await h.db
+    .insert(musicTracksTable)
+    .values({ id: stored.entityId.toLowerCase(), title: 'Ambiguous', slug: 'ambiguous' })
+  const retry = await h.run(Effect.flatMap(EditorialMusicService, (s) => s.attachMusic(input)))
+  expect(retry.post.musicReferences.display).toEqual([
+    DraftReferenceDisplay.cases.Unavailable.make({ target: stored }),
+  ])
+  const insert = { ...(await h.mutation()), target: input.target, offset: 0 }
+  const before = await h.state()
+  await expect(
+    h.run(Effect.flatMap(EditorialMusicService, (s) => s.insertMusicEmbed(insert))),
+  ).rejects.toMatchObject({ code: 'unavailable' })
+  expect(await h.state()).toEqual(before)
+})
+
+test('fresh Unicode tag snapshots save successfully while same-cardinality membership drift still refuses', async () => {
+  await using h = await harness()
+  const input = { ...(await h.mutation()), tags: ['😀', 'Ａ'] }
+  await h.run(Effect.flatMap(EditorialMusicService, (s) => s.setDraftTags(input)))
+  const previous = await h.snapshot()
+
+  const receipt = {
+    id: crypto.randomUUID(),
+    actorId: ownerId,
+    postId: h.postId,
+    inputHash: 'unicode',
+    result: '{}',
+    createdAt: new Date(),
+  }
+
+  expect(
+    await Effect.runPromise(
+      saveEditorialChange(
+        h.db,
+        ownerId,
+        previous,
+        { title: 'Unicode saved' },
+        receipt,
+        undefined,
+        sql`1`,
+      ),
+    ),
+  ).toBe(true)
+  const current = await h.snapshot()
+  await h.db.update(labelsTable).set({ name: 'different' }).where(eq(labelsTable.name, '😀'))
+  const before = await h.state()
+  expect(
+    await Effect.runPromise(
+      saveEditorialChange(
+        h.db,
+        ownerId,
+        current,
+        { title: 'Must not save' },
+        { ...receipt, id: crypto.randomUUID() },
+        undefined,
+        sql`1`,
+      ),
+    ),
+  ).toBe(false)
+  expect(await h.state()).toEqual(before)
 })

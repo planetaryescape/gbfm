@@ -1,7 +1,7 @@
 import { EditorialPrincipal, McpPrincipal, PostId } from '@gbfm/core/editorial-mcp'
 import { UserId } from '@gbfm/core/identity'
 import { Role } from '@gbfm/core/roles'
-import { eq, inArray } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { Effect, Exit, Layer, Match, Option, Schema } from 'effect'
 import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http'
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest'
@@ -21,6 +21,7 @@ import { DatabaseTestLayer, db } from '@/test/database'
 import { withTestLayer } from '@/test/effect'
 
 import { McpActor, McpAuthorization, McpAuthorizationLive } from './authorization'
+import { CommandAuthority } from './command-authority'
 import { GetPostResult, ListDraftsResult } from './contracts'
 import { insertEditorialDraft, updateEditorialDraft } from './draft-store'
 import { EditorialDraftServiceLayer } from './drafts'
@@ -91,7 +92,22 @@ const createApp = (postServiceLayer: Layer.Layer<PostService> = postLayer) =>
 
           if (Option.isNone(principal)) return yield* effect
 
-          return yield* effect.pipe(Effect.provideService(EditorialActor, principal.value))
+          return yield* effect.pipe(
+            Effect.provideService(EditorialActor, principal.value),
+            // Test-only transport: persisted OAuth authority is exercised separately.
+            Effect.provideService(
+              CommandAuthority,
+              CommandAuthority.of({
+                checkpoint: () =>
+                  Effect.succeed({
+                    actorId: principal.value.userId,
+                    clientId: principal.value.clientId,
+                    resource: config.resourceUrl,
+                    liveGuard: sql`1`,
+                  }),
+              }),
+            ),
+          )
         }),
     },
   )
@@ -500,14 +516,22 @@ describe('draft-only MCP writes', () => {
     const postId = `mcp-${'b'.repeat(64)}`
     const input = { requestId: crypto.randomUUID(), title: 'Must roll back', content: '' }
     await expect(
-      insertEditorialDraft(db, ownerId, postId, input, new Date(), {
-        id: crypto.randomUUID(),
-        actorId: 'missing-user',
+      insertEditorialDraft(
+        db,
+        ownerId,
         postId,
-        inputHash: 'test',
-        result: '{}',
-        createdAt: new Date(),
-      }),
+        input,
+        new Date(),
+        {
+          id: crypto.randomUUID(),
+          actorId: 'missing-user',
+          postId,
+          inputHash: 'test',
+          result: '{}',
+          createdAt: new Date(),
+        },
+        sql`1`,
+      ),
     ).rejects.toThrow()
     expect(await db.select().from(postsTable).where(eq(postsTable.id, postId))).toEqual([])
     expect(await db.select().from(postCreators).where(eq(postCreators.postId, postId))).toEqual([])
@@ -710,6 +734,7 @@ describe('draft-only MCP writes', () => {
           result: '{}',
           createdAt: new Date(),
         },
+        sql`1`,
       )
 
       expect(changed).toBe(false)

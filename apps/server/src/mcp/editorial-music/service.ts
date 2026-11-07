@@ -1,4 +1,4 @@
-import type { PostId, PostVersion } from '@gbfm/core/editorial-mcp'
+import type { McpScope, PostId, PostVersion } from '@gbfm/core/editorial-mcp'
 import {
   DraftMusicReferenceChange,
   type DraftMusicTarget,
@@ -24,12 +24,12 @@ import {
 import {
   AttachMusicInput,
   DetachMusicInput,
-  DraftReferenceDisplay,
   InsertMusicEmbedInput,
   ReferenceWriteResult,
   SetDraftTagsInput,
 } from './contracts'
 import {
+  checkpointEditorialCommand,
   editorialConflict,
   editorialOperationKeys,
   loadOwnedEditorialDraft,
@@ -38,7 +38,12 @@ import {
   type EditorialPatch,
 } from './save'
 import type { EditorialSnapshot } from './snapshot'
-import { draftMusicTargetsGuard, maskReferenceWriteResult, readDraftMusicTarget } from './targets'
+import {
+  draftMusicTargetsGuard,
+  maskReferenceWriteResult,
+  projectReferenceWriteResult,
+  readDraftMusicTarget,
+} from './targets'
 
 const invalid = () =>
   new EditorialToolError({ code: 'invalid_input', message: 'Invalid editorial mutation.' })
@@ -52,8 +57,20 @@ const makeEditorialMusic = Effect.gen(function* () {
   const db = yield* Database
   const authorization = yield* McpAuthorization
   const config = yield* EditorialMcpConfig
-  const write = authorization.requireScopes(['posts:read', 'drafts:write'])
-  const musicWrite = authorization.requireScopes(['posts:read', 'drafts:write', 'catalogue:read'])
+
+  const command = (scopes: ReadonlyArray<McpScope>) =>
+    authorization
+      .requireScopes(scopes)
+      .pipe(
+        Effect.flatMap((actor) =>
+          checkpointEditorialCommand(scopes, actor.userId).pipe(
+            Effect.map((checkpoint) => ({ ...actor, liveGuard: checkpoint.liveGuard })),
+          ),
+        ),
+      )
+
+  const write = command(['posts:read', 'drafts:write'])
+  const musicWrite = command(['posts:read', 'drafts:write', 'catalogue:read'])
 
   const endpoint = {
     environment: config.environment,
@@ -143,7 +160,7 @@ const makeEditorialMusic = Effect.gen(function* () {
         Effect.flatMap(boundEditorialResult),
       )
 
-      yield* authorize
+      const current = yield* authorize
       yield* saveEditorialChange(
         db,
         actor.userId,
@@ -157,6 +174,7 @@ const makeEditorialMusic = Effect.gen(function* () {
           createdAt: now,
         },
         draftMusicTargetsGuard(db, targets, now),
+        current.liveGuard,
       )
       const committed = yield* replay
 
@@ -169,24 +187,7 @@ const makeEditorialMusic = Effect.gen(function* () {
     projectPost(next, config).pipe(Effect.map((post) => ({ endpoint, post })))
 
   const projectReferences = (next: EditorialSnapshot) =>
-    Effect.gen(function* () {
-      const post = yield* projectPost(next, config)
-
-      const display = yield* Effect.forEach(
-        next.musicReferences.references,
-        (target) =>
-          readDraftMusicTarget(db, target).pipe(
-            Effect.catchTag('EditorialToolError', (error) =>
-              error.code === 'not_found'
-                ? Effect.succeed(DraftReferenceDisplay.cases.Unavailable.make({ target }))
-                : Effect.fail(error),
-            ),
-          ),
-        { concurrency: 4 },
-      )
-
-      return { endpoint, post: { ...post, musicReferences: { ...next.musicReferences, display } } }
-    })
+    projectReferenceWriteResult(db, next, config)
 
   const attachMusic = Effect.fn('EditorialMusic.attach')(function* (
     raw: typeof AttachMusicInput.Type,
@@ -204,12 +205,12 @@ const makeEditorialMusic = Effect.gen(function* () {
       musicWrite,
       (previous) =>
         Effect.gen(function* () {
-          yield* readDraftMusicTarget(db, target)
+          const canonical = (yield* readDraftMusicTarget(db, target)).target
 
           const state = yield* transitionDraftMusicReferences(
             { musicReferences: previous.musicReferences, managed: previous.musicReferencesManaged },
             DraftMusicReferenceChange.cases.Attach.make({
-              target,
+              target: canonical,
               position: input.position,
               primary: input.primary,
             }),
@@ -217,7 +218,7 @@ const makeEditorialMusic = Effect.gen(function* () {
 
           return {
             patch: { musicReferences: state.musicReferences, managed: state.managed },
-            targets: [target],
+            targets: [canonical],
           }
         }),
       ReferenceWriteResult,
@@ -243,16 +244,17 @@ const makeEditorialMusic = Effect.gen(function* () {
       musicWrite,
       (previous) =>
         Effect.gen(function* () {
-          if (primary !== null) yield* readDraftMusicTarget(db, primary)
+          const canonicalPrimary =
+            primary === null ? null : (yield* readDraftMusicTarget(db, primary)).target
 
           const state = yield* transitionDraftMusicReferences(
             { musicReferences: previous.musicReferences, managed: previous.musicReferencesManaged },
-            DraftMusicReferenceChange.cases.Remove.make({ target, primary }),
+            DraftMusicReferenceChange.cases.Remove.make({ target, primary: canonicalPrimary }),
           ).pipe(Effect.mapError(invalid))
 
           return {
             patch: { musicReferences: state.musicReferences, managed: state.managed },
-            targets: primary === null ? [] : [primary],
+            targets: canonicalPrimary === null ? [] : [canonicalPrimary],
           }
         }),
       ReferenceWriteResult,
@@ -277,10 +279,15 @@ const makeEditorialMusic = Effect.gen(function* () {
       musicWrite,
       (previous) =>
         Effect.gen(function* () {
-          yield* readDraftMusicTarget(db, target)
-          const next = yield* insertMusicEmbedSource(previous.content ?? '', target, input.offset)
+          const canonical = (yield* readDraftMusicTarget(db, target)).target
 
-          return { patch: { content: next }, targets: [target] }
+          const next = yield* insertMusicEmbedSource(
+            previous.content ?? '',
+            canonical,
+            input.offset,
+          )
+
+          return { patch: { content: next }, targets: [canonical] }
         }),
       GetPostResult,
       projectText,
@@ -308,7 +315,7 @@ const makeEditorialMusic = Effect.gen(function* () {
   const findMentions = Effect.fn('EditorialMusic.findMentions')(function* (
     input: typeof EditorialSourceInput.Type,
   ) {
-    yield* authorization.editorial()
+    yield* command(['posts:read'])
 
     return yield* findMusicMentions(input)
   })
@@ -316,7 +323,7 @@ const makeEditorialMusic = Effect.gen(function* () {
   const preview = Effect.fn('EditorialMusic.preview')(function* (
     input: typeof EditorialSourceInput.Type,
   ) {
-    yield* authorization.editorial()
+    yield* command(['posts:read'])
 
     return yield* previewEditorialContent(input)
   })

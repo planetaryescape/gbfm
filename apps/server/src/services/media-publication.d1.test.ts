@@ -266,7 +266,7 @@ describe('media publication at the content/storage seam', () => {
     ['mixed valid and invalid creators', [collaborator.userId, 'missing-creator']],
     ['duplicate creators', [collaborator.userId, collaborator.userId]],
   ])(
-    'post replacement with %s preserves existing creators and earlier content without copying',
+    'post replacement with %s rolls back content and creator changes without copying',
     async (_name, creatorIds) => {
       await using h = await harness()
 
@@ -288,6 +288,7 @@ describe('media publication at the content/storage seam', () => {
       expect(
         await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
       ).toMatchObject([{ creatorId: actor.userId }])
+      const before = await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))
 
       const result = await Effect.runPromise(
         h.post
@@ -300,13 +301,7 @@ describe('media publication at the content/storage seam', () => {
       )
 
       expect(Result.isFailure(result) && result.failure).toBeInstanceOf(DatabaseError)
-      expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toMatchObject([
-        {
-          title: 'Saved before creator failure',
-          draft: false,
-          thumbnailUrl: assetUrl(publicKey(imageKey)),
-        },
-      ])
+      expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toEqual(before)
       expect(
         await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
       ).toMatchObject([{ creatorId: actor.userId }])
@@ -346,9 +341,18 @@ describe('media publication at the content/storage seam', () => {
     expect(
       await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
     ).toMatchObject([{ creatorId: expectedCreatorId }])
-    expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toEqual(
-      originalRows,
-    )
+    const saved = await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))
+
+    const changed = expectedCreatorId !== actor.userId
+
+    const changedRows = originalRows.map((row) => ({
+      ...row,
+      updatedAt: expect.any(Date),
+      lastOperationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    }))
+
+    expect(saved).toEqual(changed ? changedRows : originalRows)
+    expect((saved[0]?.updatedAt.getTime() ?? 0) > post.updatedAt.getTime()).toBe(changed)
     expect(h.copies).toEqual([])
   })
 

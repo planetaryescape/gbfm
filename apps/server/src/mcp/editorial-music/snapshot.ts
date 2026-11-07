@@ -89,8 +89,8 @@ export const loadReadableEditorialSnapshot = (
 
 /** Full source CAS, independent of scope/display. The predicate is evaluated only before mutation. */
 export const editorialSnapshotGuard = (previous: EditorialSnapshot) => {
-  const creators = (previous.creators ?? []).map((creator) => creator.id).toSorted()
-  const tags = (previous.tags ?? []).toSorted()
+  const creators = (previous.creators ?? []).map((creator) => creator.id)
+  const tags = previous.tags ?? []
 
   const references = previous.storedMusicReferences.references.map((target, position) => ({
     ...target,
@@ -124,11 +124,17 @@ export const editorialSnapshotGuard = (previous: EditorialSnapshot) => {
     eq(postsTable.depth, previous.depth),
     eq(postsTable.musicReferencesManaged, previous.musicReferencesManaged),
     sql`${postsTable.lastOperationId} IS ${previous.lastOperationId}`,
-    sql`(SELECT json_group_array(creatorId) FROM (SELECT creatorId FROM post_creators WHERE postId = ${previous.id} ORDER BY creatorId)) = ${JSON.stringify(creators)}`,
-    sql`(SELECT json_group_array(name) FROM (SELECT ${labelsTable.name} AS name FROM ${entityLabelsTable}
+    sql`(SELECT count(*) FROM post_creators WHERE postId = ${previous.id}) = ${creators.length}`,
+    sql`NOT EXISTS (SELECT 1 FROM post_creators WHERE postId = ${previous.id}
+      AND creatorId NOT IN (SELECT value FROM json_each(${JSON.stringify(creators)})))`,
+    sql`(SELECT count(*) FROM ${entityLabelsTable}
       INNER JOIN ${labelsTable} ON ${labelsTable.id} = ${entityLabelsTable.labelId}
       WHERE ${entityLabelsTable.entityType} = 'post' AND ${entityLabelsTable.entityId} = ${previous.id}
-      AND ${labelsTable.kind} = 'tag' ORDER BY ${labelsTable.name})) = ${JSON.stringify(tags)}`,
+      AND ${labelsTable.kind} = 'tag') = ${tags.length}`,
+    sql`NOT EXISTS (SELECT 1 FROM ${entityLabelsTable}
+      INNER JOIN ${labelsTable} ON ${labelsTable.id} = ${entityLabelsTable.labelId}
+      WHERE ${entityLabelsTable.entityType} = 'post' AND ${entityLabelsTable.entityId} = ${previous.id}
+      AND ${labelsTable.kind} = 'tag' AND ${labelsTable.name} NOT IN (SELECT value FROM json_each(${JSON.stringify(tags)})))`,
     sql`${stored} = ${JSON.stringify(references)}`,
   )
 }

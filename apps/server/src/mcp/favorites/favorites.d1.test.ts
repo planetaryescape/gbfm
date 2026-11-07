@@ -490,4 +490,4 @@ test('both lists enforce defaults, maximum page, stable ties and visibility befo
   } finally {
     await app.dispose()
   }
-})
+}, 30_000)

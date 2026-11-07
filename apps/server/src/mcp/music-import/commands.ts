@@ -1,3 +1,4 @@
+import type { McpResourceUrl } from '@gbfm/core/editorial-mcp'
 import { Context, DateTime, Effect, Layer, Option, Schema } from 'effect'
 
 import { McpAuthorization } from '@/mcp/authorization'
@@ -131,54 +132,66 @@ const makeCommands = Effect.gen(function* () {
 
   // Preparation is deliberately NOT acceptance or execution. No receipt store
   // currently satisfies P0; callers must not register these as mutating tools.
-  const prepare = Effect.fn('MusicImportCommands.prepare')(function* (raw: Schema.Json) {
-    yield* authorization.highTrust('catalogue:write')
+  const prepare = Effect.fn('MusicImportCommands.prepare')(
+    function* (raw: Schema.Json, resource: McpResourceUrl) {
+      yield* authorization.highTrust('catalogue:write')
 
-    const decoded = yield* Schema.decodeUnknownEffect(command)(raw, {
-      onExcessProperty: 'error',
-    }).pipe(Effect.mapError(invalid))
+      const decoded = yield* Schema.decodeUnknownEffect(command)(raw, {
+        onExcessProperty: 'error',
+      }).pipe(Effect.mapError(invalid))
 
-    if (new TextEncoder().encode(JSON.stringify(decoded)).byteLength > 256 * 1024) {
-      return yield* invalid()
-    }
+      if (new TextEncoder().encode(JSON.stringify(decoded)).byteLength > 256 * 1024) {
+        return yield* invalid()
+      }
 
-    const actor = yield* authorization.requireScopes(
-      decoded.operation === 'import_music_url'
-        ? decoded.input.expectedType === 'playlist'
-          ? ['catalogue:write', 'catalogue:import', 'providers:read', 'playlists:write']
-          : ['catalogue:write', 'catalogue:import', 'providers:read']
-        : ['catalogue:write'],
-    )
-
-    let normalized = decoded
-
-    if (decoded.operation === 'import_music_url') {
-      const source = yield* parseMusicSource(decoded.input.url, decoded.input.expectedType).pipe(
-        Effect.mapError(invalid),
+      const actor = yield* authorization.requireScopes(
+        decoded.operation === 'import_music_url'
+          ? decoded.input.expectedType === 'playlist'
+            ? ['catalogue:write', 'catalogue:import', 'providers:read', 'playlists:write']
+            : ['catalogue:write', 'catalogue:import', 'providers:read']
+          : ['catalogue:write'],
       )
 
-      // A playlist can also be inferred from the URL; omission is no scope bypass.
-      if (source.sourceEntityType === 'playlist') {
-        yield* authorization.highTrust('playlists:write')
+      let normalized = decoded
+      let typeAuthority: 'resolved' | 'pending' = 'resolved'
+
+      if (decoded.operation === 'import_music_url') {
+        const source = yield* parseMusicSource(decoded.input.url, decoded.input.expectedType).pipe(
+          Effect.mapError(invalid),
+        )
+
+        if (source.sourceEntityType === 'url' || source.sourceEntityType === 'video') {
+          typeAuthority = 'pending'
+        }
+
+        // A playlist can also be inferred from the URL; omission is no scope bypass.
+        if (source.sourceEntityType === 'playlist') {
+          yield* authorization.highTrust('playlists:write')
+        }
+
+        normalized = {
+          operation: decoded.operation,
+          input: { ...decoded.input, url: source.canonicalUrl },
+        }
       }
 
-      normalized = {
-        operation: decoded.operation,
-        input: { ...decoded.input, url: source.canonicalUrl },
+      return {
+        command: normalized,
+        typeAuthority,
+        receiptScope: {
+          actorId: actor.userId,
+          clientId: actor.clientId,
+          resource,
+          operation: decoded.operation,
+          requestId: decoded.input.requestId,
+        },
+        inputHash: yield* fingerprint(normalized),
       }
-    }
-
-    return {
-      command: normalized,
-      receiptScope: {
-        actorId: actor.userId,
-        clientId: actor.clientId,
-        operation: decoded.operation,
-        requestId: decoded.input.requestId,
-      },
-      inputHash: yield* fingerprint(normalized),
-    }
-  })
+    },
+    Effect.catchTag('EditorialToolError', ({ code, message }) =>
+      Effect.fail(new McpToolError({ code, message })),
+    ),
+  )
 
   return { prepare }
 })

@@ -57,8 +57,12 @@ artwork policy changes the fingerprint even for the same canonical source.
 URL normalization reuses the canonical parser rather than inventing identity.
 Generic source URLs may yield a provider-inferred playlist: the future execution
 owner must check playlists:write again after type resolution **before commit**.
-The prepared result exposes `typeAuthority: 'pending'` for source types `url` and
-`video`, versus `resolved` for a known canonical type or manual create. Neither
+The prepared result exposes `typeAuthority: 'pending'` for generic URLs without
+an external ID unless playlist authority was already required, and for videos.
+A caller-supplied expectedType does not resolve generic URL authority: the
+type-independent URL identity can reuse a stored playlist even when the hint is
+track. Provider identities with a known non-video type and manual creates return
+`resolved`. Neither
 value is authority to commit later: every execution/replay still rechecks live
 authorization. Pending imports require a hook in canonical index.ts immediately
 after inferredType and before any identity/metadata commit (including reuse of

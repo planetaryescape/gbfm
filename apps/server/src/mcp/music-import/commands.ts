@@ -160,7 +160,10 @@ const makeCommands = Effect.gen(function* () {
           Effect.mapError(invalid),
         )
 
-        if (source.sourceEntityType === 'url' || source.sourceEntityType === 'video') {
+        if (
+          (source.externalId === null && source.sourceEntityType !== 'playlist') ||
+          source.sourceEntityType === 'video'
+        ) {
           typeAuthority = 'pending'
         }
 

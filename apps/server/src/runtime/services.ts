@@ -4,6 +4,7 @@ import type { Database } from '@/db/layer'
 import { AuthLive } from '@/lib/auth'
 import { CryptoLive } from '@/lib/crypto'
 import { MdxServiceCatalogLayer } from '@/lib/mdx'
+import type { McpOperationStore } from '@/mcp/operations/store'
 import {
   EditorialListCacheUnavailableLayer,
   type EditorialListCache,
@@ -72,6 +73,7 @@ const DevToolsLive: Layer.Layer<never> = Layer.empty
 // only place that may choose between them.
 export interface AppLayerOptions {
   readonly database: Layer.Layer<Database>
+  readonly operationStore: Layer.Layer<McpOperationStore>
   readonly sitemapCache: Layer.Layer<SitemapCache>
   readonly spotifyImportResolver: Layer.Layer<SpotifyImportResolver, never, Database>
   readonly playlistEnrichmentQueue: Layer.Layer<PlaylistEnrichmentQueue>
@@ -91,6 +93,7 @@ export interface AppLayerOptions {
 
 export const AppLayer = ({
   database: databaseLive,
+  operationStore: operationStoreLive,
   sitemapCache: sitemapCacheLive,
   spotifyImportResolver: spotifyImportResolverLive,
   playlistEnrichmentQueue: playlistEnrichmentQueueLive,
@@ -164,7 +167,11 @@ export const AppLayer = ({
     adminTelemetryLive,
     requestTelemetryLive,
     signupProtectionLive,
-  ).pipe(Layer.provideMerge(configLive), Layer.provide(databaseLive))
+  ).pipe(
+    Layer.provideMerge(configLive),
+    Layer.provide(databaseLive),
+    Layer.provideMerge(operationStoreLive),
+  )
 
   const CanonicalMusicIdentityLive = CanonicalMusicIdentityLayer.pipe(
     Layer.provide(BaseServicesLayer),

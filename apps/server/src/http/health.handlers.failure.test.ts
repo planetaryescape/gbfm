@@ -4,6 +4,7 @@ import { Effect } from 'effect'
 import { describe, expect, it } from 'vitest'
 
 import { DatabaseLayer } from '@/db/layer'
+import { McpOperationStoreLayer } from '@/mcp/operations/store'
 import { WorkerTracingLive } from '@/runtime/sentry-worker'
 import { AppLayer } from '@/runtime/services'
 import { RecordingEmailTransportLayer } from '@/services/email-transport.service'
@@ -24,6 +25,7 @@ import { createWebHandler } from './routes'
 // side-effecting SentryService init anymore.
 const testAppServicesLive = AppLayer({
   database: DatabaseLayer(d1),
+  operationStore: McpOperationStoreLayer(d1),
   sitemapCache: SitemapCacheLayer({
     get: async () => null,
     put: async () => {},

@@ -409,6 +409,8 @@ export const update = (
               ResolvePostMusic({
                 postId: model.draft.postId,
                 url: model.draft.musicUrl,
+                expectedUpdatedAt:
+                  model.draft.kind === 'post' ? model.draft.expectedUpdatedAt : undefined,
                 owner: { editorId: model.editorId, requestId: model.postMusicRequestId + 1 },
               }),
             ],
@@ -424,6 +426,7 @@ export const update = (
       title,
       artistNames,
       coverImageUrl,
+      updatedAt,
     }) =>
       !ownsMusic(model, owner, postId, requestedUrl)
         ? { model }
@@ -436,7 +439,13 @@ export const update = (
               musicPreviewMeta: [entityType, artistNames.join(', ')].filter(Boolean).join(' · '),
               musicPreviewImage: coverImageUrl,
             },
-            { ...model.draft, musicEntityType: entityType, musicEntityId: entityId, musicUrl: url },
+            {
+              ...model.draft,
+              musicEntityType: entityType,
+              musicEntityId: entityId,
+              musicUrl: url,
+              expectedUpdatedAt: updatedAt ?? model.draft.expectedUpdatedAt,
+            },
           ),
     PostMusicFailed: ({ postId, owner, requestedUrl, message }) => ({
       model: ownsMusic(model, owner, postId, requestedUrl)
@@ -558,7 +567,7 @@ export const update = (
         commands: [...(requested.commands ?? []), ...(closed.commands ?? [])],
       }
     },
-    Saved: ({ owner, id, slug, published }) => {
+    Saved: ({ owner, id, slug, updatedAt, published }) => {
       const pending = model.remoteSave
 
       if (!pending || !ownsSave(model, owner)) return { model }
@@ -573,6 +582,7 @@ export const update = (
             slug: model.draft.slug === pending.draft.slug ? slug : model.draft.slug,
             editSlug: slug,
             postId: model.draft.kind === 'mix' ? undefined : id,
+            expectedUpdatedAt: updatedAt ?? model.draft.expectedUpdatedAt,
           },
           phase: published ? 'published' : 'writing',
           saveState: newerEdits ? 'unsaved' : 'saved',
@@ -587,6 +597,7 @@ export const update = (
             owner,
             id,
             slug,
+            updatedAt,
           }),
         ],
       }

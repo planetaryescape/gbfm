@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { Match } from 'effect'
+import { Match, Schema } from 'effect'
 
 let fixtureClient = 1
 
@@ -21,6 +21,78 @@ const signIn = async (page: Page, email = 'editor@gbfm.local') => {
 
 const consent = (page: Page) =>
   page.getByRole('heading', { name: 'Connect OpenCode?', exact: true })
+
+test('the editorial editor retains local text and reports a stale-save conflict', async ({
+  page,
+}, info) => {
+  await page.goto('/api/e2e/mcp-start')
+  await signIn(page)
+  await expect(consent(page)).toBeVisible()
+  const slug = `editor-conflict-${crypto.randomUUID()}`
+
+  const created = await page.request.post('/api/content/post', {
+    data: {
+      type: 'post',
+      title: 'Concurrent editorial fixture',
+      content: 'Initial fixture text',
+      slug,
+      draft: true,
+    },
+  })
+
+  expect(created.ok()).toBe(true)
+  await page.goto(`/new/editorial?edit=${slug}`)
+  const canvas = page.getByRole('textbox', { name: 'Writing canvas', exact: true })
+  await expect(canvas).toHaveValue('Initial fixture text')
+
+  for (const content of ['First browser save', 'Second browser save']) {
+    await canvas.fill(content)
+
+    const saved = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/api/content/posts/${slug}`) &&
+        response.request().method() === 'PATCH',
+    )
+
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+    expect((await saved).status()).toBe(200)
+    await expect(page.getByRole('status').filter({ hasText: 'All changes saved' })).toBeVisible()
+  }
+
+  await canvas.fill('My unsaved browser text')
+
+  const remote = await page.request.patch(`/api/content/posts/${slug}`, {
+    data: { content: 'Newer connected-app fixture text' },
+  })
+
+  expect(remote.ok()).toBe(true)
+
+  const conflicted = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/content/posts/${slug}`) &&
+      response.request().method() === 'PATCH',
+  )
+
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+  expect((await conflicted).status()).toBe(409)
+  await expect(
+    page
+      .getByRole('alert')
+      .filter({ hasText: 'This post changed in another editor or connected app.' }),
+  ).toBeVisible()
+  await expect(canvas).toHaveValue('My unsaved browser text')
+  const stored = await page.request.get(`/api/content/posts/${slug}/edit`)
+  expect(
+    Schema.decodeUnknownSync(Schema.Struct({ content: Schema.String }))(await stored.json())
+      .content,
+  ).toBe('Newer connected-app fixture text')
+
+  if (process.env.MCP_EVIDENCE_DIR)
+    await page.screenshot({
+      path: `${process.env.MCP_EVIDENCE_DIR}/${info.project.name}-editor-conflict.png`,
+      fullPage: true,
+    })
+})
 
 test('signed-out users see connection context, recover from a bad password and approve read-only tools', async ({
   page,

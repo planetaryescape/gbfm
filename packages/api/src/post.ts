@@ -27,6 +27,7 @@ const PostType = Schema.Literals(['post', 'micro'])
 const MusicEntityType = Schema.Literals(['album', 'track', 'playlist'])
 
 export const ResolvePostMusicResponse = Schema.Struct({
+  updatedAt: Schema.optional(Schema.String),
   postId: Schema.String,
   entityType: MusicEntityType,
   entityId: Schema.String,
@@ -236,6 +237,7 @@ export const CreatePostInput = Schema.Struct({
 export type CreatePostInput = typeof CreatePostInput.Type
 
 export const UpdatePostInput = Schema.Struct({
+  expectedUpdatedAt: Schema.optional(Schema.DateFromString),
   title: Schema.optional(Schema.NullOr(Schema.String)),
   description: Schema.optional(Schema.String),
   thumbnailUrl: Schema.optional(Schema.String),
@@ -515,7 +517,10 @@ export const PostGroup = /* @__PURE__ */ (() =>
     .add(
       HttpApiEndpoint.post('resolvePostMusic', '/api/content/posts/:id/resolve-music-entity', {
         params: IdParam,
-        payload: Schema.Struct({ url: Schema.optional(Schema.String) }),
+        payload: Schema.Struct({
+          url: Schema.optional(Schema.String),
+          expectedUpdatedAt: Schema.optional(Schema.DateFromString),
+        }),
         success: ResolvePostMusicResponse,
         error: [
           PostMusicResolutionError,

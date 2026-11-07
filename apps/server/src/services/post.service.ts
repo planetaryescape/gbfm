@@ -304,7 +304,7 @@ export interface PostService {
     slug: string,
     userId: string,
     userRole: string,
-    data: Partial<InsertPost> & { creatorIds?: Array<string> },
+    data: Partial<InsertPost> & { creatorIds?: Array<string>; expectedUpdatedAt?: Date },
     credential?: Actor['credential'],
   ) => Effect.Effect<
     SelectMdxCompiledPost,
@@ -2618,7 +2618,7 @@ const updateEffect = (
   slug: string,
   userId: string,
   userRole: string,
-  rawData: Partial<InsertPost> & { creatorIds?: Array<string> },
+  rawData: Partial<InsertPost> & { creatorIds?: Array<string>; expectedUpdatedAt?: Date },
   mdx: MdxService,
   media: MediaPublication,
   credential?: Actor['credential'],
@@ -2659,13 +2659,28 @@ const updateEffect = (
       yield* requireCreatorOrAdmin('post', existingPost.id, userId, userRole)
     }
 
+    if (
+      rawData.expectedUpdatedAt &&
+      rawData.expectedUpdatedAt.getTime() !== existingPost.updatedAt.getTime()
+    )
+      return yield* new ConflictError({
+        message: 'Post changed since it was loaded',
+        resource: 'post',
+      })
+
     yield* validateCanonicalContent(rawData.content)
 
     // Thread structure (parentPostId/rootPostId/depth) must never be
     // mutable via update, even though InsertPost's type allows it -- the
     // HTTP schema (UpdatePostInput) already omits these fields, but this
     // strip is defense-in-depth against a future caller that bypasses it.
-    const { parentPostId: _parentPostId, rootPostId: _rootPostId, depth: _depth, ...data } = rawData
+    const {
+      parentPostId: _parentPostId,
+      rootPostId: _rootPostId,
+      depth: _depth,
+      expectedUpdatedAt,
+      ...data
+    } = rawData
 
     const nextPostData = { ...existingPost, ...data }
     const normalizedNextPostData = normalizePostData(nextPostData, nextPostData.type)
@@ -2693,15 +2708,29 @@ const updateEffect = (
         : [key.startsWith('public/') ? `private/${key.slice('public/'.length)}` : key]
     })
 
-    if (Object.keys(normalizedUpdateData).length > 0 || credential?._tag === 'PersonalAccessKey') {
+    if (
+      Object.keys(normalizedUpdateData).length > 0 ||
+      credential?._tag === 'PersonalAccessKey' ||
+      expectedUpdatedAt !== undefined
+    ) {
       const updatedRecords = yield* Effect.tryPromise({
         try: () =>
           credential?._tag === 'PersonalAccessKey'
             ? guardedPostUpdate(db, existingPost, userId, normalizedUpdateData, tags, assetKeys)
             : db
                 .update(postsTable)
-                .set({ ...normalizedUpdateData, updatedAt: new Date() })
-                .where(eq(postsTable.id, existingPost.id))
+                .set({
+                  ...normalizedUpdateData,
+                  updatedAt: new Date(Math.max(Date.now(), existingPost.updatedAt.getTime() + 1)),
+                })
+                .where(
+                  and(
+                    eq(postsTable.id, existingPost.id),
+                    expectedUpdatedAt === undefined
+                      ? undefined
+                      : eq(postsTable.updatedAt, expectedUpdatedAt),
+                  ),
+                )
                 .returning(),
         catch: (error) =>
           new DatabaseError({
@@ -2712,7 +2741,7 @@ const updateEffect = (
       })
 
       if (!updatedRecords[0]) {
-        if (credential?._tag === 'PersonalAccessKey')
+        if (credential?._tag === 'PersonalAccessKey' || expectedUpdatedAt !== undefined)
           return yield* new ConflictError({
             message: 'Post changed during update',
             resource: 'post',

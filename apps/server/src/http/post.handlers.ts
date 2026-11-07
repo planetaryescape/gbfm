@@ -555,6 +555,7 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
               params.id,
               { userId: user.id, userRole: user.role ?? 'user' },
               payload.url,
+              payload.expectedUpdatedAt,
             ),
           ).pipe(
             Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),

@@ -8,6 +8,7 @@ export const CreatorDraftSchema = Schema.Struct({
   kind: Schema.Literals(['micro', 'post', 'mix']),
   editSlug: Schema.NullOr(Schema.String),
   postId: Schema.optional(Schema.String),
+  expectedUpdatedAt: Schema.optional(Schema.toEncoded(Schema.DateFromString)),
   title: Schema.String,
   slug: Schema.String,
   content: Schema.String,
@@ -33,7 +34,7 @@ export const reconcileStoredDraft = (
   storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>,
   key: string,
   saved: CreatorDraft,
-  remote: { readonly id: string; readonly slug: string },
+  remote: { readonly id: string; readonly slug: string; readonly updatedAt?: string },
   retained: CreatorDraft | null = null,
 ) =>
   Effect.gen(function* () {
@@ -57,6 +58,7 @@ export const reconcileStoredDraft = (
                   slug: retained.slug === saved.slug ? remote.slug : retained.slug,
                   editSlug: remote.slug,
                   postId: retained.kind === 'mix' ? undefined : remote.id,
+                  expectedUpdatedAt: remote.updatedAt ?? retained.expectedUpdatedAt,
                 }),
               )
           },
@@ -92,6 +94,7 @@ export const reconcileStoredDraft = (
               slug: latest.slug === saved.slug ? remote.slug : latest.slug,
               editSlug: remote.slug,
               postId: latest.kind === 'mix' ? undefined : remote.id,
+              expectedUpdatedAt: remote.updatedAt ?? latest.expectedUpdatedAt,
             }),
           )
         }
@@ -166,7 +169,7 @@ export interface CreatorOperations {
   readonly reconcileLocalDraft: (
     key: string,
     saved: CreatorDraft,
-    remote: { readonly id: string; readonly slug: string },
+    remote: { readonly id: string; readonly slug: string; readonly updatedAt?: string },
     retained: CreatorDraft | null,
   ) => Effect.Effect<void, CreatorStorageError>
   readonly loadEditable: (
@@ -198,10 +201,14 @@ export interface CreatorOperations {
   readonly resolvePostMusic: (
     postId: string,
     url: string,
+    expectedUpdatedAt?: string,
   ) => Effect.Effect<typeof ResolvePostMusicResponse.Type, CreatorRequestError>
   readonly save: (
     input: SaveInput,
-  ) => Effect.Effect<{ readonly id: string; readonly slug: string }, CreatorRequestError>
+  ) => Effect.Effect<
+    { readonly id: string; readonly slug: string; readonly updatedAt?: string },
+    CreatorRequestError
+  >
   readonly renderPreview: (
     content: string,
   ) => Effect.Effect<typeof RichContentDocument.Type, CreatorRequestError>
@@ -214,6 +221,7 @@ export class CreatorService extends Context.Service<CreatorService, CreatorOpera
 ) {}
 
 const EditableResponse = Schema.Struct({
+  updatedAt: Schema.toEncoded(Schema.DateFromString),
   id: Schema.String,
   title: Schema.NullOr(Schema.String),
   slug: Schema.String,
@@ -232,7 +240,11 @@ const EditableResponse = Schema.Struct({
   creators: Schema.optional(Schema.Array(CreatorIdentity)),
 })
 
-const SavedResponse = Schema.Struct({ id: Schema.String, slug: Schema.String })
+const SavedResponse = Schema.Struct({
+  id: Schema.String,
+  slug: Schema.String,
+  updatedAt: Schema.toEncoded(Schema.DateFromString),
+})
 
 const MusicResponse = Schema.Struct({
   entityType: Schema.String,
@@ -271,6 +283,10 @@ const requestJson = <A>(
 
       if (!response.ok) {
         let message = 'The content request failed.'
+
+        if (operation === 'save content' && response.status === 409)
+          message =
+            'This post changed in another editor or connected app. Your text is still here. Copy your changes before reloading the latest version.'
 
         if (operation === 'resolve post music') {
           if (response.status === 503 || response.status === 429) {
@@ -429,6 +445,7 @@ export const CreatorServiceLive = Layer.succeed(CreatorService, {
         kind: kind === 'mix' ? 'mix' : item.type === 'post' ? 'post' : 'micro',
         editSlug: slug,
         postId: kind === 'mix' ? undefined : item.id,
+        expectedUpdatedAt: item.type === 'post' ? item.updatedAt : undefined,
         title: item.title ?? '',
         slug: item.slug,
         content: item.content ?? '',
@@ -478,12 +495,12 @@ export const CreatorServiceLive = Layer.succeed(CreatorService, {
             ),
       ),
     ),
-  resolvePostMusic: (postId, url) =>
+  resolvePostMusic: (postId, url, expectedUpdatedAt) =>
     requestJson(
       'resolve post music',
       ResolvePostMusicResponse,
       `/content/posts/${encodeURIComponent(postId)}/resolve-music-entity`,
-      json(url.trim() ? { url: url.trim() } : {}),
+      json({ url: url.trim() || undefined, expectedUpdatedAt }),
     ),
   resolveQuote: (slug) =>
     requestJson(
@@ -526,6 +543,8 @@ export const CreatorServiceLive = Layer.succeed(CreatorService, {
             episodeNumber: draft.episodeNumber ?? undefined,
           }
         : {
+            expectedUpdatedAt:
+              draft.kind === 'post' && draft.editSlug ? draft.expectedUpdatedAt : undefined,
             title: draft.title.trim() || null,
             slug,
             description: draft.kind === 'post' ? draft.description : undefined,

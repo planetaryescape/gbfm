@@ -14,6 +14,7 @@ import {
   ListDraftsResult,
   PostSummary,
 } from './contracts'
+import { boundEditorialWireResult } from './editorial-music/content'
 import { loadEditorialSnapshot } from './editorial-music/snapshot'
 import { type EditorialMcpSettings, notFound, projectPost, unavailable } from './model'
 
@@ -90,7 +91,7 @@ export const EditorialReadServiceLayer = Layer.effect(
         endpoint,
         posts: summaries,
         pagination: result.pagination,
-      }).pipe(Effect.mapError(unavailable))
+      }).pipe(Effect.mapError(unavailable), Effect.flatMap(boundEditorialWireResult))
     })
 
     const getPost = Effect.fn('EditorialReadService.getPost')(function* (
@@ -118,7 +119,7 @@ export const EditorialReadServiceLayer = Layer.effect(
       return yield* Schema.decodeUnknownEffect(GetPostResult)({
         endpoint,
         post: yield* projectPost(post, config),
-      }).pipe(Effect.mapError(unavailable))
+      }).pipe(Effect.mapError(unavailable), Effect.flatMap(boundEditorialWireResult))
     })
 
     return EditorialReadService.of({ listDrafts, getPost })

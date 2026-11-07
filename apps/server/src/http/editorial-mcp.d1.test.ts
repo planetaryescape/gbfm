@@ -27,6 +27,7 @@ import {
   PublicSearchResult,
 } from '@/mcp/content-read/research-contracts'
 import { GetPostResult } from '@/mcp/contracts'
+import { makeMcpWireResponse } from '@/mcp/wire-response'
 import { ConfigService, createConfig } from '@/services/config.service'
 import { createEditorialOAuthFixture, OAuthTokens } from '@/test/editorial-oauth'
 import { createTestWebHandler } from '@/test/http-handler'
@@ -195,8 +196,16 @@ test('composed OAuth MCP enforces draft-write consent, saved versions and revoca
       .set({ content: '\u0001'.repeat(100_000) })
       .where(eq(postsTable.id, saved.post.postId))
     const oversizedResponse = await call('get_post', { postId: saved.post.postId })
-    expect(oversizedResponse.status).toBe(413)
-    expect(await oversizedResponse.text()).toBe('MCP response exceeds the supported byte limit.')
+    expect(oversizedResponse.status).toBe(200)
+    const refusedSource = await oversizedResponse.text()
+    expect(JSON.parse(refusedSource)).toMatchObject({ result: { isError: true } })
+    expect(refusedSource).toContain('invalid_input')
+    expect(refusedSource).not.toContain('\\u0001')
+    expect(new TextEncoder().encode(refusedSource).byteLength).toBeLessThanOrEqual(256 * 1024)
+    expect(
+      (await fixture.db.select().from(postsTable).where(eq(postsTable.id, saved.post.postId)))[0]
+        ?.content,
+    ).toBe('\u0001'.repeat(100_000))
     await fixture.db
       .update(postsTable)
       .set({ content: input.content })
@@ -1234,6 +1243,7 @@ test('independent catalogue module composes with live OAuth and owned draft serv
       'get_post',
       'fixture_catalogue_artist',
       'fixture_command_checkpoint',
+      'fixture_wire_budget',
     ])
     expect(listedOwner).toMatchObject({
       jsonrpc: '2.0',
@@ -1249,6 +1259,7 @@ test('independent catalogue module composes with live OAuth and owned draft serv
           expect.anything(),
           expect.anything(),
           expect.objectContaining({ name: 'fixture_command_checkpoint' }),
+          expect.objectContaining({ name: 'fixture_wire_budget' }),
         ],
       },
     })
@@ -1418,6 +1429,82 @@ test('independent catalogue module composes with live OAuth and owned draft serv
       fixture.service.disconnect(Schema.decodeUnknownSync(UserId)('reader'), clientId),
     )
     expect((await rpc('tools/list', listener.access_token)).status).toBe(401)
+  } finally {
+    await handler.dispose()
+  }
+}, 30_000)
+
+test('request-scoped wire budget matches installed OAuth HTTP encoding and rejects overflow', async () => {
+  await using fixture = await createEditorialOAuthFixture()
+  const clientId = await fixture.register()
+
+  const tokens = Schema.decodeUnknownSync(OAuthTokens)(
+    await (
+      await fixture.exchange(
+        clientId,
+        await fixture.authorize(clientId, 'owner', 'posts:read offline_access drafts:write'),
+      )
+    ).json(),
+  )
+
+  const handler = createComposedMcpFixture(fixture)
+
+  const rpc = (id: string | number, nonce: string) =>
+    handler.handler(
+      new Request(fixture.config.mcp.resourceUrl, {
+        method: 'POST',
+        headers: {
+          accept: 'application/json, text/event-stream',
+          'content-type': 'application/json',
+          'mcp-protocol-version': '2026-07-28',
+          'mcp-method': 'tools/call',
+          'mcp-name': 'fixture_wire_budget',
+          authorization: `Bearer ${Redacted.value(tokens.access_token)}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id,
+          method: 'tools/call',
+          params: {
+            name: 'fixture_wire_budget',
+            arguments: { nonce },
+            _meta: {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': {},
+            },
+          },
+        }),
+      }),
+    )
+
+  try {
+    for (const id of [7, '\\é🪐"'.repeat(1000)]) {
+      const baseline = await rpc(id, '')
+      expect(baseline.status).toBe(200)
+      const baselineText = await baseline.text()
+      const baselineBytes = new TextEncoder().encode(baselineText).byteLength
+      expect(makeMcpWireResponse(id, 'json').successBytes({ nonce: '' })).toBe(baselineBytes)
+      // Derive the boundary from observed transport bytes, not the budget implementation.
+      // Each ASCII character occurs twice: text content and structuredContent.
+      const length = Math.floor((262144 - baselineBytes) / 2)
+      const nonce = 'a'.repeat(length)
+      const accepted = await rpc(id, nonce)
+      expect(accepted.status).toBe(200)
+      const text = await accepted.text()
+      expect(JSON.parse(text)).toMatchObject({ id, result: { isError: false } })
+      expect(new TextEncoder().encode(text).byteLength).toBe(baselineBytes + 2 * length)
+      expect(makeMcpWireResponse(id, 'json').successBytes({ nonce })).toBe(
+        new TextEncoder().encode(text).byteLength,
+      )
+
+      for (const oversized of [`${nonce}a`, '\\'.repeat(60_000)]) {
+        const rejected = await rpc(id, oversized)
+        expect(rejected.status).toBe(200)
+        expect(await rejected.json()).toMatchObject({
+          result: { isError: true, content: [{ text: expect.stringContaining('invalid_input') }] },
+        })
+      }
+    }
   } finally {
     await handler.dispose()
   }

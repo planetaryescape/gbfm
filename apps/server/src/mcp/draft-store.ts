@@ -1,6 +1,5 @@
 import type { UserId } from '@gbfm/core/identity'
 import { and, eq, exists, inArray, sql, type SQL } from 'drizzle-orm'
-import { Effect } from 'effect'
 
 import { user } from '@/db/auth.schema'
 import { editorialOperations } from '@/db/editorial-operation.schema'
@@ -134,18 +133,16 @@ export const updateEditorialDraft = (
   receipt: Receipt,
   liveGuard: SQL,
 ) =>
-  Effect.runPromise(
-    saveEditorialChange(
-      db,
-      userId,
-      previous,
-      {
-        title: input.title,
-        content: input.content,
-        description: input.description,
-      },
-      { ...receipt, createdAt: now },
-      undefined,
-      liveGuard,
-    ),
+  saveEditorialChange(
+    db,
+    userId,
+    previous,
+    {
+      title: input.title,
+      content: input.content,
+      description: input.description,
+    },
+    { ...receipt, createdAt: now },
+    undefined,
+    liveGuard,
   )

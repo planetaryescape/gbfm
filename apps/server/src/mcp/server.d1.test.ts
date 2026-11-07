@@ -29,6 +29,7 @@ import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from '.
 import { loadEditorialSnapshot } from './editorial-music/snapshot'
 import { EditorialMcpSettings } from './model'
 import { composeMcpToolkits, EditorialToolkit, makeEditorialMcpLayer } from './server'
+import { makeMcpWireResponse, McpWireResponse } from './wire-response'
 
 const ownerId = Schema.decodeUnknownSync(UserId)('mcp-owner')
 
@@ -94,6 +95,8 @@ const createApp = (postServiceLayer: Layer.Layer<PostService> = postLayer) =>
 
           return yield* effect.pipe(
             Effect.provideService(EditorialActor, principal.value),
+            // The fixture rpc() below always admits JSON-RPC ID 1.
+            Effect.provideService(McpWireResponse, makeMcpWireResponse(1, 'json')),
             // Test-only transport: persisted OAuth authority is exercised separately.
             Effect.provideService(
               CommandAuthority,
@@ -715,26 +718,28 @@ describe('draft-only MCP writes', () => {
       if (drift === 'creators')
         await db.insert(postCreators).values({ postId: snapshot.id, creatorId: otherId })
 
-      const changed = await updateEditorialDraft(
-        db,
-        ownerId,
-        snapshot,
-        {
-          requestId: crypto.randomUUID(),
-          postId: snapshot.id,
-          expectedVersion: result.post.version,
-          title: 'Must not overwrite',
-        },
-        new Date(),
-        {
-          id: crypto.randomUUID(),
-          actorId: ownerId,
-          postId: snapshot.id,
-          inputHash: 'uncommitted',
-          result: '{}',
-          createdAt: new Date(),
-        },
-        sql`1`,
+      const changed = await Effect.runPromise(
+        updateEditorialDraft(
+          db,
+          ownerId,
+          snapshot,
+          {
+            requestId: crypto.randomUUID(),
+            postId: snapshot.id,
+            expectedVersion: result.post.version,
+            title: 'Must not overwrite',
+          },
+          new Date(),
+          {
+            id: crypto.randomUUID(),
+            actorId: ownerId,
+            postId: snapshot.id,
+            inputHash: 'uncommitted',
+            result: '{}',
+            createdAt: new Date(),
+          },
+          sql`1`,
+        ).pipe(Effect.provideService(McpWireResponse, makeMcpWireResponse(1, 'json'))),
       )
 
       expect(changed).toBe(false)

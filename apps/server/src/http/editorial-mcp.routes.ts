@@ -38,6 +38,7 @@ import {
   EditorialToolHandlersLayer,
   makeMcpLayer,
 } from '@/mcp/server'
+import { makeMcpWireResponse, MAX_MCP_RESPONSE_BYTES, McpWireResponse } from '@/mcp/wire-response'
 import { ConfigService } from '@/services/config.service'
 import { EditorialOAuth, EditorialOAuthUnavailable } from '@/services/editorial-oauth.service'
 
@@ -96,7 +97,7 @@ const boundMcpBody = Effect.fn('EditorialMcp.boundBody')(function* <E>(
   return Option.some(body)
 })
 
-const MAX_MCP_JSON_BYTES = 256 * 1024
+const MAX_MCP_JSON_BYTES = MAX_MCP_RESPONSE_BYTES
 
 const ToolCallRequest = Schema.Struct({
   id: Schema.optional(Schema.Unknown),
@@ -225,6 +226,17 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
                           Schema.fromJsonString(ToolCallRequest),
                         )(new TextDecoder().decode(bounded.value))
 
+                        const responseId = Option.flatMap(call, (value) =>
+                          Schema.decodeUnknownOption(McpSchema.RequestId)(value.id),
+                        )
+
+                        // Complete commands emit one JSON result, with no notifications/progress.
+                        // Invalid/id-less calls cannot obtain a usable precommit response budget.
+                        const wire = Option.match(responseId, {
+                          onNone: () => ({ successBytes: () => Number.POSITIVE_INFINITY }),
+                          onSome: (id) => makeMcpWireResponse(id, 'json'),
+                        })
+
                         // The installed transport executes id-less calls too. Admission must
                         // cover them, not merely fully formed JSON-RPC requests.
                         const response =
@@ -256,6 +268,7 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
                             : yield* httpEffect.pipe(
                                 Effect.provideService(EditorialActor, principal),
                                 Effect.provideService(CommandAuthority, authority.success),
+                                Effect.provideService(McpWireResponse, wire),
                                 Effect.provideService(
                                   HttpServerRequest.HttpServerRequest,
                                   request.method === 'POST'

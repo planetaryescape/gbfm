@@ -13,7 +13,7 @@ import { postsTable, type InsertPost } from '@/db/post.schema'
 import { CommandAuthority } from '../command-authority'
 import { EditorialToolError } from '../contracts'
 import { notFound, unavailable } from '../model'
-import { boundEditorialResult } from './content'
+import { boundEditorialWireResult } from './content'
 import { editorialSnapshotGuard, loadEditorialSnapshot, type EditorialSnapshot } from './snapshot'
 
 /** Request context is resolved at execution, never when the shared service layer is constructed. */
@@ -139,7 +139,7 @@ export const replayEditorialOperation = <A extends { readonly post: { readonly p
     yield* authorize
     yield* loadOwnedEditorialDraft(db, postId, actorId)
 
-    return Option.some(yield* boundEditorialResult(masked))
+    return Option.some(yield* boundEditorialWireResult(masked))
   })
 
 /**
@@ -161,6 +161,10 @@ export const saveEditorialChange = (
         code: 'invalid_input',
         message: 'Editorial result exceeds the supported limit.',
       })
+    yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))(receipt.result).pipe(
+      Effect.mapError(unavailable),
+      Effect.flatMap(boundEditorialWireResult),
+    )
     const attemptId = crypto.randomUUID()
 
     const eligible = exists(

@@ -592,6 +592,39 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
   expect(await authorization.json()).toMatchObject({ error: 'invalid_scope' })
   expect(await fixture.db.select().from(oauthConsent)).toHaveLength(0)
 
+  const Metadata = Schema.Struct({ scopes_supported: Schema.Array(Schema.String) })
+
+  const metadataUrl = new URL(
+    '/.well-known/oauth-protected-resource/mcp',
+    fixture.config.mcp.resourceUrl,
+  )
+
+  const defaultHandler = createTestWebHandler(
+    fixture.db.$client,
+    undefined,
+    undefined,
+    undefined,
+    Layer.succeed(ConfigService, fixture.config),
+  )
+
+  try {
+    const metadata = await defaultHandler.handler(new Request(metadataUrl))
+    expect(metadata.status).toBe(200)
+    const scopes = Schema.decodeUnknownSync(Metadata)(await metadata.json()).scopes_supported
+    expect(scopes).toEqual(['drafts:write', 'posts:read'])
+
+    const fallback = await fixture.request(
+      `/oauth2/authorize?${fixture.authorizationQuery(clientId, [...scopes, 'offline_access'].join(' '))}`,
+      undefined,
+      'owner',
+    )
+
+    expect(fallback.status).toBe(302)
+    expect(new URL(fallback.headers.get('location') ?? '').pathname).toBe('/connect/gbfm/consent')
+  } finally {
+    await defaultHandler.dispose()
+  }
+
   // Only this disposable D1 resource opts in; no production policy definition changes.
   await fixture.db.update(oauthResource).set({
     allowedScopes: JSON.stringify(['posts:read', 'drafts:write', 'content:read', 'offline_access']),
@@ -726,6 +759,12 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
   const legacyNames = ['create_draft', 'update_draft', 'list_drafts', 'get_post']
 
   try {
+    const enabledMetadata = await handler.handler(new Request(metadataUrl))
+    expect(enabledMetadata.status).toBe(200)
+    expect(
+      Schema.decodeUnknownSync(Metadata)(await enabledMetadata.json()).scopes_supported,
+    ).toEqual(['content:read', 'drafts:write', 'posts:read'])
+
     for (const [token, names] of [
       [listener.access_token, contentNames],
       [editorial.access_token, legacyNames],
@@ -751,7 +790,9 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
 
     expect(
       await (await rpc(listener.access_token, 'get_post', { postId: 'r3-private' })).json(),
-    ).toMatchObject({ result: { isError: true } })
+    ).toMatchObject({
+      result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
+    })
 
     const posts = Schema.decodeUnknownSync(
       Schema.Struct({ result: Schema.Struct({ structuredContent: PublishedPostsResult }) }),
@@ -828,7 +869,9 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
     ).toMatchObject({ result: { structuredContent: { show: { showId: 'r3-show' } } } })
     expect(
       await (await rpc(listener.access_token, 'get_post', { postId: draft.post.postId })).json(),
-    ).toMatchObject({ result: { isError: true } })
+    ).toMatchObject({
+      result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
+    })
     await fixture.db.update(user).set({ banned: true }).where(eq(user.id, 'reader'))
     expect((await rpc(listener.access_token, 'get_show', { slug: 'r3-show' })).status).toBe(401)
     await fixture.db.update(user).set({ banned: false }).where(eq(user.id, 'reader'))
@@ -837,6 +880,42 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
       fixture.service.disconnect(Schema.decodeUnknownSync(UserId)('reader'), clientId),
     )
     expect((await rpc(listener.access_token, 'get_show', { slug: 'r3-show' })).status).toBe(401)
+
+    // Metadata follows live resource policy, including null (unrestricted) and
+    // the existing drafts:write admission/downscoping exception.
+    for (const [allowedScopes, expected] of [
+      [JSON.stringify(['posts:read', 'offline_access']), ['drafts:write', 'posts:read']],
+      [null, ['content:read', 'drafts:write', 'posts:read']],
+    ] as const) {
+      await fixture.db.update(oauthResource).set({ allowedScopes })
+
+      for (const path of [
+        '/.well-known/oauth-protected-resource',
+        '/.well-known/oauth-protected-resource/mcp',
+      ]) {
+        const metadata = await handler.handler(new Request(new URL(path, metadataUrl)))
+        expect(metadata.status).toBe(200)
+        expect(metadata.headers.get('cache-control')).toBe('private, no-store')
+        expect(Schema.decodeUnknownSync(Metadata)(await metadata.json()).scopes_supported).toEqual(
+          expected,
+        )
+      }
+    }
+
+    for (const policy of [
+      { allowedScopes: 'not-json', disabled: false },
+      { allowedScopes: JSON.stringify(['unsupported:scope']), disabled: false },
+      { allowedScopes: null, disabled: true },
+    ]) {
+      await fixture.db.update(oauthResource).set(policy)
+      const metadata = await handler.handler(new Request(metadataUrl))
+      expect(metadata.status).toBe(503)
+      expect(metadata.headers.get('cache-control')).toBe('private, no-store')
+      expect(await metadata.text()).toBe('')
+    }
+
+    await fixture.db.delete(oauthResource)
+    expect((await handler.handler(new Request(metadataUrl))).status).toBe(503)
   } finally {
     await handler.dispose()
   }

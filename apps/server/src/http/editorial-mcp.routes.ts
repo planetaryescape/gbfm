@@ -1,8 +1,12 @@
 import { oauthProviderAuthServerMetadata } from '@better-auth/oauth-provider'
+import { McpScope } from '@gbfm/core/editorial-mcp'
+import { eq } from 'drizzle-orm'
 import { Context, Effect, Layer, Match, Option, Redacted, Schema, Stream } from 'effect'
 import { McpSchema, type Tool, type Toolkit } from 'effect/ai'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
 
+import { Database } from '@/db/layer'
+import { oauthResource } from '@/db/oauth.schema'
 import { Auth } from '@/lib/auth'
 import { McpPermission } from '@/mcp/authorization'
 import { ContentReadServiceLayer } from '@/mcp/content-read/service'
@@ -121,6 +125,7 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>>(
 
       const oauth = yield* EditorialOAuth
       const auth = yield* Auth
+      const db = yield* Database
       const origin = new URL(settings.resourceUrl).origin
       const origins = [origin, new URL(config.urls.frontend).origin]
       const resourceMetadata = `${origin}/.well-known/oauth-protected-resource/mcp`
@@ -309,21 +314,58 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>>(
       )
 
       const protectedMetadata = () =>
-        HttpServerResponse.json({
-          resource: settings.resourceUrl,
-          authorization_servers: [settings.issuer],
-          scopes_supported: [
-            ...new Set(
-              Object.values(toolkit.tools).flatMap((tool) =>
-                Context.getOption(tool.annotations, McpPermission).pipe(
-                  Option.map((permission) => permission.scopes),
-                  Option.getOrElse(() => []),
+        Effect.gen(function* () {
+          const [resource] = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .select({
+                  disabled: oauthResource.disabled,
+                  allowedScopes: oauthResource.allowedScopes,
+                })
+                .from(oauthResource)
+                .where(eq(oauthResource.identifier, settings.resourceUrl))
+                .limit(1),
+            catch: () => new EditorialOAuthUnavailable(),
+          })
+
+          const policy = yield* Schema.decodeUnknownEffect(
+            Schema.Struct({
+              disabled: Schema.NullOr(Schema.Boolean),
+              allowedScopes: Schema.NullOr(Schema.fromJsonString(Schema.Array(McpScope))),
+            }),
+          )(resource).pipe(Effect.mapError(() => new EditorialOAuthUnavailable()))
+
+          if (policy.disabled) return yield* Effect.fail(new EditorialOAuthUnavailable())
+
+          return yield* HttpServerResponse.json({
+            resource: settings.resourceUrl,
+            authorization_servers: [settings.issuer],
+            scopes_supported: [
+              ...new Set(
+                Object.values(toolkit.tools).flatMap((tool) =>
+                  Context.getOption(tool.annotations, McpPermission).pipe(
+                    Option.map((permission) => permission.scopes),
+                    Option.getOrElse(() => []),
+                  ),
                 ),
               ),
-            ),
-          ].sort(),
-          bearer_methods_supported: ['header'],
-        }).pipe(Effect.map(noStore), Effect.orDie)
+            ]
+              .filter(
+                (scope) =>
+                  // Match authorizeAccount's legacy draft-write downscoping exception.
+                  scope === 'drafts:write' ||
+                  policy.allowedScopes === null ||
+                  policy.allowedScopes.includes(scope),
+              )
+              .sort(),
+            bearer_methods_supported: ['header'],
+          }).pipe(Effect.orDie)
+        }).pipe(
+          Effect.catchTag('EditorialOAuthUnavailable', () =>
+            Effect.succeed(HttpServerResponse.empty({ status: 503 })),
+          ),
+          Effect.map(noStore),
+        )
 
       const authorizationMetadata = () =>
         Effect.tryPromise({

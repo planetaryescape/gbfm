@@ -12,7 +12,8 @@
     "test:watch": "vitest --config vitest.d1.config.ts",
     "typecheck": "tsgo --noEmit",
     "db:seed:music-lookups": "bun run scripts/seed-music-lookups.ts",
-    "identity:maintain": "bun run scripts/music-identity-maintenance.ts"
+    "identity:maintain": "bun run scripts/music-identity-maintenance.ts",
+    "mcp:policy": "bun run scripts/mcp-resource-policy.ts"
   },
   "dependencies": {
     "@better-auth/oauth-provider": "1.7.12",

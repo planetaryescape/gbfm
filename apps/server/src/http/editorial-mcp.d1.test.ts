@@ -1104,10 +1104,12 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
           'content:read',
           'drafts:write',
           'favorites:read',
+          'favorites:write',
           'listening:read',
           'posts:read',
           'reminders:read',
           'subscriptions:read',
+          'subscriptions:write',
         ],
       ],
     ] as const) {

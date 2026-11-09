@@ -12,7 +12,11 @@ import { oauthResource } from '@/db/oauth.schema'
 import { showSubscriptionsTable, showsTable } from '@/db/show.schema'
 import { AdminOverviewResult } from '@/mcp/admin-read'
 import { EndpointIdentity } from '@/mcp/contracts'
-import { ListFavoritesResult, ListShowSubscriptionsResult } from '@/mcp/favorites/contracts'
+import {
+  ListFavoritesResult,
+  ListShowSubscriptionsResult,
+  SetMembershipResult,
+} from '@/mcp/favorites/contracts'
 import { CollectionPage, SavedMixPage } from '@/mcp/listening/contracts'
 import { ListMusicRemindersResult } from '@/mcp/reminders/contracts'
 import { ConfigService } from '@/services/config.service'
@@ -26,7 +30,7 @@ const ToolList = Schema.Struct({
   }),
 })
 
-test('central owned/admin reads isolate grants and owners without activating commands or policy', async () => {
+test('central owned reads and membership commands isolate grants and owners under disposable policy', async () => {
   await using fixture = await createEditorialOAuthFixture()
   const readScopes = 'listening:read favorites:read subscriptions:read reminders:read'
   const writeScopes = 'listening:write favorites:write subscriptions:write reminders:write'
@@ -151,7 +155,7 @@ test('central owned/admin reads isolate grants and owners without activating com
     }),
   )
 
-  const rpc = (token: typeof reader.access_token, name?: string) =>
+  const rpc = (token: typeof reader.access_token, name?: string, args: Schema.Json = {}) =>
     app.handler(
       new Request(fixture.config.mcp.resourceUrl, {
         method: 'POST',
@@ -169,7 +173,7 @@ test('central owned/admin reads isolate grants and owners without activating com
           method: name ? 'tools/call' : 'tools/list',
           params: {
             name,
-            arguments: {},
+            arguments: args,
             _meta: {
               'io.modelcontextprotocol/protocolVersion': '2026-07-28',
               'io.modelcontextprotocol/clientCapabilities': {},
@@ -187,6 +191,8 @@ test('central owned/admin reads isolate grants and owners without activating com
     'list_music_reminders',
   ]
 
+  const membershipCommands = ['set_favorite', 'set_show_subscription']
+
   const listed = async (token: typeof reader.access_token) =>
     Schema.decodeUnknownSync(ToolList)(await (await rpc(token)).json()).result.tools.map(
       ({ name }) => name,
@@ -194,14 +200,17 @@ test('central owned/admin reads isolate grants and owners without activating com
 
   try {
     expect(await listed(reader.access_token)).toEqual(privateNames)
-    expect(await listed(writer.access_token)).toEqual([])
-    // Both read AND write grants ensure placeholders cannot hide behind scope filtering.
-    expect(await listed(admin.access_token)).toEqual([
-      'list_drafts',
-      'get_post',
-      ...privateNames,
-      'get_admin_overview',
-    ])
+    expect(await listed(writer.access_token)).toEqual(membershipCommands)
+    // Both read AND write grants expose the two implemented setters, not other pending commands.
+    expect((await listed(admin.access_token)).toSorted()).toEqual(
+      [
+        'list_drafts',
+        'get_post',
+        ...privateNames,
+        ...membershipCommands,
+        'get_admin_overview',
+      ].toSorted(),
+    )
 
     for (const name of privateNames) {
       expect(await (await rpc(writer.access_token, name)).json()).toMatchObject({
@@ -209,6 +218,12 @@ test('central owned/admin reads isolate grants and owners without activating com
           isError: true,
           content: [{ text: expect.stringContaining('access_denied') }],
         },
+      })
+    }
+
+    for (const name of membershipCommands) {
+      expect(await (await rpc(reader.access_token, name)).json()).toMatchObject({
+        result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
       })
     }
 
@@ -272,6 +287,56 @@ test('central owned/admin reads isolate grants and owners without activating com
 
     expect(overview.endpoint).toEqual(editorial.endpoint)
     expect(await snapshot()).toEqual(before)
+    expect(email.messages).toEqual([])
+
+    // The same real OAuth/Worker composition must execute, not merely list, the
+    // registered setters. Reuse observed owner revisions and uncertain request IDs.
+    const intent = {
+      targetKind: 'audio',
+      targetId: 'owned-mix',
+      desiredState: false,
+      expectedRevision: favorites.revision,
+      requestId: crypto.randomUUID(),
+    }
+
+    const mutation = Schema.decodeUnknownSync(
+      Schema.Struct({ result: Schema.Struct({ structuredContent: SetMembershipResult }) }),
+    )(await (await rpc(writer.access_token, 'set_favorite', intent)).json()).result
+      .structuredContent
+
+    expect(mutation).toMatchObject({ desiredState: false, revision: 1, notifications: 'not_sent' })
+    expect(await (await rpc(writer.access_token, 'set_favorite', intent)).json()).toMatchObject({
+      result: { structuredContent: mutation },
+    })
+
+    const unsubscribe = Schema.decodeUnknownSync(
+      Schema.Struct({ result: Schema.Struct({ structuredContent: SetMembershipResult }) }),
+    )(
+      await (
+        await rpc(writer.access_token, 'set_show_subscription', {
+          showId: 'owned-show',
+          desiredState: false,
+          expectedRevision: mutation.revision,
+          requestId: crypto.randomUUID(),
+        })
+      ).json(),
+    ).result.structuredContent
+
+    expect(unsubscribe).toMatchObject({
+      desiredState: false,
+      revision: 2,
+      notifications: 'not_sent',
+    })
+    expect(
+      await (
+        await rpc(writer.access_token, 'set_favorite', {
+          ...intent,
+          requestId: crypto.randomUUID(),
+        })
+      ).json(),
+    ).toMatchObject({
+      result: { isError: true, content: [{ text: expect.stringContaining('conflict') }] },
+    })
     expect(email.messages).toEqual([])
 
     await fixture.db.update(user).set({ role: 'user' }).where(eq(user.id, 'other'))

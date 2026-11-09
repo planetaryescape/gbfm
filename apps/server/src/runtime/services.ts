@@ -5,6 +5,7 @@ import { AuthLive } from '@/lib/auth'
 import { CryptoLive } from '@/lib/crypto'
 import { MdxServiceCatalogLayer } from '@/lib/mdx'
 import type { McpOperationStore } from '@/mcp/operations/store'
+import { ReminderCommandServiceLayer } from '@/mcp/reminders/service'
 import {
   EditorialListCacheUnavailableLayer,
   type EditorialListCache,
@@ -132,6 +133,7 @@ export const AppLayer = ({
     MusicBrainzIdentityLive,
     musicCoverImageFetcherLive,
     MusicReminderServiceLayer,
+    ReminderCommandServiceLayer,
     playlistEnrichmentQueueLive,
     NavigationRetentionServiceLayer,
     spotifyImportResolverLive,
@@ -198,5 +200,5 @@ export const AppLayer = ({
       Layer.provide(Layer.mergeAll(databaseLive, configLive, EmailDeliveryWithDependencies)),
     ),
     AppLoggerLive.pipe(Layer.provide(configLive)),
-  ).pipe(Layer.provide(configLive))
+  ).pipe(Layer.provideMerge(configLive))
 }

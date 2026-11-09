@@ -2,7 +2,7 @@ import { and, asc, desc, eq, lte } from 'drizzle-orm'
 import { Effect, Schema } from 'effect'
 
 import { user as usersTable } from '@/db/auth.schema'
-import { projectEntityLabels, projectEntityLabelsForRows, replaceEntityLabels } from '@/db/labels'
+import { projectEntityLabels, projectEntityLabelsForRows } from '@/db/labels'
 import { Database } from '@/db/layer'
 import {
   musicLabelCreatorsTable,

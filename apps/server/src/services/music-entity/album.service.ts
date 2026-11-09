@@ -1,9 +1,9 @@
-import { asc, desc, eq, sql } from 'drizzle-orm'
+import { asc, desc, eq } from 'drizzle-orm'
 import { Effect, Schema } from 'effect'
 
-import { projectEntityLabels, projectEntityLabelsForRows, replaceEntityLabels } from '@/db/labels'
+import { projectEntityLabels, projectEntityLabelsForRows } from '@/db/labels'
 import { Database } from '@/db/layer'
-import { musicAlbumArtistsTable, musicAlbumsTable } from '@/db/music-entity.schema'
+import { musicAlbumsTable } from '@/db/music-entity.schema'
 import { DatabaseError, getErrorMessage } from '@/errors'
 import { omitUndefined } from '@/lib/omit-undefined'
 

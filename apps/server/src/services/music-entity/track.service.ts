@@ -1,8 +1,8 @@
-import { asc, desc, eq, sql } from 'drizzle-orm'
+import { asc, desc, eq } from 'drizzle-orm'
 import { Effect, Schema } from 'effect'
 
 import { Database } from '@/db/layer'
-import { musicTrackArtistsTable, musicTracksTable } from '@/db/music-entity.schema'
+import { musicTracksTable } from '@/db/music-entity.schema'
 import { DatabaseError, getErrorMessage } from '@/errors'
 import { omitUndefined } from '@/lib/omit-undefined'
 

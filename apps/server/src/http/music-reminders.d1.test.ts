@@ -18,11 +18,12 @@ import { ConfigService, createConfig } from '@/services/config.service'
 import { EmailDelivery } from '@/services/email-delivery.service'
 import { MusicReminderServiceLayer } from '@/services/music-reminder.service'
 import { ReminderSignalService } from '@/services/reminder-signal.service'
+import { createTestWebHandler } from '@/test/http-handler'
 import { createMigratedD1Database } from '@/test/migrate-d1'
 
 import { MusicRemindersHandlersLive } from './music-reminders.handlers'
 
-const fixture = async () => {
+const fixture = async (runtime: 'group' | 'worker' = 'group') => {
   const resource = await createMigratedD1Database()
   const db = makeDatabaseClient(resource.database)
   const now = new Date()
@@ -41,13 +42,15 @@ const fixture = async () => {
 
   const defaults = createConfig()
 
+  const config = Layer.succeed(ConfigService, {
+    ...defaults,
+    auth: { ...defaults.auth, betterAuthSecret: 'disposable-reminder-test-secret-32-chars' },
+  })
+
   const base = Layer.mergeAll(
     DatabaseLayer(resource.database),
     McpOperationStoreLayer(resource.database),
-    Layer.succeed(ConfigService, {
-      ...defaults,
-      auth: { ...defaults.auth, betterAuthSecret: 'disposable-reminder-test-secret-32-chars' },
-    }),
+    config,
     // No delivery or provider is allowed in the HTTP proof.
     Layer.succeed(EmailDelivery, { deliver: () => Effect.die('Unexpected email delivery') }),
   )
@@ -66,18 +69,21 @@ const fixture = async () => {
     }),
   ).pipe(Layer.provideMerge(base))
 
-  const handler = HttpRouter.toWebHandler(
-    HttpApiBuilder.layer(HttpApi.make('gbfm').add(MusicRemindersGroup)).pipe(
-      Layer.provide(MusicRemindersHandlersLive),
-      Layer.provideMerge(dependencies),
-      Layer.provideMerge(
-        Layer.mergeAll(FileSystem.layerNoop({}), Path.layer).pipe(
-          Layer.provideMerge(HttpServer.layerServices),
-        ),
-      ),
-    ),
-    { disableLogger: true },
-  )
+  const handler =
+    runtime === 'worker'
+      ? createTestWebHandler(resource.database, undefined, undefined, undefined, config)
+      : HttpRouter.toWebHandler(
+          HttpApiBuilder.layer(HttpApi.make('gbfm').add(MusicRemindersGroup)).pipe(
+            Layer.provide(MusicRemindersHandlersLive),
+            Layer.provideMerge(dependencies),
+            Layer.provideMerge(
+              Layer.mergeAll(FileSystem.layerNoop({}), Path.layer).pipe(
+                Layer.provideMerge(HttpServer.layerServices),
+              ),
+            ),
+          ),
+          { disableLogger: true },
+        )
 
   const request = (method: string, path = '', body?: Schema.Json, actor = 'owner') => {
     const init: RequestInit = {
@@ -125,67 +131,72 @@ const createInput = () => ({
   albumCoverUrl: 'https://private.example.test/cover',
 })
 
-test('real session HTTP writes require observed revisions and replay bounded original receipts', async () => {
-  await using f = await fixture()
-  const input = createInput()
-  const created = await f.request('POST', '', input)
-  expect(created.status).toBe(200)
-  const receipt = Schema.decodeUnknownSync(ReceiptResponse)(await created.json()).reminder
-  expect(receipt.commandRevision).toBe(1)
-  const path = `/${receipt.reminderId}`
-  expect((await f.request('POST', '', input)).status).toBe(200)
-  expect(await f.db.select().from(musicReminder)).toHaveLength(1)
-  expect(await (await f.request('GET')).json()).toMatchObject({
-    reminders: [{ id: receipt.reminderId, commandRevision: 1, dispatchState: 'open' }],
-  })
-  expect(
-    (await f.request('PUT', path, { requestId: crypto.randomUUID(), notes: 'edit' })).status,
-  ).toBe(428)
-  expect((await f.request('DELETE', path, { requestId: crypto.randomUUID() })).status).toBe(428)
-  expect((await f.request('DELETE', path)).status).toBe(400)
-  expect(
-    (
-      await f.request(
-        'PUT',
-        path,
-        {
-          requestId: crypto.randomUUID(),
-          expectedRevision: 1,
-          notes: 'steal',
-        },
-        'other',
-      )
-    ).status,
-  ).toBe(404)
-  const edit = { requestId: crypto.randomUUID(), expectedRevision: 1, notes: null }
-  const updated = await f.request('PUT', path, edit)
-  expect(updated.status).toBe(200)
-  expect(await updated.json()).toMatchObject({ reminder: { commandRevision: 2 } })
-  expect(await f.db.select().from(musicReminder)).toMatchObject([
-    {
-      notes: null,
-      musicTitle: 'Night',
-      albumCoverUrl: input.albumCoverUrl,
-    },
-  ])
-  expect(
-    (await f.request('DELETE', path, { requestId: crypto.randomUUID(), expectedRevision: 1 }))
-      .status,
-  ).toBe(409)
-  const cancel = { requestId: crypto.randomUUID(), expectedRevision: 2 }
-  expect((await f.request('DELETE', path, cancel)).status).toBe(200)
-  expect((await f.request('DELETE', path, cancel)).status).toBe(200)
-  const replay = await f.request('PUT', path, edit)
-  expect(replay.status).toBe(200)
-  expect(await replay.json()).toMatchObject({
-    reminder: { commandRevision: 2, dispatchState: 'open' },
-  })
-  expect(await f.db.select().from(musicReminder)).toMatchObject([
-    { commandRevision: 3, dispatchState: 'cancelled' },
-  ])
-  expect(JSON.stringify(receipt)).not.toContain('private')
-  expect(f.signals()).toBeGreaterThan(0)
-}, 20_000)
+test.each(['group', 'worker'] as const)(
+  'real session %s HTTP writes require observed revisions and replay bounded original receipts',
+  async (runtime) => {
+    await using f = await fixture(runtime)
+    const input = createInput()
+    const created = await f.request('POST', '', input)
+    expect(created.status).toBe(200)
+    const receipt = Schema.decodeUnknownSync(ReceiptResponse)(await created.json()).reminder
+    expect(receipt.commandRevision).toBe(1)
+    const path = `/${receipt.reminderId}`
+    expect((await f.request('POST', '', input)).status).toBe(200)
+    expect(await f.db.select().from(musicReminder)).toHaveLength(1)
+    expect(await (await f.request('GET')).json()).toMatchObject({
+      reminders: [{ id: receipt.reminderId, commandRevision: 1, dispatchState: 'open' }],
+    })
+    expect(
+      (await f.request('PUT', path, { requestId: crypto.randomUUID(), notes: 'edit' })).status,
+    ).toBe(428)
+    expect((await f.request('DELETE', path, { requestId: crypto.randomUUID() })).status).toBe(428)
+    expect((await f.request('DELETE', path)).status).toBe(400)
+    expect(
+      (
+        await f.request(
+          'PUT',
+          path,
+          {
+            requestId: crypto.randomUUID(),
+            expectedRevision: 1,
+            notes: 'steal',
+          },
+          'other',
+        )
+      ).status,
+    ).toBe(404)
+    const edit = { requestId: crypto.randomUUID(), expectedRevision: 1, notes: null }
+    const updated = await f.request('PUT', path, edit)
+    expect(updated.status).toBe(200)
+    expect(await updated.json()).toMatchObject({ reminder: { commandRevision: 2 } })
+    expect(await f.db.select().from(musicReminder)).toMatchObject([
+      {
+        notes: null,
+        musicTitle: 'Night',
+        albumCoverUrl: input.albumCoverUrl,
+      },
+    ])
+    expect(
+      (await f.request('DELETE', path, { requestId: crypto.randomUUID(), expectedRevision: 1 }))
+        .status,
+    ).toBe(409)
+    const cancel = { requestId: crypto.randomUUID(), expectedRevision: 2 }
+    expect((await f.request('DELETE', path, cancel)).status).toBe(200)
+    expect((await f.request('DELETE', path, cancel)).status).toBe(200)
+    const replay = await f.request('PUT', path, edit)
+    expect(replay.status).toBe(200)
+    expect(await replay.json()).toMatchObject({
+      reminder: { commandRevision: 2, dispatchState: 'open' },
+    })
+    expect(await f.db.select().from(musicReminder)).toMatchObject([
+      { commandRevision: 3, dispatchState: 'cancelled' },
+    ])
+    expect(JSON.stringify(receipt)).not.toContain('private')
+
+    expect(f.signals()).toBeGreaterThanOrEqual(runtime === 'group' ? 1 : 0)
+  },
+  20_000,
+)
 
 test('fenced HTTP writes explain non-recall and revoked sessions cannot replay', async () => {
   await using f = await fixture()

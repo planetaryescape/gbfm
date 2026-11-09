@@ -5,7 +5,7 @@ import type { Services } from './init'
 import { Message } from './message'
 import type { Model } from './model'
 import * as Player from './player'
-import type * as PublicActions from './public-actions'
+import * as PublicActions from './public-actions'
 
 type Return = Update.Return<Model, Message, Services>
 
@@ -25,7 +25,7 @@ const toPlayer =
   }
 
 const adoptInPage =
-  (audioId: string, active: boolean, principalId: string): Step =>
+  (audioId: string, active: boolean, principalId: string, revision: number): Step =>
   (model) => {
     const publicAction: PublicActions.Model = model.publicAction
     const document = publicAction.document
@@ -34,7 +34,8 @@ const adoptInPage =
       publicAction.principalId !== principalId ||
       document.target.kind !== 'audio' ||
       document.target.id !== audioId ||
-      publicAction.busy ||
+      (publicAction.busy && publicAction.revision !== null) ||
+      publicAction.mutationId !== null ||
       !['active', 'inactive'].includes(document.state)
       ? { model }
       : {
@@ -42,6 +43,9 @@ const adoptInPage =
             ...model,
             publicAction: {
               ...publicAction,
+              revision,
+              busy: false,
+              requestId: publicAction.requestId + 1,
               document: { ...document, state: active ? 'active' : 'inactive' },
             },
           },
@@ -70,23 +74,33 @@ const pageFavorite = (model: Model, principalId: string | null) => {
   return document?.target.kind === 'audio' &&
     principalId !== null &&
     model.publicAction.principalId === principalId &&
+    model.publicAction.revision !== null &&
+    !model.publicAction.busy &&
+    model.publicAction.mutationId === null &&
     document.target.id === model.player.favorite.track?.audioId &&
     (document.state === 'active' || document.state === 'inactive')
-    ? { audioId: document.target.id, active: document.state === 'active' }
+    ? {
+        audioId: document.target.id,
+        active: document.state === 'active',
+        revision: model.publicAction.revision,
+      }
     : null
 }
 
 const playerFavorite = (model: Model) => {
-  const { track, status, saving } = model.player.favorite
+  const { track, status, saving, revision, mutationId } = model.player.favorite
 
   return track &&
     model.player.favorite.principalId &&
     !saving &&
+    revision !== null &&
+    mutationId === null &&
     (status === 'active' || status === 'inactive')
     ? {
         audioId: track.audioId,
         active: status === 'active',
         principalId: model.player.favorite.principalId,
+        revision,
       }
     : null
 }
@@ -94,27 +108,32 @@ const playerFavorite = (model: Model) => {
 const invalidatePageAccount: Step = (model) => {
   const publicAction = model.publicAction
 
-  return !publicAction.document || publicAction.principalId === model.player.favorite.principalId
-    ? { model }
-    : {
-        model: {
-          ...model,
-          publicAction: {
-            ...publicAction,
-            principalId: model.player.favorite.principalId,
-            requestId: publicAction.requestId + 1,
-            busy: false,
-            notice: null,
-            document: {
-              ...publicAction.document,
-              state:
-                model.player.favorite.principalKnown && model.player.favorite.principalId === null
-                  ? 'anonymous'
-                  : 'unavailable',
-            },
-          },
-        },
-      }
+  if (!publicAction.document || publicAction.principalId === model.player.favorite.principalId)
+    return { model }
+
+  const child = PublicActions.load({
+    ...publicAction,
+    principalId: model.player.favorite.principalId,
+    revision: null,
+    mutationId: null,
+    requestId: publicAction.requestId + 1,
+    busy: false,
+    notice: null,
+    document: {
+      ...publicAction.document,
+      state:
+        model.player.favorite.principalKnown && model.player.favorite.principalId === null
+          ? 'anonymous'
+          : 'unavailable',
+    },
+  })
+
+  return {
+    model: { ...model, publicAction: child.model },
+    commands: Command.mapMessages(child.commands ?? [], (message) =>
+      Message.GotPublicActionMessage({ message }),
+    ),
+  }
 }
 
 const steps = (previous: Model, message: Message, next: Model): ReadonlyArray<Step> => {
@@ -135,7 +154,8 @@ const steps = (previous: Model, message: Message, next: Model): ReadonlyArray<St
 
   const pageConfirmedSignOut =
     Predicate.isTagged(message, 'GotPublicActionMessage') &&
-    Predicate.isTagged(message.message, 'Failed') &&
+    (Predicate.isTagged(message.message, 'Failed') ||
+      Predicate.isTagged(message.message, 'LoadFailed')) &&
     message.message.unauthorized &&
     next.publicAction !== previous.publicAction
 
@@ -164,8 +184,10 @@ const steps = (previous: Model, message: Message, next: Model): ReadonlyArray<St
       : undefined
 
   const fresh =
-    pageReplaced && Predicate.isTagged(message, 'LoadedPage')
-      ? (overtakingSave ?? pageFavorite(next, principalId))
+    pageReplaced &&
+    Predicate.isTagged(message, 'GotPublicActionMessage') &&
+    Predicate.isTagged(message.message, 'Loaded')
+      ? pageFavorite(next, principalId)
       : null
 
   const cached =
@@ -180,7 +202,14 @@ const steps = (previous: Model, message: Message, next: Model): ReadonlyArray<St
       ? [invalidatePageAccount]
       : []),
     ...(playerSave
-      ? [adoptInPage(playerSave.audioId, playerSave.active, playerSave.principalId)]
+      ? [
+          adoptInPage(
+            playerSave.audioId,
+            playerSave.active,
+            playerSave.principalId,
+            playerSave.revision,
+          ),
+        ]
       : []),
     ...(pageSave
       ? [
@@ -188,15 +217,26 @@ const steps = (previous: Model, message: Message, next: Model): ReadonlyArray<St
             Player.Message.FavoriteChangedElsewhere({
               audioId: pageSave.target.id,
               active: pageSave.active,
+              revision: pageSave.revision,
             }),
           ),
         ]
       : []),
     ...(overtakingSave
-      ? [adoptInPage(overtakingSave.audioId, overtakingSave.active, overtakingSave.principalId)]
+      ? [
+          adoptInPage(
+            overtakingSave.audioId,
+            overtakingSave.active,
+            overtakingSave.principalId,
+            overtakingSave.revision,
+          ),
+          toPlayer(Player.Message.FavoriteChangedElsewhere(overtakingSave)),
+        ]
       : []),
     ...(fresh ? [toPlayer(Player.Message.FavoriteChangedElsewhere(fresh))] : []),
-    ...(cached ? [adoptInPage(cached.audioId, cached.active, cached.principalId)] : []),
+    ...(cached
+      ? [adoptInPage(cached.audioId, cached.active, cached.principalId, cached.revision)]
+      : []),
   ]
 }
 
@@ -211,9 +251,9 @@ export const syncPlayerFavorite = (previous: Model, message: Message, result: Re
   const principalId = playerSave?.principalId ?? pageSave?.principalId
 
   const change = playerSave
-    ? { audioId: playerSave.audioId, active: playerSave.active }
+    ? { audioId: playerSave.audioId, active: playerSave.active, revision: playerSave.revision }
     : pageSave
-      ? { audioId: pageSave.target.id, active: pageSave.active }
+      ? { audioId: pageSave.target.id, active: pageSave.active, revision: pageSave.revision }
       : null
 
   const model =

@@ -3,7 +3,23 @@ import { Effect, Fiber, ManagedRuntime } from 'effect'
 import { TestClock } from 'effect/testing'
 import { describe, expect, it } from 'vitest'
 
-import { initialModel, Message, reconcile, sync, update } from './favorite'
+import { initialModel, Message as ActualMessage, reconcile, sync, update } from './favorite'
+
+const Message = {
+  ...ActualMessage,
+  Loaded: (input: Omit<Parameters<typeof ActualMessage.Loaded>[0], 'revision'>) =>
+    ActualMessage.Loaded({ revision: 17, ...input }),
+  Saved: (input: Omit<Parameters<typeof ActualMessage.Saved>[0], 'revision'>) =>
+    ActualMessage.Saved({ revision: 18, ...input }),
+  SaveFailed: (
+    input: Omit<Parameters<typeof ActualMessage.SaveFailed>[0], 'conflicted' | 'mutationId'>,
+  ) =>
+    ActualMessage.SaveFailed({
+      conflicted: false,
+      mutationId: 'da5495ab-6f07-4a4f-bb5e-0f9355e71e40',
+      ...input,
+    }),
+}
 
 const track = (id: string, slug = id): QueueTrackType => ({
   id,
@@ -162,6 +178,8 @@ describe('player favorite', () => {
       audioId: 'mix-a',
       active: true,
       principalId: 'user-1',
+      expectedRevision: 17,
+      mutationId: null,
     })
     expect(update(saving.model, Message.Toggled()).commands).toBeUndefined()
 
@@ -251,7 +269,7 @@ describe('player favorite', () => {
 
   it('adopts acknowledged changes from another control only for the same idle track', () => {
     const inactive = loaded()
-    const adopted = reconcile(inactive, 'mix-a', true)
+    const adopted = reconcile(inactive, 'mix-a', true, 18)
     expect(adopted.status).toBe('active')
 
     expect(
@@ -265,13 +283,13 @@ describe('player favorite', () => {
         }),
       ).model,
     ).toEqual(adopted)
-    expect(reconcile(inactive, 'mix-b', true)).toBe(inactive)
+    expect(reconcile(inactive, 'mix-b', true, 18)).toBe(inactive)
 
     const saving = update(inactive, Message.Toggled()).model
-    expect(reconcile(saving, 'mix-a', false)).toBe(saving)
+    expect(reconcile(saving, 'mix-a', false, 18)).toBe(saving)
 
     const loading = sync(initialModel, track('mix-a'), 'user-1').model
-    const settled = reconcile(loading, 'mix-a', true)
+    const settled = reconcile(loading, 'mix-a', true, 18)
     expect(
       update(
         settled,
@@ -310,7 +328,7 @@ describe('player favorite', () => {
     try {
       const dismissed = await runtime.runPromise(
         Effect.gen(function* () {
-          const delivered: Array<Message> = []
+          const delivered: Array<ActualMessage> = []
 
           const fiber = yield* timer.effect.pipe(
             Effect.tap((message) => Effect.sync(() => delivered.push(message))),

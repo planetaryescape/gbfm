@@ -13,6 +13,7 @@ describe('dashboard collection artwork', () => {
       favorites: [
         {
           id: 'favorite-audio',
+          membershipRevision: 7,
           userId: 'listener',
           audioId: 'audio',
           showId: null,
@@ -29,6 +30,7 @@ describe('dashboard collection artwork', () => {
         },
         {
           id: 'favorite-show',
+          membershipRevision: 7,
           userId: 'listener',
           audioId: null,
           showId: 'show',
@@ -43,6 +45,7 @@ describe('dashboard collection artwork', () => {
         },
         {
           id: 'favorite-unavailable',
+          membershipRevision: 7,
           userId: 'listener',
           audioId: 'missing',
           showId: null,
@@ -76,6 +79,8 @@ describe('dashboard collection artwork', () => {
       total: 2,
       reminders: ['https://example.test/album-cover.jpg', null].map((albumCoverUrl, index) => ({
         id: `reminder-${index}`,
+        commandRevision: 3,
+        dispatchState: 'open' as const,
         userId: 'listener',
         musicTitle: 'Album',
         artistName: 'Artist',

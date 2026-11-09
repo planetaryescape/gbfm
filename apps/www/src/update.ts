@@ -116,12 +116,19 @@ const showPage = (
   const identityChanged = next.model.tweetReader.identity !== model.tweetReader.identity
 
   const keepPendingPublicAction =
-    model.publicAction.busy &&
+    (model.publicAction.busy || model.publicAction.mutationId !== null) &&
     model.publicAction.document !== null &&
     model.publicAction.principalId !== null &&
     model.publicAction.principalId === next.model.publicAction.principalId &&
     model.publicAction.document?.target.kind === next.model.publicAction.document?.target.kind &&
     model.publicAction.document?.target.id === next.model.publicAction.document?.target.id
+
+  const publicAction = keepPendingPublicAction
+    ? { model: model.publicAction }
+    : PublicActions.load({
+        ...PublicActions.init(flags.publicAction, flags.principal?.id ?? null),
+        requestId: model.publicAction.requestId,
+      })
 
   const sameTweet =
     !identityChanged &&
@@ -155,24 +162,24 @@ const showPage = (
       navigationPrincipalId: model.navigationPrincipalId,
       navigationPrincipalKnown: model.navigationPrincipalKnown,
       navigationFavoriteChanges: model.navigationFavoriteChanges,
-      publicAction: keepPendingPublicAction
-        ? model.publicAction
-        : {
-            ...next.model.publicAction,
-            requestId: model.publicAction.requestId + 1,
-          },
+      publicAction: publicAction.model,
     },
     commands: [
-      ...Command.mapMessages(next.commands ?? [], (message) =>
-        Match.value(message).pipe(
-          Match.tag('GotCreatorResult', ({ message }) =>
-            Message.GotCreatorResult({ message, navigationId }),
+      ...Command.mapMessages(
+        (next.commands ?? []).filter(({ name }) => name !== 'PublicActions.Load'),
+        (message) =>
+          Match.value(message).pipe(
+            Match.tag('GotCreatorResult', ({ message }) =>
+              Message.GotCreatorResult({ message, navigationId }),
+            ),
+            Match.tag('GotDashboardResult', ({ message }) =>
+              Message.GotDashboardResult({ message, navigationId }),
+            ),
+            Match.orElse((message) => message),
           ),
-          Match.tag('GotDashboardResult', ({ message }) =>
-            Message.GotDashboardResult({ message, navigationId }),
-          ),
-          Match.orElse((message) => message),
-        ),
+      ),
+      ...Command.mapMessages(publicAction.commands ?? [], (message) =>
+        Message.GotPublicActionMessage({ message }),
       ),
       SetResolvedUrl({
         href: flags.url,

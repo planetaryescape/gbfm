@@ -47,7 +47,9 @@ def main():
         raise RuntimeError("Expected consolidated MCP migration directory; refusing deployment")
     hashes = {name: hashlib.sha256(sql.encode()).hexdigest() for name, sql in sources.items()}
     tables = {r["name"] for r in query("SELECT name FROM sqlite_master WHERE type='table'")}
-    if "__alchemy_migrations" not in tables:
+    # databaseProps pins production to its existing Alchemy-format ledger.
+    # Never fall back to a second table or invent hashes from local files.
+    if "d1_migrations" not in tables or "__alchemy_migrations" in tables:
         diagnostic = {"migration_tables": sorted(t for t in tables if "migration" in t.lower())}
         for table in ["d1_migrations", "__drizzle_migrations"]:
             if table not in tables:
@@ -72,8 +74,11 @@ def main():
                 "WHERE typeof(revision)<>'integer' OR revision NOT BETWEEN 0 AND 9007199254740991"
             )
         print(json.dumps(diagnostic, indent=2))
-        raise RuntimeError("Production Alchemy ledger missing; inspect legacy history before rollout")
-    ledger = query("SELECT name, hash FROM __alchemy_migrations ORDER BY id")
+        raise RuntimeError("Production migration ledger missing or ambiguous; refusing rollout")
+    columns = {r["name"] for r in query("SELECT name FROM pragma_table_info('d1_migrations')")}
+    if columns != {"id", "hash", "created_at", "name", "applied_at"}:
+        raise RuntimeError("Production ledger is not the verified Alchemy format; refusing conversion")
+    ledger = query("SELECT name, hash FROM d1_migrations ORDER BY id")
     applied = set()
     for row in ledger:
         name = row["name"]
@@ -112,7 +117,7 @@ def main():
             if table in tables:
                 raise RuntimeError(f"Partial DDL before {name}: {table} already exists")
 
-    summary = {"applied_migrations": len(applied), "pending_migrations": pending}
+    summary = {"migration_table": "d1_migrations", "applied_migrations": len(applied), "pending_migrations": pending}
     if "0017_mcp_domain_revisions.sql" in pending:
         counts = query(
             "SELECT count(*) AS total, "

@@ -13,6 +13,10 @@ on:
         description: Preview production changes without deploying
         type: boolean
         default: false
+      preflight_only:
+        description: Read migration history and aggregate safety counts without planning or deploying
+        type: boolean
+        default: false
 
 concurrency:
   group: alchemy-deploy
@@ -30,11 +34,13 @@ jobs:
           fetch-depth: 1
 
       - uses: ./.github/actions/setup-bun-workspace
+        if: ${{ !inputs.preflight_only }}
 
       # Alchemy patches any secret whose value differs from its state, so a
       # missing variable would reach Cloudflare as an empty string and wipe the
       # stored secret. Fail before the deploy touches anything.
       - name: Check every secret is present
+        if: ${{ !inputs.preflight_only }}
         env:
           REQUIRED: >-
             CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID SPOTIFY_CLIENT_ID
@@ -66,7 +72,14 @@ jobs:
           fi
           echo "All $(echo $REQUIRED | wc -w) secrets present."
 
+      - name: Read-only MCP migration preflight
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_DEFAULT_ACCOUNT_ID }}
+        run: python3 scripts/mcp-migration-preflight.py
+
       - name: Deploy
+        if: ${{ !inputs.preflight_only }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ANALYTICS_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -94,7 +107,7 @@ jobs:
           fi
 
       - name: Verify the deploy serves traffic
-        if: ${{ !inputs.plan_only }}
+        if: ${{ !inputs.plan_only && !inputs.preflight_only }}
         run: |
           set -uo pipefail
           fail=0

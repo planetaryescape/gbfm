@@ -98,6 +98,85 @@ export type EditorialAccount = typeof EditorialAccount.Type
 export const canReadEditorial = (account: EditorialAccount) =>
   !account.banned && canCreatePosts(account.role)
 
+// Separate from EditorialScopes: a listener grant must not require posts:read.
+export const McpScope = Schema.Literals([
+  ...EditorialScope.literals,
+  'catalogue:read',
+  'catalogue:write',
+  'catalogue:import',
+  'catalogue:propose',
+  'catalogue:inspect',
+  'catalogue:repair',
+  'content:read',
+  'providers:read',
+  'playlists:write',
+  'playlists:publish',
+  'listening:read',
+  'listening:write',
+  'listening:publish',
+  'favorites:read',
+  'favorites:write',
+  'subscriptions:read',
+  'subscriptions:write',
+  'reminders:read',
+  'reminders:write',
+  'creator:read',
+  'creator:write',
+  'micros:publish',
+  'assets:read',
+  'assets:upload',
+  'content:publish',
+  'content:delete',
+  'admin:read',
+])
+
+export type McpScope = typeof McpScope.Type
+
+export const McpScopes = Schema.Array(McpScope).check(
+  Schema.makeFilter(
+    (scopes) =>
+      scopes.some((scope) => scope !== 'offline_access') &&
+      new Set(scopes).size === scopes.length &&
+      (!scopes.includes('drafts:write') || scopes.includes('posts:read')),
+  ),
+)
+
+export type McpScopes = typeof McpScopes.Type
+
+export const McpPrincipal = Schema.Struct({
+  ...EditorialPrincipal.fields,
+  scopes: McpScopes,
+})
+
+export type McpPrincipal = typeof McpPrincipal.Type
+
+export const canAuthorizeMcp = (account: EditorialAccount, scopes: McpScopes) =>
+  !account.banned &&
+  scopes.every((scope) => {
+    switch (scope) {
+      case 'catalogue:write':
+      case 'catalogue:import':
+      case 'catalogue:inspect':
+      case 'catalogue:repair':
+      case 'playlists:write':
+      case 'playlists:publish':
+      case 'admin:read':
+        return account.role === 'admin'
+      case 'posts:read':
+      case 'drafts:write':
+      case 'creator:read':
+      case 'creator:write':
+      case 'micros:publish':
+      case 'assets:read':
+      case 'assets:upload':
+      case 'content:publish':
+      case 'content:delete':
+        return canCreatePosts(account.role)
+      default:
+        return true
+    }
+  })
+
 export const EditorialOAuthSettings = Schema.Struct({
   resourceUrl: McpResourceUrl,
   issuer: OAuthIssuerUrl,

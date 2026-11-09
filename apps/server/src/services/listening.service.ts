@@ -4,7 +4,7 @@ import {
   ListeningDocument,
   type SaveMixesInput,
 } from '@gbfm/api/listening'
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, count, desc, eq, inArray } from 'drizzle-orm'
 import { Effect, Schema } from 'effect'
 
 import { user } from '@/db/auth.schema'
@@ -14,6 +14,7 @@ import {
   listeningMembershipsTable as memberships,
   savedMixesTable as mixes,
 } from '@/db/listening.schema'
+import { createPaginationMetadata } from '@/lib/pagination'
 
 import { parseListeningSource } from './listening-import'
 
@@ -114,6 +115,71 @@ export const publicListeningCollections = Effect.fn('Listening.public')(function
     mixes: entries.map(({ mix }) => mix),
     memberships: [],
   }).pipe(Effect.mapError(() => new ListeningError({ reason: 'unavailable' })))
+})
+
+/** Published listening collection/member page, using the existing anonymous ownership predicates. */
+export const publicListeningCollectionPage = Effect.fn('Listening.publicPage')(function* (
+  id: string,
+  { limit, offset }: { limit: number; offset: number },
+) {
+  const db = yield* Database
+
+  const visible = yield* query(() =>
+    db
+      .select({
+        id: collections.id,
+        title: collections.title,
+        description: collections.description,
+        ownerName: user.name,
+      })
+      .from(collections)
+      .innerJoin(user, eq(user.id, collections.userId))
+      .where(and(eq(collections.id, id), eq(collections.published, true)))
+      .limit(1),
+  )
+
+  if (!visible[0]) return yield* notFound()
+
+  const where = and(
+    eq(collections.id, id),
+    eq(collections.published, true),
+    eq(mixes.published, true),
+    eq(mixes.userId, collections.userId),
+  )
+
+  const totals = yield* query(() =>
+    db
+      .select({ total: count() })
+      .from(memberships)
+      .innerJoin(mixes, eq(mixes.id, memberships.mixId))
+      .innerJoin(collections, eq(collections.id, memberships.collectionId))
+      .where(where),
+  )
+
+  const entries = yield* query(() =>
+    db
+      .select({
+        id: mixes.id,
+        title: mixes.title,
+        url: mixes.url,
+        platform: mixes.platform,
+        notes: mixes.notes,
+        status: mixes.status,
+      })
+      .from(memberships)
+      .innerJoin(mixes, eq(mixes.id, memberships.mixId))
+      .innerJoin(collections, eq(collections.id, memberships.collectionId))
+      .where(where)
+      .orderBy(desc(mixes.createdAt), desc(mixes.id))
+      .limit(limit)
+      .offset(offset),
+  )
+
+  return {
+    collection: visible[0],
+    mixes: entries,
+    pagination: createPaginationMetadata(totals[0]?.total ?? 0, limit, offset),
+  }
 })
 
 /** Atomic, idempotent bulk save: importing again preserves existing notes and state. */

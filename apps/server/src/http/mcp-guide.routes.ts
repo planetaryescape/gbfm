@@ -90,9 +90,51 @@ The token's granted scopes are authoritative: an environment whose resource poli
 is still read-only can reduce a write request to read-only access.
 Draft title and content must be nonblank. Content is limited to 100,000 characters,
 title to 500 and description to 2,000.
+The encoded draft-write request and every MCP response must also fit within 256 KiB;
+read requests retain their 16 KiB limit. JSON escaping and multibyte text count toward
+the byte limit, so a schema-valid draft can still be too large. Oversize bodies fail
+explicitly without truncation. After an ambiguous write response, reconcile using
+the same requestId, never a new create key.
 Draft tools never publish, delete, change creators, change media or edit published posts.
 They do not control playback or access your private listening library.
 Review and publishing stay in GBFM.
+
+Tool discovery reflects the connection's current scopes and role on each request.
+Remembered tool names do not authorize calls. Seven public-content reads are also
+registered, but require content:read and a resource policy explicitly allowing it:
+- list_published_posts: public editorial summaries only, never source bodies or micro posts.
+- get_show: public show metadata by slug, without body rendering or media URLs.
+- list_show_episodes: public audio metadata under a public show; private parents and
+  children remain excluded from pages and counts. Audio IDs are not music-track IDs.
+- search_catalogue: metadata search in one published audio/show/post namespace;
+  page limits do not bound database matching, counting or sorting work.
+- get_mix: published audio mix metadata, without body, media or related-show expansion.
+- get_public_profile: public user or artist-DJ identity metadata with an explicit kind;
+  user lookup takes precedence and banned users do not fall back to an artist.
+- get_public_collection: published collection metadata and published same-owner saves;
+  individual private saves stay excluded from pages and counts.
+Lists default to 20 items, maximum 50, with offset up to 10,000. Reads are safe to
+retry but pages are not snapshots across concurrent edits. A missing or private
+show returns not_found. These reads perform no playback, seen-state or subscription writes.
+Eligible listeners can authorize content:read without posts:read only where enabled.
+Production allowedScopes is unchanged; registering these tools does not activate
+content:read on a resource or add it to existing grants. Fresh consent and explicit
+resource-policy authorization are separate requirements. Canonical-music catalogue
+tools and read_micro_thread are not registered; thread privacy and playlist rendering
+remain gated.
+
+Six owner/admin reads are registered but require fresh consent and an explicitly
+enabled resource policy; production allowedScopes remains unchanged:
+- list_saved_mixes: your saved mix metadata and private notes; requires listening:read.
+- list_collections: your collection metadata; requires listening:read.
+- list_favorites: your favorites pointing to currently public audio; requires favorites:read.
+- list_show_subscriptions: your subscriptions to currently public shows; requires subscriptions:read.
+- list_music_reminders: your reminder summaries, without notes or source URLs; requires reminders:read.
+- get_admin_overview: fixed draft/published publishing counts; requires admin:read and a current admin role.
+These reads do not change library state or send notifications. Listening, favorite,
+subscription and reminder commands are not registered, even with write grants.
+Existing grants do not gain these permissions automatically. Admin access is checked
+live; demotion, bans and connection revocation do not wait for token expiry.
 
 ## Other clients, including Claude Code
 

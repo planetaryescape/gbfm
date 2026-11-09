@@ -51,6 +51,34 @@ test.each([
     expect(text).toContain('create_draft')
     expect(text).toContain('update_draft')
     expect(text).toContain('drafts:write')
+    expect(text).toContain('list_published_posts')
+    expect(text).toContain('get_show')
+    expect(text).toContain('list_show_episodes')
+
+    for (const name of [
+      'search_catalogue',
+      'get_mix',
+      'get_public_profile',
+      'get_public_collection',
+    ]) {
+      expect(text).toContain(`- ${name}:`)
+    }
+
+    expect(text).toContain('tools and read_micro_thread are not registered')
+    expect(text).toContain('Production allowedScopes is unchanged')
+
+    for (const name of [
+      'list_saved_mixes',
+      'list_collections',
+      'list_favorites',
+      'list_show_subscriptions',
+      'list_music_reminders',
+      'get_admin_overview',
+    ]) {
+      expect(text).toContain(`- ${name}:`)
+    }
+
+    expect(text).toContain('reminder commands are not registered, even with write grants')
     expect(text).toContain('Existing connections remain read-only')
     expect(text).toContain(
       'never publish, delete, change creators, change media or edit published posts',

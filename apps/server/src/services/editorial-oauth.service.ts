@@ -1,13 +1,14 @@
 import {
-  EditorialPrincipal,
-  EditorialScope,
-  EditorialScopes,
+  canAuthorizeMcp,
+  McpPrincipal,
+  McpScope,
+  McpScopes,
   McpResourceUrl,
   OAuthClientId,
   OAuthGrantId,
 } from '@gbfm/core/editorial-mcp'
 import { UserId } from '@gbfm/core/identity'
-import { canCreatePosts, Role } from '@gbfm/core/roles'
+import { Role } from '@gbfm/core/roles'
 import { and, eq, gt, isNull, notExists, sql } from 'drizzle-orm'
 import { Clock, Context, Effect, Layer, Redacted, Schema } from 'effect'
 
@@ -35,13 +36,13 @@ export class EditorialOAuthUnavailable extends Schema.TaggedError<
   { readonly brand: unique symbol }
 >()('EditorialOAuthUnavailable', {}) {}
 
-export type EditorialOAuthPrincipal = EditorialPrincipal
+export type EditorialOAuthPrincipal = McpPrincipal
 
 const PersistedGrant = Schema.Struct({
   userId: UserId,
   clientId: OAuthClientId,
   referenceId: OAuthGrantId,
-  scopes: Schema.fromJsonString(EditorialScopes),
+  scopes: Schema.fromJsonString(McpScopes),
   resources: Schema.fromJsonString(Schema.Array(McpResourceUrl)),
   sessionId: Schema.NullOr(Schema.String),
   sessionExpiresAt: Schema.NullOr(Schema.Date),
@@ -54,7 +55,7 @@ const PersistedGrant = Schema.Struct({
 const PersistedConnection = Schema.Struct({
   clientId: OAuthClientId,
   name: Schema.NullOr(Schema.String),
-  scopes: Schema.fromJsonString(EditorialScopes),
+  scopes: Schema.fromJsonString(McpScopes),
   createdAt: Schema.Date,
 })
 
@@ -121,7 +122,7 @@ const makeEditorialOAuth = Effect.gen(function* () {
     if (
       grant.clientDisabled ||
       grant.userBanned ||
-      !canCreatePosts(grant.role) ||
+      !canAuthorizeMcp({ role: grant.role, banned: grant.userBanned }, grant.scopes) ||
       grant.confirmation ||
       (grant.sessionId && (!grant.sessionExpiresAt || grant.sessionExpiresAt <= now)) ||
       grant.resources.length !== 1 ||
@@ -140,7 +141,7 @@ const makeEditorialOAuth = Effect.gen(function* () {
     const policy = yield* Schema.decodeUnknownEffect(
       Schema.Struct({
         disabled: Schema.NullOr(Schema.Boolean),
-        allowedScopes: Schema.NullOr(Schema.fromJsonString(Schema.Array(EditorialScope))),
+        allowedScopes: Schema.NullOr(Schema.fromJsonString(Schema.Array(McpScope))),
       }),
     )(resource).pipe(Effect.mapError(() => new EditorialOAuthInvalidToken()))
 
@@ -150,7 +151,7 @@ const makeEditorialOAuth = Effect.gen(function* () {
     )
       return yield* Effect.fail(new EditorialOAuthInvalidToken())
 
-    return yield* Schema.decodeUnknownEffect(EditorialPrincipal)({
+    return yield* Schema.decodeUnknownEffect(McpPrincipal)({
       userId: grant.userId,
       clientId: grant.clientId,
       scopes: grant.scopes,
@@ -178,7 +179,7 @@ const makeEditorialOAuth = Effect.gen(function* () {
 
     const connections = new Map<
       OAuthClientId,
-      { clientId: OAuthClientId; name: string; scopes: EditorialScopes; createdAt: string }
+      { clientId: OAuthClientId; name: string; scopes: McpScopes; createdAt: string }
     >()
 
     for (const row of parsed) {

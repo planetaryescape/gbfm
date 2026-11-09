@@ -26,6 +26,9 @@ test('favorite and subscription controls persist and mutations do not interrupt 
   await page.getByRole('textbox', { name: 'Password', exact: true }).fill('LocalTest123!')
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(page).toHaveURL(/\/mixes\/e2e-local-frequencies$/)
+  await expect(
+    page.getByRole('button', { name: /^(Add to favorites|Remove from favorites)$/ }),
+  ).toBeEnabled()
   const existingFavorite = page.getByRole('button', { name: 'Remove from favorites', exact: true })
 
   if (await existingFavorite.isVisible()) await existingFavorite.click()
@@ -77,6 +80,7 @@ test('favorite and subscription controls persist and mutations do not interrupt 
   await expect(page.getByRole('button', { name: 'Add to favorites', exact: true })).toBeVisible()
 
   await page.goto('/shows/e2e-local-radio')
+  await expect(page.getByRole('button', { name: /^(Subscribe|Unsubscribe)$/ })).toBeEnabled()
   const existingSubscription = page.getByRole('button', { name: 'Unsubscribe', exact: true })
 
   if (await existingSubscription.isVisible()) await existingSubscription.click()

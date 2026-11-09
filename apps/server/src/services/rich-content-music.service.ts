@@ -13,7 +13,7 @@ import { musicTracksTable } from '@/db/music-entity.schema'
 import { getAlbumByIdEffect } from '@/services/music-entity/album.service'
 import { getLinksForEntityEffect } from '@/services/music-entity/link.service'
 import { getPlaylistTracksEffect } from '@/services/music-entity/playlist-tracks.service'
-import { getPlaylistByIdEffect } from '@/services/music-entity/playlist.service'
+import { getPublicPlaylistEffect } from '@/services/music-entity/playlist.service'
 import { getTrackByIdEffect } from '@/services/music-entity/track.service'
 
 import { parseMusicSource } from './canonical-music-identity/music-source'
@@ -160,7 +160,7 @@ const loadSnapshot = (
       }
     }
 
-    const playlist = yield* provideDb(getPlaylistByIdEffect(entity.entityId))
+    const playlist = yield* provideDb(getPublicPlaylistEffect(entity.entityId))
     const tracks = reference.showTracks ? yield* playlistTracks(db, playlist.id) : []
 
     return {

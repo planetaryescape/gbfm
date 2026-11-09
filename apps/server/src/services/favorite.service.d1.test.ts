@@ -1,5 +1,5 @@
-import { and, eq } from 'drizzle-orm'
-import { Cause, Effect, Exit, Layer, Option, Predicate } from 'effect'
+import { and, eq, sql } from 'drizzle-orm'
+import { Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
 
 import { audioTable } from '@/db/audio.schema'
@@ -7,24 +7,34 @@ import { user } from '@/db/auth.schema'
 import { favoritesTable } from '@/db/favorites.schema'
 import { Database } from '@/db/layer'
 import { showSubscriptionsTable, showsTable } from '@/db/show.schema'
-import type { ConflictError, DatabaseError, NotFoundError } from '@/errors'
-import { db } from '@/test/d1'
+import { type McpOperationStore, McpOperationStoreLayer } from '@/mcp/operations/store'
+import { db, d1 } from '@/test/d1'
 import { withTestLayer } from '@/test/effect'
 
 import { FavoriteService, FavoriteServiceLayer } from './favorite.service'
 
 const CONCURRENCY = 20
 
-const TestFavoriteServiceLayer = FavoriteServiceLayer.pipe(
-  Layer.provide(Layer.succeed(Database)(db)),
+const TestFavoriteServiceLayer = Layer.mergeAll(
+  FavoriteServiceLayer.pipe(Layer.provide(Layer.succeed(Database)(db))),
+  McpOperationStoreLayer(d1),
 )
 
+const context = (actorId: string) => ({
+  actorId,
+  clientId: 'gbfm:session',
+  resource: 'https://example.test/api',
+  requestId: crypto.randomUUID(),
+  expectedRevision: 0,
+  now: Date.now(),
+  authorize: async () => true,
+  live: sql`1`,
+})
+
 const runFavoriteEffect = <A>(
-  fn: (
-    svc: FavoriteService,
-  ) => Effect.Effect<A, DatabaseError | NotFoundError | ConflictError, FavoriteService>,
+  fn: (svc: FavoriteService) => Effect.Effect<A, never, McpOperationStore>,
 ) =>
-  Effect.runPromiseExit(
+  Effect.runPromise(
     withTestLayer(
       Effect.gen(function* () {
         const svc = yield* FavoriteService
@@ -54,22 +64,15 @@ describe('D1 concurrent favorites', () => {
 
     const exits = await Promise.all(
       Array.from({ length: CONCURRENCY }, () =>
-        runFavoriteEffect((svc) => svc.addFavorite(userId, audioId)),
+        runFavoriteEffect((svc) => svc.addFavorite(context(userId), audioId)),
       ),
     )
 
-    const succeeded = exits.filter(Exit.isSuccess)
-    const failed = exits.filter(Exit.isFailure)
+    const succeeded = exits.filter((result) => result.status === 'applied')
+    const failed = exits.filter((result) => result.status === 'conflict')
 
     expect(succeeded.length).toBe(1)
     expect(failed.length).toBe(CONCURRENCY - 1)
-
-    for (const exit of failed) {
-      expect(Cause.hasDies(exit.cause)).toBe(false)
-      const error = Cause.findErrorOption(exit.cause)
-      expect(Option.isSome(error)).toBe(true)
-      expect(Option.exists(error, Predicate.isTagged('ConflictError'))).toBe(true)
-    }
 
     const rows = await db
       .select()
@@ -95,22 +98,15 @@ describe('D1 concurrent favorites', () => {
 
     const exits = await Promise.all(
       Array.from({ length: CONCURRENCY }, () =>
-        runFavoriteEffect((svc) => svc.addShowFavorite(userId, showId)),
+        runFavoriteEffect((svc) => svc.addShowFavorite(context(userId), showId)),
       ),
     )
 
-    const succeeded = exits.filter(Exit.isSuccess)
-    const failed = exits.filter(Exit.isFailure)
+    const succeeded = exits.filter((result) => result.status === 'applied')
+    const failed = exits.filter((result) => result.status === 'conflict')
 
     expect(succeeded.length).toBe(1)
     expect(failed.length).toBe(CONCURRENCY - 1)
-
-    for (const exit of failed) {
-      expect(Cause.hasDies(exit.cause)).toBe(false)
-      const error = Cause.findErrorOption(exit.cause)
-      expect(Option.isSome(error)).toBe(true)
-      expect(Option.exists(error, Predicate.isTagged('ConflictError'))).toBe(true)
-    }
 
     const favoriteRows = await db
       .select()

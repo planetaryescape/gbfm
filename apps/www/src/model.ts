@@ -1,6 +1,7 @@
 import * as Dialog from '@foldkit/ui/dialog'
 import * as Popover from '@foldkit/ui/popover'
 import { AudioResponse, AudioShow } from '@gbfm/api/audio'
+import { MembershipRevision } from '@gbfm/api/favorites'
 import { SavedMix } from '@gbfm/api/listening'
 import { MicroPostNeighboursResponse } from '@gbfm/api/navigation'
 import { MicroPostScreenResponse } from '@gbfm/api/post'
@@ -108,7 +109,12 @@ export const Model = Schema.Struct({
   navigationPrincipalId: Schema.NullOr(Schema.String),
   navigationPrincipalKnown: Schema.Boolean,
   navigationFavoriteChanges: Schema.Array(
-    Schema.Struct({ principalId: Schema.String, audioId: Schema.String, active: Schema.Boolean }),
+    Schema.Struct({
+      principalId: Schema.String,
+      audioId: Schema.String,
+      active: Schema.Boolean,
+      revision: MembershipRevision,
+    }),
   ),
   tweetReader: TweetReader.Model,
   error: Schema.NullOr(Schema.String),

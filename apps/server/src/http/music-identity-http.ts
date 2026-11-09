@@ -1,9 +1,12 @@
 import { MusicServiceUnavailableResponse } from '@gbfm/api/music'
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
 import { HttpApiError } from 'effect/http-api'
 
 import type { MusicIdentityError } from '@/services/canonical-music-identity'
-import type { MusicIdentityBusy } from '@/services/canonical-music-identity/errors'
+import {
+  MusicIdentityAuthorizationFailed,
+  type MusicIdentityBusy,
+} from '@/services/canonical-music-identity/errors'
 import type { SpotifyServiceError } from '@/services/spotify.service'
 
 export const PROVIDER_UNAVAILABLE_RETRY_AFTER_SECONDS = 30
@@ -35,6 +38,15 @@ export const mapMusicIdentityErrors = <A, E, R>(
   effect: Effect.Effect<A, E | MusicIdentityError, R>,
 ) =>
   effect.pipe(
+    Effect.catchTag('MusicIdentityAuthorizationFailed', (error) =>
+      Effect.fail<HttpApiError.Forbidden | MusicServiceUnavailableResponse>(
+        Schema.is(MusicIdentityAuthorizationFailed)(error) && error.reason === 'denied'
+          ? new HttpApiError.Forbidden()
+          : new MusicServiceUnavailableResponse({
+              retryAfterSeconds: PROVIDER_UNAVAILABLE_RETRY_AFTER_SECONDS,
+            }),
+      ),
+    ),
     Effect.catchTag('MusicSourceInvalid', () => new HttpApiError.BadRequest()),
     Effect.catchTag('MusicIdentityInvalidSnapshot', () => new HttpApiError.BadRequest()),
     Effect.catchTag('MusicIdentityProviderRejected', () => new HttpApiError.BadRequest()),

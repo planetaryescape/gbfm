@@ -5,6 +5,7 @@ import type * as Cloudflare from 'alchemy/Cloudflare'
 import { Schema } from 'effect'
 
 import { pendingCloneMigrationName } from './clone-sql'
+import type { StageConfig } from './stage'
 
 export const localDatabaseCloneDirectory = '.alchemy/dev-database'
 
@@ -16,13 +17,17 @@ export const CloneManifest = Schema.Struct({
 })
 
 export const databaseProps = (
-  isLocalDev: boolean,
+  config: Pick<StageConfig, 'isLocalDev' | 'isProduction'>,
   cloneDirectory: string | undefined,
   defaultDirectory = localDatabaseCloneDirectory,
 ): Cloudflare.D1.DatabaseProps => {
   const migrations = databaseMigrationsDirectory
 
-  if (!isLocalDev) return { migrations }
+  // Production already records exact Alchemy-format hashes in this table.
+  // Keep using it rather than creating a second ledger and replaying history.
+  if (config.isProduction) return { migrations: { dir: migrations, table: 'd1_migrations' } }
+
+  if (!config.isLocalDev) return { migrations }
 
   const directory = cloneDirectory ?? defaultDirectory
 

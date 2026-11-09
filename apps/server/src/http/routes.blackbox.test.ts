@@ -348,11 +348,25 @@ describe('music labels', () => {
       throw new Error('Failed to seed label affiliation test')
     }
 
-    const adminRequest = (path: string, method = 'GET') =>
-      new Request(`http://localhost${path}`, {
-        method,
-        headers: { authorization: `Bearer ${adminToken}` },
-      })
+    const adminRequest = (
+      path: string,
+      method = 'GET',
+      observed?: {
+        readonly targetRevision: number
+        readonly labelRevision: number
+        readonly requestId: string
+      },
+    ) => {
+      const headers = new Headers({ authorization: `Bearer ${adminToken}` })
+
+      if (observed) {
+        headers.set('x-gbfm-music-revision', String(observed.targetRevision))
+        headers.set('x-gbfm-music-label-revision', String(observed.labelRevision))
+        headers.set('x-gbfm-request-id', observed.requestId)
+      }
+
+      return new Request(`http://localhost${path}`, { method, headers })
+    }
 
     const publishedArtistPath = `/api/music/labels/${label.id}/artists/${publishedArtist.id}`
     const draftArtistPath = `/api/music/labels/${label.id}/artists/${draftArtist.id}`
@@ -360,16 +374,32 @@ describe('music labels', () => {
     const futureAlbumPath = `/api/music/labels/${label.id}/albums/${futureAlbum.id}`
 
     try {
-      const writes = await Promise.all(
+      // These writes share the label root: each new intent observes the prior
+      // successful revision, while duplicates retain their original intent.
+      const requests = (
         [
-          publishedArtistPath,
-          draftArtistPath,
-          publishedAlbumPath,
-          futureAlbumPath,
-          publishedArtistPath,
-          publishedAlbumPath,
-        ].map((path) => webHandler.handler(adminRequest(path, 'PUT'))),
+          [publishedArtistPath, publishedArtist.revision, label.revision],
+          [draftArtistPath, draftArtist.revision, label.revision + 1],
+          [publishedAlbumPath, publishedAlbum.revision, label.revision + 2],
+          [futureAlbumPath, futureAlbum.revision, label.revision + 3],
+        ] as const
+      ).map(([path, targetRevision, labelRevision]) =>
+        adminRequest(path, 'PUT', {
+          targetRevision,
+          labelRevision,
+          requestId: crypto.randomUUID(),
+        }),
       )
+
+      const writes: Array<Response> = []
+
+      for (const request of requests) writes.push(await webHandler.handler(request.clone()))
+
+      for (const index of [0, 2]) {
+        const request = requests[index]
+        assert(request)
+        writes.push(await webHandler.handler(request.clone()))
+      }
 
       expect(writes.map((response) => response.status)).toEqual([204, 204, 204, 204, 204, 204])
 
@@ -406,7 +436,13 @@ describe('music labels', () => {
       expect(publicBody.affiliatedArtists?.map((artist) => artist.id)).toEqual([publishedArtist.id])
       expect(publicBody.affiliatedAlbums?.map((album) => album.id)).toEqual([publishedAlbum.id])
 
-      const removed = await webHandler.handler(adminRequest(publishedArtistPath, 'DELETE'))
+      const removed = await webHandler.handler(
+        adminRequest(publishedArtistPath, 'DELETE', {
+          targetRevision: publishedArtist.revision + 1,
+          labelRevision: label.revision + 4,
+          requestId: crypto.randomUUID(),
+        }),
+      )
 
       const afterRemove = await webHandler.handler(
         adminRequest(`/api/music/artists/${publishedArtist.id}/labels`),
@@ -536,15 +572,14 @@ describe('music albums/tracks/playlists (HttpApiBuilder group, Step 6c)', () => 
     expect(res.status).toBe(404)
   })
 
-  it('GET /api/music/playlists/:id/tracks returns 401-free 200 (public read) with an empty list for an unknown playlist', async () => {
+  it('GET /api/music/playlists/:id/tracks returns 404 for an unknown or unavailable playlist', async () => {
     const res = await webHandler.handler(
       new Request(
         'http://localhost/api/music/playlists/00000000-0000-0000-0000-000000000000/tracks',
       ),
     )
 
-    expect(res.status).toBe(200)
-    await expect(res.json()).resolves.toEqual([])
+    expect(res.status).toBe(404)
   })
 
   it('POST /api/music/playlists/:id/tracks returns 401 without a session cookie', async () => {
@@ -2911,6 +2946,7 @@ describe('GET /api/content/posts/micro/:slug/screen', () => {
         title: 'Quote Playlist',
         slug: `quote-playlist-${suffix}`,
         coverImageUrl: 'https://cdn.goosebumps.fm/user-content/quote-playlist.png',
+        publishedAt: new Date(0),
       }),
     ])
     await db.insert(musicEntityLinksTable).values([
@@ -3049,6 +3085,23 @@ describe('GET /api/content/posts/micro/:slug/screen', () => {
       expect(repliesResponse.status).toBe(200)
       const replies = await decodeResponseBody(MicroPostScreenRepliesResponse, repliesResponse)
       expect(replies).toEqual(body.replies)
+
+      for (const publishedAt of [null, new Date(Date.now() + 60_000)]) {
+        await db
+          .update(musicPlaylistsTable)
+          .set({ publishedAt })
+          .where(eq(musicPlaylistsTable.id, quotePlaylistId))
+
+        const hiddenResponse = await webHandler.handler(
+          new Request(`http://localhost/api/content/posts/micro/${rootSlug}/screen`),
+        )
+
+        expect(hiddenResponse.status).toBe(200)
+        const hidden = await decodeResponseBody(MicroPostScreenResponse, hiddenResponse)
+        expect(hidden.quote?.music).toBeNull()
+        expect(JSON.stringify(hidden)).not.toContain('Quote Playlist')
+        expect(JSON.stringify(hidden)).not.toContain('https://open.spotify.com/playlist/quote')
+      }
     } finally {
       await db.delete(postCreators).where(eq(postCreators.creatorId, authorId))
       await db.delete(postsTable).where(eq(postsTable.id, reply.id))

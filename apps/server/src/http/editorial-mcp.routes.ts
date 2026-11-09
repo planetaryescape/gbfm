@@ -1,7 +1,7 @@
 import { oauthProviderAuthServerMetadata } from '@better-auth/oauth-provider'
 import { McpScope } from '@gbfm/core/editorial-mcp'
 import { eq } from 'drizzle-orm'
-import { Context, Effect, Layer, Match, Option, Redacted, Schema, Stream } from 'effect'
+import { Context, Effect, Layer, Match, Option, Predicate, Redacted, Schema, Stream } from 'effect'
 import { McpSchema, type Tool, type Toolkit } from 'effect/ai'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http'
 
@@ -14,6 +14,7 @@ import {
   AdminReadToolkit,
 } from '@/mcp/admin-read'
 import { McpAuthorizationLive, McpPermission } from '@/mcp/authorization'
+import { CommandAuthority, makeOAuthCommandAuthority } from '@/mcp/command-authority'
 import { PublicResearchServiceLayer } from '@/mcp/content-read/research-service'
 import {
   PublicResearchHandlersLayer,
@@ -37,6 +38,7 @@ import {
   EditorialToolHandlersLayer,
   makeMcpLayer,
 } from '@/mcp/server'
+import { makeMcpWireResponse, MAX_MCP_RESPONSE_BYTES, McpWireResponse } from '@/mcp/wire-response'
 import { ConfigService } from '@/services/config.service'
 import { EditorialOAuth, EditorialOAuthUnavailable } from '@/services/editorial-oauth.service'
 
@@ -95,7 +97,7 @@ const boundMcpBody = Effect.fn('EditorialMcp.boundBody')(function* <E>(
   return Option.some(body)
 })
 
-const MAX_MCP_JSON_BYTES = 256 * 1024
+const MAX_MCP_JSON_BYTES = MAX_MCP_RESPONSE_BYTES
 
 const ToolCallRequest = Schema.Struct({
   id: Schema.optional(Schema.Unknown),
@@ -182,6 +184,16 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
                       ),
                     onSuccess: (principal) =>
                       Effect.gen(function* () {
+                        const authority = yield* makeOAuthCommandAuthority(token, principal).pipe(
+                          Effect.provideService(Database, db),
+                          Effect.provideService(EditorialOAuth, oauth),
+                          Effect.provideService(ConfigService, config),
+                          Effect.result,
+                        )
+
+                        if (Predicate.isTagged(authority, 'Failure'))
+                          return noStore(HttpServerResponse.empty({ status: 503 }))
+
                         const bounded =
                           request.method === 'POST'
                             ? yield* boundMcpBody(
@@ -214,6 +226,17 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
                           Schema.fromJsonString(ToolCallRequest),
                         )(new TextDecoder().decode(bounded.value))
 
+                        const responseId = Option.flatMap(call, (value) =>
+                          Schema.decodeUnknownOption(McpSchema.RequestId)(value.id),
+                        )
+
+                        // Complete commands emit one JSON result, with no notifications/progress.
+                        // Invalid/id-less calls cannot obtain a usable precommit response budget.
+                        const wire = Option.match(responseId, {
+                          onNone: () => ({ successBytes: () => Number.POSITIVE_INFINITY }),
+                          onSome: (id) => makeMcpWireResponse(id, 'json'),
+                        })
+
                         // The installed transport executes id-less calls too. Admission must
                         // cover them, not merely fully formed JSON-RPC requests.
                         const response =
@@ -244,6 +267,8 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
                               }).pipe(Effect.map(noStore), Effect.orDie)
                             : yield* httpEffect.pipe(
                                 Effect.provideService(EditorialActor, principal),
+                                Effect.provideService(CommandAuthority, authority.success),
+                                Effect.provideService(McpWireResponse, wire),
                                 Effect.provideService(
                                   HttpServerRequest.HttpServerRequest,
                                   request.method === 'POST'

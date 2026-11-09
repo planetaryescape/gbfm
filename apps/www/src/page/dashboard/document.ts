@@ -10,7 +10,7 @@ import {
   MixAnnouncementOptions,
   SendMixNotificationResponse,
 } from '@gbfm/api/email'
-import { GetFavoritesResponse } from '@gbfm/api/favorites'
+import { GetFavoritesResponse, MembershipRevision } from '@gbfm/api/favorites'
 import { McpConnectionsResponse } from '@gbfm/api/mcp-connections'
 import {
   ImportSpotifyPlaylistResponse,
@@ -18,7 +18,7 @@ import {
   PlaylistTrackEntry,
   SyncPlaylistLinksResponse,
 } from '@gbfm/api/music'
-import { GetMusicRemindersResponse } from '@gbfm/api/music-reminders'
+import { GetMusicRemindersResponse, MusicReminderResponse } from '@gbfm/api/music-reminders'
 import { GetPostsResponse } from '@gbfm/api/post'
 import { SearchResults } from '@gbfm/api/search'
 import { GetAllShowsResponse } from '@gbfm/api/shows'
@@ -35,6 +35,8 @@ export const Row = Schema.Struct({
   detail: Schema.String,
   href: Schema.NullOr(Schema.String),
   actionId: Schema.NullOr(Schema.String),
+  membershipRevision: Schema.optional(MembershipRevision),
+  commandRevision: Schema.optional(MusicReminderResponse.fields.commandRevision),
   thumbnailUrl: Schema.optional(Schema.NullOr(Schema.String)),
   status: Schema.optional(Schema.String),
 })
@@ -216,6 +218,7 @@ export const parseDashboardDocument = (
                   ? `/${favorite.audio ? 'mixes' : 'shows'}/${encodeURIComponent(content.slug)}`
                   : null,
                 actionId: favorite.audioId ?? (favorite.showId ? `show/${favorite.showId}` : null),
+                membershipRevision: favorite.membershipRevision,
               }
             }),
           ),
@@ -225,14 +228,29 @@ export const parseDashboardDocument = (
       return Schema.decodeUnknownEffect(GetMusicRemindersResponse)(input).pipe(
         Effect.map(({ reminders }) =>
           rowsDocument(
-            reminders.map((item) => ({
-              id: item.id,
-              title: item.musicTitle,
-              detail: item.artistName,
-              thumbnailUrl: item.albumCoverUrl,
-              href: item.musicUrl,
-              actionId: item.id,
-            })),
+            reminders.map((item) => {
+              const removable =
+                item.dispatchState === 'open' && !item.isSent && item.status !== 'sent'
+
+              const state =
+                item.dispatchState === 'cancelled'
+                  ? 'Cancelled'
+                  : item.dispatchState === 'fenced'
+                    ? 'Delivery may have started'
+                    : item.dispatchState === 'accepted' || item.isSent || item.status === 'sent'
+                      ? 'Sent'
+                      : null
+
+              return {
+                id: item.id,
+                title: item.musicTitle,
+                detail: state ? `${item.artistName} · ${state}` : item.artistName,
+                thumbnailUrl: item.albumCoverUrl,
+                href: item.musicUrl,
+                actionId: removable ? item.id : null,
+                commandRevision: item.commandRevision,
+              }
+            }),
           ),
         ),
       )

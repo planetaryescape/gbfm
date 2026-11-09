@@ -1,4 +1,4 @@
-import { Effect, Layer, Predicate, Schema } from 'effect'
+import { Effect, Layer, Option, Predicate, Schema } from 'effect'
 import { Tool, Toolkit } from 'effect/ai'
 import { HttpRouter, HttpServer } from 'effect/http'
 
@@ -7,8 +7,10 @@ import { makeMcpRoutes } from '@/http/editorial-mcp.routes'
 import { AuthLive } from '@/lib/auth'
 import { MdxServiceLayer } from '@/lib/mdx'
 import { McpAuthorization, McpAuthorizationLive, McpPermission } from '@/mcp/authorization'
-import { EditorialToolError } from '@/mcp/contracts'
+import { CommandAuthority } from '@/mcp/command-authority'
+import { EditorialToolError, McpToolError } from '@/mcp/contracts'
 import { composeMcpToolkits, EditorialToolkit } from '@/mcp/server'
+import { MAX_MCP_RESPONSE_BYTES, McpWireResponse } from '@/mcp/wire-response'
 import { ConfigService } from '@/services/config.service'
 import { EditorialOAuthLive } from '@/services/editorial-oauth.service'
 import { EmailDeliveryLive } from '@/services/email-delivery.service'
@@ -39,6 +41,18 @@ const CatalogueFixture = Toolkit.make(
     failure: EditorialToolError,
     failureMode: 'return',
   }).annotate(McpPermission, { scopes: ['catalogue:write'] }),
+  Tool.make('fixture_command_checkpoint', {
+    parameters: Tool.EmptyParams,
+    success: Schema.Struct({ actorId: Schema.String, clientId: Schema.String }),
+    failure: McpToolError,
+    failureMode: 'return',
+  }).annotate(McpPermission, { scopes: ['drafts:write'] }),
+  Tool.make('fixture_wire_budget', {
+    parameters: Schema.Struct({ nonce: Schema.String }),
+    success: Schema.Struct({ nonce: Schema.String }),
+    failure: McpToolError,
+    failureMode: 'return',
+  }).annotate(McpPermission, { scopes: ['drafts:write'] }),
 )
 
 const handlers = CatalogueFixture.toLayer(
@@ -47,6 +61,30 @@ const handlers = CatalogueFixture.toLayer(
     const db = yield* Database
 
     return {
+      fixture_wire_budget: ({ nonce }) =>
+        Effect.gen(function* () {
+          const wire = yield* Effect.serviceOption(McpWireResponse)
+          const result = { nonce }
+
+          if (Option.isNone(wire) || wire.value.successBytes(result) > MAX_MCP_RESPONSE_BYTES)
+            return yield* new McpToolError({
+              code: 'invalid_input',
+              message: 'Response too large.',
+            })
+
+          return result
+        }),
+      fixture_command_checkpoint: () =>
+        Effect.gen(function* () {
+          // Resolve request context inside the handler, not at layer construction.
+          const authority = yield* Effect.serviceOption(CommandAuthority)
+
+          if (Option.isNone(authority))
+            return yield* new McpToolError({ code: 'access_denied', message: 'No authority.' })
+          const checkpoint = yield* authority.value.checkpoint(['drafts:write'])
+
+          return { actorId: checkpoint.actorId, clientId: checkpoint.clientId }
+        }),
       fixture_declared_permission: ({ nonce }) => Effect.succeed({ nonce }),
       fixture_catalogue_artist: ({ id }) =>
         Effect.gen(function* () {

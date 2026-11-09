@@ -1,9 +1,8 @@
 import { Api } from '@gbfm/api/api'
-import { Data, Effect, Match, Predicate, type Redacted } from 'effect'
+import type { MembershipMutationInput } from '@gbfm/api/favorites'
+import { Data, Effect, Predicate, type Redacted } from 'effect'
 import { HttpClient, HttpClientRequest } from 'effect/http'
 import { HttpApiClient } from 'effect/http-api'
-
-import { getSessionWithClient } from './auth'
 
 export type FavoriteTrack = {
   readonly id: string
@@ -23,10 +22,13 @@ export class FavoriteTrackUnavailable extends Data.TaggedError('FavoriteTrackUna
 
 export class FavoriteRequestFailed extends Data.TaggedError('FavoriteRequestFailed') {}
 
+export class FavoriteConflict extends Data.TaggedError('FavoriteConflict') {}
+
 export type FavoriteError =
   | FavoriteSessionExpired
   | FavoriteTrackUnavailable
   | FavoriteRequestFailed
+  | FavoriteConflict
 
 const authorizedClient = (connection: FavoritesConnection) =>
   HttpClient.mapRequest(
@@ -34,78 +36,62 @@ const authorizedClient = (connection: FavoritesConnection) =>
     HttpClientRequest.bearerToken(connection.sessionToken),
   )
 
-const failRequest = () => Effect.fail(new FavoriteRequestFailed())
-
 const toFavoriteError = (error: { readonly _tag: string }): FavoriteError => {
-  if (Predicate.isTagged(error, 'NotFound')) return new FavoriteTrackUnavailable()
+  if (Predicate.isTagged(error, 'NotFound') || Predicate.isTagged(error, 'Forbidden'))
+    return new FavoriteTrackUnavailable()
 
   if (Predicate.isTagged(error, 'Unauthorized')) return new FavoriteSessionExpired()
+
+  if (Predicate.isTagged(error, 'Conflict') || Predicate.isTagged(error, 'Gone'))
+    return new FavoriteConflict()
 
   return new FavoriteRequestFailed()
 }
 
-const pageFavorite = {
-  active: () => Effect.succeed(true),
-  inactive: () => Effect.succeed(false),
-  anonymous: (connection: FavoritesConnection) =>
-    getSessionWithClient(connection).pipe(
-      Effect.mapError((error) =>
-        Predicate.isTagged(error, 'SessionExpired')
-          ? new FavoriteSessionExpired()
-          : new FavoriteRequestFailed(),
-      ),
-      Effect.flatMap(failRequest),
-    ),
-  unavailable: () => Effect.fail(new FavoriteRequestFailed()),
-}
-
-export const loadFavorite = (connection: FavoritesConnection, track: FavoriteTrack) =>
-  Effect.gen(function* () {
-    const audio = yield* HttpApiClient.group(Api, {
-      group: 'audio',
-      httpClient: authorizedClient(connection),
-      baseUrl: connection.baseUrl,
-    })
-
-    const page = yield* audio
-      .getAudioPage({ params: { type: track.type, slug: track.slug } })
-      .pipe(Effect.catch(failRequest))
-
-    return yield* Match.value(page).pipe(
-      Match.tagsExhaustive({
-        NotFound: () => Effect.fail(new FavoriteTrackUnavailable()),
-        Unavailable: () => Effect.fail(new FavoriteRequestFailed()),
-        Ready: (ready) =>
-          ready.audio.id === track.id
-            ? pageFavorite[ready.favorite](connection)
-            : Effect.fail(new FavoriteTrackUnavailable()),
-      }),
-    )
+/** State and owner revision are one observation, obtained before enabling the control. */
+export const loadFavorite = Effect.fn('MobileFavorite.load')(function* (
+  connection: FavoritesConnection,
+  track: FavoriteTrack,
+) {
+  const favorites = yield* HttpApiClient.group(Api, {
+    group: 'favorites',
+    httpClient: authorizedClient(connection),
+    baseUrl: connection.baseUrl,
   })
 
-export const saveFavorite = (
+  const state = yield* favorites
+    .getMembershipState({ params: { targetKind: 'audio', targetId: track.id } })
+    .pipe(Effect.mapError(toFavoriteError))
+
+  return { favorite: state.favorited, revision: state.revision }
+})
+
+export const saveFavorite = Effect.fn('MobileFavorite.save')(function* (
   connection: FavoritesConnection,
   track: FavoriteTrack,
   favorite: boolean,
-) =>
-  Effect.gen(function* () {
-    const favorites = yield* HttpApiClient.group(Api, {
-      group: 'favorites',
-      httpClient: authorizedClient(connection),
-      baseUrl: connection.baseUrl,
-    })
-
-    if (favorite) {
-      return yield* favorites.addFavorite({ payload: { audioId: track.id } }).pipe(
-        Effect.as(true),
-        Effect.catchTag('Conflict', () => Effect.succeed(true)),
-        Effect.mapError(toFavoriteError),
-      )
-    }
-
-    return yield* favorites.removeFavorite({ params: { audioId: track.id } }).pipe(
-      Effect.as(false),
-      Effect.catchTag('NotFound', () => Effect.succeed(false)),
-      Effect.mapError(toFavoriteError),
-    )
+  mutation: typeof MembershipMutationInput.Type,
+) {
+  const favorites = yield* HttpApiClient.group(Api, {
+    group: 'favorites',
+    httpClient: authorizedClient(connection),
+    baseUrl: connection.baseUrl,
   })
+
+  const result = yield* (
+    favorite
+      ? favorites.addFavorite({ payload: { ...mutation, audioId: track.id } })
+      : favorites.removeFavorite({ params: { audioId: track.id }, payload: mutation })
+  ).pipe(Effect.mapError(toFavoriteError))
+
+  if (
+    result.requestId !== mutation.requestId ||
+    result.targetKind !== 'audio' ||
+    result.targetId !== track.id ||
+    result.desiredState !== favorite ||
+    result.revision !== mutation.expectedRevision + 1
+  )
+    return yield* new FavoriteRequestFailed()
+
+  return { favorite, revision: result.revision }
+})

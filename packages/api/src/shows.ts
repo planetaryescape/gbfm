@@ -4,6 +4,7 @@ import { Schema } from 'effect'
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup } from 'effect/http-api'
 
 import { AudioPagePrincipal, AudioResponse } from './audio'
+import { MembershipMutationInput, MembershipMutationResult } from './favorites'
 import { AuthMiddleware } from './middleware/auth'
 import { ValidationHttpError } from './post'
 
@@ -29,6 +30,9 @@ const ShowResponse = Schema.Struct({
   tags: Schema.NullOr(Schema.Array(Schema.String)),
   createdAt: Schema.String,
   updatedAt: Schema.String,
+  revision: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+  ),
 })
 
 const ShowWithHostsResponse = Schema.Struct({
@@ -126,6 +130,9 @@ export const CreateShowInput = Schema.Struct({
 export type CreateShowInput = typeof CreateShowInput.Type
 
 export const UpdateShowInput = Schema.Struct({
+  expectedRevision: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+  ),
   title: Schema.optional(Schema.NonEmptyString),
   description: Schema.optional(Schema.String),
   thumbnailUrl: Schema.optional(Schema.String),
@@ -138,13 +145,6 @@ export const UpdateShowInput = Schema.Struct({
 })
 
 export type UpdateShowInput = typeof UpdateShowInput.Type
-
-const SubscriptionResponse = Schema.Struct({
-  id: Schema.String,
-  userId: Schema.String,
-  showId: Schema.String,
-  createdAt: Schema.String,
-})
 
 export const ShowSubscriptionStatusResponse = Schema.Struct({ subscribed: Schema.Boolean })
 
@@ -207,6 +207,7 @@ export const ShowsGroup = /* @__PURE__ */ (() =>
         payload: UpdateShowInput,
         success: CompiledShowResponse,
         error: [
+          HttpApiError.Conflict,
           HttpApiError.NotFound,
           HttpApiError.Unauthorized,
           ValidationHttpError,
@@ -217,7 +218,12 @@ export const ShowsGroup = /* @__PURE__ */ (() =>
     .add(
       HttpApiEndpoint.delete('deleteShowBySlug', '/api/shows/:slug', {
         params: { slug: Schema.String },
-        error: [HttpApiError.NotFound, HttpApiError.Unauthorized, HttpApiError.InternalServerError],
+        error: [
+          HttpApiError.Conflict,
+          HttpApiError.NotFound,
+          HttpApiError.Unauthorized,
+          HttpApiError.InternalServerError,
+        ],
       }).middleware(AuthMiddleware),
     )
     .add(
@@ -231,14 +237,29 @@ export const ShowsGroup = /* @__PURE__ */ (() =>
     .add(
       HttpApiEndpoint.post('subscribeToShow', '/api/shows/:id/subscribe', {
         params: { id: Uuid },
-        success: SubscriptionResponse,
-        error: [HttpApiError.Forbidden, HttpApiError.Conflict, HttpApiError.InternalServerError],
+        payload: MembershipMutationInput,
+        success: MembershipMutationResult,
+        error: [
+          HttpApiError.BadRequest,
+          HttpApiError.Forbidden,
+          HttpApiError.Conflict,
+          HttpApiError.Gone,
+          HttpApiError.ServiceUnavailable,
+        ],
       }).middleware(AuthMiddleware),
     )
     .add(
       HttpApiEndpoint.delete('unsubscribeFromShow', '/api/shows/:id/unsubscribe', {
         params: { id: Uuid },
-        error: [HttpApiError.Forbidden, HttpApiError.NotFound, HttpApiError.InternalServerError],
+        payload: MembershipMutationInput,
+        success: MembershipMutationResult,
+        error: [
+          HttpApiError.BadRequest,
+          HttpApiError.Forbidden,
+          HttpApiError.Conflict,
+          HttpApiError.Gone,
+          HttpApiError.ServiceUnavailable,
+        ],
       }).middleware(AuthMiddleware),
     )
     .add(

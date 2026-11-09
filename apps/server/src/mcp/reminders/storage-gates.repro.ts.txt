@@ -1,4 +1,5 @@
-// Diagnostic only: these assertions describe missing guards at P1 base
+// Historical diagnostic only: run at reviewed read-only head 77cd30c,
+// before legacy writers were removed. These assertions describe missing guards at P1 base
 // 2d1b5592826e66e3a198dc117c153e062264fc5c, NOT the desired write contract.
 // Excluded from normal test discovery. See README.md for reproduction.
 import { Effect, Layer } from 'effect'

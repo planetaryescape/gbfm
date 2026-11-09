@@ -68,7 +68,7 @@ export const ListeningReadServiceLive = Layer.effect(
       )
 
       return yield* Schema.decodeUnknownEffect(SavedMixPage)({
-        mixes: rows.slice(0, limit),
+        mixes: rows.slice(0, limit).map((row) => ({ ...row, version: `revision:${row.revision}` })),
         pagination: { limit, offset, hasMore: rows.length > limit },
       }).pipe(
         Effect.tapError(() =>
@@ -97,6 +97,7 @@ export const ListeningReadServiceLive = Layer.effect(
               description: collections.description,
               published: collections.published,
               ownerName: user.name,
+              revision: collections.revision,
             })
             .from(collections)
             .innerJoin(user, eq(user.id, collections.userId))
@@ -115,7 +116,9 @@ export const ListeningReadServiceLive = Layer.effect(
       )
 
       return yield* Schema.decodeUnknownEffect(CollectionPage)({
-        collections: rows.slice(0, limit),
+        collections: rows
+          .slice(0, limit)
+          .map((row) => ({ ...row, version: `revision:${row.revision}` })),
         pagination: { limit, offset, hasMore: rows.length > limit },
       }).pipe(
         Effect.tapError(() =>

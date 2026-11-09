@@ -20,14 +20,17 @@ afterEach(() => {
 })
 
 test('deployment keeps the existing migrations and ignores local clone configuration', () => {
-  expect(databaseProps(false, '/does/not/exist')).toEqual({
+  expect(databaseProps({ isLocalDev: false, isProduction: false }, '/does/not/exist')).toEqual({
     migrations: databaseMigrationsDirectory,
+  })
+  expect(databaseProps({ isLocalDev: false, isProduction: true }, '/does/not/exist')).toEqual({
+    migrations: { dir: databaseMigrationsDirectory, table: 'd1_migrations' },
   })
 })
 
 test('local development without a clone uses a local migrated database without a production name', () => {
   const directory = join(temporaryDirectory(), 'missing')
-  expect(databaseProps(true, undefined, directory)).toEqual({
+  expect(databaseProps({ isLocalDev: true, isProduction: false }, undefined, directory)).toEqual({
     migrations: databaseMigrationsDirectory,
   })
 })
@@ -47,7 +50,9 @@ test('a clone keeps its baseline and synchronizes only migrations production has
     }),
   )
 
-  expect(databaseProps(true, directory)).toEqual({ migrations })
+  expect(databaseProps({ isLocalDev: true, isProduction: false }, directory)).toEqual({
+    migrations,
+  })
   expect(readdirSync(migrations).sort()).toEqual([
     '00000000_production_clone.sql',
     '1000000009_0009_featured_mix.sql',
@@ -59,11 +64,15 @@ test('a clone keeps its baseline and synchronizes only migrations production has
 })
 
 test('an explicitly configured missing or incomplete clone fails instead of using production', () => {
-  expect(() => databaseProps(true, join(temporaryDirectory(), 'missing'))).toThrow()
+  expect(() =>
+    databaseProps({ isLocalDev: true, isProduction: false }, join(temporaryDirectory(), 'missing')),
+  ).toThrow()
   const directory = temporaryDirectory()
   writeFileSync(
     join(directory, 'manifest.json'),
     JSON.stringify({ appliedMigrations: [], baselineMigrations: [] }),
   )
-  expect(() => databaseProps(true, directory)).toThrow('missing its baseline')
+  expect(() => databaseProps({ isLocalDev: true, isProduction: false }, directory)).toThrow(
+    'missing its baseline',
+  )
 })

@@ -39,6 +39,7 @@ import {
 } from '@/lib/oauth-telemetry'
 import { omitUndefined } from '@/lib/omit-undefined'
 import { hasLocalSentryContext, shouldEnableSentry } from '@/lib/sentry'
+import { McpOperationStoreLayer } from '@/mcp/operations/store'
 import { regenerateSitemap } from '@/routes/redirect/seo/sitemap.service'
 import {
   WorkerSentryEnabledLive,
@@ -203,6 +204,7 @@ const appServicesLive = (
         }
       : undefined),
     database: DatabaseLayer(env.DB),
+    operationStore: McpOperationStoreLayer(env.DB),
     sitemapCache: SitemapCacheLayer(env.SITEMAP),
     spotifyImportResolver: spotifyImportResolverLive(env),
     playlistEnrichmentQueue: playlistEnrichmentQueueLive(env),

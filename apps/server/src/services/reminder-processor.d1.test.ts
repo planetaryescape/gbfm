@@ -113,7 +113,8 @@ describe('reminder queue delivery', () => {
     await Effect.runPromise(withTestLayer(processReminderJob('pending'), layer))
     expect(messages).toHaveLength(1)
     await database.run(sql`DROP TRIGGER reject_receipt`)
-    clock.advance()
+    const [failed] = await database.select().from(musicReminder)
+    clock.advance(failed!.updatedAt.getTime() + 300_000 - clock.now())
     expect(await Effect.runPromise(withTestLayer(queryDueReminders, layer))).toHaveLength(1)
     await Effect.runPromise(withTestLayer(processReminderJob('pending'), layer))
     await Effect.runPromise(withTestLayer(processReminderJob('pending'), layer))
@@ -294,7 +295,8 @@ describe('reminder queue delivery', () => {
     await expect(
       Effect.runPromise(withTestLayer(processReminderJob('pending'), layer)),
     ).rejects.toMatchObject({ stage: 'email' })
-    clock.advance()
+    const [failed] = await database.select().from(musicReminder)
+    clock.advance(failed!.updatedAt.getTime() + 300_000 - clock.now())
     await database.run(
       sql`CREATE TRIGGER reject_sent BEFORE UPDATE ON music_reminder WHEN NEW.status = 'sent' BEGIN SELECT RAISE(ABORT, 'fixture sent failure'); END`,
     )
@@ -306,7 +308,8 @@ describe('reminder queue delivery', () => {
       (await database.select().from(emailDeliveryLogsTable)).filter((log) => log.status === 'SENT'),
     ).toHaveLength(1)
     await database.run(sql`DROP TRIGGER reject_sent`)
-    clock.advance()
+    const [failedTerminal] = await database.select().from(musicReminder)
+    clock.advance(failedTerminal!.updatedAt.getTime() + 300_000 - clock.now())
     await Effect.runPromise(withTestLayer(processReminderJob('pending'), layer))
     await Effect.runPromise(withTestLayer(processReminderJob('pending'), layer))
     expect(messages).toHaveLength(3)
@@ -368,7 +371,7 @@ describe('reminder queue delivery', () => {
       expect.objectContaining({ status: 'FAILED', failureCategory: 'unavailable' }),
     ])
 
-    clock.advance()
+    clock.advance(failedReminder[0]!.updatedAt.getTime() + 300_000 - clock.now())
     const retryClaim = await Effect.runPromise(withTestLayer(claimReminder(reminderId), layer))
 
     const retryReminder = await Effect.runPromise(

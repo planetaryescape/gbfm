@@ -5,6 +5,7 @@ import { defineMessageUnion } from 'foldkit/message'
 import { SpotifyStatus } from '../../spotify/connection'
 import { Theme } from '../../theme'
 import { Row, DashboardDocument } from './document'
+import { DeleteIntent } from './model'
 import * as ApiKeys from './page/api-keys'
 import * as Emails from './page/emails'
 import * as Playlists from './page/playlists'
@@ -47,6 +48,12 @@ export const Message = defineMessageUnion({
   ThemeSelected: { theme: Theme },
   ThemeRestored: { theme: Theme },
   DeleteRequested: { id: Schema.String },
+  DeleteCompleted: { intent: DeleteIntent },
+  DeleteFailed: {
+    intent: DeleteIntent,
+    message: Schema.String,
+    status: Schema.NullOr(Schema.Number),
+  },
   Saved: {},
   SpotifyRequested: {
     action: Schema.Literals(['status', 'connect', 'disconnect', 'completeCallback']),

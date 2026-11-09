@@ -76,6 +76,10 @@ export const initWithPlayback = (
     ? Dashboard.update(dashboard.model, Dashboard.Message.Loaded({ document: flags.dashboard }))
     : dashboard
 
+  const publicAction = PublicActions.load(
+    PublicActions.init(flags.publicAction, flags.principal?.id ?? null),
+  )
+
   return {
     model: {
       route,
@@ -109,7 +113,7 @@ export const initWithPlayback = (
           principalKnown: flags.principal !== null || flags.principalKnown === true,
         },
       },
-      publicAction: PublicActions.init(flags.publicAction, flags.principal?.id ?? null),
+      publicAction: publicAction.model,
       spotifyPlayback,
       creator: creator.model,
       dashboard: preparedDashboard.model,
@@ -117,6 +121,9 @@ export const initWithPlayback = (
     },
     commands: [
       StartClient(),
+      ...Command.mapMessages(publicAction.commands ?? [], (message) =>
+        Message.GotPublicActionMessage({ message }),
+      ),
       ...(flags.tweet
         ? [
             Command.mapMessage(

@@ -1,14 +1,70 @@
 import type { QueueTrackType } from '@gbfm/player'
-import { Option } from 'effect'
+import { Option, Predicate } from 'effect'
+import * as Scene from 'foldkit/scene'
 import { fromString } from 'foldkit/url'
 import { describe, expect, it } from 'vitest'
 
 import { init } from './init'
 import { Message } from './message'
 import type { Flags, Model, Principal } from './model'
-import * as Player from './player'
-import * as PublicActions from './public-actions'
+import * as PlayerModule from './player'
+import * as PublicActionsModule from './public-actions'
 import { update } from './update'
+
+// Server observations/acknowledgements used by the existing journey fixtures.
+const Player = {
+  ...PlayerModule,
+  Favorite: {
+    ...PlayerModule.Favorite,
+    Message: {
+      ...PlayerModule.Favorite.Message,
+      Loaded: (
+        input: Omit<Parameters<typeof PlayerModule.Favorite.Message.Loaded>[0], 'revision'> & {
+          revision?: number | null
+        },
+      ) => PlayerModule.Favorite.Message.Loaded({ revision: 17, ...input }),
+      Saved: (
+        input: Omit<Parameters<typeof PlayerModule.Favorite.Message.Saved>[0], 'revision'> & {
+          revision?: number
+        },
+      ) => PlayerModule.Favorite.Message.Saved({ revision: 18, ...input }),
+      SaveFailed: (
+        input: Omit<
+          Parameters<typeof PlayerModule.Favorite.Message.SaveFailed>[0],
+          'conflicted' | 'mutationId'
+        >,
+      ) =>
+        PlayerModule.Favorite.Message.SaveFailed({
+          conflicted: false,
+          mutationId: 'da5495ab-6f07-4a4f-bb5e-0f9355e71e40',
+          ...input,
+        }),
+    },
+  },
+}
+
+const PublicActions = {
+  ...PublicActionsModule,
+  Message: {
+    ...PublicActionsModule.Message,
+    Saved: (
+      input: Omit<Parameters<typeof PublicActionsModule.Message.Saved>[0], 'revision'> & {
+        revision?: number
+      },
+    ) => PublicActionsModule.Message.Saved({ revision: 18, ...input }),
+    Failed: (
+      input: Omit<
+        Parameters<typeof PublicActionsModule.Message.Failed>[0],
+        'conflicted' | 'mutationId'
+      >,
+    ) =>
+      PublicActionsModule.Message.Failed({
+        conflicted: false,
+        mutationId: 'da5495ab-6f07-4a4f-bb5e-0f9355e71e40',
+        ...input,
+      }),
+  },
+}
 
 const listener: Principal = { id: 'user-1', name: 'Listener', username: null, role: 'user' }
 
@@ -53,16 +109,50 @@ const mixPage = (state: 'active' | 'inactive', principal: Principal | null = lis
     state,
   })
 
-const send = (model: Model, message: Message) => update(model, message)
+const observePage = (model: Model, active: boolean, revision: number) => {
+  const action = model.publicAction
 
-const player = (model: Model, message: Player.Message) =>
+  if (!action.document || !action.principalId || action.revision !== null || !action.busy)
+    return model
+
+  return update(
+    model,
+    Message.GotPublicActionMessage({
+      message: PublicActions.Message.Loaded({
+        target: action.document.target,
+        principalId: action.principalId,
+        requestId: action.requestId,
+        active,
+        revision,
+      }),
+    }),
+  ).model
+}
+
+const send = (model: Model, message: Message) => {
+  const result = update(model, message)
+
+  return Predicate.isTagged(message, 'LoadedPage') &&
+    message.flags.principal?.id === result.model.publicAction.principalId
+    ? {
+        ...result,
+        model: observePage(result.model, message.flags.publicAction?.state === 'active', 29),
+      }
+    : result
+}
+
+const player = (model: Model, message: PlayerModule.Message) =>
   send(model, Message.GotPlayerMessage({ message }))
 
-const favorite = (model: Model, message: Player.Favorite.Message) =>
+const favorite = (model: Model, message: PlayerModule.Favorite.Message) =>
   player(model, Player.Message.GotFavoriteMessage({ message }))
 
 const playing = (flags: Flags) => {
-  const started = send(init(flags).model, Message.ClientStarted()).model
+  const started = observePage(
+    send(init(flags).model, Message.ClientStarted()).model,
+    flags.publicAction?.state === 'active',
+    17,
+  )
 
   const snapshot = {
     ...started.player.snapshot,
@@ -132,6 +222,294 @@ const changeTrack = (model: Model, current: QueueTrackType) =>
   ).model
 
 describe('player favorite integration', () => {
+  it('loads an atomic observation on init and navigation before allowing a page write', () => {
+    const initial = init(mixPage('inactive'))
+    expect(initial.model.publicAction).toMatchObject({ busy: true, revision: null })
+    const first = initial.commands?.find(({ name }) => name === 'PublicActions.Load')
+    expect(first?.args).toMatchObject({
+      principalId: listener.id,
+      requestId: initial.model.publicAction.requestId,
+    })
+    expect(
+      commandNames(
+        update(
+          initial.model,
+          Message.GotPublicActionMessage({ message: PublicActions.Message.Toggle() }),
+        ),
+      ),
+    ).not.toContain('PublicActions.Save')
+    const ready = observePage(initial.model, false, 71)
+
+    const pageControl = {
+      update,
+      view: (model: Model, h: Parameters<typeof PublicActionsModule.view<Message>>[1]) =>
+        PublicActionsModule.view(
+          model.publicAction,
+          h,
+          (message) => Message.GotPublicActionMessage({ message }),
+          true,
+        ),
+    }
+
+    Scene.scene(
+      pageControl,
+      Scene.given(initial.model),
+      Scene.expect(Scene.role('button', { name: 'Checking…' })).toBeDisabled(),
+    )
+    Scene.scene(
+      pageControl,
+      Scene.given(ready),
+      Scene.expect(Scene.role('button', { name: 'Add to favorites' })).toBeEnabled(),
+      Scene.expect(Scene.role('button')).toHaveAttr('aria-pressed', 'false'),
+    )
+
+    expect(
+      update(ready, Message.GotPublicActionMessage({ message: PublicActions.Message.Toggle() }))
+        .commands?.[0]?.args,
+    ).toMatchObject({ expectedRevision: 71 })
+
+    const away = update(ready, changed('https://gbfm.co.za/about')).model
+
+    // An ordinary destination with no action cannot inherit the previous page's revision.
+    const about = update(
+      away,
+      Message.LoadedPage({
+        flags: page('/about', listener),
+        key: '/about',
+        navigationId: away.navigationId,
+      }),
+    ).model
+
+    const returning = update(about, changed('https://gbfm.co.za/mixes/local-frequencies'))
+
+    const navigation = update(
+      returning.model,
+      Message.LoadedPage({
+        flags: mixPage('inactive'),
+        key: '/mixes/local-frequencies',
+        navigationId: returning.model.navigationId,
+      }),
+    )
+
+    expect(navigation.model.publicAction).toMatchObject({ busy: true, revision: null })
+
+    const observedCommands = [...(returning.commands ?? []), ...(navigation.commands ?? [])].filter(
+      ({ name }) => name === 'PublicActions.Load',
+    )
+
+    expect(observedCommands).toHaveLength(1)
+    expect(observedCommands[0]?.args).toMatchObject({
+      requestId: navigation.model.publicAction.requestId,
+    })
+    expect(commandNames(init(mixPage('inactive', null)))).not.toContain('PublicActions.Load')
+  })
+
+  it('propagates the actual acknowledged revision both ways, never only the membership boolean', () => {
+    const root = settled(mixPage('inactive'), 'inactive')
+
+    const ready = observePage(
+      { ...root, publicAction: { ...root.publicAction, busy: true, revision: null } },
+      false,
+      82,
+    )
+
+    const pending = update(
+      ready,
+      Message.GotPublicActionMessage({ message: PublicActions.Message.Toggle() }),
+    ).model
+
+    const saved = update(
+      pending,
+      Message.GotPublicActionMessage({
+        message: PublicActionsModule.Message.Saved({
+          target: { id: 'mix-a', kind: 'audio' },
+          active: true,
+          principalId: listener.id,
+          requestId: pending.publicAction.requestId,
+          revision: 83,
+        }),
+      }),
+    ).model
+
+    expect(saved.player.favorite).toMatchObject({ status: 'active', revision: 83 })
+    const playerWrite = favorite(saved, Player.Favorite.Message.Toggled())
+    expect(playerWrite.commands?.[0]?.args).toMatchObject({ expectedRevision: 83, active: false })
+
+    const acknowledged = favorite(
+      playerWrite.model,
+      Player.Favorite.Message.Saved({
+        generation: playerWrite.model.player.favorite.generation,
+        audioId: 'mix-a',
+        active: false,
+        principalId: listener.id,
+        revision: 84,
+      }),
+    ).model
+
+    expect(acknowledged.publicAction).toMatchObject({
+      revision: 84,
+      document: { state: 'inactive' },
+    })
+    expect(acknowledged.navigationFavoriteChanges).toEqual([
+      { audioId: 'mix-a', active: false, principalId: listener.id, revision: 84 },
+    ])
+    expect(
+      update(
+        acknowledged,
+        Message.GotPublicActionMessage({ message: PublicActions.Message.Toggle() }),
+      ).commands?.[0]?.args,
+    ).toMatchObject({ expectedRevision: 84 })
+  })
+
+  it('retains an uncertain page intent across navigation and an acknowledgement from the other control', () => {
+    const ready = settled(mixPage('inactive'), 'inactive')
+
+    const saving = update(
+      ready,
+      Message.GotPublicActionMessage({ message: PublicActions.Message.Toggle() }),
+    ).model
+
+    const mutationId = '029373a7-980e-4a18-a5ba-0063f2834ae4'
+
+    const failed = update(
+      saving,
+      Message.GotPublicActionMessage({
+        message: PublicActionsModule.Message.Failed({
+          target: { id: 'mix-a', kind: 'audio' },
+          principalId: listener.id,
+          requestId: saving.publicAction.requestId,
+          unauthorized: false,
+          conflicted: false,
+          mutationId,
+        }),
+      }),
+    ).model
+
+    const playerPending = favorite(failed, Player.Favorite.Message.Toggled()).model
+
+    const acknowledged = favorite(
+      playerPending,
+      Player.Favorite.Message.Saved({
+        generation: playerPending.player.favorite.generation,
+        audioId: 'mix-a',
+        active: true,
+        principalId: listener.id,
+        revision: 18,
+      }),
+    ).model
+
+    expect(acknowledged.publicAction).toMatchObject({
+      mutationId,
+      revision: 17,
+      document: { state: 'inactive' },
+    })
+
+    const leaving = update(
+      acknowledged,
+      changed('https://gbfm.co.za/mixes/local-frequencies'),
+    ).model
+
+    const returned = update(
+      leaving,
+      Message.LoadedPage({
+        flags: { ...mixPage('inactive'), description: 'Changed content' },
+        key: '/mixes/local-frequencies',
+        navigationId: leaving.navigationId,
+      }),
+    )
+
+    expect(returned.model.publicAction).toBe(acknowledged.publicAction)
+    expect(commandNames(returned)).not.toContain('PublicActions.Load')
+
+    const retry = update(
+      returned.model,
+      Message.GotPublicActionMessage({ message: PublicActions.Message.Toggle() }),
+    )
+
+    expect(retry.commands?.[0]?.args).toMatchObject({
+      mutationId,
+      expectedRevision: 17,
+      active: true,
+    })
+  })
+
+  it('does not replace an uncertain player retry with a page observation', () => {
+    const ready = settled(mixPage('inactive'), 'inactive')
+    const saving = favorite(ready, Player.Favorite.Message.Toggled()).model
+
+    const failed = favorite(
+      saving,
+      Player.Favorite.Message.SaveFailed({
+        generation: saving.player.favorite.generation,
+        unauthorized: false,
+        principalId: listener.id,
+      }),
+    ).model
+
+    const observed = observePage(
+      { ...failed, publicAction: { ...failed.publicAction, busy: true, revision: null } },
+      true,
+      92,
+    )
+
+    expect(observed.player.favorite).toMatchObject({
+      revision: 17,
+      mutationId: 'da5495ab-6f07-4a4f-bb5e-0f9355e71e40',
+      status: 'inactive',
+    })
+    expect(favorite(observed, Player.Favorite.Message.Toggled()).commands?.[0]?.args).toMatchObject(
+      { expectedRevision: 17, mutationId: 'da5495ab-6f07-4a4f-bb5e-0f9355e71e40' },
+    )
+  })
+
+  it('starts a new owner-bound page observation on API-confirmed identity change and ignores the old one', () => {
+    const initial = playing(mixPage('inactive')).model
+    const previousRequest = initial.publicAction.requestId
+
+    const confirmed = favorite(
+      initial,
+      Player.Favorite.Message.Loaded({
+        generation: initial.player.favorite.generation,
+        state: 'inactive',
+        principalId: 'user-2',
+        principalKnown: true,
+        revision: 103,
+      }),
+    )
+
+    expect(confirmed.model.publicAction).toMatchObject({
+      principalId: 'user-2',
+      busy: true,
+      revision: null,
+      mutationId: null,
+    })
+    expect(
+      confirmed.commands?.find(({ name }) => name === 'PublicActions.Load')?.args,
+    ).toMatchObject({ principalId: 'user-2', requestId: confirmed.model.publicAction.requestId })
+    expect(confirmed.model.publicAction.requestId).toBeGreaterThan(previousRequest)
+
+    const late = update(
+      confirmed.model,
+      Message.GotPublicActionMessage({
+        message: PublicActions.Message.Loaded({
+          target: { id: 'mix-a', kind: 'audio' },
+          principalId: listener.id,
+          requestId: previousRequest,
+          active: true,
+          revision: 19,
+        }),
+      }),
+    ).model
+
+    expect(late.publicAction).toBe(confirmed.model.publicAction)
+    const observed = observePage(late, false, 103)
+    expect(observed.publicAction).toMatchObject({
+      revision: 103,
+      busy: false,
+      document: { state: 'inactive' },
+    })
+  })
+
   it.each([false, true])(
     'preserves a pending page save across same-audio navigation before its acknowledgement, changed content: %s',
     (changedContent) => {
@@ -235,7 +613,7 @@ describe('player favorite integration', () => {
     expect(saved.player.favorite.status).toBe('active')
   })
 
-  it.each<PublicActions.Document['target']>([
+  it.each<PublicActionsModule.Document['target']>([
     { kind: 'audio', id: 'mix-b' },
     { kind: 'show', id: 'mix-a' },
   ])('invalidates a pending page save when the target changes to $kind/$id', (target) => {
@@ -416,7 +794,7 @@ describe('player favorite integration', () => {
       expect(savedB.publicAction).toMatchObject({ busy: false, document: { state: 'active' } })
       expect(savedB.player.favorite).toMatchObject({ principalId: 'user-2', status: 'active' })
       expect(savedB.navigationFavoriteChanges).toEqual([
-        { principalId: 'user-2', audioId: 'mix-a', active: true },
+        { principalId: 'user-2', audioId: 'mix-a', active: true, revision: 18 },
       ])
 
       const leavingB = send(savedB, changed('https://gbfm.co.za/mixes/local-frequencies')).model
@@ -576,7 +954,8 @@ describe('player favorite integration', () => {
     ).model
 
     expect(confirmed.publicAction).toMatchObject({
-      busy: false,
+      busy: true,
+      revision: null,
       document: { state: 'unavailable' },
     })
     expect(late.publicAction).toEqual(confirmed.publicAction)
@@ -588,7 +967,7 @@ describe('player favorite integration', () => {
 
     expect(restarted.player.favorite).toMatchObject({ principalId: 'user-2', status: 'inactive' })
     expect(restarted.publicAction).toMatchObject({
-      busy: false,
+      busy: true,
       document: { state: 'unavailable' },
     })
   })
@@ -701,7 +1080,11 @@ describe('player favorite integration', () => {
 
       const stale = loadMixPage(saved, oldFlags).model
 
-      expect(stale.publicAction).toMatchObject({ busy: false, document: { state: 'unavailable' } })
+      expect(stale.publicAction).toMatchObject({
+        busy: true,
+        revision: null,
+        document: { state: 'unavailable' },
+      })
       expect(stale.player.favorite).toMatchObject({ principalId: 'user-2', status: 'active' })
 
       const later = send(stale, changed('https://gbfm.co.za/mixes/local-frequencies')).model
@@ -975,7 +1358,7 @@ describe('player favorite integration', () => {
     const navigation = send(other, changed('https://gbfm.co.za/mixes/local-frequencies')).model
 
     const pending = send(
-      navigation,
+      observePage(navigation, false, 17),
       Message.GotPublicActionMessage({ message: PublicActions.Message.Toggle() }),
     ).model
 
@@ -1052,7 +1435,11 @@ describe('player favorite integration', () => {
     const loaded = loadMixPage(failed).model
 
     expect(loaded.publicAction.document?.state).toBe('inactive')
-    expect(loaded.player.favorite.status).toBe('inactive')
+    expect(loaded.player.favorite).toMatchObject({
+      status: 'active',
+      revision: 17,
+      mutationId: 'da5495ab-6f07-4a4f-bb5e-0f9355e71e40',
+    })
   })
 
   it('keeps the last acknowledged change when multiple player saves overtake a page read', () => {

@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, lte, sql } from 'drizzle-orm'
-import { Effect, Match } from 'effect'
+import { Effect } from 'effect'
 
 import { projectEntityLabelsForRows } from '@/db/labels'
 import { Database } from '@/db/layer'
@@ -12,37 +12,8 @@ import {
 } from '@/db/music-entity.schema'
 import { DatabaseError, getErrorMessage } from '@/errors'
 
-import { requireOne } from './shared'
-
-const findRequiredEntity = (entity: 'MusicLabel' | 'MusicArtist' | 'MusicAlbum', id: string) => {
-  const table = Match.value(entity).pipe(
-    Match.when('MusicLabel', () => musicLabelsTable),
-    Match.when('MusicArtist', () => musicArtistsTable),
-    Match.orElse(() => musicAlbumsTable),
-  )
-
-  const tableName = Match.value(entity).pipe(
-    Match.when('MusicLabel', () => 'music_labels'),
-    Match.when('MusicArtist', () => 'music_artists'),
-    Match.orElse(() => 'music_albums'),
-  )
-
-  return Effect.gen(function* () {
-    const db = yield* Database
-
-    const rows = yield* Effect.tryPromise({
-      try: () => db.select({ id: table.id }).from(table).where(eq(table.id, id)).limit(1),
-      catch: (cause) =>
-        new DatabaseError({
-          message: `Failed to find affiliation entity: ${getErrorMessage(cause)}`,
-          operation: 'select',
-          table: tableName,
-        }),
-    })
-
-    return yield* requireOne(rows, entity, id)
-  })
-}
+import { writeMusicRelationship } from './relationship-write'
+import type { MusicWriteRequest } from './write-intent'
 
 /** Lists all artists affiliated with a label for administrative management. */
 export const getArtistsForLabelEffect = (labelId: string) =>
@@ -245,103 +216,49 @@ export const getLabelsForAlbumEffect = (albumId: string) =>
   }).pipe(Effect.withSpan('musicEntity.getLabelsForAlbum', { attributes: { albumId } }))
 
 /** Creates an idempotent factual affiliation between a label and an artist. */
-export const affiliateArtistWithLabelEffect = (labelId: string, artistId: string) =>
-  Effect.gen(function* () {
-    const db = yield* Database
-    yield* Effect.all([
-      findRequiredEntity('MusicLabel', labelId),
-      findRequiredEntity('MusicArtist', artistId),
-    ])
-    yield* Effect.tryPromise({
-      try: () =>
-        db.insert(musicLabelArtistsTable).values({ labelId, artistId }).onConflictDoNothing(),
-      catch: (cause) =>
-        new DatabaseError({
-          message: `Failed to affiliate artist with label: ${getErrorMessage(cause)}`,
-          operation: 'insert',
-          table: 'music_label_artists',
-        }),
-    })
-  }).pipe(
-    Effect.withSpan('musicEntity.affiliateArtistWithLabel', {
-      attributes: { labelId, artistId },
-    }),
+export const affiliateArtistWithLabelEffect = (
+  labelId: string,
+  artistId: string,
+  write?: MusicWriteRequest,
+) =>
+  writeMusicRelationship(
+    { entityType: 'artist', entityId: artistId },
+    { kind: 'affiliation', action: 'set', labelId },
+    write,
   )
 
 /** Removes a factual affiliation between a label and an artist. */
-export const unaffiliateArtistFromLabelEffect = (labelId: string, artistId: string) =>
-  Effect.gen(function* () {
-    const db = yield* Database
-    yield* Effect.tryPromise({
-      try: () =>
-        db
-          .delete(musicLabelArtistsTable)
-          .where(
-            and(
-              eq(musicLabelArtistsTable.labelId, labelId),
-              eq(musicLabelArtistsTable.artistId, artistId),
-            ),
-          ),
-      catch: (cause) =>
-        new DatabaseError({
-          message: `Failed to remove artist label affiliation: ${getErrorMessage(cause)}`,
-          operation: 'delete',
-          table: 'music_label_artists',
-        }),
-    })
-  }).pipe(
-    Effect.withSpan('musicEntity.unaffiliateArtistFromLabel', {
-      attributes: { labelId, artistId },
-    }),
+export const unaffiliateArtistFromLabelEffect = (
+  labelId: string,
+  artistId: string,
+  write?: MusicWriteRequest,
+) =>
+  writeMusicRelationship(
+    { entityType: 'artist', entityId: artistId },
+    { kind: 'affiliation', action: 'remove', labelId },
+    write,
   )
 
 /** Creates an idempotent factual affiliation between a label and an album. */
-export const affiliateAlbumWithLabelEffect = (labelId: string, albumId: string) =>
-  Effect.gen(function* () {
-    const db = yield* Database
-    yield* Effect.all([
-      findRequiredEntity('MusicLabel', labelId),
-      findRequiredEntity('MusicAlbum', albumId),
-    ])
-    yield* Effect.tryPromise({
-      try: () =>
-        db.insert(musicLabelAlbumsTable).values({ labelId, albumId }).onConflictDoNothing(),
-      catch: (cause) =>
-        new DatabaseError({
-          message: `Failed to affiliate album with label: ${getErrorMessage(cause)}`,
-          operation: 'insert',
-          table: 'music_label_albums',
-        }),
-    })
-  }).pipe(
-    Effect.withSpan('musicEntity.affiliateAlbumWithLabel', {
-      attributes: { labelId, albumId },
-    }),
+export const affiliateAlbumWithLabelEffect = (
+  labelId: string,
+  albumId: string,
+  write?: MusicWriteRequest,
+) =>
+  writeMusicRelationship(
+    { entityType: 'album', entityId: albumId },
+    { kind: 'affiliation', action: 'set', labelId },
+    write,
   )
 
 /** Removes a factual affiliation between a label and an album. */
-export const unaffiliateAlbumFromLabelEffect = (labelId: string, albumId: string) =>
-  Effect.gen(function* () {
-    const db = yield* Database
-    yield* Effect.tryPromise({
-      try: () =>
-        db
-          .delete(musicLabelAlbumsTable)
-          .where(
-            and(
-              eq(musicLabelAlbumsTable.labelId, labelId),
-              eq(musicLabelAlbumsTable.albumId, albumId),
-            ),
-          ),
-      catch: (cause) =>
-        new DatabaseError({
-          message: `Failed to remove album label affiliation: ${getErrorMessage(cause)}`,
-          operation: 'delete',
-          table: 'music_label_albums',
-        }),
-    })
-  }).pipe(
-    Effect.withSpan('musicEntity.unaffiliateAlbumFromLabel', {
-      attributes: { labelId, albumId },
-    }),
+export const unaffiliateAlbumFromLabelEffect = (
+  labelId: string,
+  albumId: string,
+  write?: MusicWriteRequest,
+) =>
+  writeMusicRelationship(
+    { entityType: 'album', entityId: albumId },
+    { kind: 'affiliation', action: 'remove', labelId },
+    write,
   )

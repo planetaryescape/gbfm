@@ -1,28 +1,32 @@
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types'
 import { REMINDER_STATUS } from '@gbfm/core/status'
+import { sql } from 'drizzle-orm'
 import { Effect, Layer } from 'effect'
 import { describe, expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
 import { Database, DatabaseLayer } from '@/db/layer'
 import { musicReminder } from '@/db/music-reminder.schema'
+import { CommandAuthority } from '@/mcp/command-authority'
+import { McpOperationStoreLayer } from '@/mcp/operations/store'
+import { ReminderCommandService, ReminderCommandServiceLayer } from '@/mcp/reminders/service'
 import { EmailDelivery } from '@/services/email-delivery.service'
-import { MusicReminderService, MusicReminderServiceLayer } from '@/services/music-reminder.service'
 import { processReminderJob } from '@/services/reminder-processor'
 import { withTestLayer } from '@/test/effect'
 import { createMigratedD1Database } from '@/test/migrate-d1'
 import { reminderClock } from '@/test/reminder-clock'
 
 describe('reminder claim read recovery', () => {
-  test('post-claim edits deliver the freshly loaded title, URL and notes', async () => {
+  test('post-claim edits suppress stale work, then deliver the updated title, URL and notes', async () => {
     await using resource = await createMigratedD1Database()
     const databaseLayer = DatabaseLayer(resource.database)
     const database = Effect.runSync(withTestLayer(Database, databaseLayer))
+    const id = '11111111-1111-4111-8111-111111111111'
     await database
       .insert(user)
       .values({ id: 'listener', name: 'Listener', email: 'listener@example.test' })
     await database.insert(musicReminder).values({
-      id: 'pending',
+      id,
       userId: 'listener',
       musicTitle: 'OriginalTitle',
       artistName: 'Artist',
@@ -92,7 +96,7 @@ describe('reminder claim read recovery', () => {
     })
 
     const pending = Effect.runPromise(
-      withTestLayer(processReminderJob('pending'), Layer.mergeAll(DatabaseLayer(gated), delivery)),
+      withTestLayer(processReminderJob(id), Layer.mergeAll(DatabaseLayer(gated), delivery)),
     )
 
     try {
@@ -108,19 +112,44 @@ describe('reminder claim read recovery', () => {
       await Effect.runPromise(
         withTestLayer(
           Effect.gen(function* () {
-            const reminders = yield* MusicReminderService
-            yield* reminders.update('pending', 'listener', {
-              musicTitle: 'UpdatedTitle',
-              musicUrl: 'https://example.test/updated',
-              notes: 'UpdatedNotes',
-              reminderDate: new Date(0),
+            const reminders = yield* ReminderCommandService
+            yield* reminders.execute({
+              operation: 'update_music_reminder',
+              input: {
+                requestId: crypto.randomUUID(),
+                reminderId: id,
+                expectedRevision: 1,
+                musicTitle: 'UpdatedTitle',
+                musicUrl: 'https://example.test/updated',
+                notes: 'UpdatedNotes',
+                reminderDate: new Date(0).toISOString(),
+              },
             })
-          }),
-          MusicReminderServiceLayer.pipe(Layer.provide(databaseLayer)),
+          }).pipe(
+            Effect.provideService(
+              CommandAuthority,
+              CommandAuthority.of({
+                checkpoint: () =>
+                  Effect.succeed({
+                    actorId: 'listener',
+                    clientId: 'fixture',
+                    resource: 'https://api.test/api',
+                    liveGuard: sql`EXISTS (SELECT 1 FROM user WHERE id='listener')`,
+                  }),
+              }),
+            ),
+          ),
+          ReminderCommandServiceLayer.pipe(
+            Layer.provide(Layer.merge(databaseLayer, McpOperationStoreLayer(resource.database))),
+          ),
         ),
       )
       released.resolve()
       await pending
+      expect(deliveredHtml).toHaveLength(0)
+      await Effect.runPromise(
+        withTestLayer(processReminderJob(id), Layer.mergeAll(databaseLayer, delivery)),
+      )
       expect(deliveredHtml).toHaveLength(1)
       expect(deliveredHtml[0]).toContain('UpdatedTitle')
       expect(deliveredHtml[0]).toContain('https://example.test/updated')

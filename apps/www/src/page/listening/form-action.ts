@@ -1,4 +1,11 @@
-import { EditCollectionInput, EditMixInput, SaveMixesInput } from '@gbfm/api/listening'
+import {
+  CreateListeningCollectionInput,
+  EditCollectionInput,
+  EditMixInput,
+  ListeningMembershipInput,
+  ListeningVersionInput,
+  SaveMixesInput,
+} from '@gbfm/api/listening'
 import { Option, Schema } from 'effect'
 import * as Server from 'foldkit/experimental/server'
 
@@ -26,8 +33,10 @@ export const handleListeningAction = async (request: Request, form: FormData) =>
   let payload:
     | typeof SaveMixesInput.Type
     | typeof EditMixInput.Type
+    | typeof CreateListeningCollectionInput.Type
     | typeof EditCollectionInput.Type
-    | { included: boolean }
+    | typeof ListeningMembershipInput.Type
+    | typeof ListeningVersionInput.Type
     | undefined
 
   if (operation === 'save-import' || operation === 'bulk-links') {
@@ -58,6 +67,7 @@ export const handleListeningAction = async (request: Request, form: FormData) =>
     path = '/api/listening/mixes'
   } else if (operation === 'edit-mix') {
     const parsed = Schema.decodeUnknownOption(EditMixInput)({
+      expectedVersion: field('expectedVersion'),
       title: field('title'),
       notes: field('notes'),
       status: field('status'),
@@ -69,21 +79,41 @@ export const handleListeningAction = async (request: Request, form: FormData) =>
     path = `/api/listening/mixes/${id}`
     method = 'PUT'
   } else if (operation === 'create-collection' || operation === 'edit-collection') {
-    const parsed = Schema.decodeUnknownOption(EditCollectionInput)({
+    const fields = {
       title: field('title'),
       description: field('description'),
       published: field('published') === 'true',
-    })
+    }
+
+    const parsed =
+      operation === 'create-collection'
+        ? Schema.decodeUnknownOption(CreateListeningCollectionInput)(fields)
+        : Schema.decodeUnknownOption(EditCollectionInput)({
+            ...fields,
+            expectedVersion: field('expectedVersion'),
+          })
 
     if (Option.isNone(parsed)) return fail()
     payload = parsed.value
     path = `/api/listening/collections${operation === 'edit-collection' ? `/${id}` : ''}`
     method = operation === 'edit-collection' ? 'PUT' : 'POST'
   } else if (operation === 'membership') {
+    const parsed = Schema.decodeUnknownOption(ListeningMembershipInput)({
+      expectedVersion: field('expectedVersion'),
+      included: field('included') === 'true',
+    })
+
+    if (Option.isNone(parsed)) return fail()
     path = `/api/listening/collections/${id}/mixes/${encodeURIComponent(field('mixId'))}`
     method = 'PUT'
-    payload = { included: field('included') === 'true' }
+    payload = parsed.value
   } else if (operation === 'delete-mix' || operation === 'delete-collection') {
+    const parsed = Schema.decodeUnknownOption(ListeningVersionInput)({
+      expectedVersion: field('expectedVersion'),
+    })
+
+    if (Option.isNone(parsed)) return fail()
+    payload = parsed.value
     path = `/api/listening/${operation === 'delete-mix' ? 'mixes' : 'collections'}/${id}`
     method = 'DELETE'
   } else return fail(404)

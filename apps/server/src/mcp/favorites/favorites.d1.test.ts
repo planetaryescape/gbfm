@@ -29,8 +29,14 @@ import { withTestLayer } from '@/test/effect'
 import { McpActor, McpAuthorizationLive } from '../authorization'
 import { EditorialMcpConfig } from '../editorial'
 import { EditorialMcpSettings } from '../model'
+import { McpOperationStoreLayer } from '../operations/store'
 import { composeMcpToolkits, EditorialToolkit } from '../server'
-import { ListFavoritesResult, type ListOwnedInput, ListShowSubscriptionsResult } from './contracts'
+import {
+  ListFavoritesResult,
+  type ListOwnedInput,
+  ListShowSubscriptionsResult,
+  SetMembershipResult,
+} from './contracts'
 import { FavoritesMcpService, FavoritesMcpServiceLayer } from './service'
 import { FavoritesToolHandlersLayer, FavoritesToolkit } from './toolkit'
 
@@ -59,9 +65,11 @@ const setup = (fixture: Awaited<ReturnType<typeof createEditorialOAuthFixture>>)
     UnavailableObjectStoreClientLayer,
   ).pipe(Layer.provideMerge(DatabaseLayer(fixture.db.$client)))
 
-  const domain = Layer.mergeAll(FavoriteServiceLayer, ShowSubscriptionServiceLayer).pipe(
-    Layer.provide(base),
-  )
+  const domain = Layer.mergeAll(
+    FavoriteServiceLayer,
+    ShowSubscriptionServiceLayer,
+    McpOperationStoreLayer(fixture.db.$client),
+  ).pipe(Layer.provide(base))
 
   const reads = FavoritesMcpServiceLayer.pipe(
     Layer.provide(domain),
@@ -224,7 +232,7 @@ test('persisted OAuth → composed MCP → real services: bounded owner-only pub
 
     for (const name of ['set_favorite', 'set_show_subscription']) {
       expect(await (await rpc(tokens.access_token, 'tools/call', name)).json()).toMatchObject({
-        error: { code: -32602 },
+        result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
       })
     }
 
@@ -486,6 +494,228 @@ test('both lists enforce defaults, maximum page, stable ties and visibility befo
     const empty = await run({ offset: 10000 })
     expect(empty.favorites.favorites).toEqual([])
     expect(empty.subscriptions.subscriptions).toEqual([])
+  } finally {
+    await app.dispose()
+  }
+}, 30_000)
+
+test('membership state observes one owner revision with public state, never another owner or private references', async () => {
+  await using fixture = await createEditorialOAuthFixture()
+  await seed(fixture)
+  const domain = FavoriteServiceLayer.pipe(Layer.provide(DatabaseLayer(fixture.db.$client)))
+
+  const state = (owner: string, kind: 'audio' | 'show', id: string) =>
+    Effect.runPromise(
+      withTestLayer(
+        Effect.gen(function* () {
+          const service = yield* FavoriteService
+
+          return yield* service.getMembershipState(owner, kind, id)
+        }).pipe(
+          Effect.match({
+            onSuccess: (value) => ({ value }),
+            onFailure: (error) => ({ error: error._tag }),
+          }),
+        ),
+        domain,
+      ),
+    )
+
+  expect(await state('reader', 'show', 'public')).toEqual({
+    value: { revision: 0, favorited: true, subscribed: true },
+  })
+  await fixture.db.update(user).set({ role: 'admin' }).where(eq(user.id, 'other'))
+  expect(await state('other', 'show', 'public')).toEqual({
+    value: { revision: 0, favorited: false, subscribed: false },
+  })
+  expect(await state('reader', 'audio', 'mix')).toEqual({
+    value: { revision: 0, favorited: true, subscribed: null },
+  })
+  expect(await state('reader', 'show', 'other-only')).toEqual({
+    value: { revision: 0, favorited: false, subscribed: false },
+  })
+
+  for (const [kind, id] of [
+    ['show', 'private'],
+    ['audio', 'hidden-audio'],
+    ['show', 'missing'],
+  ] as const) {
+    expect(await state('reader', kind, id)).toEqual({ error: 'NotFoundError' })
+  }
+
+  await fixture.db.$client
+    .prepare(
+      'INSERT INTO listener_membership_revisions (user_id, revision, last_transition_id) VALUES (?, ?, ?)',
+    )
+    .bind('reader', 7, '5fac9287-6f11-4f81-a373-83ab96a85139')
+    .run()
+
+  const pages = () =>
+    Effect.runPromise(
+      withTestLayer(
+        Effect.gen(function* () {
+          const service = yield* FavoriteService
+
+          return yield* Effect.all([
+            service.getMembershipPage('reader', 'favorites', 20, 0),
+            service.getMembershipPage('reader', 'subscriptions', 20, 0),
+            service.getMembershipPage('reader', 'favorites', 20, 10_000),
+            service.getMembershipPage('reader', 'subscriptions', 20, 10_000),
+          ])
+        }),
+        domain,
+      ),
+    )
+
+  const nonempty = await pages()
+  expect(nonempty.map((page) => page.revision)).toEqual([7, 7, 7, 7])
+  expect(nonempty[0]?.items.length).toBeGreaterThan(0)
+  expect(nonempty[1]?.items.length).toBeGreaterThan(0)
+  expect(nonempty.slice(2).map((page) => page.items)).toEqual([[], []])
+  await fixture.db.delete(favoritesTable).where(eq(favoritesTable.userId, 'reader'))
+  await fixture.db.delete(showSubscriptionsTable).where(eq(showSubscriptionsTable.userId, 'reader'))
+  expect(await pages()).toEqual(Array.from({ length: 4 }, () => ({ revision: 7, items: [] })))
+  expect(await state('reader', 'show', 'public')).toEqual({
+    value: { revision: 7, favorited: false, subscribed: false },
+  })
+  expect(await state('reader', 'audio', 'mix')).toEqual({
+    value: { revision: 7, favorited: false, subscribed: null },
+  })
+  await fixture.db.update(user).set({ banned: true }).where(eq(user.id, 'reader'))
+  expect(await state('reader', 'show', 'public')).toEqual({ error: 'NotFoundError' })
+}, 30_000)
+
+test('persisted OAuth setters commit coupled state, replay original receipts, reject stale/private writes and recheck scopes', async () => {
+  await using fixture = await createEditorialOAuthFixture()
+  await seed(fixture)
+
+  const scope =
+    'favorites:read favorites:write subscriptions:read subscriptions:write offline_access'
+
+  const client = await fixture.register(scope)
+  await fixture.db.update(oauthResource).set({ allowedScopes: JSON.stringify(scope.split(' ')) })
+
+  const tokens = Schema.decodeUnknownSync(OAuthTokens)(
+    await (await fixture.exchange(client, await fixture.authorize(client, 'reader', scope))).json(),
+  )
+
+  const narrow = Schema.decodeUnknownSync(OAuthTokens)(
+    await (
+      await fixture.exchange(
+        client,
+        await fixture.authorize(client, 'other', 'favorites:write offline_access'),
+      )
+    ).json(),
+  )
+
+  const { app, rpc, recording } = setup(fixture)
+
+  const Result = Schema.Struct({
+    result: Schema.Struct({ structuredContent: SetMembershipResult }),
+  })
+
+  const favorite = {
+    requestId: crypto.randomUUID(),
+    expectedRevision: 0,
+    targetKind: 'show',
+    targetId: 'other-only',
+    desiredState: true,
+  }
+
+  const call = async (name: string, input: Schema.Json) =>
+    (await rpc(tokens.access_token, 'tools/call', name, input)).json()
+
+  const failure = (code: string) => ({
+    result: { isError: true, content: [{ text: expect.stringContaining(code) }] },
+  })
+
+  try {
+    const first = await call('set_favorite', favorite)
+    expect(first).toMatchObject({ result: { structuredContent: { revision: 1 } } })
+    const committed = Schema.decodeUnknownSync(Result)(first).result.structuredContent
+    expect(committed).toMatchObject({
+      requestId: favorite.requestId,
+      targetKind: 'show',
+      targetId: 'other-only',
+      desiredState: true,
+      revision: 1,
+      notifications: 'not_sent',
+    })
+    expect(await call('set_favorite', favorite)).toMatchObject({
+      result: { structuredContent: committed },
+    })
+    expect(await call('set_favorite', { ...favorite, desiredState: false })).toMatchObject(
+      failure('conflict'),
+    )
+    expect(
+      await call('set_show_subscription', {
+        requestId: crypto.randomUUID(),
+        expectedRevision: 0,
+        showId: 'public',
+        desiredState: false,
+      }),
+    ).toMatchObject(failure('conflict'))
+
+    const unsubscribed = Schema.decodeUnknownSync(Result)(
+      await call('set_show_subscription', {
+        requestId: crypto.randomUUID(),
+        expectedRevision: 1,
+        showId: 'other-only',
+        desiredState: false,
+      }),
+    ).result.structuredContent
+
+    expect(unsubscribed).toMatchObject({
+      targetKind: 'show',
+      desiredState: false,
+      revision: 2,
+      notifications: 'not_sent',
+    })
+
+    const favorites = await fixture.db
+      .select()
+      .from(favoritesTable)
+      .where(eq(favoritesTable.userId, 'reader'))
+
+    expect(favorites.some((row) => row.showId === 'other-only')).toBe(true)
+
+    const subscriptions = await fixture.db
+      .select()
+      .from(showSubscriptionsTable)
+      .where(eq(showSubscriptionsTable.userId, 'reader'))
+
+    expect(subscriptions.some((row) => row.showId === 'other-only')).toBe(false)
+    expect(await call('set_favorite', favorite)).toMatchObject({
+      result: { structuredContent: committed },
+    })
+
+    for (const targetId of ['private', 'missing'])
+      expect(
+        await call('set_favorite', {
+          ...favorite,
+          requestId: crypto.randomUUID(),
+          expectedRevision: 2,
+          targetId,
+        }),
+      ).toMatchObject(failure('access_denied'))
+    expect(
+      await (await rpc(narrow.access_token, 'tools/call', 'set_favorite', favorite)).json(),
+    ).toMatchObject(failure('access_denied'))
+    expect(
+      await call('set_favorite', {
+        ...favorite,
+        requestId: crypto.randomUUID(),
+        expectedRevision: 2,
+        userId: 'other',
+      }),
+    ).toMatchObject({ result: { isError: true } })
+    expect(recording.messages).toEqual([])
+    await Effect.runPromise(
+      fixture.service.disconnect(Schema.decodeUnknownSync(UserId)('reader'), client),
+    )
+    expect((await rpc(tokens.access_token, 'tools/call', 'set_favorite', favorite)).status).toBe(
+      401,
+    )
   } finally {
     await app.dispose()
   }

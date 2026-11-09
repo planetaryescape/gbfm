@@ -13,6 +13,7 @@ import {
 } from './contracts'
 import { EditorialDraftService } from './drafts'
 import { EditorialReadService } from './editorial'
+import { MCP_SERVER_INFO } from './wire-response'
 
 export const EditorialToolkit = Toolkit.make(
   Tool.make('create_draft', {
@@ -111,10 +112,7 @@ export const makeMcpLayer = <Tools extends Record<string, Tool.Any>>(
   McpServer.toolkit(toolkit).pipe(
     Layer.provideMerge(
       McpServer.layerHttpRequestScoped({
-        name: 'GBFM Editorial',
-        version: '1.0.0',
-        description:
-          'Editorial reads and separately authorized draft writes. Publishing stays in GBFM.',
+        ...MCP_SERVER_INFO,
         path: '/mcp',
         protocols: [McpProtocol.v2026_07_28],
         allowedOrigins,

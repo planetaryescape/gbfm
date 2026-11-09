@@ -216,6 +216,7 @@ test('successful resolution only attaches music and interrupted provider work ca
         onFailure: () => before,
         onSuccess: (value) => ({
           ...post,
+          lastOperationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
           musicEntityId: value.entityId,
           musicEntityType: 'track',
           updatedAt: new Date(value.updatedAt),

@@ -3,7 +3,11 @@ import { Context, Effect } from 'effect'
 import type { ConfigService } from '@/services/config.service'
 import type { S3Service } from '@/services/s3.service'
 
-import type { AnyResolvedMusicEntity, ArtworkDelivery } from './contract'
+import type {
+  AnyResolvedMusicEntity,
+  ArtworkDelivery,
+  MusicIdentityAuthorization,
+} from './contract'
 import { MusicIdentityArtworkDeliveryFailed, type MusicIdentityError } from './errors'
 import type { CanonicalMusicIdentityRepository, EntityReference } from './repository'
 import { withSafeTypedSpan } from './telemetry'
@@ -145,11 +149,12 @@ type DeliverMusicArtworkInput = {
   readonly resolved: AnyResolvedMusicEntity
   readonly candidateUrl: string | undefined | null
   readonly delivery: ArtworkDelivery
+  readonly authorize?: MusicIdentityAuthorization | undefined
 }
 
 export const buildDeliverMusicArtwork =
   ({ s3, config, fetcher, repository, reload }: ArtworkDeliveryDependencies) =>
-  ({ resolved, candidateUrl, delivery }: DeliverMusicArtworkInput) =>
+  ({ resolved, candidateUrl, delivery, authorize }: DeliverMusicArtworkInput) =>
     Effect.gen(function* () {
       const reference = {
         entityType: resolved.entityType,
@@ -158,11 +163,14 @@ export const buildDeliverMusicArtwork =
 
       if (delivery === 'preserve' || !candidateUrl) return resolved
 
+      if (authorize) yield* authorize(reference.entityType)
       const artwork = yield* fetchArtwork(fetcher, candidateUrl)
 
       if (!artwork) return resolved
 
       const key = `music/${reference.entityType}/${reference.entityId}/cover`
+
+      if (authorize) yield* authorize(reference.entityType)
 
       const upload = s3
         .uploadFile(key, artwork.bytes, artwork.contentType, config.buckets.userContent)
@@ -198,6 +206,8 @@ export const buildDeliverMusicArtwork =
       if (!publicArtworkUrl) return resolved
 
       const storedArtworkUrl = `${config.urls.bucketRouter}/user-content/${publicArtworkUrl}`
+
+      if (authorize) yield* authorize(reference.entityType)
       yield* repository.updateArtwork(reference, storedArtworkUrl)
 
       return yield* reload(reference, resolved.created)

@@ -1,3 +1,4 @@
+import { MembershipRevision } from '@gbfm/api/favorites'
 import { ROLES } from '@gbfm/core/roles'
 import { Schema } from 'effect'
 
@@ -18,6 +19,18 @@ export const Principal = Schema.Struct({ id: Schema.String, role: Role })
 
 export type Principal = typeof Principal.Type
 
+/** A removal keeps its observed revision and retry identity until acknowledged. */
+export const DeleteIntent = Schema.Struct({
+  principalId: Schema.String,
+  section: Schema.Literals(['favorites', 'reminders']),
+  rowId: Schema.String,
+  path: Schema.String,
+  expectedRevision: MembershipRevision,
+  requestId: Schema.NullOr(Schema.String.check(Schema.isUUID(4))),
+})
+
+export type DeleteIntent = typeof DeleteIntent.Type
+
 export const Model = Schema.Struct({
   section: Schema.String,
   principal: Principal,
@@ -27,6 +40,7 @@ export const Model = Schema.Struct({
   fields: Schema.Record(Schema.String, Schema.String),
   toggles: Schema.Record(Schema.String, Schema.Boolean),
   error: Schema.NullOr(Schema.String),
+  deletePending: Schema.NullOr(Schema.Struct({ intent: DeleteIntent, busy: Schema.Boolean })),
   spotify: SpotifyStatus,
   spotifyRequestId: Schema.Number,
   spotifyPending: Schema.NullOr(

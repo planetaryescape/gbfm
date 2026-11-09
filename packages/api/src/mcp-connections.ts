@@ -1,4 +1,4 @@
-import { EditorialReadScope, OAuthClientId } from '@gbfm/core/editorial-mcp'
+import { McpScope, OAuthClientId } from '@gbfm/core/editorial-mcp'
 import { Schema } from 'effect'
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup } from 'effect/http-api'
 
@@ -9,7 +9,7 @@ export const McpClientId = OAuthClientId
 export const McpConnection = Schema.Struct({
   clientId: McpClientId,
   name: Schema.String,
-  scopes: Schema.Array(EditorialReadScope),
+  scopes: Schema.Array(McpScope),
   createdAt: Schema.String,
 })
 

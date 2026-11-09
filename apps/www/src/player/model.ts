@@ -1,4 +1,5 @@
 import * as Dialog from '@foldkit/ui/dialog'
+import { MembershipRevision } from '@gbfm/api/favorites'
 import { QueueTrack, type PlaybackSnapshot } from '@gbfm/player'
 import { Effect, Option, Schema } from 'effect'
 import { Command, Update } from 'foldkit'
@@ -100,7 +101,11 @@ export const Message = defineMessageUnion({
   OperationCompleted: {},
   GotFavoriteMessage: { message: Favorite.Message },
   PrincipalChanged: { principalId: Schema.NullOr(Schema.String), principalKnown: Schema.Boolean },
-  FavoriteChangedElsewhere: { audioId: Schema.String, active: Schema.Boolean },
+  FavoriteChangedElsewhere: {
+    audioId: Schema.String,
+    active: Schema.Boolean,
+    revision: MembershipRevision,
+  },
 })
 
 export type Message = typeof Message.Type
@@ -332,6 +337,11 @@ export const update = (
         model,
         Favorite.sync(model.favorite, model.snapshot.queue.current, principalId, principalKnown),
       ),
-    FavoriteChangedElsewhere: ({ audioId, active }) =>
-      withFavorite(model, { model: Favorite.reconcile(model.favorite, audioId, active) }),
+    FavoriteChangedElsewhere: ({ audioId, active, revision }) =>
+      withFavorite(model, {
+        model:
+          model.favorite.mutationId !== null
+            ? model.favorite
+            : Favorite.reconcile(model.favorite, audioId, active, revision),
+      }),
   })

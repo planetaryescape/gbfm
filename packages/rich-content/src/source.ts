@@ -109,6 +109,8 @@ export interface ParseRichContentResult {
 export interface ParseRichContentOptions {
   readonly sourceBytes?: number
   readonly blocks?: number
+  /** Anonymous source-prose projection only; existing browser parsing is unchanged. */
+  readonly publicSourceProse?: boolean
 }
 
 interface DocumentTotals {
@@ -130,6 +132,7 @@ type Node = {
   align?: Array<'left' | 'center' | 'right' | null>
   name?: string
   attributes?: Record<string, string | null>
+  identifier?: string
   children?: Array<Node>
   position?: {
     start: { line: number; column: number; offset?: number }
@@ -138,6 +141,50 @@ type Node = {
 }
 
 const parser = unified().use(remarkParse).use(remarkGfm).use(remarkDirective)
+
+// Keep provenance until unsupported inline nodes have been removed. Sanitizing
+// resulting Text strings would also destroy deliberately authored prose/code.
+const publicSourceNodes = (nodes: Array<Node>): Array<Node> => {
+  const definitions = new Map<string, Node>()
+
+  const collect = (items: Array<Node>): void => {
+    for (const node of items) {
+      if (node.type === 'definition' && node.identifier) {
+        const key = node.identifier.toUpperCase()
+
+        if (!definitions.has(key)) definitions.set(key, node)
+      }
+
+      if (node.children) collect(node.children)
+    }
+  }
+
+  collect(nodes)
+
+  const project = (items: Array<Node>): Array<Node> =>
+    items.flatMap((node): Array<Node> => {
+      if (node.type === 'definition') return []
+
+      if (node.type === 'html' || node.type === 'textDirective')
+        return [{ type: 'text', value: '[Unsupported markup omitted]' }]
+      const projected: Node = { ...node }
+
+      if (node.children) projected.children = project(node.children)
+
+      if (node.type === 'linkReference' || node.type === 'imageReference') {
+        const definition = definitions.get((node.identifier ?? '').toUpperCase())
+        projected.type = node.type === 'linkReference' ? 'link' : 'image'
+
+        if (definition?.url !== undefined) projected.url = definition.url
+
+        if (definition?.title !== undefined) projected.title = definition.title
+      }
+
+      return [projected]
+    })
+
+  return project(nodes)
+}
 
 const location = (node: Node) => ({
   line: node.position?.start.line ?? null,
@@ -482,7 +529,13 @@ export const parseRichContent = (
   const root: Root = parser.parse(source)
   // SAFETY: unified returns mdast nodes; Node is the exact field subset read by this projector.
   // oxlint-disable-next-line typescript/consistent-type-assertions, typescript/no-unsafe-type-assertion, anti-slop/require-safety-comment-for-type-assertion
-  const projected = blocks(root.children as Array<Node>, source, diagnostics)
+  const nodes = root.children as Array<Node>
+
+  const projected = blocks(
+    options.publicSourceProse ? publicSourceNodes(nodes) : nodes,
+    source,
+    diagnostics,
+  )
 
   const totals = projected.reduce(
     function visit(total, block): DocumentTotals {

@@ -1,0 +1,184 @@
+// Historical diagnostic only: run at reviewed read-only head 77cd30c,
+// before legacy writers were removed. These assertions describe missing guards at P1 base
+// 2d1b5592826e66e3a198dc117c153e062264fc5c, NOT the desired write contract.
+// Excluded from normal test discovery. See README.md for reproduction.
+import { Effect, Layer } from 'effect'
+import { describe, expect, test } from 'vitest'
+
+import { user } from '@/db/auth.schema'
+import { Database, DatabaseLayer } from '@/db/layer'
+import { musicReminder } from '@/db/music-reminder.schema'
+import { EmailDelivery } from '@/services/email-delivery.service'
+import { MusicReminderService, MusicReminderServiceLayer } from '@/services/music-reminder.service'
+import { processReminderJob } from '@/services/reminder-processor'
+import { withTestLayer } from '@/test/effect'
+import { gatedPostDatabase } from '@/test/gated-post-database'
+import { createMigratedD1Database } from '@/test/migrate-d1'
+import { reminderClock } from '@/test/reminder-clock'
+
+const data = {
+  userId: 'listener',
+  musicTitle: 'Mix',
+  artistName: 'Artist',
+  musicUrl: 'https://example.test/mix',
+  reminderDate: new Date(0),
+  updatedAt: new Date(0),
+}
+
+const create = Effect.flatMap(MusicReminderService, (service) => service.create(data))
+
+const edit = (date: number) =>
+  Effect.flatMap(MusicReminderService, (service) =>
+    service.update('scheduled', 'listener', { reminderDate: new Date(date) }),
+  )
+
+const cancel = Effect.flatMap(MusicReminderService, (service) =>
+  service.delete('scheduled', 'listener'),
+)
+
+describe('#538 current-writer storage gate probes; not write-tool acceptance', () => {
+  test('same create payload has no durable request identity: two concurrent rows', async () => {
+    await using r = await createMigratedD1Database()
+    const database = DatabaseLayer(r.database)
+    const db = Effect.runSync(withTestLayer(Database, database))
+    await db.insert(user).values({ id: 'listener', name: 'Listener', email: 'l@example.test' })
+    const layer = MusicReminderServiceLayer.pipe(Layer.provide(database))
+
+    const rows = await Promise.all([
+      Effect.runPromise(withTestLayer(create, layer)),
+      Effect.runPromise(withTestLayer(create, layer)),
+    ])
+
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2)
+    expect(await db.select().from(musicReminder)).toHaveLength(2)
+  })
+
+  test.each(['reschedule', 'cancel'] as const)(
+    'stale %s wins after a newer schedule commits',
+    async (operation) => {
+      await using r = await createMigratedD1Database()
+      const database = DatabaseLayer(r.database)
+      const db = Effect.runSync(withTestLayer(Database, database))
+      await db.insert(user).values({ id: 'listener', name: 'Listener', email: 'l@example.test' })
+      await db.insert(musicReminder).values({ ...data, id: 'scheduled' })
+      const clock = reminderClock(1_000_000)
+
+      const gate = gatedPostDatabase(
+        r.database,
+        'before',
+        operation === 'cancel' ? /^delete from "music_reminder"/i : /^update "music_reminder"/i,
+      )
+
+      const layer = MusicReminderServiceLayer.pipe(
+        Layer.provide(database),
+        Layer.provideMerge(clock.layer),
+      )
+
+      const staleLayer = MusicReminderServiceLayer.pipe(
+        Layer.provide(DatabaseLayer(gate.database)),
+        Layer.provideMerge(clock.layer),
+      )
+
+      const stale = operation === 'cancel' ? Effect.asVoid(cancel) : Effect.asVoid(edit(20_000))
+      const pending = Effect.runPromise(withTestLayer(stale, staleLayer))
+
+      try {
+        await Promise.race([
+          gate.reached,
+          pending.then(() => {
+            throw new Error('Gate not reached')
+          }),
+        ])
+        await Effect.runPromise(withTestLayer(edit(30_000), layer))
+        gate.release()
+        await pending
+        const rows = await db.select().from(musicReminder)
+
+        const expected = operation === 'cancel' ? [] : [new Date(20_000)]
+        expect(rows.map((row) => row.reminderDate)).toEqual(expected)
+      } finally {
+        gate.release()
+        await pending
+      }
+    },
+  )
+
+  test.each(['reschedule', 'cancel'] as const)(
+    '%s after final eligibility read cannot recall delivery',
+    async (operation) => {
+      await using r = await createMigratedD1Database()
+      const database = DatabaseLayer(r.database)
+      const db = Effect.runSync(withTestLayer(Database, database))
+      await db.insert(user).values({ id: 'listener', name: 'Listener', email: 'l@example.test' })
+      await db.insert(musicReminder).values({ ...data, id: 'scheduled' })
+      const clock = reminderClock(1_000_000)
+      const gate = gatedPostDatabase(r.database, 'after', /^select "id" from "music_reminder"/i)
+      let delivered = 0
+
+      const delivery = Layer.succeed(EmailDelivery, {
+        deliver: () =>
+          Effect.sync(() => {
+            delivered += 1
+
+            return {
+              deliveryLogId: 'recorded',
+              provider: 'cloudflare' as const,
+              providerMessageId: 'recorded',
+              acceptedAt: new Date(0),
+            }
+          }),
+      })
+
+      const layer = MusicReminderServiceLayer.pipe(
+        Layer.provide(database),
+        Layer.provideMerge(clock.layer),
+      )
+
+      const pending = Effect.runPromise(
+        withTestLayer(
+          processReminderJob('scheduled'),
+          Layer.mergeAll(DatabaseLayer(gate.database), clock.layer, delivery),
+        ),
+      )
+
+      try {
+        await Promise.race([
+          gate.reached,
+          pending.then(() => {
+            throw new Error('Gate not reached')
+          }),
+        ])
+        expect(delivered).toBe(0)
+
+        if (operation === 'cancel') await Effect.runPromise(withTestLayer(cancel, layer))
+        else await Effect.runPromise(withTestLayer(edit(2_000_000), layer))
+        gate.release()
+        await pending
+        expect(delivered).toBe(1)
+        const rows = await db.select().from(musicReminder)
+
+        const expected =
+          operation === 'cancel'
+            ? []
+            : [
+                {
+                  status: 'pending',
+                  isSent: false,
+                  reminderDate: new Date(2_000_000),
+                },
+              ]
+
+        expect(
+          rows.map((row) => ({
+            status: row.status,
+            isSent: row.isSent,
+            reminderDate: row.reminderDate,
+          })),
+        ).toEqual(expected)
+      } finally {
+        gate.release()
+        await pending
+      }
+    },
+  )
+})

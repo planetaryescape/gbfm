@@ -41,6 +41,12 @@ import {
   mapSpotifyTrackImportErrors,
   PROVIDER_UNAVAILABLE_RETRY_AFTER_SECONDS,
 } from '@/http/music-identity-http'
+import {
+  mapMusicWriteErrors,
+  musicBodyWriteRequest,
+  musicHeaderWriteRequest,
+  musicReferenceHeaderWriteRequest,
+} from '@/http/music-write-http'
 import { omitUndefined } from '@/lib/omit-undefined'
 import {
   CanonicalMusicIdentity,
@@ -56,10 +62,16 @@ import {
   type ScrapedMusicEntity,
 } from '@/services/music-entity'
 import {
+  getReadablePlaylistsEffect,
+  getReadablePlaylistByIdEffect,
+} from '@/services/music-entity/playlist.service'
+import {
   PlaylistEnrichmentJob,
   PlaylistEnrichmentQueue,
 } from '@/services/playlist-enrichment-queue'
 import { getIdFromSpotifyUrl } from '@/services/url-utils'
+
+import { resolvePageSession } from './page-session'
 
 const decodeMusicEntityMetadata = Schema.decodeUnknownSync(Schema.JsonObject)
 
@@ -177,7 +189,10 @@ function toServiceFields(
   input: CreateArtistInput | UpdateArtistInput,
 ): Partial<ArtistServiceCreateInput> {
   return omitUndefined({
-    ...input,
+    name: input.name,
+    bio: input.bio,
+    imageUrl: input.imageUrl,
+    slug: input.slug,
     genres: input.genres ? [...input.genres] : undefined,
     publishedAt: input.publishedAt ? new Date(input.publishedAt) : undefined,
   })
@@ -336,25 +351,21 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
+        const write = yield* musicBodyWriteRequest(payload)
 
-        const row = yield* dieOnDatabaseError(
-          svc
-            .updateArtist(params.id, omitUndefined(toServiceFields(payload)))
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
+        const row = yield* mapMusicWriteErrors(
+          svc.updateArtist(params.id, omitUndefined(toServiceFields(payload)), write),
         )
 
         return toArtistResponse(row)
       }),
     )
-    .handle('deleteArtist', ({ params }) =>
+    .handle('deleteArtist', ({ params, headers }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(
-          svc
-            .deleteArtist(params.id)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
-        )
+        const write = yield* musicHeaderWriteRequest(headers)
+        yield* mapMusicWriteErrors(svc.deleteArtist(params.id, write))
       }),
     )
     .handle('listArtistLabels', ({ params }) =>
@@ -370,32 +381,60 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(
-          svc.addArtistToAlbum(params.albumId, params.artistId, omitUndefined(payload)),
+        const write = yield* musicBodyWriteRequest(payload)
+        yield* mapMusicWriteErrors(
+          svc.addArtistToAlbum(
+            params.albumId,
+            params.artistId,
+            omitUndefined({ role: payload.role, displayOrder: payload.displayOrder }),
+            write,
+          ),
         )
       }),
     )
-    .handle('removeArtistFromAlbum', ({ params }) =>
+    .handle('removeArtistFromAlbum', ({ params, headers }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(svc.removeArtistFromAlbum(params.albumId, params.artistId))
+
+        const write = yield* musicReferenceHeaderWriteRequest(headers, {
+          entityType: 'artist',
+          entityId: params.artistId,
+        })
+
+        yield* mapMusicWriteErrors(
+          svc.removeArtistFromAlbum(params.albumId, params.artistId, write),
+        )
       }),
     )
     .handle('addArtistToTrack', ({ params, payload }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(
-          svc.addArtistToTrack(params.trackId, params.artistId, omitUndefined(payload)),
+        const write = yield* musicBodyWriteRequest(payload)
+        yield* mapMusicWriteErrors(
+          svc.addArtistToTrack(
+            params.trackId,
+            params.artistId,
+            omitUndefined({ role: payload.role, displayOrder: payload.displayOrder }),
+            write,
+          ),
         )
       }),
     )
-    .handle('removeArtistFromTrack', ({ params }) =>
+    .handle('removeArtistFromTrack', ({ params, headers }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(svc.removeArtistFromTrack(params.trackId, params.artistId))
+
+        const write = yield* musicReferenceHeaderWriteRequest(headers, {
+          entityType: 'artist',
+          entityId: params.artistId,
+        })
+
+        yield* mapMusicWriteErrors(
+          svc.removeArtistFromTrack(params.trackId, params.artistId, write),
+        )
       }),
     )
     // -----------------------------------------------------------------
@@ -439,25 +478,21 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
+        const write = yield* musicBodyWriteRequest(payload)
 
-        const row = yield* dieOnDatabaseError(
-          svc
-            .updateAlbum(params.id, toAlbumUpdateFields(payload))
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
+        const row = yield* mapMusicWriteErrors(
+          svc.updateAlbum(params.id, toAlbumUpdateFields(payload), write),
         )
 
         return toAlbumResponse(row)
       }),
     )
-    .handle('deleteAlbum', ({ params }) =>
+    .handle('deleteAlbum', ({ params, headers }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(
-          svc
-            .deleteAlbum(params.id)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
-        )
+        const write = yield* musicHeaderWriteRequest(headers)
+        yield* mapMusicWriteErrors(svc.deleteAlbum(params.id, write))
       }),
     )
     .handle('listAlbumLabels', ({ params }) =>
@@ -510,25 +545,21 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
+        const write = yield* musicBodyWriteRequest(payload)
 
-        const row = yield* dieOnDatabaseError(
-          svc
-            .updateTrack(params.id, toTrackUpdateFields(payload))
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
+        const row = yield* mapMusicWriteErrors(
+          svc.updateTrack(params.id, toTrackUpdateFields(payload), write),
         )
 
         return toTrackResponse(row)
       }),
     )
-    .handle('deleteTrack', ({ params }) =>
+    .handle('deleteTrack', ({ params, headers }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(
-          svc
-            .deleteTrack(params.id)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
-        )
+        const write = yield* musicHeaderWriteRequest(headers)
+        yield* mapMusicWriteErrors(svc.deleteTrack(params.id, write))
       }),
     )
     // -----------------------------------------------------------------
@@ -536,8 +567,8 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
     // -----------------------------------------------------------------
     .handle('listPlaylists', () =>
       Effect.gen(function* () {
-        const svc = yield* MusicEntityService
-        const rows = yield* dieOnDatabaseError(svc.getPlaylists)
+        const reader = yield* resolvePageSession()
+        const rows = yield* dieOnDatabaseError(getReadablePlaylistsEffect(reader ?? undefined))
 
         return rows.map(toPlaylistResponse)
       }),
@@ -557,12 +588,12 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
     )
     .handle('getPlaylist', ({ params }) =>
       Effect.gen(function* () {
-        const svc = yield* MusicEntityService
+        const reader = yield* resolvePageSession()
 
         const row = yield* dieOnDatabaseError(
-          svc
-            .getPlaylistById(params.id)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
+          getReadablePlaylistByIdEffect(params.id, reader ?? undefined).pipe(
+            Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
+          ),
         )
 
         return toPlaylistResponse(row)
@@ -667,26 +698,21 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
+        const write = yield* musicBodyWriteRequest(payload)
 
-        const row = yield* dieOnDatabaseError(
-          svc.updateLabel(params.id, toLabelUpdateFields(payload)).pipe(
-            Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
-            Effect.catchTag('ValidationError', () => new ValidationHttpError()),
-          ),
+        const row = yield* mapMusicWriteErrors(
+          svc.updateLabel(params.id, toLabelUpdateFields(payload), write),
         )
 
         return toLabelResponse(row)
       }),
     )
-    .handle('deleteLabel', ({ params }) =>
+    .handle('deleteLabel', ({ params, headers }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(
-          svc
-            .deleteLabel(params.id)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
-        )
+        const write = yield* musicHeaderWriteRequest(headers)
+        yield* mapMusicWriteErrors(svc.deleteLabel(params.id, write))
       }),
     )
     .handle('listLabelArtists', ({ params }) =>
@@ -707,40 +733,64 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
         return rows.map(toAlbumResponse)
       }),
     )
-    .handle('affiliateArtistWithLabel', ({ params }) =>
+    .handle('affiliateArtistWithLabel', ({ params, headers }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(
-          svc
-            .affiliateArtistWithLabel(params.labelId, params.artistId)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
+
+        const write = yield* musicReferenceHeaderWriteRequest(headers, {
+          entityType: 'label',
+          entityId: params.labelId,
+        })
+
+        yield* mapMusicWriteErrors(
+          svc.affiliateArtistWithLabel(params.labelId, params.artistId, write),
         )
       }),
     )
-    .handle('unaffiliateArtistFromLabel', ({ params }) =>
+    .handle('unaffiliateArtistFromLabel', ({ params, headers }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(svc.unaffiliateArtistFromLabel(params.labelId, params.artistId))
-      }),
-    )
-    .handle('affiliateAlbumWithLabel', ({ params }) =>
-      Effect.gen(function* () {
-        yield* requireAdmin
-        const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(
-          svc
-            .affiliateAlbumWithLabel(params.labelId, params.albumId)
-            .pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
+
+        const write = yield* musicReferenceHeaderWriteRequest(headers, {
+          entityType: 'label',
+          entityId: params.labelId,
+        })
+
+        yield* mapMusicWriteErrors(
+          svc.unaffiliateArtistFromLabel(params.labelId, params.artistId, write),
         )
       }),
     )
-    .handle('unaffiliateAlbumFromLabel', ({ params }) =>
+    .handle('affiliateAlbumWithLabel', ({ params, headers }) =>
       Effect.gen(function* () {
         yield* requireAdmin
         const svc = yield* MusicEntityService
-        yield* dieOnDatabaseError(svc.unaffiliateAlbumFromLabel(params.labelId, params.albumId))
+
+        const write = yield* musicReferenceHeaderWriteRequest(headers, {
+          entityType: 'label',
+          entityId: params.labelId,
+        })
+
+        yield* mapMusicWriteErrors(
+          svc.affiliateAlbumWithLabel(params.labelId, params.albumId, write),
+        )
+      }),
+    )
+    .handle('unaffiliateAlbumFromLabel', ({ params, headers }) =>
+      Effect.gen(function* () {
+        yield* requireAdmin
+        const svc = yield* MusicEntityService
+
+        const write = yield* musicReferenceHeaderWriteRequest(headers, {
+          entityType: 'label',
+          entityId: params.labelId,
+        })
+
+        yield* mapMusicWriteErrors(
+          svc.unaffiliateAlbumFromLabel(params.labelId, params.albumId, write),
+        )
       }),
     )
     // -----------------------------------------------------------------
@@ -749,13 +799,19 @@ export const MusicHandlersLive = HttpApiBuilder.group(Api, 'music', (handlers) =
     .handle('getPlaylistTracks', ({ params }) =>
       Effect.gen(function* () {
         const svc = yield* MusicEntityService
+        const reader = yield* resolvePageSession()
+        yield* dieOnDatabaseError(
+          getReadablePlaylistByIdEffect(params.id, reader ?? undefined).pipe(
+            Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
+          ),
+        )
         const rows = yield* dieOnDatabaseError(svc.getPlaylistTracks(params.id))
 
         return rows.map((entry) => ({
           track: toTrackResponse(entry.track),
           position: entry.position,
           addedAt: entry.addedAt.toISOString(),
-          links: entry.links,
+          links: entry.links.map(toEntityLinkResponse),
         }))
       }),
     )

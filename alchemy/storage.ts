@@ -9,7 +9,7 @@ export const storage = (config: StageConfig) =>
   Effect.gen(function* () {
     const db = yield* Cloudflare.D1.Database(
       'Database',
-      databaseProps(config.isLocalDev, process.env.GBFM_DEV_DATABASE_CLONE),
+      databaseProps(config, process.env.GBFM_DEV_DATABASE_CLONE),
     ).pipe(retain())
 
     // The browser PUTs image and audio bytes straight to the bucket with a

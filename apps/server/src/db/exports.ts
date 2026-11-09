@@ -35,3 +35,17 @@ export * from './upload-asset.schema.ts'
 export * from './personal-access-key.schema.ts'
 
 export * from './oauth.schema'
+
+export * from './editorial-operation.schema'
+
+export * from './mcp-operation.schema'
+
+export * from './music-credit.schema'
+
+export * from './post-music-reference.schema'
+
+export * from './metadata-review.schema'
+
+export * from './music-merge.schema'
+
+export * from './playlist-import-status.schema'

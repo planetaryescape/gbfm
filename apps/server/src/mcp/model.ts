@@ -1,6 +1,6 @@
-import { EditorialPrincipal, McpResourceUrl, PostId, PostVersion } from '@gbfm/core/editorial-mcp'
+import { McpResourceUrl, PostId, PostVersion } from '@gbfm/core/editorial-mcp'
 import { UserId } from '@gbfm/core/identity'
-import { Role } from '@gbfm/core/roles'
+import { DraftMusicReferences } from '@gbfm/core/post-music-references'
 import { Effect, Match, Schema } from 'effect'
 
 import {
@@ -18,8 +18,6 @@ export const EditorialMcpSettings = Schema.Struct({
   resourceUrl: McpResourceUrl,
   frontendUrl: EditorialFrontendUrl,
 })
-
-export const EditorialReader = Schema.Struct({ ...EditorialPrincipal.fields, role: Role })
 
 export const PostSource = Schema.TaggedUnion({
   Editorial: {},
@@ -48,6 +46,8 @@ export const PersistedPost = Schema.Struct({
   createdAt: Schema.Date,
   musicEntityType: Schema.NullOr(Schema.String),
   musicEntityId: Schema.NullOr(Schema.String),
+  musicReferencesManaged: Schema.Boolean,
+  musicReferences: DraftMusicReferences,
   parentPostId: Schema.NullOr(PostId),
   rootPostId: Schema.NullOr(PostId),
   depth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -59,9 +59,6 @@ export const unavailable = () =>
 
 export const notFound = () =>
   new EditorialToolError({ code: 'not_found', message: 'Post not found.' })
-
-export const accessDenied = () =>
-  new EditorialToolError({ code: 'access_denied', message: 'Editorial read access denied.' })
 
 export const projectPost = Effect.fn('EditorialMcp.projectPost')(function* (
   post: typeof PersistedPost.Type,
@@ -104,6 +101,8 @@ export const projectPost = Effect.fn('EditorialMcp.projectPost')(function* (
             bannerImageUrl: post.bannerImageUrl,
             musicEntityType: post.musicEntityType,
             musicEntityId: post.musicEntityId,
+            musicReferencesManaged: post.musicReferencesManaged,
+            musicReferences: post.musicReferences,
             parentPostId: post.parentPostId,
             rootPostId: post.rootPostId,
             depth: post.depth,

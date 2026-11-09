@@ -1,8 +1,9 @@
 import { oauthProvider } from '@better-auth/oauth-provider'
 import {
-  canReadEditorial,
+  canAuthorizeMcp,
   EditorialAccount,
-  EditorialReadScopes,
+  McpScope,
+  McpScopes,
   OAuthClientId,
   OAuthGrantId,
 } from '@gbfm/core/editorial-mcp'
@@ -18,6 +19,7 @@ import {
   editorialOAuthEpoch,
   editorialOAuthRevokedGrant,
   oauthRefreshToken,
+  oauthResource,
 } from '@/db/oauth.schema'
 import {
   BoundedOAuthRegistrationPayload,
@@ -43,7 +45,42 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
 
   const GrantSession = Schema.Struct({ impersonatedBy: Schema.optional(Schema.NullOr(UserId)) })
 
-  const authorizeAccount = async (userId: UserId) => {
+  const authorizeAccount = async (userId: UserId, scopes: McpScopes = ['posts:read']) => {
+    const [resource] = await db
+      .select({ disabled: oauthResource.disabled, allowedScopes: oauthResource.allowedScopes })
+      .from(oauthResource)
+      .where(eq(oauthResource.identifier, mcp.resourceUrl))
+      .limit(1)
+      .catch(() => {
+        throw new APIError('SERVICE_UNAVAILABLE', { message: 'MCP resource unavailable' })
+      })
+
+    const policy = Schema.decodeUnknownOption(
+      Schema.Struct({
+        disabled: Schema.NullOr(Schema.Boolean),
+        allowedScopes: Schema.NullOr(Schema.fromJsonString(Schema.Array(McpScope))),
+      }),
+    )(resource).pipe(
+      Option.getOrThrowWith(
+        () => new APIError('SERVICE_UNAVAILABLE', { message: 'MCP resource unavailable' }),
+      ),
+    )
+
+    // Preserve legacy drafts:write downscoping, but never consent to disabled new capabilities.
+    if (
+      policy.disabled ||
+      scopes.some(
+        (scope) =>
+          scope !== 'drafts:write' &&
+          policy.allowedScopes !== null &&
+          !policy.allowedScopes.includes(scope),
+      )
+    )
+      throw new APIError('BAD_REQUEST', {
+        error: 'invalid_scope',
+        error_description: 'Requested MCP scope is not enabled for this resource',
+      })
+
     const [row] = await db
       .select({ role: userTable.role, banned: userTable.banned })
       .from(userTable)
@@ -63,7 +100,7 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
       Option.getOrThrowWith(forbidden),
     )
 
-    if (!canReadEditorial(account)) throw forbidden()
+    if (!canAuthorizeMcp(account, scopes)) throw forbidden()
   }
 
   return [
@@ -83,7 +120,17 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
                   ).pipe(Option.getOrThrowWith(forbidden))
 
                   if (grantSession.impersonatedBy) throw forbidden()
-                  await authorizeAccount(parseUserId(session.user.id))
+                  const query = Schema.decodeUnknownOption(Schema.String)(ctx.query?.scope)
+
+                  // Signed continuations are validated by the provider and postLogin below.
+                  const scopes = Option.isSome(query)
+                    ? Schema.decodeUnknownOption(McpScopes)(query.value.split(/\s+/)).pipe(
+                        Option.getOrUndefined,
+                      )
+                    : undefined
+
+                  if (ctx.path === '/oauth2/authorize')
+                    await authorizeAccount(parseUserId(session.user.id), scopes)
                 }
               }
 
@@ -93,12 +140,12 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
                 )(ctx.body).pipe(Option.getOrUndefined)?.scope
 
                 if (requestedScope !== undefined)
-                  Schema.decodeUnknownOption(EditorialReadScopes)(requestedScope.split(/\s+/)).pipe(
+                  Schema.decodeUnknownOption(McpScopes)(requestedScope.split(/\s+/)).pipe(
                     Option.getOrThrowWith(
                       () =>
                         new APIError('BAD_REQUEST', {
                           error: 'invalid_scope',
-                          error_description: 'Editorial tokens require posts:read',
+                          error_description: 'Invalid MCP scope set',
                         }),
                     ),
                   )
@@ -124,7 +171,12 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
                             Schema.Struct({
                               userId: UserId,
                               referenceId: Schema.optional(OAuthGrantId),
-                              query: Schema.optional(Schema.Struct({ client_id: OAuthClientId })),
+                              query: Schema.optional(
+                                Schema.Struct({
+                                  client_id: OAuthClientId,
+                                  scope: Schema.optional(Schema.String),
+                                }),
+                              ),
                             }),
                           ),
                         )(code.value).pipe(
@@ -137,7 +189,14 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
                           ),
                         )
 
-                        await authorizeAccount(payload.userId)
+                        const scopes =
+                          payload.query?.scope === undefined
+                            ? undefined
+                            : Schema.decodeUnknownOption(McpScopes)(
+                                payload.query.scope.split(/\s+/),
+                              ).pipe(Option.getOrThrowWith(forbidden))
+
+                        await authorizeAccount(payload.userId, scopes)
 
                         if (!payload.referenceId || !payload.query)
                           throw new APIError('BAD_REQUEST', {
@@ -172,7 +231,13 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
                         .where(eq(oauthRefreshToken.token, hash))
                         .limit(1)
 
-                      if (refresh) await authorizeAccount(parseUserId(refresh.userId))
+                      if (refresh)
+                        await authorizeAccount(
+                          parseUserId(refresh.userId),
+                          Schema.decodeUnknownOption(Schema.fromJsonString(McpScopes))(
+                            refresh.scopes,
+                          ).pipe(Option.getOrThrowWith(forbidden)),
+                        )
                     }),
                     Match.exhaustive,
                   )
@@ -199,7 +264,7 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
     },
     oauthProvider({
       disableJwtPlugin: true,
-      scopes: ['posts:read', 'offline_access'],
+      scopes: [...McpScope.literals],
       grantTypes: ['authorization_code', 'refresh_token'],
       loginPage: `${config.urls.frontend}/connect/gbfm`,
       consentPage: `${config.urls.frontend}/connect/gbfm/consent`,
@@ -209,11 +274,14 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
       clientRegistrationDefaultApplicationType: 'native',
       clientRegistrationRequirePKCE: true,
       clientRegistrationDefaultScopes: ['posts:read', 'offline_access'],
+      clientRegistrationAllowedScopes: McpScope.literals.filter(
+        (scope) => scope !== 'posts:read' && scope !== 'offline_access',
+      ),
       resources: [
         {
           identifier: mcp.resourceUrl,
           name: 'GBFM Editorial',
-          allowedScopes: ['posts:read', 'offline_access'],
+          allowedScopes: ['posts:read', 'offline_access', 'drafts:write'],
         },
       ],
       clientRegistrationDefaultResources: [mcp.resourceUrl],
@@ -227,12 +295,12 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
       postLogin: {
         page: `${config.urls.frontend}/connect/gbfm`,
         consentReferenceId: async ({ user, session, scopes }) => {
-          Schema.decodeUnknownOption(EditorialReadScopes)(scopes).pipe(
+          const parsedScopes = Schema.decodeUnknownOption(McpScopes)(scopes).pipe(
             Option.getOrThrowWith(
               () =>
                 new APIError('BAD_REQUEST', {
                   error: 'invalid_scope',
-                  error_description: 'Editorial tokens require posts:read',
+                  error_description: 'Invalid MCP scope set',
                 }),
             ),
           )
@@ -242,7 +310,7 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
           )
 
           if (grantSession.impersonatedBy) throw forbidden()
-          await authorizeAccount(parseUserId(user.id))
+          await authorizeAccount(parseUserId(user.id), parsedScopes)
 
           await db
             .insert(editorialOAuthEpoch)

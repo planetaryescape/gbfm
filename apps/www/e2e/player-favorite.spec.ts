@@ -60,6 +60,17 @@ test('the player heart saves the queued track only after the server acknowledges
   const playback = nowPlaying(page).getByRole('slider', { name: 'Playback position' })
   const playbackBounds = await playback.boundingBox()
 
+  await page.route('**/api/favorites', (route) => route.fulfill({ status: 403, body: 'Forbidden' }))
+  await add.click()
+  await expect(nowPlaying(page).getByText('Favorite could not be saved. Try again.')).toBeVisible()
+  await expect(add).toBeEnabled()
+  await expect(add).toHaveAttribute('aria-pressed', 'false')
+  await expect(
+    nowPlaying(page).getByRole('link', { name: 'Sign in to favorite', exact: true }),
+  ).toHaveCount(0)
+  await nowPlaying(page).getByRole('button', { name: 'Dismiss favorite notice' }).click()
+  await page.unroute('**/api/favorites')
+
   await page.route('**/api/favorites', (route) =>
     route.fulfill({ status: 503, body: 'Unavailable' }),
   )
@@ -144,4 +155,11 @@ test('the player heart saves the queued track only after the server acknowledges
     .getByRole('button', { name: 'Retry loading favorite', exact: true })
     .click()
   await expect(add).toHaveAttribute('aria-pressed', 'false')
+  await page.route('**/api/favorites', (route) =>
+    route.fulfill({ status: 401, body: 'Unauthorized' }),
+  )
+  await add.click()
+  await expect(
+    nowPlaying(page).getByRole('link', { name: 'Sign in to favorite', exact: true }),
+  ).toBeVisible()
 })

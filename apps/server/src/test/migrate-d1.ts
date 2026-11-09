@@ -25,6 +25,18 @@ export const d1MigrationFiles = [
   '0011_listening_collections.sql',
   '0012_personal_access_keys.sql',
   '0013_editorial_oauth.sql',
+  '0014_editorial_operations.sql',
+  '0015_music_catalogue_read_indexes.sql',
+  '0016_mcp_durable_operations.sql',
+  '0017_mcp_domain_revisions.sql',
+  '0018_music_credits_aliases.sql',
+  '0019_post_music_references.sql',
+  '0020_playlist_command_revisions.sql',
+  '0021_mcp_staged_operations.sql',
+  '0022_creator_revisions.sql',
+  '0023_metadata_review.sql',
+  '0024_music_entity_merges.sql',
+  '0025_playlist_import_status.sql',
 ] as const
 
 const splitStatements = (migration: string) =>

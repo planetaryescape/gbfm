@@ -119,14 +119,19 @@ export const createEditorialOAuthFixture = async () => {
     return auth.handler(new Request(`https://editorial-test.localhost/auth${path}`, options))
   }
 
-  const register = async () => {
-    const response = await request('/oauth2/register', {
+  const register = async (scope?: string) => {
+    const registration = {
       client_name: 'Disposable native client',
       token_endpoint_auth_method: 'none',
       redirect_uris: ['http://127.0.0.1:38479/callback'],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
-    })
+    }
+
+    const response = await request(
+      '/oauth2/register',
+      scope === undefined ? registration : { ...registration, scope },
+    )
 
     if (response.status !== 201) throw new Error(`Registration failed: ${response.status}`)
 
@@ -143,21 +148,25 @@ export const createEditorialOAuthFixture = async () => {
     .replaceAll('/', '_')
     .replace(/=+$/, '')
 
-  const authorizationQuery = (clientId: OAuthClientId) =>
+  const authorizationQuery = (clientId: OAuthClientId, scope = 'posts:read offline_access') =>
     new URLSearchParams({
       client_id: clientId,
       redirect_uri: 'http://127.0.0.1:38479/callback',
       response_type: 'code',
-      scope: 'posts:read offline_access',
+      scope,
       resource: config.mcp.resourceUrl,
       code_challenge: challenge,
       code_challenge_method: 'S256',
       state: 'disposable-state',
     })
 
-  const authorize = async (clientId: OAuthClientId, actor = 'owner') => {
+  const authorize = async (
+    clientId: OAuthClientId,
+    actor = 'owner',
+    scope = 'posts:read offline_access',
+  ) => {
     const authorization = await request(
-      `/oauth2/authorize?${authorizationQuery(clientId)}`,
+      `/oauth2/authorize?${authorizationQuery(clientId, scope)}`,
       undefined,
       actor,
     )
@@ -195,6 +204,7 @@ export const createEditorialOAuthFixture = async () => {
 
   return {
     db,
+    database: resource.database,
     userId: Schema.decodeUnknownSync(UserId)('owner'),
     config,
     service,

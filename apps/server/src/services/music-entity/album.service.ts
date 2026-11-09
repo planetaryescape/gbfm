@@ -1,18 +1,18 @@
-import { asc, desc, eq, sql } from 'drizzle-orm'
-import { Effect } from 'effect'
+import { asc, desc, eq } from 'drizzle-orm'
+import { Effect, Schema } from 'effect'
 
-import { projectEntityLabels, projectEntityLabelsForRows, replaceEntityLabels } from '@/db/labels'
+import { projectEntityLabels, projectEntityLabelsForRows } from '@/db/labels'
 import { Database } from '@/db/layer'
-import { musicAlbumArtistsTable, musicAlbumsTable } from '@/db/music-entity.schema'
+import { musicAlbumsTable } from '@/db/music-entity.schema'
 import { DatabaseError, getErrorMessage } from '@/errors'
-import { toSlug } from '@/services/to-slug'
+import { omitUndefined } from '@/lib/omit-undefined'
 
-import {
-  deleteEntityLabels,
-  deleteIdentitiesForEntity,
-  deleteLinksForEntity,
-  requireOne,
-} from './shared'
+import { insertMusicEntity } from './create-statements'
+import { deleteMusicEntity } from './delete-write'
+import { MusicMetadataRow, writeMusicMetadata } from './metadata-write'
+import { writeMusicRelationship } from './relationship-write'
+import { requireOne } from './shared'
+import { MusicWriteError, type MusicWriteRequest } from './write-intent'
 
 export interface CreateAlbumInput {
   title: string
@@ -31,31 +31,11 @@ export const createAlbumEffect = Effect.fn('musicEntity.createAlbum')(function* 
   data: CreateAlbumInput,
 ) {
   const db = yield* Database
-  const { artistIds, genres, ...albumData } = data
   const id = crypto.randomUUID()
 
   const rows = yield* Effect.tryPromise({
     try: async () => {
-      await db.batch([
-        db.insert(musicAlbumsTable).values({ ...albumData, id }),
-        ...(artistIds?.length
-          ? [
-              db
-                .insert(musicAlbumArtistsTable)
-                .values(
-                  artistIds.map((artistId, displayOrder) => ({
-                    albumId: id,
-                    artistId,
-                    displayOrder,
-                  })),
-                )
-                .onConflictDoUpdate({
-                  target: [musicAlbumArtistsTable.albumId, musicAlbumArtistsTable.artistId],
-                  set: { displayOrder: sql`excluded.displayOrder` },
-                }),
-            ]
-          : []),
-      ])
+      await insertMusicEntity(db, { entityType: 'album', data }, id)
 
       const rows = await db
         .select()
@@ -66,8 +46,6 @@ export const createAlbumEffect = Effect.fn('musicEntity.createAlbum')(function* 
       const album = rows[0]
 
       if (!album) throw new Error('Insert returned no rows')
-
-      if (genres !== undefined) await replaceEntityLabels(db, 'album', album.id, { genres })
 
       return album
     },
@@ -136,156 +114,78 @@ export const getAlbumByIdEffect = (id: string) =>
     return { ...album, genres }
   }).pipe(Effect.withSpan('musicEntity.getAlbumById', { attributes: { id } }))
 
-export const updateAlbumEffect = (id: string, data: Partial<CreateAlbumInput>) =>
+const AlbumWriteRow = Schema.Struct({
+  ...MusicMetadataRow.fields,
+  title: Schema.String,
+  artistNames: Schema.NullOr(Schema.Array(Schema.String)),
+  releaseDate: Schema.NullOr(Schema.DateFromString),
+  coverImageUrl: Schema.NullOr(Schema.String),
+  genres: Schema.NullOr(Schema.Array(Schema.String)),
+  albumType: Schema.NullOr(Schema.String),
+})
+
+const AlbumWritePatch = Schema.Struct({
+  title: Schema.optionalKey(AlbumWriteRow.fields.title),
+  artistNames: Schema.optionalKey(AlbumWriteRow.fields.artistNames),
+  releaseDate: Schema.optionalKey(AlbumWriteRow.fields.releaseDate),
+  coverImageUrl: Schema.optionalKey(AlbumWriteRow.fields.coverImageUrl),
+  genres: Schema.optionalKey(AlbumWriteRow.fields.genres),
+  albumType: Schema.optionalKey(AlbumWriteRow.fields.albumType),
+  slug: Schema.optionalKey(AlbumWriteRow.fields.slug),
+  publishedAt: Schema.optionalKey(AlbumWriteRow.fields.publishedAt),
+  createdById: Schema.optionalKey(AlbumWriteRow.fields.createdById),
+})
+
+export const updateAlbumEffect = (
+  id: string,
+  data: Partial<CreateAlbumInput>,
+  write?: MusicWriteRequest,
+) =>
   Effect.gen(function* () {
-    const db = yield* Database
-    const { artistIds, genres, ...albumData } = data
+    const patch = yield* Schema.encodeEffect(AlbumWritePatch)(omitUndefined(data)).pipe(
+      Effect.mapError(
+        () => new MusicWriteError({ code: 'invalid_input', message: 'Invalid album edit.' }),
+      ),
+    )
 
-    if (albumData.title && !albumData.slug) {
-      albumData.slug = toSlug(albumData.title)
+    const saved = yield* writeMusicMetadata({
+      target: { entityType: 'album', entityId: id },
+      write,
+      patch,
+      row: AlbumWriteRow,
+      load: getAlbumByIdEffect(id),
+      relationships: { artistIds: data.artistIds, artistNames: data.artistNames },
+    })
+
+    return {
+      ...saved,
+      artistNames: saved.artistNames?.slice() ?? null,
+      genres: saved.genres?.slice() ?? null,
     }
-
-    const rows = yield* Effect.tryPromise({
-      try: async () => {
-        await db.batch([
-          db
-            .update(musicAlbumsTable)
-            .set({ ...albumData, updatedAt: new Date() })
-            .where(eq(musicAlbumsTable.id, id)),
-          ...(artistIds?.length
-            ? [
-                db
-                  .insert(musicAlbumArtistsTable)
-                  .values(
-                    artistIds.map((artistId, displayOrder) => ({
-                      albumId: id,
-                      artistId,
-                      displayOrder,
-                    })),
-                  )
-                  .onConflictDoUpdate({
-                    target: [musicAlbumArtistsTable.albumId, musicAlbumArtistsTable.artistId],
-                    set: { displayOrder: sql`excluded.displayOrder` },
-                  }),
-              ]
-            : []),
-        ])
-
-        const rows = await db
-          .select()
-          .from(musicAlbumsTable)
-          .where(eq(musicAlbumsTable.id, id))
-          .limit(1)
-
-        const album = rows[0]
-
-        if (!album) throw new Error('Album not found')
-
-        if (genres !== undefined) await replaceEntityLabels(db, 'album', album.id, { genres })
-
-        return album
-      },
-      catch: (e) =>
-        new DatabaseError({
-          message: `Failed to update album: ${getErrorMessage(e)}`,
-          operation: 'update',
-          table: 'music_albums',
-        }),
-    })
-
-    const { genres: projectedGenres } = yield* Effect.tryPromise({
-      try: () => projectEntityLabels(db, 'album', rows),
-      catch: (e) =>
-        new DatabaseError({ message: getErrorMessage(e), operation: 'select', table: 'labels' }),
-    })
-
-    return { ...rows, genres: projectedGenres }
   }).pipe(Effect.withSpan('musicEntity.updateAlbum', { attributes: { id } }))
 
-export const deleteAlbumEffect = (id: string) =>
-  Effect.gen(function* () {
-    const db = yield* Database
-
-    const rows = yield* Effect.tryPromise({
-      try: () =>
-        (async () => {
-          const [, , , rows] = await db.batch([
-            deleteIdentitiesForEntity(db, 'album', id),
-            deleteLinksForEntity(db, 'album', id),
-            deleteEntityLabels(db, 'album', id),
-            db
-              .delete(musicAlbumsTable)
-              .where(eq(musicAlbumsTable.id, id))
-              .returning({ id: musicAlbumsTable.id }),
-          ])
-
-          return rows
-        })(),
-      catch: (e) =>
-        new DatabaseError({
-          message: `Failed to delete album: ${getErrorMessage(e)}`,
-          operation: 'delete',
-          table: 'music_albums',
-        }),
-    })
-
-    yield* requireOne(rows, 'MusicAlbum', id)
-  }).pipe(Effect.withSpan('musicEntity.deleteAlbum', { attributes: { id } }))
+export const deleteAlbumEffect = (id: string, write?: MusicWriteRequest) =>
+  deleteMusicEntity({ entityType: 'album', entityId: id }, write)
 
 export const addArtistToAlbumEffect = (
   albumId: string,
   artistId: string,
   opts?: { role?: string; displayOrder?: number },
+  write?: MusicWriteRequest,
 ) =>
-  Effect.gen(function* () {
-    const db = yield* Database
-    yield* Effect.tryPromise({
-      try: () =>
-        db
-          .insert(musicAlbumArtistsTable)
-          .values({
-            albumId,
-            artistId,
-            role: opts?.role,
-            displayOrder: opts?.displayOrder ?? 0,
-          })
-          .onConflictDoUpdate({
-            target: [musicAlbumArtistsTable.albumId, musicAlbumArtistsTable.artistId],
-            set: { role: opts?.role, displayOrder: opts?.displayOrder ?? 0 },
-          }),
-      catch: (e) =>
-        new DatabaseError({
-          message: `Failed to add artist to album: ${getErrorMessage(e)}`,
-          operation: 'insert',
-          table: 'music_album_artists',
-        }),
-    })
-  }).pipe(
-    Effect.withSpan('musicEntity.addArtistToAlbum', {
-      attributes: { albumId, artistId },
-    }),
+  writeMusicRelationship(
+    { entityType: 'album', entityId: albumId },
+    { kind: 'credit', action: 'set', artistId, ...opts },
+    write,
   )
 
-export const removeArtistFromAlbumEffect = (albumId: string, artistId: string) =>
-  Effect.gen(function* () {
-    const db = yield* Database
-    yield* Effect.tryPromise({
-      try: () =>
-        db
-          .delete(musicAlbumArtistsTable)
-          .where(
-            eq(musicAlbumArtistsTable.albumId, albumId) &&
-              eq(musicAlbumArtistsTable.artistId, artistId),
-          ),
-      catch: (e) =>
-        new DatabaseError({
-          message: `Failed to remove artist from album: ${getErrorMessage(e)}`,
-          operation: 'delete',
-          table: 'music_album_artists',
-        }),
-    })
-  }).pipe(
-    Effect.withSpan('musicEntity.removeArtistFromAlbum', {
-      attributes: { albumId, artistId },
-    }),
+export const removeArtistFromAlbumEffect = (
+  albumId: string,
+  artistId: string,
+  write?: MusicWriteRequest,
+) =>
+  writeMusicRelationship(
+    { entityType: 'album', entityId: albumId },
+    { kind: 'credit', action: 'remove', artistId },
+    write,
   )

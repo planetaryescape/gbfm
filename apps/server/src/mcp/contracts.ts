@@ -6,8 +6,32 @@ export class EditorialToolError extends Schema.TaggedError<
   EditorialToolError,
   { readonly brand: unique symbol }
 >()('EditorialToolError', {
-  code: Schema.Literals(['access_denied', 'not_found', 'unavailable']),
+  code: Schema.Literals([
+    'access_denied',
+    'not_found',
+    'unavailable',
+    'conflict',
+    'invalid_input',
+    'expired',
+  ]),
   message: Schema.String,
+}) {}
+
+export class McpToolError extends Schema.TaggedError<McpToolError>()('McpToolError', {
+  code: Schema.Literals([
+    'access_denied',
+    'not_found',
+    'unavailable',
+    'conflict',
+    'invalid_input',
+    'expired',
+    'rate_limited',
+    'precondition_required',
+  ]),
+  message: Schema.String,
+  retryAfterSeconds: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 60 })),
+  ),
 }) {}
 
 const httpUrl = Schema.String.check(
@@ -82,3 +106,33 @@ export const GetPostResult = Schema.Struct({
     createdAt: Schema.String,
   }),
 })
+
+const DraftTitle = Schema.NonEmptyString.check(
+  Schema.isMaxLength(500),
+  Schema.makeFilter((value) => value.trim().length > 0),
+)
+
+const DraftContent = Schema.String.check(Schema.isMaxLength(100_000))
+
+const DraftDescription = Schema.NullOr(Schema.String.check(Schema.isMaxLength(2000)))
+
+export const CreateDraftInput = Schema.Struct({
+  requestId: Schema.String.check(Schema.isUUID(4)),
+  title: DraftTitle,
+  content: DraftContent,
+  description: Schema.optionalKey(DraftDescription),
+})
+
+export const UpdateDraftInput = Schema.Struct({
+  requestId: CreateDraftInput.fields.requestId,
+  postId: PostId,
+  expectedVersion: PostVersion,
+  title: Schema.optionalKey(DraftTitle),
+  content: Schema.optionalKey(DraftContent),
+  description: Schema.optionalKey(DraftDescription),
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      input.title !== undefined || input.content !== undefined || input.description !== undefined,
+  ),
+)

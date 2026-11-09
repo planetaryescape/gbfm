@@ -58,6 +58,7 @@ describe('playlist editing', () => {
   const tracks = ['one', 'two'].map((id, position) => ({
     track: {
       id,
+      revision: 0,
       title: id,
       artistNames: [],
       coverImageUrl: null,

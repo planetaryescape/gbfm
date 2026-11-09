@@ -3,6 +3,7 @@ import { Layer } from 'effect'
 
 import { DatabaseLayer } from '@/db/layer'
 import { createWebHandler } from '@/http/routes'
+import { McpOperationStoreLayer } from '@/mcp/operations/store'
 import {
   WorkerSentryEnabledLive,
   WorkerSentryEnv,
@@ -74,6 +75,7 @@ export const createTestWebHandler = (
 ) => {
   const baseServices = {
     database: DatabaseLayer(d1),
+    operationStore: McpOperationStoreLayer(d1),
     sitemapCache: SitemapCacheLayer(inMemorySitemapKv()),
     spotifyImportResolver: SpotifyImportResolverLocalLayer,
     playlistEnrichmentQueue: PlaylistEnrichmentQueueTestLayer,

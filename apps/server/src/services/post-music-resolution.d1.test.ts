@@ -176,11 +176,28 @@ test('successful resolution only attaches music and interrupted provider work ca
 
     const [before] = await db.select().from(postsTable).where(eq(postsTable.id, post.id))
 
+    if (!before) throw new Error('Missing post fixture')
+
+    const stale = await Effect.runPromise(
+      withTestLayer(
+        resolvePostMusic(post.id, { userId: 'owner', userRole: 'creator' }, url, new Date(0)).pipe(
+          Effect.provideService(Database, db),
+          Effect.flip,
+        ),
+        layer,
+      ),
+    )
+
+    expect(stale).toBeInstanceOf(ConflictError)
+
     const pending = Effect.runPromiseExit(
       withTestLayer(
-        resolvePostMusic(post.id, { userId: 'owner', userRole: 'creator' }, url).pipe(
-          Effect.provideService(Database, db),
-        ),
+        resolvePostMusic(
+          post.id,
+          { userId: 'owner', userRole: 'creator' },
+          url,
+          before.updatedAt,
+        ).pipe(Effect.provideService(Database, db)),
         layer,
       ),
       { signal: controller.signal },
@@ -199,9 +216,10 @@ test('successful resolution only attaches music and interrupted provider work ca
         onFailure: () => before,
         onSuccess: (value) => ({
           ...post,
+          lastOperationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
           musicEntityId: value.entityId,
           musicEntityType: 'track',
-          updatedAt: after?.updatedAt,
+          updatedAt: new Date(value.updatedAt),
         }),
       }),
     )

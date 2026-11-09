@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     "./editorial-mcp": "./src/editorial-mcp.ts",
+    "./post-music-references": "./src/post-music-references.ts",
     "./identity": "./src/identity.ts",
     "./personal-access-keys": "./src/personal-access-keys/index.ts",
     "./http/read-limited-body": "./src/http/read-limited-body.ts",

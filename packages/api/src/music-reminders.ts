@@ -23,6 +23,33 @@ const IsoDateTimeString = Schema.String.pipe(Schema.check(Schema.isPattern(IsoDa
 
 const MusicReminderStatus = Schema.Literals(['pending', 'processing', 'sent', 'failed'])
 
+const CommandRevision = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+)
+
+const RequestId = Schema.String.check(Schema.isUUID(4))
+
+export class ReminderPreconditionRequired extends Schema.TaggedError<ReminderPreconditionRequired>()(
+  'ReminderPreconditionRequired',
+  {
+    message: Schema.String,
+  },
+  { httpApiStatus: 428 },
+) {}
+
+export class ReminderCommandConflict extends Schema.TaggedError<ReminderCommandConflict>()(
+  'ReminderCommandConflict',
+  { message: Schema.String },
+  { httpApiStatus: 409 },
+) {}
+
+const CommandReceipt = Schema.Struct({
+  reminderId: Uuid,
+  commandRevision: CommandRevision,
+  dispatchState: Schema.Literals(['open', 'cancelled']),
+  reminderDate: Schema.String,
+})
+
 export const MusicReminderResponse = Schema.Struct({
   id: Schema.String,
   userId: Schema.String,
@@ -34,11 +61,14 @@ export const MusicReminderResponse = Schema.Struct({
   notes: Schema.NullOr(Schema.String),
   status: MusicReminderStatus,
   isSent: Schema.Boolean,
+  commandRevision: CommandRevision,
+  dispatchState: Schema.Literals(['open', 'fenced', 'accepted', 'cancelled']),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 })
 
 export const CreateMusicReminderInput = Schema.Struct({
+  requestId: RequestId,
   musicTitle: Schema.NonEmptyString,
   artistName: Schema.NonEmptyString,
   musicUrl: UrlString,
@@ -51,7 +81,7 @@ export type CreateMusicReminderInput = typeof CreateMusicReminderInput.Type
 
 export const CreateMusicReminderResponse = Schema.Struct({
   success: Schema.Boolean,
-  reminder: MusicReminderResponse,
+  reminder: CommandReceipt,
   message: Schema.String,
 })
 
@@ -62,26 +92,43 @@ export const GetMusicRemindersResponse = Schema.Struct({
 })
 
 export const UpdateMusicReminderInput = Schema.Struct({
+  requestId: RequestId,
+  expectedRevision: Schema.optional(CommandRevision),
   musicTitle: Schema.optional(Schema.NonEmptyString),
   artistName: Schema.optional(Schema.NonEmptyString),
   musicUrl: Schema.optional(UrlString),
-  albumCoverUrl: Schema.optional(UrlString),
+  albumCoverUrl: Schema.optional(Schema.NullOr(UrlString)),
   reminderDate: Schema.optional(IsoDateTimeString),
-  notes: Schema.optional(Schema.String),
+  notes: Schema.optional(Schema.NullOr(Schema.String)),
 })
 
 export type UpdateMusicReminderInput = typeof UpdateMusicReminderInput.Type
 
 export const UpdateMusicReminderResponse = Schema.Struct({
   success: Schema.Boolean,
-  reminder: MusicReminderResponse,
+  reminder: CommandReceipt,
   message: Schema.String,
 })
 
 export const DeleteMusicReminderResponse = Schema.Struct({
   success: Schema.Boolean,
   message: Schema.String,
+  reminder: CommandReceipt,
 })
+
+export const DeleteMusicReminderInput = Schema.Struct({
+  requestId: RequestId,
+  expectedRevision: Schema.optional(CommandRevision),
+})
+
+const CommandErrors = [
+  HttpApiError.BadRequest,
+  HttpApiError.NotFound,
+  HttpApiError.Forbidden,
+  ReminderCommandConflict,
+  HttpApiError.ServiceUnavailable,
+  ReminderPreconditionRequired,
+]
 
 export const MusicRemindersGroup = /* @__PURE__ */ (() =>
   HttpApiGroup.make('music-reminders')
@@ -89,7 +136,7 @@ export const MusicRemindersGroup = /* @__PURE__ */ (() =>
       HttpApiEndpoint.post('createMusicReminder', '/api/music-reminders', {
         payload: CreateMusicReminderInput,
         success: CreateMusicReminderResponse,
-        error: HttpApiError.BadRequest,
+        error: CommandErrors,
       }).middleware(AuthMiddleware),
     )
     .add(
@@ -102,13 +149,14 @@ export const MusicRemindersGroup = /* @__PURE__ */ (() =>
         params: { id: Uuid },
         payload: UpdateMusicReminderInput,
         success: UpdateMusicReminderResponse,
-        error: [HttpApiError.BadRequest, HttpApiError.NotFound, HttpApiError.Forbidden],
+        error: CommandErrors,
       }).middleware(AuthMiddleware),
     )
     .add(
       HttpApiEndpoint.delete('deleteMusicReminder', '/api/music-reminders/:id', {
         params: { id: Uuid },
+        payload: DeleteMusicReminderInput,
         success: DeleteMusicReminderResponse,
-        error: [HttpApiError.NotFound, HttpApiError.Forbidden],
+        error: CommandErrors,
       }).middleware(AuthMiddleware),
     ))()

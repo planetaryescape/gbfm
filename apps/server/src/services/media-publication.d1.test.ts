@@ -175,7 +175,7 @@ async function harness() {
 }
 
 describe('media publication at the content/storage seam', () => {
-  test('audio creator failure rolls back creator replacement but retains its earlier content write without copying', async () => {
+  test('audio creator failure rolls back all fields and creator replacement without copying', async () => {
     await using h = await harness()
 
     const audio = await Effect.runPromise(
@@ -194,6 +194,13 @@ describe('media publication at the content/storage seam', () => {
       ),
     )
 
+    const before = await h.db.select().from(audioTable).where(eq(audioTable.id, audio.id))
+
+    const creatorsBefore = await h.db
+      .select()
+      .from(audioCreators)
+      .where(eq(audioCreators.audioId, audio.id))
+
     const result = await Effect.runPromise(
       h.audio
         .update('mix', 'partial-audio', actor.userId, actor.userRole, {
@@ -205,16 +212,10 @@ describe('media publication at the content/storage seam', () => {
     )
 
     expect(Result.isFailure(result) && result.failure).toBeInstanceOf(DatabaseError)
-    expect(await h.db.select().from(audioTable).where(eq(audioTable.id, audio.id))).toMatchObject([
-      {
-        title: 'Saved before creator failure',
-        draft: false,
-        url: assetUrl(publicKey(audioKey)),
-      },
-    ])
+    expect(await h.db.select().from(audioTable).where(eq(audioTable.id, audio.id))).toEqual(before)
     expect(
       await h.db.select().from(audioCreators).where(eq(audioCreators.audioId, audio.id)),
-    ).toMatchObject([{ creatorId: actor.userId }])
+    ).toEqual(creatorsBefore)
     expect(h.copies).toEqual([])
     expect(h.objects.has(audioKey)).toBe(true)
   })
@@ -266,7 +267,7 @@ describe('media publication at the content/storage seam', () => {
     ['mixed valid and invalid creators', [collaborator.userId, 'missing-creator']],
     ['duplicate creators', [collaborator.userId, collaborator.userId]],
   ])(
-    'post replacement with %s preserves existing creators and earlier content without copying',
+    'post replacement with %s rolls back content and creator changes without copying',
     async (_name, creatorIds) => {
       await using h = await harness()
 
@@ -288,6 +289,7 @@ describe('media publication at the content/storage seam', () => {
       expect(
         await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
       ).toMatchObject([{ creatorId: actor.userId }])
+      const before = await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))
 
       const result = await Effect.runPromise(
         h.post
@@ -300,13 +302,7 @@ describe('media publication at the content/storage seam', () => {
       )
 
       expect(Result.isFailure(result) && result.failure).toBeInstanceOf(DatabaseError)
-      expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toMatchObject([
-        {
-          title: 'Saved before creator failure',
-          draft: false,
-          thumbnailUrl: assetUrl(publicKey(imageKey)),
-        },
-      ])
+      expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toEqual(before)
       expect(
         await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
       ).toMatchObject([{ creatorId: actor.userId }])
@@ -346,9 +342,18 @@ describe('media publication at the content/storage seam', () => {
     expect(
       await h.db.select().from(postCreators).where(eq(postCreators.postId, post.id)),
     ).toMatchObject([{ creatorId: expectedCreatorId }])
-    expect(await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))).toEqual(
-      originalRows,
-    )
+    const saved = await h.db.select().from(postsTable).where(eq(postsTable.id, post.id))
+
+    const changed = expectedCreatorId !== actor.userId
+
+    const changedRows = originalRows.map((row) => ({
+      ...row,
+      updatedAt: expect.any(Date),
+      lastOperationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    }))
+
+    expect(saved).toEqual(changed ? changedRows : originalRows)
+    expect((saved[0]?.updatedAt.getTime() ?? 0) > post.updatedAt.getTime()).toBe(changed)
     expect(h.copies).toEqual([])
   })
 

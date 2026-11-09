@@ -1,7 +1,8 @@
 import { LINK_STATUS } from '@gbfm/core/status'
-import { and, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 
+import { guardedPostUpdate } from '@/db/guarded-post-update'
 import { Database } from '@/db/layer'
 import { postsTable } from '@/db/post.schema'
 import { ConflictError, DatabaseError, NotFoundError, ValidationError } from '@/errors'
@@ -41,6 +42,7 @@ export const resolvePostMusic = (
   postId: string,
   actor: { readonly userId: string; readonly userRole: string },
   url?: string,
+  expectedUpdatedAt?: Date,
 ) =>
   Effect.gen(function* () {
     const db = yield* Database
@@ -56,6 +58,17 @@ export const resolvePostMusic = (
       return yield* new NotFoundError({ message: 'Post not found', resource: 'post', id: postId })
 
     yield* requireCreatorOrAdmin('post', postId, actor.userId, actor.userRole)
+
+    // Refuse before any provider/import work: a legacy resolver cannot unfreeze a managed collection.
+    if (post.musicReferencesManaged && !post.draft)
+      return yield* new ValidationError({
+        message: 'Managed published music associations are frozen',
+      })
+
+    if (expectedUpdatedAt && expectedUpdatedAt.getTime() !== post.updatedAt.getTime())
+      return yield* new ConflictError({
+        message: 'The post changed since it was loaded. Reload and try again.',
+      })
 
     let candidate =
       url?.trim() ||
@@ -103,15 +116,18 @@ export const resolvePostMusic = (
 
     const updated = yield* Effect.tryPromise({
       try: () =>
-        db
-          .update(postsTable)
-          .set({
+        guardedPostUpdate(
+          db,
+          post,
+          actor.userId,
+          {
             musicEntityType: resolved.entityType,
             musicEntityId: resolved.entity.id,
-            updatedAt: new Date(),
-          })
-          .where(and(eq(postsTable.id, postId), eq(postsTable.updatedAt, post.updatedAt)))
-          .returning({ id: postsTable.id }),
+          },
+          undefined,
+          [],
+          { allowAdmin: actor.userRole === 'admin' },
+        ),
       catch: () =>
         new DatabaseError({
           message: 'Could not attach music',
@@ -120,13 +136,16 @@ export const resolvePostMusic = (
         }),
     })
 
-    if (!updated.length)
+    const attached = updated[0]
+
+    if (!attached)
       return yield* new ConflictError({
         message: 'The post changed during resolution. Reload and try again.',
       })
 
     return {
       postId,
+      updatedAt: attached.updatedAt.toISOString(),
       entityType: resolved.entityType,
       entityId: resolved.entity.id,
       url: candidate,

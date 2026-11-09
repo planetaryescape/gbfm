@@ -11,6 +11,7 @@ import {
 } from '@/db/music-entity.schema'
 import { DatabaseError, getErrorMessage, MusicProviderInvalidInput } from '@/errors'
 import type { CanonicalMusicIdentityService } from '@/services/canonical-music-identity'
+import type { MusicIdentityError } from '@/services/canonical-music-identity/errors'
 import { getSafeErrorTag } from '@/services/canonical-music-identity/telemetry'
 import {
   getIdFromSpotifyUrl,
@@ -20,6 +21,22 @@ import {
 } from '@/services/spotify.service'
 
 import { type ImportedTrackTarget, requireInserted } from './shared'
+
+export interface PlaylistExecutionProgress {
+  readonly phase: 'importing' | 'enriching'
+  readonly processed: number
+  readonly total: number | null
+  readonly failed: number
+}
+
+// These hooks report real work; they are not durable acceptance, a SQL fence,
+// or permission to reuse a cached grant. The caller owns persisted status.
+export interface PlaylistExecutionHooks {
+  readonly checkpoint: Effect.Effect<void, DatabaseError | MusicIdentityError>
+  readonly progress: (
+    progress: PlaylistExecutionProgress,
+  ) => Effect.Effect<void, DatabaseError | MusicIdentityError>
+}
 
 export const getPlaylistTracksEffect = (playlistId: string) =>
   Effect.gen(function* () {
@@ -36,7 +53,7 @@ export const getPlaylistTracksEffect = (playlistId: string) =>
           .from(musicPlaylistTracksTable)
           .innerJoin(musicTracksTable, eq(musicPlaylistTracksTable.trackId, musicTracksTable.id))
           .where(eq(musicPlaylistTracksTable.playlistId, playlistId))
-          .orderBy(musicPlaylistTracksTable.position)
+          .orderBy(musicPlaylistTracksTable.position, musicPlaylistTracksTable.trackId)
 
         const trackIds = rows.map((r) => r.track.id)
 
@@ -52,6 +69,7 @@ export const getPlaylistTracksEffect = (playlistId: string) =>
                     inArray(musicEntityLinksTable.entityId, trackIds),
                   ),
                 )
+                .orderBy(musicEntityLinksTable.platform, musicEntityLinksTable.url)
 
         const linksByTrackId = new Map<string, Array<SelectMusicEntityLink>>()
 
@@ -281,24 +299,54 @@ const enrichImportedPlaylistLinksEffect = (
   identity: CanonicalMusicIdentityService,
   playlistId: string,
   tracks: Array<ImportedTrackTarget>,
+  execution?: PlaylistExecutionHooks,
 ) =>
   Effect.gen(function* () {
     const uniqueTracks = [...new Map(tracks.map((track) => [track.trackId, track])).values()]
+    let processed = 0
+    let failed = 0
+
+    if (execution) {
+      yield* execution.checkpoint
+      yield* execution.progress({
+        phase: 'enriching',
+        processed,
+        total: uniqueTracks.length,
+        failed,
+      })
+    }
 
     const exits = yield* Effect.forEach(
       uniqueTracks,
       (track) =>
-        Effect.exit(enrichTrackLinksEffect(identity, playlistId, track)).pipe(
-          Effect.tap((exit) =>
-            Exit.isFailure(exit)
-              ? Effect.logWarning('[MusicEntity] Playlist track link enrichment failed', {
-                  playlistId,
-                  trackId: track.trackId,
-                  errorTag: getExitErrorTag(exit),
-                })
-              : Effect.void,
-          ),
-        ),
+        Effect.gen(function* () {
+          // Keep authority/status failures outside the item failure collector:
+          // they stop the pass, rather than allowing later provider calls.
+          if (execution) yield* execution.checkpoint
+          const exit = yield* Effect.exit(enrichTrackLinksEffect(identity, playlistId, track))
+
+          if (execution && Exit.hasInterrupts(exit)) return yield* Effect.failCause(exit.cause)
+          processed += 1
+
+          if (Exit.isFailure(exit)) {
+            failed += 1
+            yield* Effect.logWarning('[MusicEntity] Playlist track link enrichment failed', {
+              playlistId,
+              trackId: track.trackId,
+              errorTag: getExitErrorTag(exit),
+            })
+          }
+
+          if (execution)
+            yield* execution.progress({
+              phase: 'enriching',
+              processed,
+              total: uniqueTracks.length,
+              failed,
+            })
+
+          return exit
+        }),
       { concurrency: 1 },
     )
 
@@ -434,6 +482,7 @@ export const importSpotifyPlaylistEffect = (
   Effect.fn('musicEntity.importSpotifyPlaylist')(function* (
     url: string,
     curatorId?: string | null,
+    execution?: PlaylistExecutionHooks,
   ) {
     const db = yield* Database
     const id = getIdFromSpotifyUrl(url)
@@ -445,7 +494,22 @@ export const importSpotifyPlaylistEffect = (
       })
     }
 
+    if (execution) {
+      yield* execution.checkpoint
+      yield* execution.progress({ phase: 'importing', processed: 0, total: null, failed: 0 })
+    }
+
     const data: SpotifyImportPlaylist = yield* spotify.getPlaylistForImport(id)
+
+    if (execution) {
+      yield* execution.checkpoint
+      yield* execution.progress({
+        phase: 'importing',
+        processed: 0,
+        total: data.tracks.length,
+        failed: 0,
+      })
+    }
 
     const resolvedPlaylist = yield* identity.importProviderEntity({
       snapshot: {
@@ -467,17 +531,38 @@ export const importSpotifyPlaylistEffect = (
 
     const playlist = resolvedPlaylist.entity
 
+    let processed = 0
+
     const tracks = yield* Effect.forEach(data.tracks, (track) =>
-      identity
-        .importProviderEntity({
-          snapshot: spotifyTrackSnapshot(track),
-          origin: 'spotify_import',
-          artworkDelivery: 'preserve',
-        })
-        .pipe(
-          Effect.map((resolved) => ({ trackId: resolved.entity.id, created: resolved.created })),
-        ),
+      Effect.gen(function* () {
+        if (execution) yield* execution.checkpoint
+
+        const exit = yield* Effect.exit(
+          identity.importProviderEntity({
+            snapshot: spotifyTrackSnapshot(track),
+            origin: 'spotify_import',
+            artworkDelivery: 'preserve',
+          }),
+        )
+
+        if (execution && Exit.hasInterrupts(exit)) return yield* Effect.failCause(exit.cause)
+        processed += 1
+
+        if (execution)
+          yield* execution.progress({
+            phase: 'importing',
+            processed,
+            total: data.tracks.length,
+            failed: Exit.isFailure(exit) ? 1 : 0,
+          })
+
+        if (Exit.isFailure(exit)) return yield* Effect.failCause(exit.cause)
+
+        return { trackId: exit.value.entity.id, created: exit.value.created }
+      }),
     )
+
+    if (execution) yield* execution.checkpoint
 
     const result = yield* Effect.tryPromise({
       try: async () => {
@@ -582,15 +667,29 @@ export const importSpotifyPlaylistEffect = (
   })
 
 export const enrichPlaylistLinksEffect = (identity: CanonicalMusicIdentityService) =>
-  Effect.fn('musicEntity.enrichPlaylistLinks')(function* (playlistId: string) {
+  Effect.fn('musicEntity.enrichPlaylistLinks')(function* (
+    playlistId: string,
+    execution?: PlaylistExecutionHooks,
+  ) {
+    if (execution) yield* execution.checkpoint
     const targets = yield* getPlaylistLinkSyncTargetsEffect(playlistId)
-    const result = yield* enrichImportedPlaylistLinksEffect(identity, playlistId, targets)
+
+    const result = yield* enrichImportedPlaylistLinksEffect(
+      identity,
+      playlistId,
+      targets,
+      execution,
+    )
 
     return { playlistId, trackCount: targets.length, insertedCount: result.insertedCount }
   })
 
 export const syncPlaylistLinksEffect = (identity: CanonicalMusicIdentityService) =>
-  Effect.fn('musicEntity.syncPlaylistLinks')(function* (playlistId: string) {
+  Effect.fn('musicEntity.syncPlaylistLinks')(function* (
+    playlistId: string,
+    execution?: PlaylistExecutionHooks,
+  ) {
+    if (execution) yield* execution.checkpoint
     yield* identity
       .refreshEntity({
         entityType: 'playlist',
@@ -615,5 +714,5 @@ export const syncPlaylistLinksEffect = (identity: CanonicalMusicIdentityService)
         ),
       )
 
-    return yield* enrichPlaylistLinksEffect(identity)(playlistId)
+    return yield* enrichPlaylistLinksEffect(identity)(playlistId, execution)
   })

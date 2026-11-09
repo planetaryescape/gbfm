@@ -7,12 +7,49 @@ import {
   EditorialOAuthConfiguration,
   EditorialOAuthSettings,
   EditorialPrincipal,
+  EditorialReadScopes,
+  EditorialScopes,
+  McpScopes,
+  canAuthorizeMcp,
   McpResourceUrl,
   OAuthClientId,
   PostVersion,
 } from './editorial-mcp'
 
 describe('editorial MCP domain boundaries', () => {
+  test('expanded listener grants do not acquire editorial authority or implicit scopes', () => {
+    const scopes = Schema.decodeUnknownSync(McpScopes)(['catalogue:read', 'offline_access'])
+    const listener = Schema.decodeUnknownSync(EditorialAccount)({ role: 'user', banned: false })
+    expect(canAuthorizeMcp(listener, scopes)).toBe(true)
+    expect(canAuthorizeMcp(listener, ['posts:read'])).toBe(false)
+    expect(canAuthorizeMcp(listener, ['catalogue:write'])).toBe(false)
+    expect(
+      canAuthorizeMcp(
+        Schema.decodeUnknownSync(EditorialAccount)({ role: 'creator', banned: false }),
+        ['catalogue:write'],
+      ),
+    ).toBe(false)
+    expect(
+      canAuthorizeMcp(
+        Schema.decodeUnknownSync(EditorialAccount)({ role: 'admin', banned: false }),
+        ['catalogue:write'],
+      ),
+    ).toBe(true)
+    expect(canAuthorizeMcp({ ...listener, banned: true }, scopes)).toBe(false)
+
+    for (const invalid of [
+      [],
+      ['offline_access'],
+      ['drafts:write'],
+      ['catalogue:read', 'catalogue:read'],
+      ['unknown:read'],
+    ]) {
+      expect(Schema.decodeUnknownOption(McpScopes)(invalid)._tag).toBe('None')
+    }
+
+    expect(Schema.decodeUnknownOption(EditorialScopes)(scopes)._tag).toBe('None')
+  })
+
   test.each(['creator', 'editor', 'admin'])(
     'allows an eligible %s without a configured identity',
     (role) => {
@@ -67,7 +104,9 @@ describe('editorial MCP domain boundaries', () => {
     { scopes: ['offline_access'] },
     { scopes: ['posts:read', 'posts:publish'] },
     { scopes: ['posts:read', 'posts:read'] },
-  ])('rejects a principal without a valid read-only permission grant: %j', ({ scopes }) => {
+    { scopes: ['drafts:write'] },
+    { scopes: ['posts:read', 'drafts:write', 'drafts:write'] },
+  ])('rejects a principal without a valid editorial permission grant: %j', ({ scopes }) => {
     expect(
       Option.isNone(
         Schema.decodeUnknownOption(EditorialPrincipal)({
@@ -77,6 +116,13 @@ describe('editorial MCP domain boundaries', () => {
         }),
       ),
     ).toBe(true)
+  })
+
+  test('draft-write is a separate permission and does not widen read-only contracts', () => {
+    const write = ['posts:read', 'offline_access', 'drafts:write']
+    expect(Schema.decodeUnknownSync(EditorialScopes)(write)).toEqual(write)
+    expect(Option.isNone(Schema.decodeUnknownOption(EditorialReadScopes)(write))).toBe(true)
+    expect(Schema.decodeUnknownSync(EditorialScopes)(['posts:read'])).toEqual(['posts:read'])
   })
 
   test('a post version cannot be confused with an arbitrary timestamp', () => {

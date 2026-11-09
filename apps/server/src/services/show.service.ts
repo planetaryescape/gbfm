@@ -13,7 +13,6 @@ import {
   showCreators,
   showsTable,
 } from '@/db/show.schema'
-import { entityLabelsTable } from '@/db/tags.schema'
 import {
   ConflictError,
   DatabaseError,
@@ -27,6 +26,10 @@ import { requireCreatorOrAdmin } from '@/lib/authorization'
 import { MdxService, validateCanonicalContent } from '@/lib/mdx'
 import { createPaginationMetadata, type PaginationMetadata } from '@/lib/pagination'
 import { ConfigService } from '@/services/config.service'
+import {
+  deleteCreatorBrowserShow,
+  saveCreatorBrowserUpdate,
+} from '@/services/creator-command/browser-save'
 import {
   makeMediaPublication,
   type MediaActor,
@@ -42,7 +45,17 @@ type ShowWithHosts = SelectShow & {
   hosts: Array<{ id: string; name: string; username: string | null }>
 }
 
+/** Non-rendering public show metadata; no media, host graph or personalized state. */
+export type PublicShowSummary = Pick<
+  SelectShow,
+  'id' | 'slug' | 'title' | 'description' | 'createdAt' | 'updatedAt'
+>
+
 export interface ShowService {
+  /** Missing and draft shows are indistinguishable; never renders or resolves embeds. */
+  readonly getPublicSummaryBySlug: (
+    slug: string,
+  ) => Effect.Effect<PublicShowSummary, DatabaseError | NotFoundError>
   readonly getNavigationShows: Effect.Effect<Array<ShowWithHosts>, DatabaseError>
   readonly getEpisodesForShow: (
     show: SelectMdxCompiledShow,
@@ -81,16 +94,16 @@ export interface ShowService {
     slug: string,
     userId: string,
     userRole: string,
-    data: Partial<InsertShow> & { hostIds?: Array<string> },
+    data: Partial<InsertShow> & { hostIds?: Array<string>; expectedRevision?: number },
   ) => Effect.Effect<
     SelectMdxCompiledShow,
-    DatabaseError | NotFoundError | UnauthorizedError | ValidationError | S3Error
+    DatabaseError | ConflictError | NotFoundError | UnauthorizedError | ValidationError | S3Error
   >
   readonly delete: (
     slug: string,
     userId: string,
     userRole: string,
-  ) => Effect.Effect<void, DatabaseError | NotFoundError | UnauthorizedError>
+  ) => Effect.Effect<void, DatabaseError | ConflictError | NotFoundError | UnauthorizedError>
   readonly getEpisodes: (
     showSlug: string,
     options: { limit: number; offset: number },
@@ -325,7 +338,7 @@ const updateEffect = (
   slug: string,
   userId: string,
   userRole: string,
-  data: Partial<InsertShow> & { hostIds?: Array<string> },
+  data: Partial<InsertShow> & { hostIds?: Array<string>; expectedRevision?: number },
   media: MediaPublication,
 ) =>
   Effect.gen(function* () {
@@ -354,39 +367,28 @@ const updateEffect = (
     yield* requireCreatorOrAdmin('show', existingShow.id, userId, userRole)
     yield* validateCanonicalContent(data.content)
 
+    const { expectedRevision, ...fields } = data
+
+    if (expectedRevision !== undefined && expectedRevision !== existingShow.revision)
+      return yield* new ConflictError({ message: 'Content changed; reload before saving.' })
+
     const publication = yield* media(
-      data,
+      fields,
       { userId, userRole, credential: undefined },
       existingShow,
     )
 
     const { hostIds, tags, ...updateData } = publication.data
+    yield* saveCreatorBrowserUpdate('show', existingShow, userId, updateData, {
+      expectedRevision,
+      now: new Date(Math.max(Date.now(), existingShow.updatedAt.getTime() + 1)),
+      allowAdmin: true,
+      tags,
+      creatorIds: hostIds,
+    })
 
     const updatedRecords = yield* Effect.tryPromise({
-      try: async () => {
-        const update = db
-          .update(showsTable)
-          .set({ ...updateData, updatedAt: new Date() })
-          .where(eq(showsTable.id, existingShow.id))
-
-        if (hostIds) {
-          await db.batch([
-            update,
-            db.delete(showCreators).where(eq(showCreators.showId, existingShow.id)),
-            ...(hostIds.length > 0
-              ? [
-                  db
-                    .insert(showCreators)
-                    .values(hostIds.map((creatorId) => ({ showId: existingShow.id, creatorId }))),
-                ]
-              : []),
-          ])
-        } else {
-          await db.batch([update])
-        }
-
-        return db.select().from(showsTable).where(eq(showsTable.id, existingShow.id)).limit(1)
-      },
+      try: () => db.select().from(showsTable).where(eq(showsTable.id, existingShow.id)).limit(1),
       catch: (error) =>
         new DatabaseError({
           message: `Failed to update show: ${getErrorMessage(error)}`,
@@ -402,18 +404,6 @@ const updateEffect = (
         message: 'Failed to update show',
         operation: 'update',
         table: 'shows',
-      })
-    }
-
-    if (tags !== undefined) {
-      yield* Effect.tryPromise({
-        try: () => replaceEntityLabels(db, 'show', updatedShow.id, { tags }),
-        catch: (error) =>
-          new DatabaseError({
-            message: getErrorMessage(error),
-            operation: 'update',
-            table: 'labels',
-          }),
       })
     }
 
@@ -491,26 +481,7 @@ const deleteEffect = (slug: string, userId: string, userRole: string) =>
 
     yield* requireCreatorOrAdmin('show', existingShow.id, userId, userRole)
 
-    yield* Effect.tryPromise({
-      try: () =>
-        db.batch([
-          db
-            .delete(entityLabelsTable)
-            .where(
-              and(
-                eq(entityLabelsTable.entityType, 'show'),
-                eq(entityLabelsTable.entityId, existingShow.id),
-              ),
-            ),
-          db.delete(showsTable).where(eq(showsTable.id, existingShow.id)),
-        ]),
-      catch: (error) =>
-        new DatabaseError({
-          message: `Failed to delete show: ${getErrorMessage(error)}`,
-          operation: 'delete',
-          table: 'shows',
-        }),
-    })
+    yield* deleteCreatorBrowserShow(existingShow, userId)
 
     return undefined
   })
@@ -570,7 +541,7 @@ const getEpisodesEffect = (
               extras: (audio) => ({ tagsJson: entityTagsProjection('audio', audio.id) }),
               limit,
               offset,
-              orderBy: desc(audioTable.createdAt),
+              orderBy: [desc(audioTable.createdAt), desc(audioTable.id)],
               with: {
                 audioArtists: {
                   orderBy: [asc(audioArtists.position), asc(audioArtists.artistId)],
@@ -641,6 +612,39 @@ export const ShowServiceLayer = Layer.effect(
     const provideDb = Effect.provideService(Database, db)
 
     return {
+      getPublicSummaryBySlug: (slug) =>
+        Effect.gen(function* () {
+          const rows = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .select({
+                  id: showsTable.id,
+                  slug: showsTable.slug,
+                  title: showsTable.title,
+                  description: showsTable.description,
+                  createdAt: showsTable.createdAt,
+                  updatedAt: showsTable.updatedAt,
+                })
+                .from(showsTable)
+                .where(and(eq(showsTable.slug, slug), eq(showsTable.draft, false)))
+                .limit(1),
+            catch: (error) =>
+              new DatabaseError({
+                message: `Failed to read public show metadata: ${getErrorMessage(error)}`,
+                operation: 'select',
+                table: 'shows',
+              }),
+          })
+
+          if (!rows[0])
+            return yield* new NotFoundError({
+              message: 'Show not found',
+              resource: 'show',
+              id: slug,
+            })
+
+          return rows[0]
+        }).pipe(Effect.withSpan('show.getPublicSummaryBySlug')),
       getEpisodesForShow: (show, options, actor) =>
         provideDb(getEpisodesEffect(show.slug, options, actor, show)).pipe(
           Effect.withSpan('show.getEpisodesForShow', { attributes: { showId: show.id } }),
@@ -680,6 +684,7 @@ export const ShowServiceLayer = Layer.effect(
         provideDb(
           updateEffect(slug, userId, userRole, data, media).pipe(
             Effect.provideService(MdxService, mdx),
+            Effect.provideService(ConfigService, config),
           ),
         ).pipe(Effect.withSpan('show.update', { attributes: { slug } })),
       delete: (slug, userId, userRole) =>

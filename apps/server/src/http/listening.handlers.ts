@@ -3,6 +3,7 @@ import { AuthSession } from '@gbfm/api/middleware/auth'
 import { Effect } from 'effect'
 import { HttpApiBuilder, HttpApiError } from 'effect/http-api'
 
+import { CommandAuthority, makeSessionCommandAuthority } from '@/mcp/command-authority'
 import { previewListeningImport } from '@/services/listening-import'
 import {
   deleteListeningItem,
@@ -22,12 +23,23 @@ const respond = <A, R>(effect: Effect.Effect<A, ListeningError, R>) =>
 
       if (error.reason === 'not-found') return new HttpApiError.NotFound()
 
+      if (error.reason === 'conflict') return new HttpApiError.Conflict()
+
+      if (error.reason === 'access-denied') return new HttpApiError.Forbidden()
+
       return new HttpApiError.ServiceUnavailable()
     }),
   )
 
 const mutate = <R>(effect: Effect.Effect<void, ListeningError, R>) =>
-  respond(effect).pipe(Effect.as({ success: true }))
+  Effect.gen(function* () {
+    const authority = yield* makeSessionCommandAuthority
+
+    return yield* respond(effect).pipe(
+      Effect.provideService(CommandAuthority, authority),
+      Effect.as({ success: true }),
+    )
+  })
 
 /** Authenticated mutations never accept an owner ID from the client. */
 export const ListeningHandlersLive = HttpApiBuilder.group(Api, 'listening', (handlers) =>
@@ -60,11 +72,13 @@ export const ListeningHandlersLive = HttpApiBuilder.group(Api, 'listening', (han
         return yield* mutate(editListeningMix(user.id, params.id, payload))
       }),
     )
-    .handle('deleteMix', ({ params }) =>
+    .handle('deleteMix', ({ params, payload }) =>
       Effect.gen(function* () {
         const { user } = yield* AuthSession
 
-        return yield* mutate(deleteListeningItem(user.id, params.id, 'mix'))
+        return yield* mutate(
+          deleteListeningItem(user.id, params.id, 'mix', payload.expectedVersion),
+        )
       }),
     )
     .handle('createCollection', ({ payload }) =>
@@ -81,11 +95,13 @@ export const ListeningHandlersLive = HttpApiBuilder.group(Api, 'listening', (han
         return yield* mutate(writeListeningCollection(user.id, payload, params.id))
       }),
     )
-    .handle('deleteCollection', ({ params }) =>
+    .handle('deleteCollection', ({ params, payload }) =>
       Effect.gen(function* () {
         const { user } = yield* AuthSession
 
-        return yield* mutate(deleteListeningItem(user.id, params.id, 'collection'))
+        return yield* mutate(
+          deleteListeningItem(user.id, params.id, 'collection', payload.expectedVersion),
+        )
       }),
     )
     .handle('membership', ({ params, payload }) =>
@@ -93,7 +109,13 @@ export const ListeningHandlersLive = HttpApiBuilder.group(Api, 'listening', (han
         const { user } = yield* AuthSession
 
         return yield* mutate(
-          setListeningMembership(user.id, params.id, params.mixId, payload.included),
+          setListeningMembership(
+            user.id,
+            params.id,
+            params.mixId,
+            payload.included,
+            payload.expectedVersion,
+          ),
         )
       }),
     )

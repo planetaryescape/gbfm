@@ -1,14 +1,46 @@
 import { Api } from '@gbfm/api/api'
 import { AuthSession } from '@gbfm/api/middleware/auth'
-import { Effect } from 'effect'
+import { ReminderCommandConflict, ReminderPreconditionRequired } from '@gbfm/api/music-reminders'
+import { Effect, type Schema } from 'effect'
 import { HttpApiBuilder, HttpApiError } from 'effect/http-api'
 
 import { dieOnDatabaseError as makeDieOnDatabaseError } from '@/http/handler-utils'
 import { omitUndefined } from '@/lib/omit-undefined'
+import { CommandAuthority, makeSessionCommandAuthority } from '@/mcp/command-authority'
+import { ReminderCommandService } from '@/mcp/reminders/service'
 import { MusicReminderService } from '@/services/music-reminder.service'
 import { ReminderSignalService } from '@/services/reminder-signal.service'
 
 const dieOnDatabaseError = makeDieOnDatabaseError('music-reminders')
+
+const executeCommand = Effect.fn('MusicRemindersHandlers.executeCommand')(
+  function* (command: Schema.Json) {
+    const authority = yield* makeSessionCommandAuthority
+    const service = yield* ReminderCommandService
+
+    return yield* service.execute(command).pipe(Effect.provideService(CommandAuthority, authority))
+  },
+  Effect.catchTag(
+    'McpToolError',
+    Effect.fn(function* (error) {
+      switch (error.code) {
+        case 'precondition_required':
+          return yield* new ReminderPreconditionRequired({ message: error.message })
+        case 'not_found':
+          return yield* new HttpApiError.NotFound()
+        case 'access_denied':
+          return yield* new HttpApiError.Forbidden()
+        case 'conflict':
+        case 'expired':
+          return yield* new ReminderCommandConflict({ message: error.message })
+        case 'unavailable':
+          return yield* new HttpApiError.ServiceUnavailable()
+        default:
+          return yield* new HttpApiError.BadRequest()
+      }
+    }),
+  ),
+)
 
 const toReminderResponse = (reminder: {
   id: string
@@ -21,6 +53,8 @@ const toReminderResponse = (reminder: {
   notes: string | null
   status: 'pending' | 'processing' | 'sent' | 'failed'
   isSent: boolean
+  commandRevision: number
+  dispatchState: 'open' | 'fenced' | 'accepted' | 'cancelled'
   createdAt: Date
   updatedAt: Date
 }) => ({
@@ -34,27 +68,17 @@ export const MusicRemindersHandlersLive = HttpApiBuilder.group(Api, 'music-remin
   handlers
     .handle('createMusicReminder', ({ payload }) =>
       Effect.gen(function* () {
-        const { user } = yield* AuthSession
-        const svc = yield* MusicReminderService
-
-        const reminder = yield* dieOnDatabaseError(
-          svc.create({
-            userId: user.id,
-            musicTitle: payload.musicTitle,
-            artistName: payload.artistName,
-            musicUrl: payload.musicUrl,
-            albumCoverUrl: payload.albumCoverUrl ?? null,
-            reminderDate: new Date(payload.reminderDate),
-            notes: payload.notes ?? null,
-          }),
-        )
+        const reminder = yield* executeCommand({
+          operation: 'create_music_reminder',
+          input: omitUndefined(payload),
+        })
 
         const signal = yield* ReminderSignalService
         yield* signal.signal
 
         return {
           success: true,
-          reminder: toReminderResponse(reminder),
+          reminder,
           message: 'Music reminder created successfully',
         }
       }),
@@ -75,52 +99,33 @@ export const MusicRemindersHandlersLive = HttpApiBuilder.group(Api, 'music-remin
     )
     .handle('updateMusicReminder', ({ params, payload }) =>
       Effect.gen(function* () {
-        const { user } = yield* AuthSession
-        const svc = yield* MusicReminderService
-
-        const reminder = yield* dieOnDatabaseError(
-          svc
-            .update(
-              params.id,
-              user.id,
-              omitUndefined({
-                musicTitle: payload.musicTitle,
-                artistName: payload.artistName,
-                musicUrl: payload.musicUrl,
-                albumCoverUrl: payload.albumCoverUrl,
-                reminderDate: payload.reminderDate ? new Date(payload.reminderDate) : undefined,
-                notes: payload.notes,
-              }),
-            )
-            .pipe(
-              Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
-              Effect.catchTag('UnauthorizedError', () => new HttpApiError.Forbidden()),
-            ),
-        )
+        const reminder = yield* executeCommand({
+          operation: 'update_music_reminder',
+          input: omitUndefined({ ...payload, reminderId: params.id }),
+        })
 
         const signal = yield* ReminderSignalService
         yield* signal.signal
 
         return {
           success: true,
-          reminder: toReminderResponse(reminder),
+          reminder,
           message: 'Music reminder updated successfully',
         }
       }),
     )
-    .handle('deleteMusicReminder', ({ params }) =>
+    .handle('deleteMusicReminder', ({ params, payload }) =>
       Effect.gen(function* () {
-        const { user } = yield* AuthSession
-        const svc = yield* MusicReminderService
+        const reminder = yield* executeCommand({
+          operation: 'cancel_music_reminder',
+          input: omitUndefined({ ...payload, reminderId: params.id }),
+        })
 
-        yield* dieOnDatabaseError(
-          svc.delete(params.id, user.id).pipe(
-            Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound()),
-            Effect.catchTag('UnauthorizedError', () => new HttpApiError.Forbidden()),
-          ),
-        )
-
-        return { success: true, message: 'Music reminder deleted successfully' }
+        return {
+          success: true,
+          reminder,
+          message: 'Music reminder cancelled; pending delivery suppressed',
+        }
       }),
     ),
 )

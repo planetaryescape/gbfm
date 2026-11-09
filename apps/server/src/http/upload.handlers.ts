@@ -18,53 +18,27 @@ import { ConfigService } from '@/services/config.service'
 import { attachedMediaUrls } from '@/services/media-publication'
 import { S3Service } from '@/services/s3.service'
 import { UploadAssetService } from '@/services/upload-asset.service'
+import {
+  buildImageObjectKey,
+  buildObjectKey,
+  CHUNK_SIZE,
+  expectedMultipartPartSize,
+  expectedSizeFromKey,
+  hasContiguousUploadParts,
+  hasValidMultipartParts,
+  matchesCompletedObject,
+  MAX_AUDIO_SIZE,
+  MAX_IMAGE_SIZE,
+  ownsUploadKey,
+  PENDING_ASSET_EXPIRY_SECONDS,
+  PRESIGNED_IMAGE_URL_EXPIRY_SECONDS,
+  PRESIGNED_PART_URL_EXPIRY_SECONDS,
+  sanitizeKeySegment,
+} from '@/services/upload-policy'
+
+export { expectedMultipartPartSize, matchesCompletedObject } from '@/services/upload-policy'
 
 const dieOnS3Error = makeDieOnS3Error('upload')
-
-const CHUNK_SIZE = 8 * 1024 * 1024
-
-const MAX_AUDIO_SIZE = 200 * 1024 * 1024
-
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024
-
-// Long enough to cover an 8 MiB part PUT over a genuinely slow upload
-// connection with room for a retry or two before the URL goes stale, short
-// enough to bound how long a leaked URL stays usable.
-const PRESIGNED_PART_URL_EXPIRY_SECONDS = 15 * 60
-
-// Matches PR #220's PRESIGNED_PART_URL_EXPIRY_SECONDS reasoning: long enough
-// to cover a slow-connection PUT with retry headroom, short enough to bound
-// how long a leaked URL stays usable. Images are a single PUT of at most
-// MAX_IMAGE_SIZE (10 MiB), so the same 5-minute window is generous rather
-// than tight here.
-const PRESIGNED_IMAGE_URL_EXPIRY_SECONDS = 5 * 60
-
-// How long a `pending` upload_assets row is allowed to sit unconfirmed before
-// a future cleanup job (out of scope here, see docs/migrations -- this table
-// only needs to carry enough for that job to find candidates) is entitled to
-// reclaim the S3 object. Deliberately generous relative to the presigned URL
-// expiry above: the URL expiring doesn't mean the user gave up, they may
-// retry and get a fresh presign against the same pending row's key.
-const PENDING_ASSET_EXPIRY_SECONDS = 30 * 24 * 60 * 60
-
-const sanitizeKeySegment = (value: string): string => value.replace(/[^a-zA-Z0-9.-]/g, '_')
-
-const buildObjectKey = (
-  userId: string,
-  fileType: string,
-  fileName: string,
-  expectedSize: number,
-): string => {
-  const sanitizedName = sanitizeKeySegment(fileName)
-
-  return `private/${sanitizeKeySegment(userId)}/multipart/${crypto.randomUUID()}/${expectedSize}/${fileType}_${sanitizedName}`
-}
-
-const buildImageObjectKey = (userId: string, fileName: string): string => {
-  const sanitizedName = sanitizeKeySegment(fileName)
-
-  return `private/${sanitizeKeySegment(userId)}/image/${crypto.randomUUID()}/${sanitizedName}`
-}
 
 // Best-effort: a failure recording lifecycle state must never fail the
 // upload/save request it's attached to (see upload-asset.service.ts's
@@ -80,72 +54,15 @@ const recordAssetLifecycle = <A>(effect: Effect.Effect<A, { readonly _tag: 'Data
   )
 
 export const assertKeyOwnership = (userId: string, key: string) =>
-  key.startsWith(`${sanitizeKeySegment(userId)}/`) ||
-  key.startsWith(`private/${sanitizeKeySegment(userId)}/`)
-    ? Effect.void
-    : new HttpApiError.BadRequest()
+  ownsUploadKey(userId, key) ? Effect.void : new HttpApiError.BadRequest()
 
-export const assertContiguousParts = (parts: ReadonlyArray<{ partNumber: number }>) => {
-  const sorted = parts.toSorted((a, b) => a.partNumber - b.partNumber)
-
-  for (const [index, part] of sorted.entries()) {
-    if (part.partNumber !== index + 1) {
-      return new HttpApiError.BadRequest()
-    }
-  }
-
-  return null
-}
-
-export const expectedMultipartPartSize = (expectedSize: number, partNumber: number) => {
-  const partCount = Math.ceil(expectedSize / CHUNK_SIZE)
-
-  if (partNumber < 1 || partNumber > partCount) return null
-
-  if (partNumber < partCount) return CHUNK_SIZE
-
-  return expectedSize - CHUNK_SIZE * (partCount - 1)
-}
+export const assertContiguousParts = (parts: ReadonlyArray<{ partNumber: number }>) =>
+  hasContiguousUploadParts(parts) ? null : new HttpApiError.BadRequest()
 
 export const validateMultipartParts = (
   expectedSize: number,
   parts: ReadonlyArray<{ partNumber: number; size: number }>,
-) => {
-  if (parts.length !== Math.ceil(expectedSize / CHUNK_SIZE)) {
-    return new HttpApiError.BadRequest()
-  }
-
-  const contiguityError = assertContiguousParts(parts)
-
-  if (contiguityError) return contiguityError
-
-  for (const part of parts) {
-    if (part.size !== expectedMultipartPartSize(expectedSize, part.partNumber)) {
-      return new HttpApiError.BadRequest()
-    }
-  }
-
-  return null
-}
-
-export const matchesCompletedObject = (
-  expectedSize: number,
-  object: { readonly size: number; readonly metadata: Readonly<Record<string, string>> } | null,
-) => object?.size === expectedSize && object.metadata['expected-size'] === String(expectedSize)
-
-const expectedSizeFromKey = (userId: string, key: string) => {
-  const prefix = `${key.startsWith('private/') ? 'private/' : ''}${sanitizeKeySegment(userId)}/multipart/`
-
-  if (!key.startsWith(prefix)) return null
-  const segments = key.slice(prefix.length).split('/')
-
-  if (segments.length !== 3 || !/^[0-9a-f-]{36}$/i.test(segments[0] ?? '')) return null
-  const expectedSize = Number(segments[1])
-
-  return Number.isSafeInteger(expectedSize) && expectedSize > 0 && expectedSize <= MAX_AUDIO_SIZE
-    ? expectedSize
-    : null
-}
+) => (hasValidMultipartParts(expectedSize, parts) ? null : new HttpApiError.BadRequest())
 
 const requireExpectedSize = (userId: string, key: string) => {
   const expectedSize = expectedSizeFromKey(userId, key)
@@ -301,7 +218,7 @@ export const UploadHandlersLive = HttpApiBuilder.group(Api, 'upload', (handlers)
           })
         }
 
-        const key = buildImageObjectKey(user.id, payload.fileName)
+        const key = buildImageObjectKey(user.id, payload.fileName, crypto.randomUUID())
 
         const config = yield* ConfigService
         const s3Service = yield* S3Service
@@ -350,7 +267,13 @@ export const UploadHandlersLive = HttpApiBuilder.group(Api, 'upload', (handlers)
           })
         }
 
-        const key = buildObjectKey(user.id, payload.fileType, payload.fileName, payload.fileSize)
+        const key = buildObjectKey(
+          user.id,
+          payload.fileType,
+          payload.fileName,
+          payload.fileSize,
+          crypto.randomUUID(),
+        )
 
         const config = yield* ConfigService
         const s3Service = yield* S3Service

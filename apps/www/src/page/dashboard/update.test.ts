@@ -304,6 +304,79 @@ describe('dashboard submodel', () => {
     },
   )
 
+  it.each([409, 410])(
+    'retires a definitively refused removal (%s) and requires a fresh observed explicit intent',
+    async (status) => {
+      const bodies: Array<string> = []
+
+      const fetcher: typeof fetch = async (_input, options) => {
+        if (!Predicate.isString(options?.body)) throw new Error('Expected a removal body')
+        bodies.push(options.body)
+
+        return new Response(null, { status: bodies.length === 1 ? status : 204 })
+      }
+
+      const runtime = ManagedRuntime.make(
+        Layer.mergeAll(
+          makeDashboardServiceLayer(fetcher),
+          SpotifyConnectionLive,
+          KeyServiceLive,
+          SessionServiceLive,
+        ),
+      )
+
+      const run = (command: Command.Command<Message, never, Services> | undefined) => {
+        if (!command) throw new Error('Expected a removal command')
+
+        return runtime.runPromise(command.effect)
+      }
+
+      const document = (revision: number) => ({
+        ...emptyDocument,
+        rows: [
+          {
+            id: 'saved-row',
+            title: 'Fixture',
+            detail: '',
+            href: null,
+            actionId: 'e6d841a8-68fd-4351-8478-7fe248a9520e',
+            membershipRevision: revision,
+          },
+        ],
+      })
+
+      try {
+        const loaded = update(
+          initialModel('favorites', member),
+          Message.Loaded({ document: document(5) }),
+        ).model
+
+        const pending = update(loaded, Message.DeleteRequested({ id: 'saved-row' }))
+        const refused = update(pending.model, await run(pending.commands?.[0]))
+        expect(refused.model.deletePending).toBeNull()
+        expect(refused.model.error).toContain(status === 409 ? 'changed' : 'expired')
+        expect(refused.commands).toBeUndefined()
+        expect(
+          update(refused.model, Message.DeleteRequested({ id: 'saved-row' })).commands,
+        ).toBeUndefined()
+        expect(update(refused.model, Message.LoadRequested()).commands?.[0]?.args).toEqual({
+          path: '/api/favorites?limit=25&offset=0',
+        })
+        const refreshed = update(refused.model, Message.Loaded({ document: document(6) })).model
+        const next = update(refreshed, Message.DeleteRequested({ id: 'saved-row' }))
+        const completed = await run(next.commands?.[0])
+        const first = JSON.parse(bodies[0] ?? 'null')
+        const second = JSON.parse(bodies[1] ?? 'null')
+        expect(first.expectedRevision).toBe(5)
+        expect(second.expectedRevision).toBe(6)
+        expect(second.requestId).not.toBe(first.requestId)
+        expect(update(next.model, completed).model.deletePending).toBeNull()
+      } finally {
+        await runtime.dispose()
+      }
+    },
+  )
+
   it.each(['reminders', 'favorites'])(
     'does not fabricate a missing %s revision or issue a removal',
     (section) => {

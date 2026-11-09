@@ -177,7 +177,9 @@ export const DeleteRow = Command.define('Dashboard.DeleteRow', {
         ),
         Effect.as(Message.DeleteCompleted({ intent: pinned })),
         Effect.catch((error) =>
-          Effect.succeed(Message.DeleteFailed({ intent: pinned, message: error.message })),
+          Effect.succeed(
+            Message.DeleteFailed({ intent: pinned, message: error.message, status: error.status }),
+          ),
         ),
       )
     }),

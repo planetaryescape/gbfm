@@ -1,3 +1,4 @@
+import { Match } from 'effect'
 import { Command, type Update } from 'foldkit'
 
 import {
@@ -364,7 +365,7 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
         }
       }
 
-      if (!model.principal.id || model.phase === 'saving') return { model }
+      if (!model.principal.id || model.phase !== 'ready') return { model }
       const row = model.rows.find((item) => item.id === id)
       const actionId = row?.actionId
 
@@ -400,14 +401,27 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
         commands: [DeleteRow({ intent })],
       }
     },
-    DeleteFailed: ({ intent, message }) =>
+    DeleteFailed: ({ intent, message, status }) =>
       acceptsDelete(model, intent)
         ? {
             model: {
               ...model,
               phase: 'error',
-              error: message,
-              deletePending: { intent, busy: false },
+              error: Match.value(status).pipe(
+                Match.when(
+                  409,
+                  () => 'This saved item changed. Reload before choosing another removal.',
+                ),
+                Match.when(
+                  410,
+                  () => 'This removal request expired. Reload before choosing another removal.',
+                ),
+                Match.orElse(() => message),
+              ),
+              deletePending:
+                status !== null && status >= 400 && status < 500 && status !== 408
+                  ? null
+                  : { intent, busy: false },
             },
           }
         : { model },

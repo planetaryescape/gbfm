@@ -49,7 +49,11 @@ export const Message = defineMessageUnion({
   ThemeRestored: { theme: Theme },
   DeleteRequested: { id: Schema.String },
   DeleteCompleted: { intent: DeleteIntent },
-  DeleteFailed: { intent: DeleteIntent, message: Schema.String },
+  DeleteFailed: {
+    intent: DeleteIntent,
+    message: Schema.String,
+    status: Schema.NullOr(Schema.Number),
+  },
   Saved: {},
   SpotifyRequested: {
     action: Schema.Literals(['status', 'connect', 'disconnect', 'completeCallback']),

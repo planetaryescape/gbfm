@@ -68,6 +68,24 @@ export const providerRedirect = async (
   query: string,
   apiOrigin: string = URL.parse(response.url)?.origin ?? origin,
 ): Promise<typeof ProviderOutcome.Type> => {
+  if (!response.ok) {
+    const error = Option.getOrNull(
+      Schema.decodeUnknownOption(
+        Schema.Struct({
+          error: Schema.String,
+        }),
+      )(
+        await response
+          .clone()
+          .json()
+          .catch(() => null),
+      ),
+    )
+
+    if (error?.error === 'invalid_scope')
+      return ProviderOutcome.cases.Rejected.make({ status: 409 })
+  }
+
   const location = await providerLocation(response, origin, query, apiOrigin)
 
   return location

@@ -6,6 +6,7 @@ import { authErrorKey, authErrorMessages, readAuthErrorCode } from '../auth/erro
 import { consentFormActionSource } from './callback'
 import { connectionIssuer } from './configuration'
 import { providerRedirect } from './continuation'
+import { permissionsUnavailableDocument } from './document'
 import {
   ConsentState,
   Continuation,
@@ -44,6 +45,8 @@ const connectionPage = async (request: Request, continuation: PendingContinuatio
 
   const result = await ConsentState.match<Promise<Server.Responded>>(state, {
     Failed: async ({ status }) => failure(status),
+    PermissionsUnavailable: async (state) =>
+      connectionResponse(permissionsUnavailableDocument(state), undefined, 409),
     LoginRequired: async (state) =>
       connectionResponse(connectionLoginDocument(state), continuation),
     Verified: async (state) => {
@@ -128,6 +131,9 @@ const actOnConnection = async (
 
   if (ConsentState.guards.Failed(state)) return failure(state.status)
 
+  if (ConsentState.guards.PermissionsUnavailable(state))
+    return connectionResponse(permissionsUnavailableDocument(state), undefined, 409)
+
   const headers = {
     'content-type': 'application/json',
     accept: 'application/json',
@@ -196,6 +202,12 @@ const signIn = async (request: Request, continuation: PendingContinuation, form:
       return failure(403, continuation)
     const error = authErrorMessages[authErrorKey(response.status, code)]
     const { state, cookies } = await loadConnection(request, continuation)
+
+    if (ConsentState.guards.PermissionsUnavailable(state))
+      return withConnectionCookies(
+        connectionResponse(permissionsUnavailableDocument(state), undefined, 409),
+        [...cookies, ...response.headers.getSetCookie()],
+      )
 
     const result = ConsentState.guards.Failed(state)
       ? failure(state.status)

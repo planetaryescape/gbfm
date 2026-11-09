@@ -1093,10 +1093,8 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
       expect((await rpc(listener.access_token, name, args)).status).toBe(401)
     }
 
-    // Metadata follows live resource policy, including null (unrestricted) and
-    // the existing drafts:write admission/downscoping exception.
     for (const [allowedScopes, expected] of [
-      [JSON.stringify(['posts:read', 'offline_access']), ['drafts:write', 'posts:read']],
+      [JSON.stringify(['posts:read', 'offline_access']), ['posts:read']],
       [
         null,
         [

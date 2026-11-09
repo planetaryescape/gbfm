@@ -86,8 +86,11 @@ posts:read drafts:write offline_access during authorization and approve fresh co
 New registrations support that permission; an older read-only registration may need
 to be replaced with a separate client registration. Refreshing a read-only token
 does not add write access.
-The token's granted scopes are authoritative: an environment whose resource policy
-is still read-only can reduce a write request to read-only access.
+The token's granted scopes are authoritative. If an environment's resource policy
+has not enabled a requested permission, authorization fails explicitly; signing
+in again or refreshing a token cannot enable it. An operator must first apply an
+approved, version-checked resource-policy rollout. Then request fresh consent
+and verify the granted scopes and discovered tools. Existing tokens never expand.
 Draft title and content must be nonblank. Content is limited to 100,000 characters,
 title to 500 and description to 2,000.
 The encoded draft-write request and every MCP response must also fit within 256 KiB;

@@ -30,6 +30,11 @@ export const ConsentState = Schema.TaggedUnion({
     clientName: Schema.String,
   },
   Failed: { status: Schema.Number },
+  PermissionsUnavailable: {
+    requested: McpScopes,
+    available: Schema.Array(Schema.String),
+    blocked: Schema.Array(Schema.String),
+  },
 })
 
 export const ProviderOutcome = Schema.TaggedUnion({

@@ -1,3 +1,4 @@
+import { McpScope } from '@gbfm/core/editorial-mcp'
 import { Option, Schema } from 'effect'
 
 import { apiRequest } from '../../server/api'
@@ -39,6 +40,42 @@ export const loadConnection = async (
 
   if (!client) return { state: ConsentState.cases.Failed.make({ status: 502 }), cookies }
   const clientName = client.client_name || 'This app'
+
+  if (continuation.scopes.some((scope) => !['posts:read', 'offline_access'].includes(scope))) {
+    const metadataResponse = await apiRequest(
+      request,
+      '/.well-known/oauth-protected-resource/mcp',
+      {
+        method: 'GET',
+      },
+    )
+
+    const metadata = metadataResponse.ok
+      ? Option.getOrNull(
+          Schema.decodeUnknownOption(
+            Schema.Struct({
+              scopes_supported: Schema.Array(McpScope),
+            }),
+          )(await metadataResponse.json().catch(() => null)),
+        )
+      : null
+
+    if (!metadata) return { state: ConsentState.cases.Failed.make({ status: 502 }), cookies }
+
+    const blocked = continuation.scopes.filter(
+      (scope) => scope !== 'offline_access' && !metadata.scopes_supported.includes(scope),
+    )
+
+    if (blocked.length)
+      return {
+        state: ConsentState.cases.PermissionsUnavailable.make({
+          requested: continuation.scopes,
+          available: metadata.scopes_supported,
+          blocked,
+        }),
+        cookies,
+      }
+  }
 
   if (!sessionResponse.ok && sessionResponse.status !== 401)
     return { state: ConsentState.cases.Failed.make({ status: 502 }), cookies }

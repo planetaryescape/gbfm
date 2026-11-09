@@ -119,7 +119,7 @@ describe('editorial OAuth provider on migrated D1', () => {
     ).toHaveProperty('_tag', 'Failure')
   }, 15_000)
 
-  test('the provider downscopes issuance to an existing read-only resource policy', async () => {
+  test('disabled draft writes are rejected before consent instead of silently downscoping', async () => {
     await using fixture = await createEditorialOAuthFixture()
     const clientId = await fixture.register()
     await fixture.db
@@ -128,20 +128,67 @@ describe('editorial OAuth provider on migrated D1', () => {
       .where(eq(oauthResource.identifier, fixture.config.mcp.resourceUrl))
     fixture.recreateAuth()
 
-    const code = await fixture.authorize(
-      clientId,
+    const authorization = await fixture.request(
+      `/oauth2/authorize?${fixture.authorizationQuery(clientId, 'posts:read offline_access drafts:write')}`,
+      undefined,
       'owner',
-      'posts:read offline_access drafts:write',
     )
 
-    const exchange = await fixture.exchange(clientId, code)
-    expect(exchange.status).toBe(200)
-    const tokens = Schema.decodeUnknownSync(OAuthTokens)(await exchange.json())
+    expect(authorization.status).toBe(400)
+    expect(await authorization.json()).toMatchObject({
+      error: 'invalid_scope',
+      error_description: expect.stringContaining('not enabled for this GBFM environment'),
+    })
+    expect(await fixture.db.select().from(oauthConsent)).toHaveLength(0)
+    expect(await fixture.db.select().from(oauthAccessToken)).toHaveLength(0)
+    expect(await fixture.db.select().from(oauthRefreshToken)).toHaveLength(0)
+
+    const tokens = Schema.decodeUnknownSync(OAuthTokens)(
+      await (await fixture.exchange(clientId, await fixture.authorize(clientId))).json(),
+    )
+
     expect((await Effect.runPromise(fixture.service.verify(tokens.access_token))).scopes).toEqual([
       'posts:read',
       'offline_access',
     ])
   })
+  test.each(['consent', 'exchange'])(
+    'policy reduction during %s cannot issue a silently reduced write grant',
+    async (stage) => {
+      await using fixture = await createEditorialOAuthFixture()
+      const clientId = await fixture.register()
+      const scope = 'posts:read drafts:write offline_access'
+
+      const authorization = await fixture.request(
+        `/oauth2/authorize?${fixture.authorizationQuery(clientId, scope)}`,
+        undefined,
+        'owner',
+      )
+
+      const continuation = new URL(authorization.headers.get('location') ?? '')
+
+      const code =
+        stage === 'exchange' ? await fixture.authorize(clientId, 'owner', scope) : undefined
+
+      await fixture.db
+        .update(oauthResource)
+        .set({ allowedScopes: JSON.stringify(['posts:read', 'offline_access']) })
+
+      const response = code
+        ? await fixture.exchange(clientId, code)
+        : await fixture.request(
+            '/oauth2/consent',
+            { accept: true, oauth_query: continuation.searchParams.toString() },
+            'owner',
+          )
+
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({ error: 'invalid_scope' })
+      expect(await fixture.db.select().from(oauthAccessToken)).toHaveLength(0)
+      expect(await fixture.db.select().from(oauthRefreshToken)).toHaveLength(0)
+    },
+  )
+
   test('draft-write scope is explicit, requires new consent and never expands existing tokens', async () => {
     await using fixture = await createEditorialOAuthFixture()
     const scope = 'posts:read offline_access drafts:write'

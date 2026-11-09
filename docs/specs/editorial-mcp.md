@@ -118,9 +118,12 @@ fields. No code path silently updates existing client scopes, consents or tokens
 New client registrations have the supported permission ceiling; older read-only
 registrations may need replacement. Each write grant requires fresh consent,
 and refreshing a read-only grant cannot add write access.
-The pinned provider intersects new token scopes with the stored resource policy;
-a write request against an existing read-only policy receives read-only tokens,
-not an unusable write token. Clients must inspect the scopes actually granted.
+GBFM rejects requested scopes that are disabled by the stored resource policy,
+including draft writes, before consent or token exchange. Protected-resource
+metadata advertises only enabled tool scopes. Clients must still inspect the
+scopes actually granted. Use the explicit, version-checked
+[permissions rollout workflow](../architecture/mcp-permissions-rollout.md), not
+ad hoc SQL or automatic resource-seed overwrites, to activate approved scopes.
 
 ## Verification and operational safety
 

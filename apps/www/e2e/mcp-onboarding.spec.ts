@@ -22,6 +22,60 @@ const signIn = async (page: Page, email = 'editor@gbfm.local') => {
 const consent = (page: Page) =>
   page.getByRole('heading', { name: 'Connect OpenCode?', exact: true })
 
+test('disabled write permissions explain the policy gate and a reviewed rollout unlocks fresh consent', async ({
+  page,
+}, info) => {
+  const policy = (mode: 'read-only' | 'draft-write') =>
+    page.request.post('/api/e2e/mcp-policy', { data: { mode } })
+
+  expect((await policy('read-only')).ok()).toBe(true)
+
+  try {
+    await page.goto('/api/e2e/mcp-start?write=1')
+    await expect(
+      page.getByRole('heading', { name: 'Requested permissions are unavailable', exact: true }),
+    ).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Not enabled', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Allow connection', exact: true })).toHaveCount(0)
+    await expect(
+      page.getByText('An operator must enable these permissions before you reconnect.', {
+        exact: false,
+      }),
+    ).toBeVisible()
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+
+    if (process.env.MCP_EVIDENCE_DIR)
+      await page.screenshot({
+        path: `${process.env.MCP_EVIDENCE_DIR}/${info.project.name}-permissions-unavailable.png`,
+        fullPage: true,
+      })
+
+    expect((await policy('draft-write')).ok()).toBe(true)
+    await page.goto('/api/e2e/mcp-start?write=1')
+    await signIn(page)
+    await expect(consent(page)).toBeVisible()
+    await expect(
+      page.getByRole('heading', { name: 'Read and draft-write access', exact: true }),
+    ).toBeVisible()
+
+    if (process.env.MCP_EVIDENCE_DIR)
+      await page.screenshot({
+        path: `${process.env.MCP_EVIDENCE_DIR}/${info.project.name}-permissions-upgrade-consent.png`,
+        fullPage: true,
+      })
+    await page.getByRole('button', { name: 'Allow connection', exact: true }).click()
+    await expect(
+      page.getByText('Connected to local GBFM. Available tools:', { exact: false }),
+    ).toBeVisible()
+    await expect(page.getByText('create_draft', { exact: false })).toBeVisible()
+    await expect(page.getByText('update_draft', { exact: false })).toBeVisible()
+  } finally {
+    expect((await policy('draft-write')).ok()).toBe(true)
+  }
+})
+
 test('a post first saved from the new-editor URL can recover a conflict in a new tab', async ({
   page,
   context,
@@ -203,9 +257,7 @@ test('signed-out users see connection context, recover from a bad password and a
 
   await page.getByRole('button', { name: 'Allow connection', exact: true }).click()
   await expect(
-    page.getByText(
-      'Connected to local GBFM. Available tools: create_draft, update_draft, list_drafts, get_post.',
-    ),
+    page.getByText('Connected to local GBFM. Available tools: list_drafts, get_post.'),
   ).toBeVisible()
 })
 

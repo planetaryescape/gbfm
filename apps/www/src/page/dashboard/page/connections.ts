@@ -26,6 +26,12 @@ export const connectionsView = (model: Model, url: string, h: HtmlBuilder<Messag
           'Apps with approved access to your Goosebumps FM posts and drafts. Their granted permissions are listed below. Disconnecting removes their access and requires a new connection to use them again.',
         ],
       ),
+      h.p(
+        [],
+        [
+          'To add permissions, request them in your app and start a fresh authorization. Check the consent screen and the granted permissions here afterward. Reconnecting or refreshing a token does not expand access. If permissions are unavailable, the environment policy must be enabled first; an older app registration may also need replacing.',
+        ],
+      ),
       Match.value(new URL(url).searchParams.get('notice')).pipe(
         Match.when('disconnected', () => h.p([h.Role('status')], ['App disconnected.'])),
         Match.when('failed', () =>

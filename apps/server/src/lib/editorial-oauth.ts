@@ -66,19 +66,14 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
       ),
     )
 
-    // Preserve legacy drafts:write downscoping, but never consent to disabled new capabilities.
     if (
       policy.disabled ||
-      scopes.some(
-        (scope) =>
-          scope !== 'drafts:write' &&
-          policy.allowedScopes !== null &&
-          !policy.allowedScopes.includes(scope),
-      )
+      scopes.some((scope) => policy.allowedScopes !== null && !policy.allowedScopes.includes(scope))
     )
       throw new APIError('BAD_REQUEST', {
         error: 'invalid_scope',
-        error_description: 'Requested MCP scope is not enabled for this resource',
+        error_description:
+          'Requested permissions are not enabled for this GBFM environment. An operator must enable them before you reconnect; signing in again cannot enable them.',
       })
 
     const [row] = await db
@@ -284,6 +279,7 @@ export const editorialOAuthPlugins = (config: ConfigService, db: DatabaseClient)
           allowedScopes: ['posts:read', 'offline_access', 'drafts:write'],
         },
       ],
+      resourceSeedMode: 'insertOnly',
       clientRegistrationDefaultResources: [mcp.resourceUrl],
       enforcePerClientResources: true,
       resourcePrivileges: () => false,

@@ -399,11 +399,7 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
               ),
             ]
               .filter(
-                (scope) =>
-                  // Match authorizeAccount's legacy draft-write downscoping exception.
-                  scope === 'drafts:write' ||
-                  policy.allowedScopes === null ||
-                  policy.allowedScopes.includes(scope),
+                (scope) => policy.allowedScopes === null || policy.allowedScopes.includes(scope),
               )
               .sort(),
             bearer_methods_supported: ['header'],

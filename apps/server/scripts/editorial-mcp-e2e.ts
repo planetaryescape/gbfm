@@ -1,12 +1,18 @@
-import { EditorialOAuthSettings, OAuthClientId } from '@gbfm/core/editorial-mcp'
+import { EditorialOAuthSettings, McpScopes, OAuthClientId } from '@gbfm/core/editorial-mcp'
 import { eq } from 'drizzle-orm'
-import { Layer, Redacted, Schema } from 'effect'
+import { Effect, Layer, Redacted, Schema } from 'effect'
 
 import { user } from '@/db/auth.schema'
-import { makeDatabaseClient } from '@/db/layer'
+import { Database, makeDatabaseClient } from '@/db/layer'
 import { postCreators, postsTable } from '@/db/post.schema'
 import { seedLocalUsers } from '@/db/seed-local-users'
 import { ConfigService, createConfig } from '@/services/config.service'
+import {
+  applyMcpPolicy,
+  inspectMcpPolicy,
+  planMcpPolicy,
+  PolicyTarget,
+} from '@/services/mcp-resource-policy'
 import { createTestWebHandler } from '@/test/http-handler'
 import { createMigratedD1Database } from '@/test/migrate-d1'
 
@@ -62,6 +68,12 @@ const app = createTestWebHandler(
 
 const authorization = new Map<string, { clientId: typeof OAuthClientId.Type; verifier: string }>()
 
+const policyTarget = PolicyTarget.make({
+  environment: 'local',
+  databaseId: 'disposable-mcp-browser-fixture',
+  resourceUrl: settings.resourceUrl,
+})
+
 let fixtureRequest = 0
 
 const request = (path: string, values: Record<string, Schema.Json>, form = false) =>
@@ -86,6 +98,50 @@ const server = Bun.serve({
   fetch: async (incoming) => {
     const url = new URL(incoming.url)
     const callback = `http://127.0.0.1:${server.port}/oauth-callback`
+
+    if (url.pathname === '/api/e2e/mcp-policy' && incoming.method === 'POST') {
+      const body = Schema.decodeUnknownSync(
+        Schema.Struct({
+          mode: Schema.Literals(['read-only', 'draft-write']),
+        }),
+      )(await incoming.json())
+
+      await app.handler(
+        new Request(`${new URL(issuer).origin}/.well-known/oauth-protected-resource/mcp`),
+      )
+
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const current = yield* inspectMcpPolicy(policyTarget)
+
+          const scopes = yield* Schema.decodeUnknownEffect(McpScopes)(
+            body.mode === 'read-only'
+              ? ['posts:read', 'offline_access']
+              : ['posts:read', 'offline_access', 'drafts:write'],
+          )
+
+          if (
+            current.scopes.length === scopes.length &&
+            current.scopes.every((scope) => scopes.includes(scope))
+          )
+            return current
+
+          const plan = yield* planMcpPolicy({
+            operationId: crypto.randomUUID(),
+            target: policyTarget,
+            actor: 'local-browser-test',
+            approval: 'disposable-local-only',
+            reason: 'Verify permission upgrade journey',
+            expectedVersion: current.version,
+            scopes,
+          })
+
+          return yield* applyMcpPolicy(policyTarget, plan)
+        }).pipe(Effect.provideService(Database, db)),
+      )
+
+      return Response.json(result, { headers: { 'cache-control': 'no-store' } })
+    }
 
     if (url.pathname === '/api/e2e/mcp-start') {
       const registered = await request('/auth/oauth2/register', {

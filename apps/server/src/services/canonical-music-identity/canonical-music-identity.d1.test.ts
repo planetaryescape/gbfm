@@ -6,6 +6,7 @@ import { and, eq } from 'drizzle-orm'
 import { Effect, Exit, Layer, Result } from 'effect'
 import { beforeAll, describe, expect, test } from 'vitest'
 
+import { session, user } from '@/db/auth.schema'
 import { Database } from '@/db/layer'
 import {
   musicAlbumArtistsTable,
@@ -23,10 +24,7 @@ import {
 } from '@/db/music-entity.schema'
 import { S3Error } from '@/errors'
 import { ConfigService, createConfig } from '@/services/config.service'
-import { deleteAlbumEffect } from '@/services/music-entity/album.service'
-import { deleteArtistEffect } from '@/services/music-entity/artist.service'
 import { deletePlaylistEffect } from '@/services/music-entity/playlist.service'
-import { deleteTrackEffect } from '@/services/music-entity/track.service'
 import {
   MusicLinkScraperService,
   MusicScraperError,
@@ -34,8 +32,9 @@ import {
   type ScrapeResult,
 } from '@/services/music-link-scraper.service'
 import { S3Service, type S3Service as S3ServiceType } from '@/services/s3.service'
-import { db } from '@/test/d1'
+import { d1, db } from '@/test/d1'
 import { withTestLayer } from '@/test/effect'
+import { createTestWebHandler } from '@/test/http-handler'
 import { makeTestS3Service } from '@/test/s3'
 
 import { MusicCoverImageFetcher, type MusicCoverImageFetch } from './artwork-delivery'
@@ -2045,16 +2044,49 @@ describe('CanonicalMusicIdentity', () => {
       }),
     )
 
-    const provideDb = Effect.provideService(Database, db)
+    const adminId = crypto.randomUUID()
+    const token = crypto.randomUUID()
+    await db.insert(user).values({
+      id: adminId,
+      name: 'Delete fixture admin',
+      email: `${adminId}@example.test`,
+      role: 'admin',
+    })
+    await db.insert(session).values({
+      id: crypto.randomUUID(),
+      userId: adminId,
+      token,
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    const web = createTestWebHandler(d1)
 
-    await Effect.runPromise(
-      Effect.all([
-        deleteArtistEffect(imported.artist.entity.id),
-        deleteAlbumEffect(imported.album.entity.id),
-        deleteTrackEffect(imported.track.entity.id),
-        deletePlaylistEffect(imported.playlist.entity.id),
-      ]).pipe(provideDb),
-    )
+    try {
+      for (const [collection, entity] of [
+        ['artists', imported.artist.entity],
+        ['albums', imported.album.entity],
+        ['tracks', imported.track.entity],
+      ] as const) {
+        const response = await web.handler(
+          new Request(`http://localhost/api/music/${collection}/${entity.id}`, {
+            method: 'DELETE',
+            headers: {
+              authorization: `Bearer ${token}`,
+              'x-gbfm-music-revision': String(entity.revision),
+              'x-gbfm-request-id': crypto.randomUUID(),
+            },
+          }),
+        )
+
+        expect(response.status).toBe(204)
+      }
+
+      await Effect.runPromise(
+        deletePlaylistEffect(imported.playlist.entity.id).pipe(Effect.provideService(Database, db)),
+      )
+    } finally {
+      await web.dispose()
+      await db.delete(user).where(eq(user.id, adminId))
+    }
 
     const deletedEntityIds = new Set(Object.values(imported).map((result) => result.entity.id))
 

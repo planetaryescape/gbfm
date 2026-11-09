@@ -48,6 +48,30 @@ def main():
     hashes = {name: hashlib.sha256(sql.encode()).hexdigest() for name, sql in sources.items()}
     tables = {r["name"] for r in query("SELECT name FROM sqlite_master WHERE type='table'")}
     if "__alchemy_migrations" not in tables:
+        diagnostic = {"migration_tables": sorted(t for t in tables if "migration" in t.lower())}
+        for table in ["d1_migrations", "__drizzle_migrations"]:
+            if table not in tables:
+                continue
+            columns = {r["name"] for r in query(f"SELECT name FROM pragma_table_info('{table}')")}
+            diagnostic[table + "_columns"] = sorted(columns)
+            if "name" in columns:
+                projection = "name, hash" if "hash" in columns else "name"
+                diagnostic[table] = query(f"SELECT {projection} FROM {table} ORDER BY id LIMIT 1000")
+        if "music_reminder" in tables:
+            diagnostic["reminder_counts"] = query(
+                "SELECT count(*) AS total, "
+                "sum(CASE WHEN COALESCE((is_sent=1 AND status='sent') OR "
+                "(is_sent=0 AND status IN ('pending','processing','failed')),0)=0 THEN 1 ELSE 0 END) "
+                "AS invalid_reminders, "
+                "sum(CASE WHEN is_sent=0 AND status IN ('pending','processing','failed') THEN 1 ELSE 0 END) "
+                "AS historical_unsent_to_fence FROM music_reminder"
+            )
+        if "music_playlists" in tables:
+            diagnostic["playlist_counts"] = query(
+                "SELECT count(*) AS invalid_playlist_revisions FROM music_playlists "
+                "WHERE typeof(revision)<>'integer' OR revision NOT BETWEEN 0 AND 9007199254740991"
+            )
+        print(json.dumps(diagnostic, indent=2))
         raise RuntimeError("Production Alchemy ledger missing; inspect legacy history before rollout")
     ledger = query("SELECT name, hash FROM __alchemy_migrations ORDER BY id")
     applied = set()

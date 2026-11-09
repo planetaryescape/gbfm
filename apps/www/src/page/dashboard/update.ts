@@ -1,8 +1,8 @@
-import { Match } from 'effect'
 import { Command, type Update } from 'foldkit'
 
 import {
   ApplyTheme,
+  DeleteRow,
   Load,
   LoadCatalogLinks,
   SavePlayerPreferences,
@@ -12,7 +12,7 @@ import {
   WriteCatalog,
 } from './command'
 import { type CatalogOperation, Message } from './message'
-import type { Model } from './model'
+import type { DeleteIntent, Model } from './model'
 import * as ApiKeys from './page/api-keys'
 import { entityRoute } from './page/catalog'
 import * as Connections from './page/connections'
@@ -21,6 +21,24 @@ import * as Playlists from './page/playlists'
 import * as Sessions from './page/sessions'
 import * as Shows from './page/shows'
 import { endpointFor } from './section'
+
+const acceptsDelete = (model: Model, intent: DeleteIntent): boolean => {
+  const pending = model.deletePending
+
+  return (
+    pending !== null &&
+    pending.busy &&
+    intent.requestId !== null &&
+    intent.principalId === model.principal.id &&
+    intent.section === model.section &&
+    intent.principalId === pending.intent.principalId &&
+    intent.section === pending.intent.section &&
+    intent.rowId === pending.intent.rowId &&
+    intent.path === pending.intent.path &&
+    intent.expectedRevision === pending.intent.expectedRevision &&
+    (pending.intent.requestId === null || intent.requestId === pending.intent.requestId)
+  )
+}
 
 const writeCatalog = (
   model: Model,
@@ -324,27 +342,82 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
       ],
     }),
     DeleteRequested: ({ id }) => {
+      const pending = model.deletePending
+
+      if (pending) {
+        if (
+          pending.busy ||
+          pending.intent.rowId !== id ||
+          pending.intent.principalId !== model.principal.id ||
+          pending.intent.section !== model.section
+        )
+          return { model }
+
+        return {
+          model: {
+            ...model,
+            phase: 'saving',
+            error: null,
+            deletePending: { ...pending, busy: true },
+          },
+          commands: [DeleteRow({ intent: pending.intent })],
+        }
+      }
+
+      if (!model.principal.id || model.phase === 'saving') return { model }
       const row = model.rows.find((item) => item.id === id)
       const actionId = row?.actionId
 
-      if (!actionId) return { model }
+      if (!actionId || (model.section !== 'favorites' && model.section !== 'reminders'))
+        return { model }
 
-      const path = Match.value(model.section).pipe(
-        Match.when('reminders', () => `/api/music-reminders/${encodeURIComponent(actionId)}`),
-        Match.when(
-          'favorites',
-          () => `/api/favorites/${actionId.split('/').map(encodeURIComponent).join('/')}`,
-        ),
-        Match.orElse(() => null),
-      )
+      const expectedRevision =
+        model.section === 'reminders' ? row.commandRevision : row.membershipRevision
 
-      return path
-        ? {
-            model: { ...model, phase: 'saving' },
-            commands: [Write({ path, method: 'DELETE', body: '' })],
-          }
-        : { model }
+      if (expectedRevision === undefined)
+        return {
+          model: {
+            ...model,
+            phase: 'error',
+            error: 'Reload to observe the saved item before removing it.',
+          },
+        }
+
+      const intent: DeleteIntent = {
+        principalId: model.principal.id,
+        section: model.section,
+        rowId: id,
+        path:
+          model.section === 'reminders'
+            ? `/api/music-reminders/${encodeURIComponent(actionId)}`
+            : `/api/favorites/${actionId.split('/').map(encodeURIComponent).join('/')}`,
+        expectedRevision,
+        requestId: null,
+      }
+
+      return {
+        model: { ...model, phase: 'saving', error: null, deletePending: { intent, busy: true } },
+        commands: [DeleteRow({ intent })],
+      }
     },
+    DeleteFailed: ({ intent, message }) =>
+      acceptsDelete(model, intent)
+        ? {
+            model: {
+              ...model,
+              phase: 'error',
+              error: message,
+              deletePending: { intent, busy: false },
+            },
+          }
+        : { model },
+    DeleteCompleted: ({ intent }) =>
+      acceptsDelete(model, intent)
+        ? {
+            model: { ...model, phase: 'loading', error: null, deletePending: null },
+            commands: [Load({ path: endpointFor(intent.section) ?? intent.path })],
+          }
+        : { model },
     Saved: () => {
       const path = endpointFor(model.section)
 

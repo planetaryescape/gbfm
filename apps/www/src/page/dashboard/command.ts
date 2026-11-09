@@ -6,6 +6,7 @@ import { Command } from 'foldkit'
 import { disconnected, SpotifyConnection } from '../../spotify/connection'
 import { readTheme, saveTheme, Theme } from '../../theme'
 import { CatalogOperation, Message } from './message'
+import { DeleteIntent } from './model'
 import type * as ApiKeys from './page/api-keys'
 import { catalogPayload, Kind } from './page/catalog'
 import type * as Sessions from './page/sessions'
@@ -155,6 +156,31 @@ export const WriteCatalog = Command.define('Catalog.Write', {
         ),
       ),
     ),
+})
+
+/** Pins the generated UUID to both success and uncertain failure for deliberate retries. */
+export const DeleteRow = Command.define('Dashboard.DeleteRow', {
+  args: { intent: DeleteIntent },
+  messages: [Message.DeleteCompleted, Message.DeleteFailed],
+  execute: ({ intent }) =>
+    Effect.gen(function* () {
+      const requestId = intent.requestId ?? (yield* Effect.sync(() => crypto.randomUUID()))
+      const pinned = { ...intent, requestId }
+
+      return yield* DashboardService.pipe(
+        Effect.flatMap((service) =>
+          service.request({
+            path: intent.path,
+            method: 'DELETE',
+            body: JSON.stringify({ requestId, expectedRevision: intent.expectedRevision }),
+          }),
+        ),
+        Effect.as(Message.DeleteCompleted({ intent: pinned })),
+        Effect.catch((error) =>
+          Effect.succeed(Message.DeleteFailed({ intent: pinned, message: error.message })),
+        ),
+      )
+    }),
 })
 
 // Dashboard command arguments can contain account data. Parent telemetry must mark command spans private.

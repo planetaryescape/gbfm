@@ -24,6 +24,12 @@ export const collection = (model: Model, h: HtmlBuilder<Message>) => {
         : h.ul(
             [h.Class('dashboard-list dashboard-library-list')],
             model.rows.map((row) => {
+              const pending =
+                model.deletePending?.intent.rowId === row.id ? model.deletePending : null
+
+              const retry = pending !== null && !pending.busy
+              const label = retry ? `Retry removal of ${row.title}` : `Remove ${row.title}`
+
               const content = [
                 ...(hasArtwork
                   ? [
@@ -48,17 +54,24 @@ export const collection = (model: Model, h: HtmlBuilder<Message>) => {
                   row.href
                     ? h.a([h.Href(row.href), h.Class('dashboard-library-item')], content)
                     : h.div([h.Class('dashboard-library-item')], content),
-                  model.section === 'favorites' || model.section === 'reminders'
+                  (model.section === 'favorites' || model.section === 'reminders') &&
+                  (row.actionId !== null || pending !== null)
                     ? h.button(
                         [
                           h.Class('dashboard-button-quiet dashboard-remove'),
-                          h.AriaLabel(`Remove ${row.title}`),
-                          h.Title(`Remove ${row.title}`),
+                          h.AriaLabel(label),
+                          h.Title(label),
+                          h.Disabled(
+                            model.phase === 'saving' || (model.deletePending !== null && !retry),
+                          ),
                           h.OnClick(Message.DeleteRequested({ id: row.id })),
                         ],
                         [
                           lucide('M18 6 6 18 M6 6l12 12', 'dashboard-remove-icon'),
-                          h.span([h.Class('dashboard-remove-label')], ['Remove']),
+                          h.span(
+                            [h.Class('dashboard-remove-label')],
+                            [retry ? 'Retry removal' : 'Remove'],
+                          ),
                         ],
                       )
                     : h.empty,
@@ -66,6 +79,16 @@ export const collection = (model: Model, h: HtmlBuilder<Message>) => {
               )
             }),
           ),
+      model.deletePending && !model.rows.some((row) => row.id === model.deletePending?.intent.rowId)
+        ? h.button(
+            [
+              h.Class('dashboard-button-quiet'),
+              h.Disabled(model.deletePending.busy),
+              h.OnClick(Message.DeleteRequested({ id: model.deletePending.intent.rowId })),
+            ],
+            ['Retry pending removal'],
+          )
+        : h.empty,
     ],
   )
 }

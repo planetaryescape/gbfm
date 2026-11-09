@@ -26,6 +26,7 @@ export const initialModel = (section: string, principal: Principal): Model => ({
   fields: {},
   toggles: {},
   error: null,
+  deletePending: null,
   spotify: disconnected,
   spotifyRequestId: 0,
   spotifyPending: null,

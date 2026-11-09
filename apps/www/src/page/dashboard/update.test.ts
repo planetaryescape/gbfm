@@ -1,10 +1,18 @@
-import { Effect } from 'effect'
+import { Effect, Layer, ManagedRuntime, Predicate } from 'effect'
+import type { Command } from 'foldkit'
+import { Scene } from 'foldkit/test'
 import { describe, expect, it } from 'vitest'
 
+import { SpotifyConnectionLive } from '../../spotify/connection'
+import { collection } from './collection'
+import type { Services } from './command'
 import { emptyDocument, parseDashboardDocument } from './document'
 import { init, initialModel } from './init'
 import { Message } from './message'
+import { KeyServiceLive } from './page/api-keys'
+import { SessionServiceLive } from './page/sessions'
 import { endpointFor } from './section'
+import { makeDashboardServiceLayer } from './service'
 import { update } from './update'
 
 const member = { id: 'user-1', role: 'user' as const }
@@ -128,4 +136,191 @@ describe('dashboard submodel', () => {
       ).model.rows[0],
     ).toMatchObject({ id: 'r1', title: 'Album', detail: 'Artist' })
   })
+
+  it.each(['audio', 'show', 'reminder'] as const)(
+    'deletes a %s with its observed revision and replays the same intent after an uncertain response and refreshed rows',
+    async (kind) => {
+      const id = 'e6d841a8-68fd-4351-8478-7fe248a9520e'
+      const section = kind === 'reminder' ? 'reminders' : 'favorites'
+      const listing = kind === 'reminder' ? '/api/music-reminders' : '/api/favorites'
+      const path = `${listing}/${kind === 'show' ? 'show/' : ''}${id}`
+      const writes: Array<{ path: string; body: string }> = []
+      let revision = kind === 'reminder' ? 3 : 27
+      let cancelled = false
+      const originalRevision = revision
+      const content = { id, title: 'Fixture', slug: 'fixture', thumbnailUrl: null }
+
+      const document = () =>
+        parseDashboardDocument(
+          listing,
+          kind === 'reminder'
+            ? {
+                success: true,
+                total: 1,
+                reminders: [
+                  {
+                    id,
+                    userId: member.id,
+                    musicTitle: 'Fixture',
+                    artistName: 'Artist',
+                    musicUrl: 'https://example.test/music',
+                    albumCoverUrl: null,
+                    reminderDate: '2026-11-12T10:00:00Z',
+                    notes: null,
+                    status: 'pending',
+                    isSent: false,
+                    commandRevision: revision,
+                    dispatchState: cancelled ? 'cancelled' : 'open',
+                    createdAt: '2026-11-09T10:00:00Z',
+                    updatedAt: '2026-11-09T10:00:00Z',
+                  },
+                ],
+              }
+            : {
+                success: true,
+                total: 1,
+                favorites: [
+                  {
+                    id: 'favorite-row',
+                    userId: member.id,
+                    membershipRevision: revision,
+                    audioId: kind === 'audio' ? id : null,
+                    showId: kind === 'show' ? id : null,
+                    createdAt: '2026-11-09T10:00:00Z',
+                    audio:
+                      kind === 'audio'
+                        ? { ...content, type: 'mix', url: 'https://example.test/mix.mp3' }
+                        : null,
+                    show: kind === 'show' ? content : null,
+                  },
+                ],
+              },
+        )
+
+      const fetcher: typeof fetch = async (input, options) => {
+        expect(options?.method).toBe('DELETE')
+        expect(new Headers(options?.headers).get('content-type')).toBe('application/json')
+
+        if (!(input instanceof URL) || !Predicate.isString(options?.body))
+          throw new Error('Expected a URL and JSON request body')
+        writes.push({ path: input.href, body: options.body })
+
+        if (writes.length === 1) throw new TypeError('Response lost after commit')
+
+        return new Response(null, { status: 204 })
+      }
+
+      const layer = Layer.mergeAll(
+        makeDashboardServiceLayer(fetcher),
+        SpotifyConnectionLive,
+        KeyServiceLive,
+        SessionServiceLive,
+      )
+
+      const runtime = ManagedRuntime.make(layer)
+
+      const run = (command: Command.Command<Message, never, Services> | undefined) => {
+        if (!command) throw new Error('Expected dashboard command')
+
+        return runtime.runPromise(command.effect)
+      }
+
+      try {
+        const loaded = update(
+          initialModel(section, member),
+          Message.Loaded({
+            document: await Effect.runPromise(document()),
+          }),
+        ).model
+
+        const rowId = loaded.rows[0]?.id
+
+        if (!rowId) throw new Error('Expected fixture row')
+        const pending = update(loaded, Message.DeleteRequested({ id: rowId }))
+        expect(
+          update(pending.model, Message.DeleteRequested({ id: rowId })).commands,
+        ).toBeUndefined()
+        Scene.scene(
+          { update, view: collection },
+          Scene.given(pending.model),
+          Scene.expect(Scene.role('button', { name: 'Remove Fixture' })).toBeDisabled(),
+        )
+        const failure = await run(pending.commands?.[0])
+        expect(writes[0]?.path).toBe(`http://localhost${path}`)
+        expect(JSON.parse(writes[0]?.body ?? 'null')).toEqual({
+          expectedRevision: originalRevision,
+          requestId: expect.stringMatching(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+          ),
+        })
+        const failed = update(pending.model, failure).model
+        revision += 11
+        cancelled = kind === 'reminder'
+
+        const refreshed = update(
+          failed,
+          Message.Loaded({
+            document: await Effect.runPromise(document()),
+          }),
+        ).model
+
+        Scene.scene(
+          { update, view: collection },
+          Scene.given(refreshed),
+          Scene.expect(Scene.role('button', { name: 'Retry removal of Fixture' })).toBeEnabled(),
+        )
+        const missingRow = update(refreshed, Message.Loaded({ document: emptyDocument })).model
+        Scene.scene(
+          { update, view: collection },
+          Scene.given(missingRow),
+          Scene.expect(Scene.role('button', { name: 'Retry pending removal' })).toBeEnabled(),
+        )
+        const retry = update(missingRow, Message.DeleteRequested({ id: rowId }))
+        const completed = await run(retry.commands?.[0])
+        expect(writes[1]).toEqual(writes[0])
+
+        if (!Predicate.isTagged(completed, 'DeleteCompleted'))
+          throw new Error('Expected acknowledged deletion')
+        const otherOwner = { ...retry.model, principal: { ...member, id: 'other-owner' } }
+        expect(update(otherOwner, completed).model).toBe(otherOwner)
+        expect(
+          update(
+            retry.model,
+            Message.DeleteCompleted({
+              intent: { ...completed.intent, requestId: 'e85e2a1b-1b97-4d87-9614-1fec238f9207' },
+            }),
+          ).model,
+        ).toBe(retry.model)
+        const saved = update(retry.model, completed)
+        expect(saved.model.deletePending).toBeNull()
+        expect(update(saved.model, completed).model).toBe(saved.model)
+        expect(saved.model.phase).toBe('loading')
+        expect(saved.commands?.[0]?.args).toEqual({
+          path: kind === 'reminder' ? '/api/music-reminders' : '/api/favorites?limit=25&offset=0',
+        })
+      } finally {
+        await runtime.dispose()
+      }
+    },
+  )
+
+  it.each(['reminders', 'favorites'])(
+    'does not fabricate a missing %s revision or issue a removal',
+    (section) => {
+      const loaded = update(
+        initialModel(section, member),
+        Message.Loaded({
+          document: {
+            ...emptyDocument,
+            rows: [{ id: 'r1', title: 'Fixture', detail: '', href: null, actionId: 'r1' }],
+          },
+        }),
+      ).model
+
+      const result = update(loaded, Message.DeleteRequested({ id: 'r1' }))
+      expect(result.commands).toBeUndefined()
+      expect(result.model.phase).toBe('error')
+      expect(result.model.deletePending).toBeNull()
+    },
+  )
 })

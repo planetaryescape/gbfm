@@ -1,3 +1,34 @@
+# [2.128.0](https://github.com/planetaryescape/gbfm/compare/v2.127.0...v2.128.0) (2026-11-09)
+
+
+### Bug Fixes
+
+* **mcp:** address admin-read review findings ([2d47372](https://github.com/planetaryescape/gbfm/commit/2d4737272973de24d3df6dd4679006a279de158a))
+* **mcp:** address listening review diagnostics and evidence ([fb21633](https://github.com/planetaryescape/gbfm/commit/fb21633de80247fe06bf77f541bd845240677e9a))
+* **mcp:** address public content review feedback ([e4b9fc7](https://github.com/planetaryescape/gbfm/commit/e4b9fc7d057bae2785b16c85d1e79ec25d490e54))
+* **mcp:** admit id-less calls through the permission guard ([2d1b559](https://github.com/planetaryescape/gbfm/commit/2d1b5592826e66e3a198dc117c153e062264fc5c))
+* **mcp:** advertise only resource-enabled tool scopes ([1d4cf62](https://github.com/planetaryescape/gbfm/commit/1d4cf62ff0cbfa59eeab52c8d3b7da24bd28cce2))
+* **mcp:** await resource policy initialization for discovery ([2fa6712](https://github.com/planetaryescape/gbfm/commit/2fa6712689521ab8d48085873c845b63ea4c2ffa))
+* **mcp:** bound reminder envelopes and diagnose read failures ([c223f89](https://github.com/planetaryescape/gbfm/commit/c223f89f275ffea9e8193a040e4ae04de9a00368))
+* **mcp:** distinguish user and artist profile identities ([113455e](https://github.com/planetaryescape/gbfm/commit/113455ecaf71788bbd405adcdbe193858ce18999))
+* **mcp:** enforce live scope admission before consent and dispatch ([3686ad6](https://github.com/planetaryescape/gbfm/commit/3686ad6f2b429e1586ab786c54b9dd165dc18ee4))
+* **mcp:** isolate oversized saved-item summaries ([aa522bc](https://github.com/planetaryescape/gbfm/commit/aa522bc430a8a1a4e2ab2f9d9489284272459505))
+* **mcp:** strengthen composed research evidence and guide ([4952a03](https://github.com/planetaryescape/gbfm/commit/4952a03a4d73afab45feb72c6b893ffce7be7631))
+
+
+### Features
+
+* **mcp:** add bounded owner favorites and subscription reads ([7a40cb2](https://github.com/planetaryescape/gbfm/commit/7a40cb24b5388532ec14bb7b01f2c4361f4fd5e7))
+* **mcp:** add bounded private listening reads ([d340af3](https://github.com/planetaryescape/gbfm/commit/d340af34ed52321024e59b42447f233655636cd6))
+* **mcp:** add bounded public editorial and show reads ([07ba384](https://github.com/planetaryescape/gbfm/commit/07ba384a2d4e942e079733c32cb1d970e577d8e5))
+* **mcp:** add bounded public research metadata reads ([9776269](https://github.com/planetaryescape/gbfm/commit/9776269ddb71ad1b291ec16441eea316be2ca824))
+* **mcp:** add least-privilege admin publishing overview ([16f1de1](https://github.com/planetaryescape/gbfm/commit/16f1de17501d1b1a5a68bf5a377d428348d39ab6))
+* **mcp:** add owner-bounded reminder reads ([23c93d7](https://github.com/planetaryescape/gbfm/commit/23c93d71d55707710190f62b4f3617102fd609fc))
+* **mcp:** compose owner and admin reads with persisted OAuth ([8dbd4f4](https://github.com/planetaryescape/gbfm/commit/8dbd4f4863ddab00238f955913ca064629e7b321))
+* **mcp:** compose public content reads with persisted OAuth ([af7c2be](https://github.com/planetaryescape/gbfm/commit/af7c2be60591f33e974515b767db4646de28863c))
+* **mcp:** compose public research reads with persisted OAuth ([8beaa54](https://github.com/planetaryescape/gbfm/commit/8beaa546e279edf093238220ed2be6dbb4b616b9))
+* **mcp:** establish scope-aware composition foundation ([2b97cf2](https://github.com/planetaryescape/gbfm/commit/2b97cf204c18ee2e22f21ed1a02782cfea532ef5))
+
 # [2.127.0](https://github.com/planetaryescape/gbfm/compare/v2.126.0...v2.127.0) (2026-11-07)
 
 

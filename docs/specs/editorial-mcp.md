@@ -32,13 +32,23 @@ Better Auth owns OAuth protocol validation and token issuance. GBFM checks the a
 
 Browser login, consent and connection management use the existing WWW app. OAuth discovery and protocol endpoints route to the API. Public URL configuration, rather than arbitrary forwarded headers, determines issuer and resource identity.
 
-Connection screens use a bundled OpenCode logo when the signed, provider-validated
-client metadata declares the supported official website and logo URL. Unknown or
-missing metadata keeps the escaped app-initial fallback. The artwork comes from
-[OpenCode's official brand assets](https://opencode.ai/brand/files/opencode-logo-dark.svg)
-and follows its dark-background colors and 4:5 proportions. No remote images are
-fetched during sign-in and no image-proxy or CSP exception is added. Client names
-and logos remain self-reported, not verified identity or endorsement.
+Connection screens display any client's valid HTTPS `logo_uri` from the signed,
+provider-validated client metadata, without identifying apps by name or maintaining
+a brand allowlist. Credentials, fragments, non-default ports, literal IP addresses
+and local/reserved hostnames are rejected. GBFM never fetches or proxies these URLs
+server-side. A per-response CSP permits images only from that logo's origin; default
+denial, form restrictions and frame protections remain. Redirects to other origins
+are blocked. Browser DNS and private-network controls still apply; hostname checks
+are not a guarantee of public DNS resolution.
+
+The browser requests the image with no referrer. No GBFM session or OAuth data is
+forwarded, although the image host may receive its own cookies under the browser's
+third-party-cookie policy. Loading does not require image-host CORS support. A fixed,
+hash-authorized inline enhancement reveals successfully loaded images and leaves
+escaped initials visible during loading, on failure, or when JavaScript is disabled.
+No arbitrary script URLs, inline event handlers or broad script allowance is added.
+Consent forms remain server-driven and usable without JavaScript. Client names and
+logos remain self-reported, not verified identity or endorsement.
 
 ## Read-only first slice
 

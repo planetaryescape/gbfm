@@ -48,12 +48,12 @@ const connectionPage = async (request: Request, continuation: PendingContinuatio
     PermissionsUnavailable: async (state) =>
       connectionResponse(permissionsUnavailableDocument(state), undefined, 409),
     LoginRequired: async (state) =>
-      connectionResponse(connectionLoginDocument(state), continuation),
+      connectionResponse(connectionLoginDocument(state), continuation, 200, state.clientLogo),
     Verified: async (state) => {
       if (!consentFormActionSource(state)) return failure(502)
 
       if (url.pathname === '/connect/gbfm/consent')
-        return connectionResponse(consentDocument(state), continuation)
+        return connectionResponse(consentDocument(state), continuation, 200, state.clientLogo)
 
       const response = await apiRequest(request, '/auth/oauth2/continue', {
         method: 'POST',
@@ -74,6 +74,8 @@ const connectionPage = async (request: Request, continuation: PendingContinuatio
             error: 'For this connection, the app requires you to sign in again.',
           }),
           continuation,
+          200,
+          state.clientLogo,
         ),
       )
     },
@@ -215,6 +217,7 @@ const signIn = async (request: Request, continuation: PendingContinuation, form:
           connectionLoginDocument({ ...state, email: credentials.email, error }),
           continuation,
           response.status,
+          state.clientLogo,
         )
 
     return withConnectionCookies(result, [...cookies, ...response.headers.getSetCookie()])

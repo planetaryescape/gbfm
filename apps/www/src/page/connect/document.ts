@@ -1,7 +1,7 @@
 import { Match } from 'effect'
 
 import { brandWordmark } from './brand'
-import type { ClientBrand } from './client-brand'
+import type { ClientLogoUrl } from './client-logo'
 import type { PendingContinuation } from './domain'
 import { connectionPair, icons } from './icons'
 import { connectionStyles } from './styles'
@@ -13,8 +13,11 @@ export const connectionDocument = (title: string, content: string) => `<!doctype
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="strict-origin"><meta name="robots" content="noindex,nofollow"><title>${escape(title)} | Goosebumps FM</title>
 <style>${connectionStyles}</style></head><body><main><header><a class="brand" href="/" aria-label="Goosebumps FM">${brandWordmark}</a><p class="eyebrow">App connection</p></header>${content}</main></body></html>`
 
-export const appIdentity = (name: string, brand?: ClientBrand) =>
-  connectionPair(escape(Array.from(name.trim())[0]?.toUpperCase() ?? '?'), brand)
+export const appIdentity = (name: string, logo?: ClientLogoUrl) =>
+  connectionPair(
+    escape(Array.from(name.trim())[0]?.toUpperCase() ?? '?'),
+    logo ? escape(logo) : undefined,
+  )
 
 export const connectionErrorDocument = (status: number, continuation?: PendingContinuation) => {
   const title = Match.value(status).pipe(

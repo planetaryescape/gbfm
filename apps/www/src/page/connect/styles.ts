@@ -26,8 +26,8 @@ header { margin-bottom: 32px; }
 .tile { display: grid; place-items: center; width: 56px; height: 56px; border: 1px solid var(--border); border-radius: ${radii.surface}px; color: var(--foreground); }
 .tile svg { width: 44px; height: auto; }
 .tile.app { font-size: 24px; background: var(--accent); border-color: var(--accent); color: var(--background); }
-.tile.app-logo { background: #0B0B0B; border-color: var(--border); }
-.tile.app-logo svg { width: 24px; height: 30px; }
+.tile.app-logo { background: var(--background); border-color: var(--border); color: var(--foreground); }
+.tile.app-logo img { width: 32px; height: 32px; object-fit: contain; }
 .icon { width: 18px; height: 18px; flex: none; }
 .row, .identity, li { display: flex; align-items: flex-start; gap: 10px; }
 .row .icon, .identity .icon, li .icon { margin-top: 3px; }

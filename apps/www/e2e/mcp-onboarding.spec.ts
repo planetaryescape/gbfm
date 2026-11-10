@@ -11,6 +11,15 @@ test.beforeEach(async ({ context }, info) => {
   )
 
   await context.setExtraHTTPHeaders({ 'cf-connecting-ip': `198.18.${subnet}.${fixtureClient++}` })
+  await context.route(
+    (url) => !url.hostname.endsWith('.localhost'),
+    (route) =>
+      route.continue({
+        headers: Object.fromEntries(
+          Object.entries(route.request().headers()).filter(([name]) => name !== 'cf-connecting-ip'),
+        ),
+      }),
+  )
 })
 
 const signIn = async (page: Page, email = 'editor@gbfm.local') => {
@@ -21,6 +30,83 @@ const signIn = async (page: Page, email = 'editor@gbfm.local') => {
 
 const consent = (page: Page) =>
   page.getByRole('heading', { name: 'Connect OpenCode?', exact: true })
+
+const otherClientLogo = 'https://assets.example.com/client-logo.svg'
+
+const logoSvg =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="14" fill="#77ddaa"/></svg>'
+
+test('any client can display its supplied logo without leaking the signed continuation', async ({
+  page,
+}, info) => {
+  const imageRequests: Array<Record<string, string>> = []
+  await page.route(otherClientLogo, async (route) => {
+    imageRequests.push(route.request().headers())
+    await route.fulfill({ contentType: 'image/svg+xml', body: logoSvg })
+  })
+  const document = await page.goto('/api/e2e/mcp-start?other-app=1')
+  await expect(
+    page.getByRole('heading', { name: 'Connect Another Editor', exact: true }),
+  ).toBeVisible()
+  await expect(page.locator('[data-client-logo]')).toBeVisible()
+  await expect(page.locator('[data-client-initial]')).toBeHidden()
+  expect((await document?.allHeaders())?.['content-security-policy']).toContain(
+    'img-src https://assets.example.com',
+  )
+  expect(imageRequests.length).toBeGreaterThan(0)
+  expect(imageRequests[0]?.referer).toBeUndefined()
+  expect(imageRequests[0]?.authorization).toBeUndefined()
+  expect(imageRequests[0]?.cookie).toBeUndefined()
+  await signIn(page)
+  await expect(
+    page.getByRole('heading', { name: 'Connect Another Editor?', exact: true }),
+  ).toBeVisible()
+  await expect(page.locator('[data-client-logo]')).toBeVisible()
+  await expect(page.getByText('not verified by Goosebumps FM', { exact: false })).toBeVisible()
+
+  if (process.env.MCP_EVIDENCE_DIR)
+    await page.screenshot({
+      path: `${process.env.MCP_EVIDENCE_DIR}/${info.project.name}-generic-client-logo.png`,
+      fullPage: true,
+    })
+  await page.getByRole('button', { name: 'Allow connection', exact: true }).click()
+  await expect(
+    page.getByText('Connected to local GBFM. Available tools:', { exact: false }),
+  ).toBeVisible()
+})
+
+test('a failed logo leaves the initial visible and does not block consent', async ({ page }) => {
+  await page.route(otherClientLogo, (route) => route.fulfill({ status: 404, body: 'Not found' }))
+  await page.goto('/api/e2e/mcp-start?other-app=1')
+  await expect(page.locator('[data-client-initial]')).toBeVisible()
+  await expect(page.locator('[data-client-initial]')).toHaveText('A')
+  await expect(page.locator('[data-client-logo]')).toHaveCount(0)
+  await signIn(page)
+  await expect(
+    page.getByRole('heading', { name: 'Connect Another Editor?', exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Allow connection', exact: true })).toBeVisible()
+  await expect(page.locator('[data-client-initial]')).toBeVisible()
+})
+
+test.describe('without JavaScript', () => {
+  test.use({ javaScriptEnabled: false })
+  test('initials and the full server-driven consent journey still work', async ({ page }) => {
+    await page.route(otherClientLogo, (route) =>
+      route.fulfill({ contentType: 'image/svg+xml', body: logoSvg }),
+    )
+    await page.goto('/api/e2e/mcp-start?other-app=1')
+    await expect(page.locator('[data-client-initial]')).toBeVisible()
+    await expect(page.locator('[data-client-logo]')).toBeHidden()
+    await signIn(page)
+    await expect(page.getByRole('button', { name: 'Allow connection', exact: true })).toBeVisible()
+    await expect(page.locator('[data-client-initial]')).toBeVisible()
+    await page.getByRole('button', { name: 'Allow connection', exact: true }).click()
+    await expect(
+      page.getByText('Connected to local GBFM. Available tools:', { exact: false }),
+    ).toBeVisible()
+  })
+})
 
 test('disabled write permissions explain the policy gate and a reviewed rollout unlocks fresh consent', async ({
   page,
@@ -216,7 +302,7 @@ test('signed-out users see connection context, recover from a bad password and a
 }, info) => {
   await page.goto('/api/e2e/mcp-start')
   await expect(page.getByRole('heading', { name: 'Connect OpenCode', exact: true })).toBeVisible()
-  await expect(page.locator('[data-client-brand="opencode"] svg')).toBeVisible()
+  await expect(page.locator('[data-client-logo]')).toBeVisible()
   await expect(page.getByText('You will review access next', { exact: false })).toBeVisible()
   await expect(page.getByRole('navigation')).toHaveCount(0)
   await page.getByRole('textbox', { name: 'Email', exact: true }).focus()
@@ -240,7 +326,7 @@ test('signed-out users see connection context, recover from a bad password and a
   await signIn(page)
   await expect(consent(page)).toBeVisible()
   await expect(page.getByText('editor@gbfm.local', { exact: false })).toBeVisible()
-  await expect(page.locator('[data-client-brand="opencode"] svg')).toBeVisible()
+  await expect(page.locator('[data-client-logo]')).toBeVisible()
   await expect(page.getByText('(app on this computer)', { exact: false })).toBeVisible()
   await expect(
     page.getByText('not verified by Goosebumps FM', {

@@ -145,9 +145,10 @@ const server = Bun.serve({
 
     if (url.pathname === '/api/e2e/mcp-start') {
       const registered = await request('/auth/oauth2/register', {
-        client_name: 'OpenCode',
-        client_uri: 'https://opencode.ai',
-        logo_uri: 'https://opencode.ai/web-app-manifest-512x512.png',
+        client_name: url.searchParams.has('other-app') ? 'Another Editor' : 'OpenCode',
+        logo_uri: url.searchParams.has('other-app')
+          ? 'https://assets.example.com/client-logo.svg'
+          : 'https://opencode.ai/web-app-manifest-512x512.png',
         token_endpoint_auth_method: 'none',
         application_type: 'native',
         redirect_uris: [callback],

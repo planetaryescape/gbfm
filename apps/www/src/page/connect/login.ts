@@ -1,23 +1,23 @@
-import type { ClientBrand } from './client-brand'
+import type { ClientLogoUrl } from './client-logo'
 import { appIdentity, connectionDocument, escape } from './document'
 import type { PendingContinuation } from './domain'
 
 export const connectionLoginDocument = ({
   continuation,
   clientName,
-  clientBrand,
+  clientLogo,
   email = '',
   error,
 }: {
   readonly continuation: PendingContinuation
   readonly clientName: string
-  readonly clientBrand?: ClientBrand
+  readonly clientLogo?: ClientLogoUrl
   readonly email?: string
   readonly error?: string
 }) =>
   connectionDocument(
     `Sign in to connect ${clientName}`,
-    `${appIdentity(clientName, clientBrand)}<h1>Connect ${escape(clientName)}</h1>
+    `${appIdentity(clientName, clientLogo)}<h1>Connect ${escape(clientName)}</h1>
 <p class="muted">Sign in with a creator, editor or admin account. You will review access next.</p>
 ${error ? `<p class="error" role="alert">${escape(error)}</p>` : ''}
 <form method="post" action="/connect/gbfm/sign-in">

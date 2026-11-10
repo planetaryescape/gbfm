@@ -1,6 +1,7 @@
 import * as Server from 'foldkit/experimental/server'
 
 import { consentFormActionSource } from './callback'
+import { type ClientLogoUrl, clientLogoScriptHash } from './client-logo'
 import { connectionErrorDocument } from './document'
 import type { PendingContinuation } from './domain'
 
@@ -8,8 +9,13 @@ export const connectionResponse = (
   document: string,
   continuation?: PendingContinuation,
   status = 200,
+  logo?: ClientLogoUrl,
 ) => {
   const callback = continuation ? consentFormActionSource({ continuation }) : null
+
+  const logoPolicy = logo
+    ? `; img-src ${new URL(logo).origin}; script-src '${clientLogoScriptHash}'`
+    : ''
 
   return Server.Responded(
     new Response(document, {
@@ -18,7 +24,7 @@ export const connectionResponse = (
         'content-type': 'text/html; charset=utf-8',
         'cache-control': 'private, no-store',
         'referrer-policy': 'strict-origin',
-        'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; form-action 'self'${callback ? ` ${callback}` : ''}; base-uri 'none'; frame-ancestors 'none'`,
+        'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; form-action 'self'${callback ? ` ${callback}` : ''}; base-uri 'none'; frame-ancestors 'none'${logoPolicy}`,
       },
     }),
   )

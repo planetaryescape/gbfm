@@ -2,13 +2,12 @@ import { McpScope } from '@gbfm/core/editorial-mcp'
 import { Option, Schema } from 'effect'
 
 import { apiRequest } from '../../server/api'
-import { identifyClientBrand } from './client-brand'
+import { parseClientLogo } from './client-logo'
 import { ConsentState, type PendingContinuation } from './domain'
 
 const Client = Schema.Struct({
   client_name: Schema.optional(Schema.String),
-  client_uri: Schema.optional(Schema.String),
-  logo_uri: Schema.optional(Schema.String),
+  logo_uri: Schema.optional(Schema.Unknown),
 })
 
 const Session = Schema.Struct({
@@ -44,9 +43,9 @@ export const loadConnection = async (
   )
 
   if (!client) return { state: ConsentState.cases.Failed.make({ status: 502 }), cookies }
-  const clientBrand = identifyClientBrand(client)
-  const clientName = clientBrand === 'opencode' ? 'OpenCode' : client.client_name || 'This app'
-  const identity = clientBrand ? { clientName, clientBrand } : { clientName }
+  const clientName = client.client_name || 'This app'
+  const clientLogo = Option.getOrUndefined(parseClientLogo(client.logo_uri))
+  const identity = clientLogo ? { clientName, clientLogo } : { clientName }
 
   if (continuation.scopes.some((scope) => !['posts:read', 'offline_access'].includes(scope))) {
     const metadataResponse = await apiRequest(

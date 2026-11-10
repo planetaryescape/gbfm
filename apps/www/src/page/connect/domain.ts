@@ -1,6 +1,8 @@
 import { McpScopes, OAuthClientId } from '@gbfm/core/editorial-mcp'
 import { Option, Schema } from 'effect'
 
+import { ClientBrand } from './client-brand'
+
 export const SignedOAuthQuery = Schema.NonEmptyString.check(Schema.isMaxLength(16384)).pipe(
   Schema.brand('SignedOAuthQuery'),
 )
@@ -23,11 +25,13 @@ export const ConsentState = Schema.TaggedUnion({
   Verified: {
     continuation: Continuation.cases.PendingVerification,
     clientName: Schema.String,
+    clientBrand: Schema.optionalKey(ClientBrand),
     account: Schema.Struct({ name: Schema.String, email: Schema.String }),
   },
   LoginRequired: {
     continuation: Continuation.cases.PendingVerification,
     clientName: Schema.String,
+    clientBrand: Schema.optionalKey(ClientBrand),
   },
   Failed: { status: Schema.Number },
   PermissionsUnavailable: {

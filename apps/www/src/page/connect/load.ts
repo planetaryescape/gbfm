@@ -2,9 +2,14 @@ import { McpScope } from '@gbfm/core/editorial-mcp'
 import { Option, Schema } from 'effect'
 
 import { apiRequest } from '../../server/api'
+import { identifyClientBrand } from './client-brand'
 import { ConsentState, type PendingContinuation } from './domain'
 
-const Client = Schema.Struct({ client_name: Schema.optional(Schema.String) })
+const Client = Schema.Struct({
+  client_name: Schema.optional(Schema.String),
+  client_uri: Schema.optional(Schema.String),
+  logo_uri: Schema.optional(Schema.String),
+})
 
 const Session = Schema.Struct({
   user: Schema.Struct({ name: Schema.String, email: Schema.String }),
@@ -39,7 +44,9 @@ export const loadConnection = async (
   )
 
   if (!client) return { state: ConsentState.cases.Failed.make({ status: 502 }), cookies }
-  const clientName = client.client_name || 'This app'
+  const clientBrand = identifyClientBrand(client)
+  const clientName = clientBrand === 'opencode' ? 'OpenCode' : client.client_name || 'This app'
+  const identity = clientBrand ? { clientName, clientBrand } : { clientName }
 
   if (continuation.scopes.some((scope) => !['posts:read', 'offline_access'].includes(scope))) {
     const metadataResponse = await apiRequest(
@@ -83,13 +90,13 @@ export const loadConnection = async (
   const payload = await sessionResponse.json().catch(() => undefined)
 
   if (payload === null || sessionResponse.status === 401)
-    return { state: ConsentState.cases.LoginRequired.make({ continuation, clientName }), cookies }
+    return { state: ConsentState.cases.LoginRequired.make({ continuation, ...identity }), cookies }
 
   const session = Option.getOrNull(Schema.decodeUnknownOption(Session)(payload))
 
   return {
     state: session
-      ? ConsentState.cases.Verified.make({ continuation, clientName, account: session.user })
+      ? ConsentState.cases.Verified.make({ continuation, ...identity, account: session.user })
       : ConsentState.cases.Failed.make({ status: 502 }),
     cookies,
   }

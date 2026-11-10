@@ -32,6 +32,14 @@ Better Auth owns OAuth protocol validation and token issuance. GBFM checks the a
 
 Browser login, consent and connection management use the existing WWW app. OAuth discovery and protocol endpoints route to the API. Public URL configuration, rather than arbitrary forwarded headers, determines issuer and resource identity.
 
+Connection screens use a bundled OpenCode logo when the signed, provider-validated
+client metadata declares the supported official website and logo URL. Unknown or
+missing metadata keeps the escaped app-initial fallback. The artwork comes from
+[OpenCode's official brand assets](https://opencode.ai/brand/files/opencode-logo-dark.svg)
+and follows its dark-background colors and 4:5 proportions. No remote images are
+fetched during sign-in and no image-proxy or CSP exception is added. Client names
+and logos remain self-reported, not verified identity or endorsement.
+
 ## Read-only first slice
 
 `list_drafts` returns a bounded page of authorized unpublished editorial posts. `get_post` retrieves a published editorial post or an authorized draft by stable post ID. Reads return an edit version for future write operations. Neither operation accepts publication changes or writes data.

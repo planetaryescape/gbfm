@@ -53,6 +53,7 @@ const scopeLabel = (scope: McpScope) => {
 
 export const consentDocument = ({
   clientName: name,
+  clientBrand,
   continuation: { query, scopes },
   account,
 }: typeof ConsentState.cases.Verified.Type) => {
@@ -70,7 +71,7 @@ export const consentDocument = ({
 
   return connectionDocument(
     `Connect ${name}`,
-    `${appIdentity(name)}<h1>Connect ${escape(name)}?</h1>
+    `${appIdentity(name, clientBrand)}<h1>Connect ${escape(name)}?</h1>
 <div class="account"><p class="identity">${icons.user}<span><span class="muted">Signed in as</span> ${escape(account.name)} <span class="muted">(${escape(account.email)})</span></span></p><form method="post" action="/connect/gbfm/account"><input type="hidden" name="oauth_query" value="${escape(query)}"><button class="quiet" type="submit">Use another account <span class="muted">(signs you out)</span></button></form></div>
 <section aria-labelledby="permissions"><h2 id="permissions">${expanded ? 'Requested permissions' : writes ? 'Read and draft-write access' : 'Read-only access'}</h2><ul>${scopes.map((scope) => `<li>${scopeLabel(scope)}</li>`).join('')}</ul>
 <p class="muted row">${icons.lock}<span>${expanded ? 'Only the permissions listed above. Private content remains limited to its owner. New permissions require fresh consent.' : writes ? 'Cannot publish, delete, upload files or edit published posts.' : 'Cannot create, edit, publish or delete.'}</span></p>

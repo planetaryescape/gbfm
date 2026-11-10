@@ -1,4 +1,6 @@
 import { brandMark } from './brand'
+import type { ClientBrand } from './client-brand'
+import opencodeLogo from './opencode-logo.svg?raw'
 
 const icon = (paths: string) =>
   `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`
@@ -22,5 +24,5 @@ export const icons = {
   alert: icon('<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>'),
 } as const
 
-export const connectionPair = (appInitial: string) =>
-  `<div class="pair" aria-hidden="true"><span class="tile">${brandMark}</span><span class="pair-link">${icons.link}</span><span class="tile app">${appInitial}</span></div>`
+export const connectionPair = (appInitial: string, brand?: ClientBrand) =>
+  `<div class="pair" aria-hidden="true"><span class="tile">${brandMark}</span><span class="pair-link">${icons.link}</span><span class="tile app${brand ? ' app-logo' : ''}"${brand ? ` data-client-brand="${brand}"` : ''}>${brand === 'opencode' ? opencodeLogo : appInitial}</span></div>`

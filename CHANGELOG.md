@@ -1,3 +1,16 @@
+# [2.130.0](https://github.com/planetaryescape/gbfm/compare/v2.129.0...v2.130.0) (2026-11-10)
+
+
+### Bug Fixes
+
+* **mcp:** reject disabled permissions before consent ([defbfa0](https://github.com/planetaryescape/gbfm/commit/defbfa0e08376a7480052f2c3cd530c19b630200))
+
+
+### Features
+
+* **mcp:** add explicit versioned resource-policy rollouts ([09f24d1](https://github.com/planetaryescape/gbfm/commit/09f24d1f797e1e7b05d452a95c7a121633285410))
+* **mobile:** align tweet resume and discovery with web ([1942192](https://github.com/planetaryescape/gbfm/commit/19421921099505281fc5820ea3764e06bf4e0440))
+
 # [2.129.0](https://github.com/planetaryescape/gbfm/compare/v2.128.0...v2.129.0) (2026-11-09)
 
 

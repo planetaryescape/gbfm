@@ -1,3 +1,11 @@
+## [2.130.1](https://github.com/planetaryescape/gbfm/compare/v2.130.0...v2.130.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **www:** render OAuth client logos without brand-specific matching ([2fca37d](https://github.com/planetaryescape/gbfm/commit/2fca37d562026efa9314b81fcba3086e32bf3341))
+* **www:** show the supplied OpenCode brand on consent screens ([bd14d50](https://github.com/planetaryescape/gbfm/commit/bd14d504b2f7945736b060a12923bc7a89ade658))
+
 # [2.130.0](https://github.com/planetaryescape/gbfm/compare/v2.129.0...v2.130.0) (2026-11-10)
 
 

@@ -1,3 +1,10 @@
+## [2.131.2](https://github.com/planetaryescape/gbfm/compare/v2.131.1...v2.131.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **mcp:** fetch import artwork with Worker-compatible redirect handling ([8f46821](https://github.com/planetaryescape/gbfm/commit/8f4682108c6881ad7a102e5456ba9630444653c1))
+
 ## [2.131.1](https://github.com/planetaryescape/gbfm/compare/v2.131.0...v2.131.1) (2026-11-11)
 
 

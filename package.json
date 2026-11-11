@@ -1,6 +1,6 @@
 {
   "name": "gbfm",
-  "version": "2.131.1",
+  "version": "2.131.2",
   "sideEffects": false,
   "private": true,
   "type": "module",

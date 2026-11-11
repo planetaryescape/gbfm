@@ -1,3 +1,10 @@
+# [2.131.0](https://github.com/planetaryescape/gbfm/compare/v2.130.1...v2.131.0) (2026-11-11)
+
+
+### Features
+
+* **mcp:** enable durable music imports with recoverable artwork ([7beac63](https://github.com/planetaryescape/gbfm/commit/7beac63532c014f76b4add47e0a978257b47897c))
+
 ## [2.130.1](https://github.com/planetaryescape/gbfm/compare/v2.130.0...v2.130.1) (2026-11-10)
 
 

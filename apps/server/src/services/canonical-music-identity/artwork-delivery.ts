@@ -138,9 +138,11 @@ export const fetchImportMusicArtwork = (
 
       if (!approved(candidateUrl)) return null
 
-      const response = await fetcher(candidateUrl, { redirect: 'error', signal }).catch(() => {
+      const response = await fetcher(candidateUrl, { redirect: 'manual', signal }).catch(() => {
         throw new ImportArtworkFetchUnavailable({ reason: 'network' })
       })
+
+      if (response.status >= 300 && response.status < 400) return null
 
       if (response.status === 429 || response.status >= 500)
         throw new ImportArtworkFetchUnavailable({ reason: 'provider_status' })

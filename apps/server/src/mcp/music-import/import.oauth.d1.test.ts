@@ -188,7 +188,7 @@ const setup = async () => {
       storage,
       Layer.succeed(MusicCoverImageFetcher, async (_url, init) => {
         state.fetches++
-        expect(init?.redirect).toBe('error')
+        expect(init?.redirect).toBe('manual')
         expect(init?.signal).toBeDefined()
 
         if (artworkBody.mode !== 'normal') {

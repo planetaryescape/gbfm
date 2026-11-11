@@ -1,9 +1,79 @@
-# I1 #521: import execution and durability integration
+# Music URL import runtime
+
+The MCP route composes exactly two tools from this lane: `import_music_url` and
+`get_music_import_status`. Both require an active admin account and the existing
+`catalogue:write`, `catalogue:import`, and `providers:read` scopes. Registration
+does not expand resource policy, consent, or grants. No other music toolkit or
+manual-create tool is registered by this change. Playlist imports, including
+provider-inferred or reused playlists, fail closed.
+
+Supply a UUIDv4 `requestId`, exact source `url`, optional artist/album/track
+`expectedType`, and explicit `artworkDelivery` (`preserve`, `required`, or
+`best_effort`). Canonical URL normalization removes tracking parameters, not
+provider identity. A similarly named album is never a replacement for the exact
+Spotify album. Cross-provider discovery conflicts with an incumbent's different
+exact source instead of overwriting it. Known-good existing links are preserved.
+
+`service.ts` uses the existing command preparation and execution-authority lane,
+the route's live credential verifier and `CommandAuthority` SQL checkpoints,
+and the canonical resolver. `CanonicalImportPersistence` couples the canonical
+writer's existing statements, original created/reused outcome, observed revision,
+and optional pending artwork stage in the shared `McpOperationStore` D1 batch.
+Resolved-source reuse also saves an original receipt. No second ledger, import
+dispatcher, in-memory deduplicator, schema, migration, or background worker is
+introduced. Source leases and the SQL-time credential predicates remain fences.
+
+The response separates original `catalogue` evidence from the latest `artwork`
+phase and `completion` (`complete`, `pending_artwork`, or `partial`). Original catalogue revision/disposition do not change on replay. Artwork
+association reports its separate `associatedRevision`. `pending`, `uploading`,
+and `association_pending` are not delivery, even with `required` policy.
+Transient fetch, PUT, and association failures leave recoverable evidence;
+definitive rejection or a stale target revision produces a terminal failed phase.
+Existing canonical artwork/metadata updates now advance revisions so that staged
+association cannot silently overwrite them.
+
+`artwork.ts` uses the existing shared staged store. It freezes digest, MIME type,
+byte length, and operation-specific object key before PUT, renews its 60-second
+lease every 20 seconds, and atomically couples association/revision with delivered
+evidence. Recovery can recognize an already uploaded immutable object without
+refetching a changed provider image. Refetched bytes must match the frozen
+descriptor. Artwork fetches have a 10 MiB ceiling, an approved HTTPS host policy,
+no redirects, caller cancellation, and a default 12-second I/O wait budget.
+Provider preparation has a default 45-second wait budget. Timeout is not proof
+that an external effect failed or stopped; an interrupted PUT may still finish
+at its immutable key. The S3 adapter itself does not expose cancellation.
+The actual request's encoded MCP response budget is checked before provider work
+or catalogue mutation; id-less calls cannot obtain a usable budget.
+
+After interruption, retry only identical input and `requestId`. Status lookup
+does not run providers or uploads. An absent receipt does not prove preparatory
+work failed: acceptance is the atomic catalogue/receipt commit, not a queue
+acknowledgement. There is no automatic background completion promise. Repeating
+`import_music_url` is the recovery owner. The 24-hour original-result window and
+tombstones prevent expired keys from importing again; unfinished artwork can be
+recovered after that window with fresh authorization. Terminal expired receipts
+are no longer disclosed. Do not issue a new requestId to work around uncertainty.
+
+Verification uses migrated disposable D1, real OAuth registration/consent/token
+verification, the actual composed production MCP route, and controlled scraper,
+fetch, and object-store adapters. It covers registry/scope delta, exact identity,
+concurrent/restarted replay, changed input, revocation after JS authorization,
+expired receipts, unavailable required artwork, immutable-artifact mismatch,
+upload-success/lost-ack recovery, association failure, and stale-revision refusal.
+No live music is imported by these tests.
+
+Production activation still requires independent review, deployment verification,
+the already-existing operation/revision/staged-artwork migrations, an explicitly
+reviewed resource-policy change if those scopes are disabled, and new consent for
+the specific client. No production policy, grants, schema, or data are changed by
+this local implementation.
+
+## Historical I1 #521 integration record
 
 This lane depends on P1 #548 at remote commit
 `2d1b5592826e66e3a198dc117c153e062264fc5c`, not coordinator-local changes.
 P0 D1–D6 in `docs/architecture/mcp-expanded-contracts.md` governs the design.
-**No tools are registered yet.** This execution follow-up is rooted on P1's
+The original preparation-only lane registered no tools. That follow-up was rooted on P1's
 named combined prerequisite `695bb12d2149bcbe123f0b6e7661909c4c3ea5ee`
 ([PR #575](https://github.com/planetaryescape/gbfm/pull/575)), with I1's reviewed
 preparation history applied once. The common atomic receipt runtime and domain
@@ -284,8 +354,8 @@ artist-fanout/name-key helpers, not creates or canonical writes. Domain revision
 DDL (0017, no triggers) is separately owned. R1 owns its read indexes; neither
 allocation grants I1 schema, migration or replay-list ownership.
 
-Until the approved shared prerequisites are integrated and proved, all five
-commands stay unregistered. Required integration proof: concurrent identical
+The four manual-create commands remain unregistered. The URL-import runtime above
+supersedes its original registration gate. Historical required proof: concurrent identical
 command keys, concurrent differing keys
 for one source, changed-payload conflict, discard response then exact receipt
 replay, expired tombstones, revoked replay, browser/MCP revision conflict, and

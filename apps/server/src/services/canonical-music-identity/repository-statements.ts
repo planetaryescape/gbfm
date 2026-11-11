@@ -1,4 +1,7 @@
 import { LINK_STATUS } from '@gbfm/core/status'
+import type { SQL } from 'drizzle-orm'
+import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core'
+import { Schema } from 'effect'
 
 import type { DatabaseClient } from '@/db/layer'
 import type { ScrapedLink } from '@/services/music-link-scraper.service'
@@ -15,6 +18,8 @@ export type WriteFence = {
   readonly aliases: ReadonlyArray<ParsedMusicSource>
   readonly ownerToken: string
   readonly reference: EntityReference
+  readonly additionalGuard?: SQL | undefined
+  readonly preserveLinks?: boolean
 }
 
 const entityTable = (entityType: EntityReference['entityType']) => {
@@ -35,6 +40,14 @@ const entityTable = (entityType: EntityReference['entityType']) => {
 const placeholders = (count: number) => Array.from({ length: count }, () => '?').join(', ')
 
 const ownershipGuard = (fence: WriteFence) => {
+  const additional = fence.additionalGuard
+    ? new SQLiteSyncDialect().sqlToQuery(fence.additionalGuard)
+    : { sql: '1', params: [] }
+
+  const values = Schema.decodeUnknownSync(
+    Schema.Array(Schema.Union([Schema.String, Schema.Number, Schema.Null])),
+  )(additional.params)
+
   const aliasGuards = fence.aliases.map(
     () =>
       `NOT EXISTS (SELECT 1 FROM music_source_aliases
@@ -47,12 +60,14 @@ const ownershipGuard = (fence: WriteFence) => {
         WHERE state = 'resolving' AND owner_token = ?
           AND source_key IN (${placeholders(fence.ownedSources.length)})) = ?`,
       ...aliasGuards,
+      `(${additional.sql})`,
     ].join(' AND '),
     values: [
       fence.ownerToken,
       ...fence.ownedSources.map((source) => source.sourceKey),
       fence.ownedSources.length,
       ...fence.aliases.flatMap((source) => [source.normalizedUrl, source.sourceKey]),
+      ...values,
     ],
   }
 }
@@ -216,9 +231,13 @@ export const linkStatement = (
     .prepare(`INSERT INTO music_entity_links (
       id, entity_type, entityId, platform, url, status, scrapedAt, verifiedAt, metadata, createdAt, updatedAt
     ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${guard.sql}
-    ON CONFLICT(entity_type, entityId, platform) DO UPDATE SET
+    ON CONFLICT(entity_type, entityId, platform) ${
+      fence.preserveLinks
+        ? 'DO NOTHING'
+        : `DO UPDATE SET
       url = excluded.url, status = excluded.status, scrapedAt = excluded.scrapedAt,
-      verifiedAt = excluded.verifiedAt, metadata = excluded.metadata, updatedAt = excluded.updatedAt`)
+      verifiedAt = excluded.verifiedAt, metadata = excluded.metadata, updatedAt = excluded.updatedAt`
+    }`)
     .bind(
       crypto.randomUUID(),
       reference.entityType,

@@ -1,4 +1,4 @@
-import { Context, Effect } from 'effect'
+import { Context, Effect, Option, Schema } from 'effect'
 
 import type { ConfigService } from '@/services/config.service'
 import type { S3Service } from '@/services/s3.service'
@@ -66,6 +66,11 @@ const isApprovedArtworkUrl = (source: string) => {
   )
 }
 
+class MusicArtworkBodyTooLarge extends Schema.TaggedError<MusicArtworkBodyTooLarge>()(
+  'MusicArtworkBodyTooLarge',
+  {},
+) {}
+
 const readResponseBody = async (response: Response): Promise<Uint8Array> => {
   if (!response.body) throw new Error('Music artwork response has no body')
 
@@ -82,8 +87,8 @@ const readResponseBody = async (response: Response): Promise<Uint8Array> => {
       size += result.value.byteLength
 
       if (size > MAX_MUSIC_ARTWORK_SIZE) {
-        await reader.cancel()
-        throw new Error('Music artwork exceeds the maximum size')
+        await reader.cancel().catch(() => undefined)
+        throw new MusicArtworkBodyTooLarge({})
       }
 
       chunks.push(result.value)
@@ -104,6 +109,55 @@ const readResponseBody = async (response: Response): Promise<Uint8Array> => {
 
   return bytes
 }
+
+class ImportArtworkFetchUnavailable extends Schema.TaggedError<ImportArtworkFetchUnavailable>()(
+  'ImportArtworkFetchUnavailable',
+  {},
+) {}
+
+export const fetchImportMusicArtwork = (
+  fetcher: MusicCoverImageFetch,
+  candidateUrl: string,
+  ownedArtworkPrefix: URL,
+) =>
+  Effect.tryPromise({
+    try: async (signal) => {
+      const approved = (value: string) => {
+        if (isApprovedArtworkUrl(value)) return true
+        const url = URL.parse(value)
+
+        return (
+          url !== null &&
+          url.protocol === 'https:' &&
+          !url.username &&
+          !url.password &&
+          url.origin === ownedArtworkPrefix.origin &&
+          url.pathname.startsWith(ownedArtworkPrefix.pathname)
+        )
+      }
+
+      if (!approved(candidateUrl)) return null
+      const response = await fetcher(candidateUrl, { redirect: 'error', signal })
+
+      if (response.status === 429 || response.status >= 500)
+        throw new Error('Artwork source temporarily unavailable')
+
+      if (!response.ok || (response.url && !approved(response.url))) return null
+
+      const contentType = Schema.decodeUnknownOption(
+        Schema.Literals(['image/jpeg', 'image/png', 'image/webp']),
+      )(response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase())
+
+      if (Option.isNone(contentType)) return null
+      const length = Number(response.headers.get('content-length'))
+
+      if (Number.isFinite(length) && length > MAX_MUSIC_ARTWORK_SIZE) return null
+
+      return { bytes: await readResponseBody(response), contentType: contentType.value }
+    },
+    catch: (cause) =>
+      cause instanceof MusicArtworkBodyTooLarge ? cause : new ImportArtworkFetchUnavailable({}),
+  }).pipe(Effect.catchTag('MusicArtworkBodyTooLarge', () => Effect.succeed(null)))
 
 const fetchArtwork = (fetcher: MusicCoverImageFetch, candidateUrl: string) =>
   Effect.gen(function* () {

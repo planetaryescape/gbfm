@@ -31,7 +31,10 @@ import type { EmailTransportService } from '@/services/email-transport.service'
 import { FavoriteServiceLayer } from '@/services/favorite.service'
 import { AppLoggerLive } from '@/services/logger.service'
 import { MusicEntityServiceLayer } from '@/services/music-entity'
-import { MusicLinkScraperServiceLayer } from '@/services/music-link-scraper.service'
+import {
+  MusicLinkScraperServiceLayer,
+  type MusicLinkScraperService,
+} from '@/services/music-link-scraper.service'
 import { MusicReminderServiceLayer } from '@/services/music-reminder.service'
 import { MusicBrainzIdentityLive } from '@/services/musicbrainz-identity.service'
 import { NavigationRetentionServiceLayer } from '@/services/navigation-retention.service'
@@ -90,6 +93,7 @@ export interface AppLayerOptions {
   readonly requestTelemetry?: Layer.Layer<RequestTelemetry>
   readonly signupProtection?: Layer.Layer<SignupProtection>
   readonly editorialListCache?: Layer.Layer<EditorialListCache>
+  readonly musicLinkScraper?: Layer.Layer<MusicLinkScraperService, never, ConfigService>
 }
 
 export const AppLayer = ({
@@ -110,6 +114,9 @@ export const AppLayer = ({
   requestTelemetry: requestTelemetryLive = RequestTelemetryUnavailableLayer,
   signupProtection: signupProtectionLive = SignupProtectionUnavailableLayer,
   editorialListCache: editorialListCacheLive = EditorialListCacheUnavailableLayer,
+  musicLinkScraper: musicLinkScraperLive = MusicLinkScraperServiceLayer.pipe(
+    Layer.provide(Layer.mergeAll(SpotifyServiceLayer, DeezerServiceLayer, MusicBrainzIdentityLive)),
+  ),
 }: AppLayerOptions) => {
   const EmailDeliveryWithDependencies = EmailDeliveryLive.pipe(
     Layer.provide(Layer.mergeAll(databaseLive, configLive, emailTransportLive)),
@@ -139,11 +146,7 @@ export const AppLayer = ({
     spotifyImportResolverLive,
     NavigationServiceLayer,
     ReminderSignalServiceLayer,
-    MusicLinkScraperServiceLayer.pipe(
-      Layer.provide(
-        Layer.mergeAll(SpotifyServiceLayer, DeezerServiceLayer, MusicBrainzIdentityLive),
-      ),
-    ),
+    musicLinkScraperLive,
     AudioServiceLayer.pipe(
       Layer.provide(MdxLive),
       Layer.provide(UploadAssetDepsLive),

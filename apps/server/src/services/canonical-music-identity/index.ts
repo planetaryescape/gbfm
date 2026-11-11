@@ -1,4 +1,4 @@
-import { Context, Effect, Fiber, Layer, Predicate } from 'effect'
+import { Context, Effect, Fiber, Layer, Option, Predicate } from 'effect'
 
 import { Database } from '@/db/layer'
 import { omitUndefined } from '@/lib/omit-undefined'
@@ -30,6 +30,7 @@ import {
   MusicIdentityProviderUnavailable,
   MusicIdentityStorageError,
 } from './errors'
+import { CanonicalImportPersistence } from './import-persistence'
 import {
   type CanonicalMusicEntityType,
   parseMusicSource,
@@ -190,11 +191,22 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
 
         if (entity) {
           yield* checkAuthorization(authorize, reference.entityType)
-          yield* repository.touchAlias(source, reference, new Date())
+
+          if (Option.isNone(yield* Effect.serviceOption(CanonicalImportPersistence))) {
+            yield* repository.touchAlias(source, reference, new Date())
+          }
+
           yield* annotateEntity(reference)
           yield* Effect.annotateCurrentSpan({ result: 'hit', outcome: 'success' })
 
           return reference
+        }
+
+        if (Option.isSome(yield* Effect.serviceOption(CanonicalImportPersistence))) {
+          return yield* storageError(
+            'lookup',
+            'Source target is missing; administrator reconciliation required',
+          )
         }
 
         yield* repository.removeOrphan(reference)
@@ -458,6 +470,25 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
             })
           }
 
+          if (Option.isSome(yield* Effect.serviceOption(CanonicalImportPersistence))) {
+            if (result.entityMeta?.type === 'playlist')
+              yield* checkAuthorization(authorize, 'playlist')
+
+            const observedType =
+              result.entityMeta?.type === 'song' ? 'track' : result.entityMeta?.type
+
+            if (
+              observedType &&
+              initial.sourceEntityType !== 'url' &&
+              initial.sourceEntityType !== 'video' &&
+              observedType !== initial.sourceEntityType
+            ) {
+              return yield* new MusicIdentityInvalidSnapshot({
+                message: 'Provider entity type does not match the requested exact source',
+              })
+            }
+          }
+
           const entityType = inferredType(initial, result)
 
           if (!entityType) {
@@ -548,6 +579,35 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
           }
 
           const incumbent = [...incumbents.values()][0]
+
+          if (incumbent && Option.isSome(yield* Effect.serviceOption(CanonicalImportPersistence))) {
+            const existingLinks = yield* repository.linksFor(incumbent)
+
+            for (const link of existingLinks) {
+              const proposed = links.find((value) => value.platform === link.platform)
+
+              if (!proposed) continue
+
+              const parsed = yield* parseMusicSource(link.url, incumbent.entityType).pipe(
+                Effect.catchTag('MusicSourceInvalid', () => Effect.succeed(undefined)),
+              )
+
+              const proposedSource = yield* parseMusicSource(
+                proposed.url,
+                incumbent.entityType,
+              ).pipe(Effect.catchTag('MusicSourceInvalid', () => Effect.succeed(undefined)))
+
+              if (parsed && proposedSource && parsed.sourceKey !== proposedSource.sourceKey) {
+                return yield* new MusicIdentityConflict({
+                  sourceKey: initial.sourceKey,
+                  incumbentEntityType: incumbent.entityType,
+                  incumbentEntityId: incumbent.entityId,
+                  candidateEntityType: entityType,
+                  candidateEntityId: incumbent.entityId,
+                })
+              }
+            }
+          }
 
           const reference: EntityReference = incumbent ?? {
             entityType,

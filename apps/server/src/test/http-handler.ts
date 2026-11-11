@@ -3,7 +3,7 @@ import { Layer } from 'effect'
 
 import { DatabaseLayer } from '@/db/layer'
 import { createWebHandler } from '@/http/routes'
-import { McpOperationStoreLayer } from '@/mcp/operations/store'
+import { McpOperationStoreLayer, type McpOperationStore } from '@/mcp/operations/store'
 import {
   WorkerSentryEnabledLive,
   WorkerSentryEnv,
@@ -17,6 +17,7 @@ import {
   RecordingEmailTransportLayer,
   type EmailTransportService,
 } from '@/services/email-transport.service'
+import type { MusicLinkScraperService } from '@/services/music-link-scraper.service'
 import { PlaylistEnrichmentQueueTestLayer } from '@/services/playlist-enrichment-queue'
 import type { RequestTelemetry } from '@/services/request-telemetry.service'
 import { SentryServiceLayer } from '@/services/sentry.service'
@@ -71,6 +72,8 @@ export const createTestWebHandler = (
   options?: {
     readonly editorialListCache?: Layer.Layer<EditorialListCache>
     readonly requestTelemetry?: Layer.Layer<RequestTelemetry>
+    readonly musicLinkScraper?: Layer.Layer<MusicLinkScraperService, never, ConfigService>
+    readonly operationStore?: Layer.Layer<McpOperationStore>
   },
 ) => {
   const baseServices = {

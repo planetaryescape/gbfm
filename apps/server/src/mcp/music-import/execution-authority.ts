@@ -1,5 +1,5 @@
 import type { McpPrincipal, McpResourceUrl } from '@gbfm/core/editorial-mcp'
-import { Context, Effect, Layer, type Schema } from 'effect'
+import { Context, Effect, Layer, Option, type Schema } from 'effect'
 
 import { McpActor, McpAuthorization } from '@/mcp/authorization'
 import { McpToolError } from '@/mcp/contracts'
@@ -19,8 +19,8 @@ export class MusicImportLiveGrant extends Context.Service<
 >()('gbfm/mcp/MusicImportLiveGrant') {}
 
 const makeAuthority = Effect.gen(function* () {
-  const original = yield* McpActor
-  const grant = yield* MusicImportLiveGrant
+  const configuredActor = yield* Effect.serviceOption(McpActor)
+  const configuredGrant = yield* Effect.serviceOption(MusicImportLiveGrant)
   const commands = yield* MusicImportCommands
   const authorization = yield* McpAuthorization
 
@@ -32,7 +32,23 @@ const makeAuthority = Effect.gen(function* () {
       resource: McpResourceUrl,
       resolvedType?: CanonicalMusicEntityType,
     ) {
-      const current = yield* grant.reverify(resource)
+      const originalActor = Option.orElse(
+        yield* Effect.serviceOption(McpActor),
+        () => configuredActor,
+      )
+
+      const liveGrant = Option.orElse(
+        yield* Effect.serviceOption(MusicImportLiveGrant),
+        () => configuredGrant,
+      )
+
+      if (Option.isNone(originalActor) || Option.isNone(liveGrant))
+        return yield* new McpToolError({
+          code: 'access_denied',
+          message: 'Live import authority is required.',
+        })
+      const original = originalActor.value
+      const current = yield* liveGrant.value.reverify(resource)
 
       if (original.userId !== current.userId || original.clientId !== current.clientId) {
         return yield* new McpToolError({ code: 'access_denied', message: 'MCP access denied.' })

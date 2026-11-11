@@ -130,8 +130,6 @@ const fingerprint = Effect.fn('MusicImportCommands.fingerprint')(function* (
 const makeCommands = Effect.gen(function* () {
   const authorization = yield* McpAuthorization
 
-  // Preparation is deliberately NOT acceptance or execution. No receipt store
-  // currently satisfies P0; callers must not register these as mutating tools.
   const prepare = Effect.fn('MusicImportCommands.prepare')(
     function* (raw: Schema.Json, resource: McpResourceUrl) {
       yield* authorization.highTrust('catalogue:write')

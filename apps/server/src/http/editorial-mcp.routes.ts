@@ -22,7 +22,7 @@ import {
 } from '@/mcp/content-read/research-toolkit'
 import { ContentReadServiceLayer } from '@/mcp/content-read/service'
 import { ContentReadHandlersLayer, ContentReadToolkit } from '@/mcp/content-read/toolkit'
-import { EditorialToolError } from '@/mcp/contracts'
+import { EditorialToolError, McpToolError } from '@/mcp/contracts'
 import { EditorialDraftServiceLayer } from '@/mcp/drafts'
 import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from '@/mcp/editorial'
 import { FavoritesMcpServiceLayer } from '@/mcp/favorites/service'
@@ -30,6 +30,9 @@ import { FavoritesToolkit, FavoritesToolHandlersLayer } from '@/mcp/favorites/to
 import { ListeningReadServiceLive } from '@/mcp/listening/reads'
 import { ListeningToolkit, ListeningToolHandlersLayer } from '@/mcp/listening/tools'
 import { EditorialMcpSettings } from '@/mcp/model'
+import { MusicImportLiveGrant } from '@/mcp/music-import/execution-authority'
+import { MusicImportHandlersLive, MusicImportToolkit } from '@/mcp/music-import/toolkit'
+import { McpArtworkStoreLayer } from '@/mcp/operations/staged-store'
 import { ReminderReadServiceLayer } from '@/mcp/reminders/reads'
 import { ReminderToolkit, ReminderToolHandlersLayer } from '@/mcp/reminders/toolkit'
 import {
@@ -268,6 +271,30 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
                             : yield* httpEffect.pipe(
                                 Effect.provideService(EditorialActor, principal),
                                 Effect.provideService(CommandAuthority, authority.success),
+                                Effect.provideService(MusicImportLiveGrant, {
+                                  reverify: (resource) =>
+                                    resource !== settings.resourceUrl
+                                      ? Effect.fail(
+                                          new McpToolError({
+                                            code: 'access_denied',
+                                            message: 'Import audience mismatch.',
+                                          }),
+                                        )
+                                      : oauth.verify(token).pipe(
+                                          Effect.mapError(
+                                            (error) =>
+                                              new McpToolError({
+                                                code: Predicate.isTagged(
+                                                  error,
+                                                  'EditorialOAuthInvalidToken',
+                                                )
+                                                  ? 'access_denied'
+                                                  : 'unavailable',
+                                                message: 'Live import authorization unavailable.',
+                                              }),
+                                          ),
+                                        ),
+                                }),
                                 Effect.provideService(McpWireResponse, wire),
                                 Effect.provideService(
                                   HttpServerRequest.HttpServerRequest,
@@ -463,6 +490,7 @@ export const EditorialMcpRoutesLive = makeMcpRoutes(
     FavoritesToolkit,
     ReminderToolkit,
     AdminReadToolkit,
+    MusicImportToolkit,
   ),
   Layer.mergeAll(
     ContentReadHandlersLayer.pipe(Layer.provide(ContentReadServiceLayer)),
@@ -474,6 +502,9 @@ export const EditorialMcpRoutesLive = makeMcpRoutes(
     ),
     ReminderToolHandlersLayer.pipe(Layer.provide(ReminderReadServiceLayer)),
     AdminReadToolHandlersLayer.pipe(Layer.provide(AdminReadServiceLayer)),
+    MusicImportHandlersLive.pipe(
+      Layer.provide(Layer.unwrap(Effect.map(Database, (db) => McpArtworkStoreLayer(db.$client)))),
+    ),
   ),
 )
 

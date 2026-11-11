@@ -1,6 +1,6 @@
 import { LINK_STATUS } from '@gbfm/core/status'
-import { and, eq, inArray, lt, or } from 'drizzle-orm'
-import { Data, Effect } from 'effect'
+import { and, eq, inArray, lt, or, sql, type SQL } from 'drizzle-orm'
+import { Data, Effect, Option } from 'effect'
 
 import type { DatabaseClient } from '@/db/layer'
 import {
@@ -18,6 +18,7 @@ import { getErrorMessage } from '@/errors'
 import type { ScrapedLink } from '@/services/music-link-scraper.service'
 
 import { MusicIdentityAliasCollision, MusicIdentityStorageError } from './errors'
+import { CanonicalImportPersistence } from './import-persistence'
 import type { CanonicalMusicEntityType, ParsedMusicSource } from './music-source'
 import {
   aliasStatement,
@@ -62,6 +63,18 @@ export type ClaimResult =
 export const ClaimResult = Data.taggedEnum<ClaimResult>()
 
 export type SettledClaim = Extract<ClaimResult, { readonly _tag: 'owned' | 'resolved' }>
+
+export interface CanonicalCommit {
+  readonly ownedSources: ReadonlyArray<ParsedMusicSource>
+  readonly allSources: ReadonlyArray<ParsedMusicSource>
+  readonly reference: EntityReference
+  readonly entity?: EntityRecord
+  readonly slug?: string
+  readonly links: ReadonlyArray<ScrapedLink>
+  readonly ownerToken: string
+  readonly scrapedAt: Date
+  readonly now: Date
+}
 
 const storageError = (operation: string, cause: unknown) =>
   new MusicIdentityStorageError({
@@ -461,26 +474,18 @@ export class CanonicalMusicIdentityRepository {
       catch: (cause) => storageError('upsertLink', cause),
     })
 
-  readonly commit = (input: {
-    readonly ownedSources: ReadonlyArray<ParsedMusicSource>
-    readonly allSources: ReadonlyArray<ParsedMusicSource>
-    readonly reference: EntityReference
-    readonly entity?: EntityRecord
-    readonly slug?: string
-    readonly links: ReadonlyArray<ScrapedLink>
-    readonly ownerToken: string
-    readonly scrapedAt: Date
-    readonly now: Date
-  }) =>
-    Effect.tryPromise({
-      try: async () => {
-        if (input.ownedSources.length === 0) return true
+  readonly commit = (input: CanonicalCommit) =>
+    Effect.gen({ self: this }, function* () {
+      const persistence = yield* Effect.serviceOption(CanonicalImportPersistence)
 
+      const build = (additionalGuard?: SQL) => {
         const fence: WriteFence = {
           ownedSources: input.ownedSources,
           aliases: input.allSources,
           ownerToken: input.ownerToken,
           reference: input.reference,
+          additionalGuard,
+          preserveLinks: Option.isSome(persistence),
         }
 
         const statements: Array<D1PreparedStatement> = []
@@ -500,12 +505,22 @@ export class CanonicalMusicIdentityRepository {
         }
 
         statements.push(completionStatement(this.db, fence, input.scrapedAt, input.now))
-        const results = await this.db.$client.batch(statements)
-        const completion = results.at(-1)
 
-        return (completion?.meta.changes ?? 0) === input.ownedSources.length
-      },
-      catch: (cause) => storageError('commit', cause),
+        return statements
+      }
+
+      if (Option.isSome(persistence)) return yield* persistence.value.commit(input, build)
+
+      if (input.ownedSources.length === 0) return true
+
+      return yield* Effect.tryPromise({
+        try: async () => {
+          const results = await this.db.$client.batch(build())
+
+          return (results.at(-1)?.meta.changes ?? 0) === input.ownedSources.length
+        },
+        catch: (cause) => storageError('commit', cause),
+      })
     })
 
   readonly updateArtwork = (reference: EntityReference, artworkUrl: string) =>
@@ -517,22 +532,38 @@ export class CanonicalMusicIdentityRepository {
           case 'artist':
             return this.db
               .update(musicArtistsTable)
-              .set({ imageUrl: artworkUrl, updatedAt })
+              .set({
+                imageUrl: artworkUrl,
+                updatedAt,
+                revision: sql`${musicArtistsTable.revision} + 1`,
+              })
               .where(eq(musicArtistsTable.id, reference.entityId))
           case 'album':
             return this.db
               .update(musicAlbumsTable)
-              .set({ coverImageUrl: artworkUrl, updatedAt })
+              .set({
+                coverImageUrl: artworkUrl,
+                updatedAt,
+                revision: sql`${musicAlbumsTable.revision} + 1`,
+              })
               .where(eq(musicAlbumsTable.id, reference.entityId))
           case 'track':
             return this.db
               .update(musicTracksTable)
-              .set({ coverImageUrl: artworkUrl, updatedAt })
+              .set({
+                coverImageUrl: artworkUrl,
+                updatedAt,
+                revision: sql`${musicTracksTable.revision} + 1`,
+              })
               .where(eq(musicTracksTable.id, reference.entityId))
           case 'playlist':
             return this.db
               .update(musicPlaylistsTable)
-              .set({ coverImageUrl: artworkUrl, updatedAt })
+              .set({
+                coverImageUrl: artworkUrl,
+                updatedAt,
+                revision: sql`${musicPlaylistsTable.revision} + 1`,
+              })
               .where(eq(musicPlaylistsTable.id, reference.entityId))
           default:
             return unreachableEntityType(reference.entityType)
@@ -594,7 +625,7 @@ export class CanonicalMusicIdentityRepository {
           case 'artist':
             statements.push(
               this.db.$client
-                .prepare(`UPDATE music_artists SET name = ?, imageUrl = ?, updatedAt = ?
+                .prepare(`UPDATE music_artists SET name = ?, imageUrl = ?, updatedAt = ?, revision = revision + 1
                   WHERE id = ? AND ${guard.sql}`)
                 .bind(
                   entity.title,
@@ -608,7 +639,7 @@ export class CanonicalMusicIdentityRepository {
           case 'album':
             statements.push(
               this.db.$client
-                .prepare(`UPDATE music_albums SET title = ?, artistNames = ?, coverImageUrl = ?, updatedAt = ?
+                .prepare(`UPDATE music_albums SET title = ?, artistNames = ?, coverImageUrl = ?, updatedAt = ?, revision = revision + 1
                   WHERE id = ? AND ${guard.sql}`)
                 .bind(
                   entity.title,
@@ -623,7 +654,7 @@ export class CanonicalMusicIdentityRepository {
           case 'track':
             statements.push(
               this.db.$client
-                .prepare(`UPDATE music_tracks SET title = ?, artistNames = ?, coverImageUrl = ?, updatedAt = ?
+                .prepare(`UPDATE music_tracks SET title = ?, artistNames = ?, coverImageUrl = ?, updatedAt = ?, revision = revision + 1
                   WHERE id = ? AND ${guard.sql}`)
                 .bind(
                   entity.title,
@@ -638,7 +669,7 @@ export class CanonicalMusicIdentityRepository {
           case 'playlist':
             statements.push(
               this.db.$client
-                .prepare(`UPDATE music_playlists SET title = ?, description = ?, coverImageUrl = ?, updatedAt = ?
+                .prepare(`UPDATE music_playlists SET title = ?, description = ?, coverImageUrl = ?, updatedAt = ?, revision = revision + 1
                   WHERE id = ? AND ${guard.sql}`)
                 .bind(
                   entity.title,

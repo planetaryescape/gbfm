@@ -12,6 +12,7 @@ import {
 import type { JsonValue, OperationKey } from '@/mcp/operations/store'
 import {
   fetchImportMusicArtwork,
+  ImportArtworkFetchUnavailable,
   MusicCoverImageFetcher,
 } from '@/services/canonical-music-identity/artwork-delivery'
 import type { CanonicalMusicEntityType } from '@/services/canonical-music-identity/music-source'
@@ -33,6 +34,29 @@ export const MusicImportIoBudget = Context.Reference<number>('gbfm/MusicImportIo
 
 const tables = { artist: 'music_artists', album: 'music_albums', track: 'music_tracks' }
 
+interface ArtworkDiagnostic {
+  readonly step:
+    | 'target_read'
+    | 'source_fetch'
+    | 'artifact_digest'
+    | 'transition'
+    | 'object_head'
+    | 'object_upload'
+    | 'association'
+    | 'heartbeat'
+    | 'checkpoint'
+  readonly dependency: 'database' | 'provider' | 'storage' | 'authorization' | 'crypto'
+  readonly reason:
+    | 'timeout'
+    | 'network'
+    | 'provider_status'
+    | 'body_read'
+    | 'target_read'
+    | 'transition'
+    | 'storage'
+    | 'other'
+}
+
 const unavailable = () =>
   new McpToolError({
     code: 'unavailable',
@@ -47,11 +71,33 @@ const makeArtwork = Effect.gen(function* () {
   const fetcher = yield* MusicCoverImageFetcher
   const budget = yield* MusicImportIoBudget
 
-  const bounded = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  const report = (diagnostic: ArtworkDiagnostic) =>
+    Effect.logWarning('mcp.music_import.artwork.recoverable').pipe(
+      Effect.annotateLogs({ ...diagnostic }),
+    )
+
+  const observed = <A, E, R>(effect: Effect.Effect<A, E, R>, diagnostic: ArtworkDiagnostic) =>
     effect.pipe(
+      Effect.tapError((error) =>
+        error instanceof McpToolError && error.code === 'access_denied'
+          ? Effect.void
+          : report({
+              ...diagnostic,
+              reason:
+                error instanceof ImportArtworkFetchUnavailable ? error.reason : diagnostic.reason,
+            }),
+      ),
+    )
+
+  const bounded = <A, E, R>(effect: Effect.Effect<A, E, R>, diagnostic: ArtworkDiagnostic) =>
+    observed(effect, diagnostic).pipe(
       Effect.timeoutOption(budget),
       Effect.flatMap((value) =>
-        Option.isSome(value) ? Effect.succeed(value.value) : Effect.fail(unavailable()),
+        Option.isSome(value)
+          ? Effect.succeed(value.value)
+          : report({ ...diagnostic, reason: 'timeout' }).pipe(
+              Effect.andThen(Effect.fail(unavailable())),
+            ),
       ),
       Effect.mapError(unavailable),
     )
@@ -142,14 +188,30 @@ const makeArtwork = Effect.gen(function* () {
       const transition = Effect.fn('MusicImportArtwork.transition')(function* (
         next: ArtworkTransition,
       ) {
-        const req = yield* leasedRequest()
-
-        const moved = yield* Effect.tryPromise({
-          try: () => store.transition({ ...req, lease, transition: next }),
-          catch: unavailable,
+        const req = yield* observed(leasedRequest(), {
+          step: 'checkpoint',
+          dependency: 'authorization',
+          reason: 'other',
         })
 
-        if (moved.status !== 'ready') return yield* unavailable()
+        const moved = yield* observed(
+          Effect.tryPromise({
+            try: () => store.transition({ ...req, lease, transition: next }),
+            catch: unavailable,
+          }),
+          {
+            step: 'transition',
+            dependency: 'database',
+            reason: 'transition',
+          },
+        )
+
+        if (moved.status !== 'ready') {
+          if (moved.status !== 'access_denied')
+            yield* report({ step: 'transition', dependency: 'database', reason: 'transition' })
+
+          return yield* unavailable()
+        }
 
         return moved.stage
       })
@@ -165,10 +227,15 @@ const makeArtwork = Effect.gen(function* () {
           let objectExists = false
 
           if (stage.artifact) {
-            yield* input.checkpoint(type)
+            yield* observed(input.checkpoint(type), {
+              step: 'checkpoint',
+              dependency: 'authorization',
+              reason: 'other',
+            })
 
             const metadata = yield* bounded(
               s3.getObjectMetadata(stage.artifact.objectKey, config.buckets.userContent),
+              { step: 'object_head', dependency: 'storage', reason: 'storage' },
             )
 
             if (metadata && metadata.size !== stage.artifact.byteLength) return yield* unavailable()
@@ -176,17 +243,23 @@ const makeArtwork = Effect.gen(function* () {
           }
 
           if (!objectExists) {
-            const row = yield* Effect.tryPromise({
-              try: () =>
-                db.get(
-                  sql`SELECT ${column} AS url, revision FROM ${table} WHERE id = ${stage.original.entityId}`,
-                ),
-              catch: unavailable,
-            })
+            const row = yield* observed(
+              Effect.tryPromise({
+                try: () =>
+                  db.get(
+                    sql`SELECT ${column} AS url, revision FROM ${table} WHERE id = ${stage.original.entityId}`,
+                  ),
+                catch: unavailable,
+              }),
+              { step: 'target_read', dependency: 'database', reason: 'target_read' },
+            )
 
-            const target = yield* Schema.decodeUnknownEffect(
-              Schema.Struct({ url: Schema.NullOr(Schema.String), revision: Schema.Number }),
-            )(row).pipe(Effect.mapError(unavailable))
+            const target = yield* observed(
+              Schema.decodeUnknownEffect(
+                Schema.Struct({ url: Schema.NullOr(Schema.String), revision: Schema.Number }),
+              )(row).pipe(Effect.mapError(unavailable)),
+              { step: 'target_read', dependency: 'database', reason: 'target_read' },
+            )
 
             if (target.revision !== stage.original.catalogueRevision) {
               stage = yield* transition({ phase: 'failed', failureCode: 'stale_revision' })
@@ -200,7 +273,11 @@ const makeArtwork = Effect.gen(function* () {
               return undefined
             }
 
-            yield* input.checkpoint(type)
+            yield* observed(input.checkpoint(type), {
+              step: 'checkpoint',
+              dependency: 'authorization',
+              reason: 'other',
+            })
 
             const image = yield* bounded(
               fetchImportMusicArtwork(
@@ -210,6 +287,7 @@ const makeArtwork = Effect.gen(function* () {
                   `${config.urls.bucketRouter}/user-content/music/${type}/${stage.original.entityId}/`,
                 ),
               ),
+              { step: 'source_fetch', dependency: 'provider', reason: 'other' },
             )
 
             if (!image) {
@@ -218,10 +296,13 @@ const makeArtwork = Effect.gen(function* () {
               return undefined
             }
 
-            const digest = yield* Effect.tryPromise({
-              try: () => crypto.subtle.digest('SHA-256', image.bytes),
-              catch: unavailable,
-            })
+            const digest = yield* observed(
+              Effect.tryPromise({
+                try: () => crypto.subtle.digest('SHA-256', image.bytes),
+                catch: unavailable,
+              }),
+              { step: 'artifact_digest', dependency: 'crypto', reason: 'other' },
+            )
 
             const sha256 = Array.from(new Uint8Array(digest), (byte) =>
               byte.toString(16).padStart(2, '0'),
@@ -248,7 +329,11 @@ const makeArtwork = Effect.gen(function* () {
             })
 
             if (!stage.artifact) return yield* unavailable()
-            yield* input.checkpoint(type)
+            yield* observed(input.checkpoint(type), {
+              step: 'checkpoint',
+              dependency: 'authorization',
+              reason: 'other',
+            })
             yield* bounded(
               s3.uploadFile(
                 stage.artifact.objectKey,
@@ -256,6 +341,7 @@ const makeArtwork = Effect.gen(function* () {
                 image.contentType,
                 config.buckets.userContent,
               ),
+              { step: 'object_upload', dependency: 'storage', reason: 'storage' },
             )
           }
 
@@ -264,17 +350,28 @@ const makeArtwork = Effect.gen(function* () {
 
         if (stage.phase === 'association_pending' && stage.artifact) {
           const artifact = stage.artifact
-          const req = yield* leasedRequest()
 
-          const observed = yield* Effect.tryPromise({
-            try: () =>
-              db.get(sql`SELECT revision FROM ${table} WHERE id = ${stage.original.entityId}`),
-            catch: unavailable,
+          const req = yield* observed(leasedRequest(), {
+            step: 'checkpoint',
+            dependency: 'authorization',
+            reason: 'other',
           })
 
-          const current = yield* Schema.decodeUnknownEffect(
-            Schema.Struct({ revision: Schema.Number }),
-          )(observed).pipe(Effect.mapError(unavailable))
+          const row = yield* observed(
+            Effect.tryPromise({
+              try: () =>
+                db.get(sql`SELECT revision FROM ${table} WHERE id = ${stage.original.entityId}`),
+              catch: unavailable,
+            }),
+            { step: 'target_read', dependency: 'database', reason: 'target_read' },
+          )
+
+          const current = yield* observed(
+            Schema.decodeUnknownEffect(Schema.Struct({ revision: Schema.Number }))(row).pipe(
+              Effect.mapError(unavailable),
+            ),
+            { step: 'target_read', dependency: 'database', reason: 'target_read' },
+          )
 
           if (current.revision !== stage.original.catalogueRevision) {
             stage = yield* transition({ phase: 'failed', failureCode: 'stale_revision' })
@@ -282,30 +379,39 @@ const makeArtwork = Effect.gen(function* () {
             return undefined
           }
 
-          const associated = yield* Effect.tryPromise({
-            try: () =>
-              store.associate({
-                ...req,
-                lease,
-                build: (context) => {
-                  const url = `${config.urls.bucketRouter}/user-content/${artifact.objectKey}`
-                  const target = stage.original
-                  const sourceGuard = sql`EXISTS (SELECT 1 FROM music_source_identities WHERE source_key = ${input.sourceKey} AND state = 'resolved' AND entity_type = ${type} AND entity_id = ${target.entityId})`
+          const associated = yield* observed(
+            Effect.tryPromise({
+              try: () =>
+                store.associate({
+                  ...req,
+                  lease,
+                  build: (context) => {
+                    const url = `${config.urls.bucketRouter}/user-content/${artifact.objectKey}`
+                    const target = stage.original
+                    const sourceGuard = sql`EXISTS (SELECT 1 FROM music_source_identities WHERE source_key = ${input.sourceKey} AND state = 'resolved' AND entity_type = ${type} AND entity_id = ${target.entityId})`
 
-                  return {
-                    statements: [
-                      context.prepare(
-                        sql`UPDATE ${table} SET ${column} = ${url}, revision = revision + 1, last_operation_id = ${context.attemptId}, updatedAt = ${req.now} WHERE id = ${target.entityId} AND revision = ${target.catalogueRevision} AND (${context.fence}) AND (${req.liveGuard}) AND (${sourceGuard})`,
-                      ),
-                    ],
-                    assertApplied: sql`(${sourceGuard}) AND EXISTS (SELECT 1 FROM ${table} WHERE id = ${target.entityId} AND revision = ${target.catalogueRevision + 1} AND last_operation_id = ${context.attemptId} AND ${column} = ${url})`,
-                  }
-                },
-              }),
-            catch: unavailable,
-          })
+                    return {
+                      statements: [
+                        context.prepare(
+                          sql`UPDATE ${table} SET ${column} = ${url}, revision = revision + 1, last_operation_id = ${context.attemptId}, updatedAt = ${req.now} WHERE id = ${target.entityId} AND revision = ${target.catalogueRevision} AND (${context.fence}) AND (${req.liveGuard}) AND (${sourceGuard})`,
+                        ),
+                      ],
+                      assertApplied: sql`(${sourceGuard}) AND EXISTS (SELECT 1 FROM ${table} WHERE id = ${target.entityId} AND revision = ${target.catalogueRevision + 1} AND last_operation_id = ${context.attemptId} AND ${column} = ${url})`,
+                    }
+                  },
+                }),
+              catch: unavailable,
+            }),
+            { step: 'association', dependency: 'database', reason: 'storage' },
+          )
 
-          if (associated.status !== 'ready') return yield* unavailable()
+          if (associated.status !== 'ready') {
+            if (associated.status !== 'access_denied')
+              yield* report({ step: 'association', dependency: 'database', reason: 'storage' })
+
+            return yield* unavailable()
+          }
+
           stage = associated.stage
         }
 
@@ -313,14 +419,26 @@ const makeArtwork = Effect.gen(function* () {
       })
 
       const heartbeat = Effect.gen(function* () {
-        const req = yield* leasedRequest()
-
-        const renewed = yield* Effect.tryPromise({
-          try: () => store.renew({ ...req, lease }),
-          catch: unavailable,
+        const req = yield* observed(leasedRequest(), {
+          step: 'heartbeat',
+          dependency: 'authorization',
+          reason: 'other',
         })
 
-        if (renewed.status !== 'ready') return yield* unavailable()
+        const renewed = yield* observed(
+          Effect.tryPromise({
+            try: () => store.renew({ ...req, lease }),
+            catch: unavailable,
+          }),
+          { step: 'heartbeat', dependency: 'database', reason: 'storage' },
+        )
+
+        if (renewed.status !== 'ready') {
+          if (renewed.status !== 'access_denied')
+            yield* report({ step: 'heartbeat', dependency: 'database', reason: 'storage' })
+
+          return yield* unavailable()
+        }
 
         return undefined
       }).pipe(Effect.repeat(Schedule.spaced('20 seconds')), Effect.delay('20 seconds'))

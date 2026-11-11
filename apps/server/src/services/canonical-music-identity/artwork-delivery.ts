@@ -110,9 +110,9 @@ const readResponseBody = async (response: Response): Promise<Uint8Array> => {
   return bytes
 }
 
-class ImportArtworkFetchUnavailable extends Schema.TaggedError<ImportArtworkFetchUnavailable>()(
+export class ImportArtworkFetchUnavailable extends Schema.TaggedError<ImportArtworkFetchUnavailable>()(
   'ImportArtworkFetchUnavailable',
-  {},
+  { reason: Schema.Literals(['network', 'provider_status', 'body_read', 'other']) },
 ) {}
 
 export const fetchImportMusicArtwork = (
@@ -137,10 +137,13 @@ export const fetchImportMusicArtwork = (
       }
 
       if (!approved(candidateUrl)) return null
-      const response = await fetcher(candidateUrl, { redirect: 'error', signal })
+
+      const response = await fetcher(candidateUrl, { redirect: 'error', signal }).catch(() => {
+        throw new ImportArtworkFetchUnavailable({ reason: 'network' })
+      })
 
       if (response.status === 429 || response.status >= 500)
-        throw new Error('Artwork source temporarily unavailable')
+        throw new ImportArtworkFetchUnavailable({ reason: 'provider_status' })
 
       if (!response.ok || (response.url && !approved(response.url))) return null
 
@@ -153,10 +156,17 @@ export const fetchImportMusicArtwork = (
 
       if (Number.isFinite(length) && length > MAX_MUSIC_ARTWORK_SIZE) return null
 
-      return { bytes: await readResponseBody(response), contentType: contentType.value }
+      const bytes = await readResponseBody(response).catch((cause: unknown) => {
+        if (cause instanceof MusicArtworkBodyTooLarge) throw cause
+        throw new ImportArtworkFetchUnavailable({ reason: 'body_read' })
+      })
+
+      return { bytes, contentType: contentType.value }
     },
     catch: (cause) =>
-      cause instanceof MusicArtworkBodyTooLarge ? cause : new ImportArtworkFetchUnavailable({}),
+      cause instanceof MusicArtworkBodyTooLarge || cause instanceof ImportArtworkFetchUnavailable
+        ? cause
+        : new ImportArtworkFetchUnavailable({ reason: 'other' }),
   }).pipe(Effect.catchTag('MusicArtworkBodyTooLarge', () => Effect.succeed(null)))
 
 const fetchArtwork = (fetcher: MusicCoverImageFetch, candidateUrl: string) =>

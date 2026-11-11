@@ -1,3 +1,10 @@
+## [2.131.1](https://github.com/planetaryescape/gbfm/compare/v2.131.0...v2.131.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **mcp:** diagnose recoverable artwork import failures ([80994b8](https://github.com/planetaryescape/gbfm/commit/80994b8df5baa767637aeadb17ca82e48293bb68))
+
 # [2.131.0](https://github.com/planetaryescape/gbfm/compare/v2.130.1...v2.131.0) (2026-11-11)
 
 

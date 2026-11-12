@@ -1,0 +1,79 @@
+name: CI cache benchmark
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  install:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        cache: [legacy, isolated, uncached]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+
+      - uses: oven-sh/setup-bun@v2
+        id: bun
+        with:
+          bun-version-file: 'package.json'
+
+      - name: Start dependency timing
+        env:
+          CACHE_MODE: ${{ matrix.cache }}
+        run: |
+          if [ "$CACHE_MODE" = legacy ]; then
+            echo "BUN_INSTALL_CACHE_DIR=$HOME/.bun/install/cache" >> "$GITHUB_ENV"
+          else
+            echo "BUN_INSTALL_CACHE_DIR=$RUNNER_TEMP/bun-install-cache" >> "$GITHUB_ENV"
+          fi
+          echo "CACHE_BENCHMARK_START_MS=$(date +%s%3N)" >> "$GITHUB_ENV"
+
+      - name: Restore legacy cache
+        if: matrix.cache == 'legacy'
+        id: legacy
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Restore isolated cache
+        if: matrix.cache == 'isolated'
+        id: isolated
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/bun-install-cache
+          key: bun-install-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.bun.outputs.bun-version }}-${{ hashFiles('bun.lock') }}
+
+      - name: Install and report
+        env:
+          CACHE_MODE: ${{ matrix.cache }}
+          CACHE_HIT: ${{ steps.legacy.outputs.cache-hit || steps.isolated.outputs.cache-hit || 'false' }}
+        run: |
+          install_start=$(date +%s%3N)
+          bun install --frozen-lockfile --cache-dir "$BUN_INSTALL_CACHE_DIR"
+          finish=$(date +%s%3N)
+          cache_kib=$(du -sk "$BUN_INSTALL_CACHE_DIR" | cut -f1)
+          {
+            echo "## $CACHE_MODE dependency cache"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- Attempt: $GITHUB_RUN_ATTEMPT"
+            echo "- Bun: $(bun --version)"
+            echo "- Exact cache hit: $CACHE_HIT"
+            echo "- Restore and install: $((finish - CACHE_BENCHMARK_START_MS)) ms"
+            echo "- Install only: $((finish - install_start)) ms"
+            echo "- Uncompressed cache: $cache_kib KiB"
+          } | tee -a "$GITHUB_STEP_SUMMARY"

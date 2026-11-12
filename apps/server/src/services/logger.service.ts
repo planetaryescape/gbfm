@@ -1,163 +1,96 @@
+import { hostname } from 'node:os'
+
 import * as Sentry from '@sentry/core'
-import { Effect, Layer, Logger, Option, References, Schema, type LogLevel } from 'effect'
-import pino from 'pino'
-import pretty from 'pino-pretty'
+import { Console, Effect, Layer, Logger, References, Schema, type LogLevel } from 'effect'
 
 import { ConfigService } from './config.service'
+import { formatLogMessage, redactLogValue } from './log-redaction'
 
-const REDACT_PATHS = [
-  'password',
-  'token',
-  'authorization',
-  'cookie',
-  'email',
-  '*.password',
-  '*.token',
-  '*.authorization',
-  '*.cookie',
-  '*.email',
-  'req.headers.authorization',
-  'req.headers.cookie',
-  'headers.authorization',
-  'headers.cookie',
-  'accessToken',
-  'refreshToken',
-  'spotifyAccessToken',
-  'betterAuthSession',
-]
+const ConsoleLevel = Schema.Literals(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'])
 
-const PII_KEY_PATTERN = /password|token|authorization|cookie|secret|email|session/i
-
-type RedactedLogValue =
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | ReadonlyArray<RedactedLogValue>
-  | { readonly [key: string]: RedactedLogValue }
-
-type EffectLogMessage = Logger.Options<unknown>['message']
-
-const LogScalar = Schema.Union([Schema.String, Schema.Number, Schema.Boolean, Schema.Null])
-
-const LogRecord = Schema.Record(Schema.String, Schema.Unknown)
-
-function redactValue(value: EffectLogMessage, depth = 0): RedactedLogValue {
-  if (depth > 4) return '[Truncated]'
-
-  if (value === undefined) return undefined
-
-  if (Array.isArray(value)) return value.map((entry) => redactValue(entry, depth + 1))
-  const record = Schema.decodeUnknownOption(LogRecord)(value)
-
-  if (Option.isSome(record)) {
-    const out: Record<string, RedactedLogValue> = {}
-
-    for (const [k, v] of Object.entries(record.value)) {
-      out[k] = PII_KEY_PATTERN.test(k) ? '[Redacted]' : redactValue(v, depth + 1)
-    }
-
-    return out
-  }
-
-  // oxlint-disable-next-line typescript/no-base-to-string -- This fallback intentionally preserves arbitrary log payloads when they cannot be decoded as scalars or records.
-  return Option.getOrElse(Schema.decodeUnknownOption(LogScalar)(value), () => String(value))
+const consoleLevels = {
+  trace: 10,
+  debug: 20,
+  info: 30,
+  warn: 40,
+  error: 50,
+  fatal: 60,
+  silent: Infinity,
 }
 
-function redactAttributes(
-  attributes: Record<string, EffectLogMessage>,
-): Record<string, RedactedLogValue> {
-  return Object.fromEntries(
-    Object.entries(attributes).map(([key, value]) => [key, redactValue(value)]),
-  )
-}
+const consoleLabels = { 20: 'DEBUG', 30: 'INFO', 40: 'WARN', 50: 'ERROR' }
 
-const makePinoLogger = (nodeEnv: string, logLevel: string | undefined) =>
-  pino(
-    {
-      level: logLevel || (nodeEnv === 'production' ? 'warn' : 'info'),
-      redact: { paths: REDACT_PATHS, censor: '[Redacted]' },
-    },
-    nodeEnv === 'production' ? undefined : pretty(),
-  )
-
-function pinoLevel(level: LogLevel.LogLevel): pino.Level {
+function outputLevel(level: LogLevel.LogLevel): 20 | 30 | 40 | 50 {
   switch (level) {
     case 'Trace':
     case 'Debug':
-      return 'debug'
-    case 'Info':
-      return 'info'
+      return 20
     case 'Warn':
-      return 'warn'
+      return 40
     case 'Error':
     case 'Fatal':
-      return 'error'
+      return 50
     default:
-      return 'info'
+      return 30
   }
 }
 
-function formatMessage(value: EffectLogMessage): string {
-  const message = Schema.decodeUnknownOption(Schema.String)(value)
+const makeAppLogger = (config: ConfigService['app']) => {
+  const production = config.nodeEnv === 'production'
 
-  if (Option.isSome(message)) return message.value
+  const threshold =
+    consoleLevels[
+      Schema.decodeUnknownSync(ConsoleLevel)(config.logLevel || (production ? 'warn' : 'info'))
+    ]
 
-  if (Array.isArray(value)) return value.map(formatMessage).join(' ')
+  const host = hostname()
+  const pid = process.pid
 
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return String(value)
-  }
-}
+  return Logger.make(({ logLevel, message, cause, fiber, date }) => {
+    const msg = formatLogMessage(message)
 
-const makeAppLogger = (pinoInstance: pino.Logger) =>
-  Logger.make(({ logLevel, message, cause, fiber, date }) => {
-    const msg = formatMessage(message)
-
-    const data = redactAttributes({
-      annotations: fiber.getRef(References.CurrentLogAnnotations),
-      cause,
+    const payload = {
+      annotations: redactLogValue(fiber.getRef(References.CurrentLogAnnotations)),
+      cause: redactLogValue(cause),
       fiberId: fiber.id,
-      date,
-    })
+      date: redactLogValue(date),
+      logLevel,
+    }
 
-    const payload = { ...data, logLevel }
+    const level = outputLevel(logLevel)
 
-    pinoInstance[pinoLevel(logLevel)](payload, msg)
+    if (level >= threshold) {
+      const output = { level, time: Date.now(), pid, hostname: host, ...payload, msg }
+      const label = consoleLabels[level]
+      fiber
+        .getRef(Console.Console)
+        .log(
+          production
+            ? JSON.stringify(output)
+            : `[${date.toISOString()}] ${label} (${pid}): ${msg}\n${JSON.stringify(payload, null, 2)}`,
+        )
+    }
 
-    if (!Sentry.getClient() || ['Trace', 'Debug', 'Info'].includes(logLevel)) return
-
-    const sentryLogger = Sentry.logger
+    if (!Sentry.getClient()) return
 
     switch (logLevel) {
-      case 'Trace':
-      case 'Debug':
-        sentryLogger.debug(msg, payload)
-        break
-      case 'Info':
-        sentryLogger.info(msg, payload)
-        break
       case 'Warn':
-        sentryLogger.warn(msg, payload)
+        Sentry.logger.warn(msg, payload)
         break
       case 'Error':
-        sentryLogger.error(msg, payload)
+        Sentry.logger.error(msg, payload)
         break
       case 'Fatal':
-        sentryLogger.fatal(msg, payload)
+        Sentry.logger.fatal(msg, payload)
         break
-      default:
-        sentryLogger.info(msg, payload)
     }
   })
+}
 
 export const AppLoggerLive = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ConfigService
 
-    return Logger.layer([makeAppLogger(makePinoLogger(config.app.nodeEnv, config.app.logLevel))])
+    return Logger.layer([makeAppLogger(config.app)])
   }),
 )

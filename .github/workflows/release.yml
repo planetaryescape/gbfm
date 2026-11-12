@@ -8,12 +8,23 @@ on:
     branches:
       - prod
   workflow_dispatch:
+    inputs:
+      benchmark_cache:
+        description: Compare dependency cache strategies without releasing or deploying
+        type: boolean
+        default: false
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  benchmark-cache:
+    if: github.event_name == 'workflow_dispatch' && inputs.benchmark_cache
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci-benchmark.yml
+
   lint:
     runs-on: ubuntu-24.04
 

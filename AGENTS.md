@@ -5,6 +5,10 @@
 
 ## Agent skills
 
+### Editorial and music notes
+
+Use the `gbfm-editorial` skill when creating or editing editorial drafts, saving listening research, importing referenced records, converting music links to cards, or checking editorial previews. Resolve music into native GBFM catalog entities and reference their GBFM IDs. Do not substitute Spotify iframes for failed imports or count a blank player as a verified embed.
+
 ### Pull requests
 
 Use the `pr-description` skill when creating or updating PR descriptions. For UI changes verified in a browser, use the `pr-screenshot-evidence` skill to embed real screenshots in a `Test evidence` section of the PR description. Keep screenshots out of git and use disposable fixtures without real user data or secrets.

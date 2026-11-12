@@ -82,17 +82,6 @@ const setup = async () => {
     ).json(),
   )
 
-  const readId = await fixture.register('posts:read offline_access')
-
-  const readTokens = Schema.decodeUnknownSync(OAuthTokens)(
-    await (
-      await fixture.exchange(
-        readId,
-        await fixture.authorize(readId, 'owner', 'posts:read offline_access'),
-      )
-    ).json(),
-  )
-
   await fixture.db
     .insert(musicEntityTypesTable)
     .values([
@@ -333,7 +322,6 @@ const setup = async () => {
     state,
     tokens,
     clientId,
-    readTokens,
     objects,
     call,
     rpc,
@@ -403,6 +391,16 @@ test.each(['preserve', 'required'] as const)(
 
 test('composed OAuth discovery, exact source import, original receipt replay, conflict and revoked replay', async () => {
   await using f = await setup()
+  const readId = await f.fixture.register('posts:read offline_access')
+
+  const readTokens = Schema.decodeUnknownSync(OAuthTokens)(
+    await (
+      await f.fixture.exchange(
+        readId,
+        await f.fixture.authorize(readId, 'owner', 'posts:read offline_access'),
+      )
+    ).json(),
+  )
 
   const names = Schema.decodeUnknownSync(
     Schema.Struct({
@@ -413,9 +411,9 @@ test('composed OAuth discovery, exact source import, original receipt replay, co
   const adminTools = names(await f.rpc('tools/list', {})).result.tools.map((tool) => tool.name)
   expect(adminTools).toContain('import_music_url')
 
-  const readTools = names(
-    await f.rpc('tools/list', {}, f.readTokens.access_token),
-  ).result.tools.map((tool) => tool.name)
+  const readTools = names(await f.rpc('tools/list', {}, readTokens.access_token)).result.tools.map(
+    (tool) => tool.name,
+  )
 
   expect(readTools).not.toContain('import_music_url')
   expect(readTools).not.toContain('get_music_import_status')
@@ -442,7 +440,7 @@ test('composed OAuth discovery, exact source import, original receipt replay, co
     platform: 'spotify',
     url: 'https://open.spotify.com/album/DifferentExactAlbum',
   })
-  expect(await f.call(input, 'import_music_url', f.readTokens.access_token)).toMatchObject({
+  expect(await f.call(input, 'import_music_url', readTokens.access_token)).toMatchObject({
     result: { isError: true },
   })
   expect(f.state.scrapes).toBe(0)

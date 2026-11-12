@@ -1,3 +1,11 @@
+## [2.131.3](https://github.com/planetaryescape/gbfm/compare/v2.131.2...v2.131.3) (2026-11-12)
+
+
+### Bug Fixes
+
+* **mcp:** challenge expired credentials before returning results ([2dd86e5](https://github.com/planetaryescape/gbfm/commit/2dd86e52069856a89f78ea1b28c06bad08bda1b9))
+* **music:** parse provider URLs with Effect schemas ([98a4b06](https://github.com/planetaryescape/gbfm/commit/98a4b0698da96a325255f9338548b73418d46115))
+
 ## [2.131.2](https://github.com/planetaryescape/gbfm/compare/v2.131.1...v2.131.2) (2026-11-11)
 
 

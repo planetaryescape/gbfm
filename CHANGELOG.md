@@ -1,3 +1,10 @@
+## [2.132.1](https://github.com/planetaryescape/gbfm/compare/v2.132.0...v2.132.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **music:** reuse verified Spotify recording aliases ([38931df](https://github.com/planetaryescape/gbfm/commit/38931df7236dddda69da6eb541a1305e0c629eca))
+
 # [2.132.0](https://github.com/planetaryescape/gbfm/compare/v2.131.3...v2.132.0) (2026-11-12)
 
 

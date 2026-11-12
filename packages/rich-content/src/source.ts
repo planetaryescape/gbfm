@@ -115,7 +115,7 @@ export interface ParseRichContentOptions {
 
 interface DocumentTotals {
   readonly blocks: number
-  readonly embeds: number
+  readonly externalMediaEmbeds: number
 }
 
 type Node = {
@@ -541,7 +541,9 @@ export const parseRichContent = (
     function visit(total, block): DocumentTotals {
       const current = {
         blocks: total.blocks + 1,
-        embeds: total.embeds + (block._tag === 'EmbedReference' ? 1 : 0),
+        externalMediaEmbeds:
+          total.externalMediaEmbeds +
+          (block._tag === 'EmbedReference' && block.reference._tag === 'ExternalMedia' ? 1 : 0),
       }
 
       if (block._tag === 'Quote' || block._tag === 'CardGroup')
@@ -555,7 +557,7 @@ export const parseRichContent = (
 
       return current
     },
-    { blocks: 0, embeds: 0 },
+    { blocks: 0, externalMediaEmbeds: 0 },
   )
 
   if (totals.blocks > blockLimit)
@@ -567,11 +569,11 @@ export const parseRichContent = (
       column: null,
     })
 
-  if (totals.embeds > RICH_CONTENT_LIMITS.embeds)
+  if (totals.externalMediaEmbeds > RICH_CONTENT_LIMITS.externalMediaEmbeds)
     diagnostics.push({
       severity: 'error',
       code: 'document-limit-exceeded',
-      message: 'Embed limit exceeded',
+      message: 'External media embed limit exceeded',
       line: null,
       column: null,
     })

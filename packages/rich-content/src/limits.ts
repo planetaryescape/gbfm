@@ -4,7 +4,7 @@ export const RICH_CONTENT_LIMITS = {
   nestingDepth: 12,
   tableRows: 100,
   tableColumns: 20,
-  embeds: 50,
+  externalMediaEmbeds: 50,
   tracklistEntries: 100,
   directiveAttributeCharacters: 2_000,
 } as const

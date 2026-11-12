@@ -6,6 +6,50 @@ import { SafeUrl } from './schema'
 import { parseRichContent, safeUrl, validateForWrite } from './source'
 
 describe('canonical rich content source', () => {
+  test('accepts more than fifty native music cards including nested card groups', async () => {
+    const source = `:::cards\n${Array.from(
+      { length: 120 },
+      (_, index) => `::track{id="track-${index}"}`,
+    ).join('\n')}\n:::`
+
+    const result = parseRichContent(source)
+
+    expect(result.diagnostics).toEqual([])
+    expect(result.document.blocks[0]).toMatchObject({
+      _tag: 'CardGroup',
+      children: Array.from({ length: 120 }, () => ({ _tag: 'EmbedReference' })),
+    })
+    expect(Exit.isSuccess(await Effect.runPromiseExit(validateForWrite(source)))).toBe(true)
+  })
+
+  test('keeps the separate external-player budget and document safety guards', async () => {
+    const players = Array.from(
+      { length: 51 },
+      (_, index) => `::media{url="https://www.youtube.com/watch?v=video${index}"}`,
+    ).join('\n\n')
+
+    expect(parseRichContent(players).diagnostics).toContainEqual(
+      expect.objectContaining({ message: 'External media embed limit exceeded' }),
+    )
+    expect(Exit.isFailure(await Effect.runPromiseExit(validateForWrite(players)))).toBe(true)
+
+    const mixed = [
+      ...Array.from({ length: 60 }, (_, index) => `::track{id="track-${index}"}`),
+      ...Array.from(
+        { length: 50 },
+        (_, index) => `::media{url="https://www.youtube.com/watch?v=video${index}"}`,
+      ),
+    ].join('\n\n')
+
+    expect(parseRichContent(mixed).diagnostics).toEqual([])
+    expect(parseRichContent('x'.repeat(102_401)).diagnostics).toContainEqual(
+      expect.objectContaining({ message: 'Source size limit exceeded' }),
+    )
+    expect(
+      parseRichContent(Array.from({ length: 2_001 }, () => 'paragraph').join('\n\n')).diagnostics,
+    ).toContainEqual(expect.objectContaining({ message: 'Block limit exceeded' }))
+  })
+
   test('preserves asymmetric GFM structure', () => {
     const result = parseRichContent(
       '## *Hello*\n\n3. first\n   - nested\n\n![cover](/cover.jpg)\n\n| A | B |\n| :- | -: |\n| x | y |',

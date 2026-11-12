@@ -23,7 +23,6 @@
 import { Context, Data, Effect, Layer, Match, Schedule, Schema } from 'effect'
 
 import { getErrorMessage } from '@/errors'
-import { omitUndefined } from '@/lib/omit-undefined'
 import { extractBandcampArtist, getBandcampMetadataWithSpan } from '@/services/bandcamp.service'
 import {
   DeezerService,
@@ -601,8 +600,9 @@ export const scrapeEffect = Effect.fn('musicScraper.scrape')(function* (input: M
   if (musicbrainzApplicable) attemptedProviders += 1
 
   const musicbrainzResult = yield* resolveMusicBrainzIdentity(
-    omitUndefined({ ...input, isrc: input.isrc ?? entityMeta?.isrc }),
+    input,
     !entityMeta?.thumbnailUrl,
+    entityMeta?.isrc,
   ).pipe(
     Effect.tap((value) => logProviderOutcome('musicbrainz', value ? 'succeeded' : 'not_found')),
     Effect.catchTag('MusicBrainzNotFound', () =>
@@ -1052,10 +1052,20 @@ function enrichMusicBrainzResult(
 function resolveMusicBrainzIdentity(
   input: MusicScrapeInput,
   allowCoverArt: boolean,
+  fallbackIsrc?: string,
 ): Effect.Effect<ProviderResult | null, MusicBrainzIdentityError, MusicBrainzIdentityService> {
   if (isPlaylistInput(input)) return Effect.succeed(null)
 
   return Effect.flatMap(MusicBrainzIdentityService, (musicbrainz) => {
+    const recordingByIsrc = (isrc: string) =>
+      musicbrainz
+        .lookupRecordingByIsrc(isrc)
+        .pipe(
+          Effect.flatMap((candidate) =>
+            enrichMusicBrainzResult(candidate, musicbrainz, allowCoverArt),
+          ),
+        )
+
     if (input.mbid) {
       const mbid = input.mbid
       const mbidType = musicBrainzMbidType(input.entityType)
@@ -1083,13 +1093,7 @@ function resolveMusicBrainzIdentity(
     }
 
     if (input.entityType === 'track' && input.isrc) {
-      return musicbrainz
-        .lookupRecordingByIsrc(input.isrc)
-        .pipe(
-          Effect.flatMap((candidate) =>
-            enrichMusicBrainzResult(candidate, musicbrainz, allowCoverArt),
-          ),
-        )
+      return recordingByIsrc(input.isrc)
     }
 
     const inferredEntityType = input.entityType ?? sourceDetails(input)?.entityType
@@ -1101,8 +1105,15 @@ function resolveMusicBrainzIdentity(
           Effect.flatMap((candidate) =>
             enrichMusicBrainzResult(candidate, musicbrainz, allowCoverArt),
           ),
+          Effect.catch((error) =>
+            inferredEntityType === 'track' && fallbackIsrc
+              ? recordingByIsrc(fallbackIsrc)
+              : Effect.fail(error),
+          ),
         )
     }
+
+    if (inferredEntityType === 'track' && fallbackIsrc) return recordingByIsrc(fallbackIsrc)
 
     return Effect.succeed(null)
   })

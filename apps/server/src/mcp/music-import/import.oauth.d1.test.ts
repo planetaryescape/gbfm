@@ -825,6 +825,7 @@ test('exact MusicBrainz recording evidence reuses alternate Spotify tracks witho
 test.each([
   'missing incoming evidence',
   'non-exact incoming match',
+  'ISRC-only incoming match',
   'different matched source',
   'non-recording MusicBrainz identity',
   'different recording',
@@ -867,6 +868,9 @@ test.each([
         break
       case 'non-exact incoming match':
         proposed.metadata = { ...proposed.metadata, confidence: 'search' }
+        break
+      case 'ISRC-only incoming match':
+        proposed.metadata = { ...proposed.metadata, confidence: 'exact_isrc', matchedUrl: null }
         break
       case 'different matched source':
         proposed.metadata = { ...proposed.metadata, matchedUrl: original.url }

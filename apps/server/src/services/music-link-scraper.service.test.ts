@@ -115,6 +115,22 @@ const deezer: DeezerService = {
   searchAlbumByTitleArtist: () => Effect.succeed(null),
 }
 
+const spotifyWithIsrc: SpotifyService = {
+  ...spotify,
+  resolveSource: () =>
+    Effect.succeed({
+      platform: 'spotify',
+      entityType: 'track',
+      externalId: '4iV5W9uYEdYUVa79Axb7Rh',
+      title: 'Fallback Track',
+      artists: 'Fallback Artist',
+      url: 'https://open.spotify.com/track/4iV5W9uYEdYUVa79Axb7Rh',
+      imageUrl: 'https://example.com/cover.jpg',
+      isrc: 'GBUM71029604',
+      crossPlatformEnrichment: 'allowed',
+    }),
+}
+
 const musicbrainz: MusicBrainzIdentityServiceContract = {
   lookupByMbid: () => Effect.die('unexpected MusicBrainz MBID lookup'),
   lookupRecordingByIsrc: (isrc) =>
@@ -675,53 +691,116 @@ describe('scrapeEffect', () => {
     expect(result.links).toEqual([])
   })
 
-  test('attaches an exact MusicBrainz URL relationship without text search', async () => {
-    const calls: Array<string> = []
+  test.each([false, true])(
+    'preserves exact MusicBrainz URL evidence with source ISRC=%s',
+    async (hasIsrc) => {
+      const calls: Array<string> = []
 
-    const exactMusicBrainz: MusicBrainzIdentityServiceContract = {
-      ...musicbrainz,
-      lookupByExternalUrl: ({ url }) => {
-        calls.push(`url:${url}`)
+      const exactMusicBrainz: MusicBrainzIdentityServiceContract = {
+        ...musicbrainz,
+        lookupByExternalUrl: ({ url }) => {
+          calls.push(`url:${url}`)
 
-        return Effect.succeed({
-          source: 'musicbrainz',
-          entityType: 'track',
-          title: 'Fallback Track',
-          artistNames: ['Fallback Artist'],
-          recordingMbid: '12345678-1234-4234-8234-123456789abc',
-          isrcs: [],
-          provenance: {
+          return Effect.succeed({
             source: 'musicbrainz',
-            confidence: 'exact_url',
-            lookupAt: '2026-08-16T00:00:00.000Z',
-            canonicalMbid: '12345678-1234-4234-8234-123456789abc',
-            matchedUrl: url,
-          },
-        })
-      },
-      searchCandidates: () => {
-        calls.push('search')
+            entityType: 'track',
+            title: 'Fallback Track',
+            artistNames: ['Fallback Artist'],
+            recordingMbid: '12345678-1234-4234-8234-123456789abc',
+            isrcs: [],
+            provenance: {
+              source: 'musicbrainz',
+              confidence: 'exact_url',
+              lookupAt: '2026-08-16T00:00:00.000Z',
+              canonicalMbid: '12345678-1234-4234-8234-123456789abc',
+              matchedUrl: url,
+            },
+          })
+        },
+        searchCandidates: () => {
+          calls.push('search')
 
-        return Effect.succeed([])
-      },
-    }
+          return Effect.succeed([])
+        },
+      }
 
-    const result = await runScrape(
-      { musicbrainz: exactMusicBrainz },
-      {
-        entityType: 'track',
-        url: 'https://open.spotify.com/track/4iV5W9uYEdYUVa79Axb7Rh',
-      },
-    )
+      const result = await runScrape(
+        {
+          musicbrainz: exactMusicBrainz,
+          spotify: hasIsrc ? spotifyWithIsrc : spotify,
+        },
+        {
+          entityType: 'track',
+          url: 'https://open.spotify.com/track/4iV5W9uYEdYUVa79Axb7Rh',
+        },
+      )
 
-    expect(calls).toEqual(['url:https://open.spotify.com/track/4iV5W9uYEdYUVa79Axb7Rh'])
-    expect(result.links).toContainEqual(
-      expect.objectContaining({
-        platform: 'musicbrainz',
-        metadata: expect.objectContaining({ confidence: 'exact_url' }),
-      }),
-    )
-  })
+      expect(calls).toEqual(['url:https://open.spotify.com/track/4iV5W9uYEdYUVa79Axb7Rh'])
+      expect(result.links).toContainEqual(
+        expect.objectContaining({
+          platform: 'musicbrainz',
+          metadata: expect.objectContaining({ confidence: 'exact_url' }),
+        }),
+      )
+    },
+  )
+
+  test.each(['not_found', 'unavailable'])(
+    'retains weaker ISRC evidence when the exact URL relationship is %s',
+    async (outcome) => {
+      const calls: Array<string> = []
+
+      const fallbackMusicBrainz: MusicBrainzIdentityServiceContract = {
+        ...musicbrainz,
+        lookupByExternalUrl: ({ url }) => {
+          calls.push(`url:${url}`)
+
+          return outcome === 'not_found'
+            ? Effect.fail(
+                new MusicBrainzNotFound({ operation: 'lookupByExternalUrl', identifier: url }),
+              )
+            : Effect.fail(
+                new MusicBrainzRequestFailed({
+                  operation: 'lookupByExternalUrl',
+                  statusCode: 503,
+                  cause: new Error('Controlled provider outage'),
+                }),
+              )
+        },
+        lookupRecordingByIsrc: (isrc) => {
+          calls.push(`isrc:${isrc}`)
+
+          return Effect.succeed({
+            source: 'musicbrainz',
+            entityType: 'track',
+            title: 'Fallback Track',
+            artistNames: ['Fallback Artist'],
+            recordingMbid: '12345678-1234-4234-8234-123456789abc',
+            isrcs: ['GBUM71029604'],
+            provenance: {
+              source: 'musicbrainz',
+              confidence: 'exact_isrc',
+              lookupAt: '2026-08-16T00:00:00.000Z',
+              canonicalMbid: '12345678-1234-4234-8234-123456789abc',
+            },
+          })
+        },
+      }
+
+      const result = await runScrape(
+        { spotify: spotifyWithIsrc, musicbrainz: fallbackMusicBrainz },
+        { url: 'https://open.spotify.com/track/4iV5W9uYEdYUVa79Axb7Rh', entityType: 'track' },
+      )
+
+      expect(calls).toEqual([
+        'url:https://open.spotify.com/track/4iV5W9uYEdYUVa79Axb7Rh',
+        'isrc:GBUM71029604',
+      ])
+      const recording = result.links.find((link) => link.platform === 'musicbrainz')
+      expect(recording?.metadata).toMatchObject({ confidence: 'exact_isrc' })
+      expect(recording?.metadata).not.toHaveProperty('matchedUrl')
+    },
+  )
 
   test('uses Cover Art Archive only as a missing source artwork fallback', async () => {
     const album: MusicBrainzIdentityCandidate = {

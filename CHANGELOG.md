@@ -1,3 +1,21 @@
+# [2.132.0](https://github.com/planetaryescape/gbfm/compare/v2.131.3...v2.132.0) (2026-11-12)
+
+
+### Bug Fixes
+
+* **rich-content:** remove the native music-card count limit ([8fccd70](https://github.com/planetaryescape/gbfm/commit/8fccd701ed4e32f418882250cd8cfb12b3180ecf))
+* **www:** expose contextual music-card accessible names ([8afcb81](https://github.com/planetaryescape/gbfm/commit/8afcb815dfdcf2b392eadebfe42cb27c22cbd7fc))
+
+
+### Features
+
+* **www:** mark YouTube links with decorative icons ([8d2d6af](https://github.com/planetaryescape/gbfm/commit/8d2d6af745d72915502e9a50a31d4c6e6ecb4252))
+
+
+### Performance Improvements
+
+* **www:** defer off-screen music-card rendering ([3321227](https://github.com/planetaryescape/gbfm/commit/3321227f77359b4d0149c61983e132a2e9aa0a9c))
+
 ## [2.131.3](https://github.com/planetaryescape/gbfm/compare/v2.131.2...v2.131.3) (2026-11-12)
 
 

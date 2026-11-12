@@ -1,3 +1,11 @@
+## [2.132.4](https://github.com/planetaryescape/gbfm/compare/v2.132.3...v2.132.4) (2026-11-12)
+
+
+### Performance Improvements
+
+* **test:** provision read-only OAuth grants only where exercised ([4f755c1](https://github.com/planetaryescape/gbfm/commit/4f755c1484ca0e24af2edce5115da3df4e551efa))
+* **test:** skip unused read-only OAuth grants in import fixtures ([27f40e2](https://github.com/planetaryescape/gbfm/commit/27f40e22f27484f9137baf8b73a265ff16ad8b10))
+
 ## [2.132.3](https://github.com/planetaryescape/gbfm/compare/v2.132.2...v2.132.3) (2026-11-12)
 
 

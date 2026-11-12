@@ -2641,6 +2641,13 @@
     padding: 1rem;
     line-height: 1.5;
   }
+  .rich-content-youtube-icon {
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    margin-inline-start: 0.3em;
+    vertical-align: -0.125em;
+  }
   .rich-content-music-head {
     display: grid;
     grid-template-columns: 5rem minmax(0, 1fr);

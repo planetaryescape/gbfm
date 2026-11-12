@@ -34,6 +34,21 @@ const linkAttributes = <Message>(href: string, h: HtmlBuilder<Message>) => [
   ...(isOutbound(href) ? [h.Target('_blank'), h.Rel('noopener noreferrer')] : []),
 ]
 
+const isYoutubeLink = (href: string): boolean => {
+  try {
+    const url = new URL(href)
+
+    return (
+      (url.protocol === 'https:' || url.protocol === 'http:') &&
+      ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be', 'www.youtu.be'].includes(
+        url.hostname,
+      )
+    )
+  } catch {
+    return false
+  }
+}
+
 const inlineView = <Message>(inline: RichContentInline, h: HtmlBuilder<Message>): Html | string => {
   // oxlint-disable-next-line anti-slop-effect/no-manual-tag-comparison -- Schema-owned recursive unions have no generated matcher; this switch provides compile-time exhaustiveness.
   switch (inline._tag) {
@@ -59,7 +74,12 @@ const inlineView = <Message>(inline: RichContentInline, h: HtmlBuilder<Message>)
     case 'Link':
       return h.a(
         [...linkAttributes(inline.href, h), ...(inline.title ? [h.Title(inline.title)] : [])],
-        inline.children.map((child) => inlineView(child, h)),
+        [
+          ...inline.children.map((child) => inlineView(child, h)),
+          ...(isYoutubeLink(inline.href)
+            ? [lucide(iconPaths.youtube, 'rich-content-youtube-icon')]
+            : []),
+        ],
       )
     case 'Image':
       return h.img([
@@ -339,7 +359,10 @@ const musicView = <Message>(
                           ? [spotifyIcon('rich-content-music-link-icon')]
                           : []),
                         musicPlatformLabel(link.platform),
-                        lucide(iconPaths.externalLink, 'rich-content-music-link-external'),
+                        lucide(
+                          isYoutubeLink(link.url) ? iconPaths.youtube : iconPaths.externalLink,
+                          'rich-content-music-link-external',
+                        ),
                       ],
                     ),
                   ],
@@ -446,7 +469,10 @@ const mediaView = <Message>(
             [...linkAttributes(block.canonicalUrl, h), h.AriaLabel(`Open on ${label}`)],
             [
               h.span([h.Class('rich-content-media-host')], [hostOf(block.canonicalUrl)]),
-              lucide(iconPaths.externalLink, 'rich-content-media-icon'),
+              lucide(
+                block.provider === 'youtube' ? iconPaths.youtube : iconPaths.externalLink,
+                'rich-content-media-icon',
+              ),
             ],
           ),
         ],
@@ -484,7 +510,13 @@ const unavailableMediaView = <Message>(
         ? h.empty
         : h.a(
             [...linkAttributes(block.href, h), h.Class('btn btn-sm')],
-            [label ? `Listen on ${label}` : 'Open link', lucide(iconPaths.externalLink, 'h-3 w-3')],
+            [
+              label ? `Listen on ${label}` : 'Open link',
+              lucide(
+                provider === 'youtube' ? iconPaths.youtube : iconPaths.externalLink,
+                'h-3 w-3',
+              ),
+            ],
           ),
     ],
   )

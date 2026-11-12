@@ -1,6 +1,7 @@
 import { bandcampPlayerUrl } from '@gbfm/rich-content/media'
-import type { RichContentDocument, SafeUrl } from '@gbfm/rich-content/schema'
-import { Predicate } from 'effect'
+import { RichContentDocument, type SafeUrl } from '@gbfm/rich-content/schema'
+import { parseRichContent } from '@gbfm/rich-content/source'
+import { Predicate, Schema } from 'effect'
 import { inertHtml as h, type Html } from 'foldkit/html'
 import { describe, expect, it } from 'vitest'
 
@@ -273,6 +274,33 @@ describe('richContentView', () => {
     expect(textContent(providerLink)).toBe('Bandcamp')
     expect(attribute(first(findAll(card, 'img')), 'loading')).toBe('lazy')
     expect(attribute(first(findAll(card, 'img')), 'decoding')).toBe('async')
+  })
+
+  it('marks YouTube links with decorative icons without changing their names or destinations', () => {
+    const urls = [
+      'https://www.youtube.com/watch?v=example',
+      'https://youtu.be/example',
+      'https://m.youtube.com/watch?v=example',
+      'https://youtube.com.evil.example/watch?v=example',
+      '/youtube',
+      'https://example.com/?next=https://youtube.com',
+    ]
+
+    const source = urls.map((url, index) => `[Watch ${index}](${url})`).join('\n\n')
+    const parsed = Schema.decodeUnknownSync(RichContentDocument)(parseRichContent(source).document)
+    const rendered = richContentView(parsed, h)
+    const view = first(rendered === null ? [] : [rendered])
+    const links = findAll(view, 'a')
+
+    expect(links.map((link) => attribute(link, 'href'))).toEqual(urls)
+    expect(links.map(textContent)).toEqual(urls.map((_, index) => `Watch ${index}`))
+    expect(links.map((link) => findAll(link, '.rich-content-youtube-icon').length)).toEqual([
+      1, 1, 1, 0, 0, 0,
+    ])
+
+    for (const icon of findAll(view, '.rich-content-youtube-icon')) {
+      expect(attribute(icon, 'aria-hidden')).toBe('true')
+    }
   })
 
   it('distinguishes repeated titles by artist and labels internal links without a new-tab notice', () => {

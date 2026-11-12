@@ -1,3 +1,11 @@
+## [2.132.3](https://github.com/planetaryescape/gbfm/compare/v2.132.2...v2.132.3) (2026-11-12)
+
+
+### Performance Improvements
+
+* **test:** clone migrated D1 templates for isolated fixtures ([dec6cc8](https://github.com/planetaryescape/gbfm/commit/dec6cc81fb53cd576c82e18dfa9ca272da4903c3))
+* **test:** reuse migrated D1 templates without sharing fixture state ([e8da5a0](https://github.com/planetaryescape/gbfm/commit/e8da5a0673f524006139f396f22015e0c4bc9b2f))
+
 ## [2.132.2](https://github.com/planetaryescape/gbfm/compare/v2.132.1...v2.132.2) (2026-11-12)
 
 

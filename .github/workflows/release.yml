@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       benchmark_cache:
-        description: Compare dependency cache strategies without releasing or deploying
+        description: Benchmark dependency caches only; skip validation, release and deployment
         type: boolean
         default: false
 
@@ -26,6 +26,7 @@ jobs:
     uses: ./.github/workflows/ci-benchmark.yml
 
   lint:
+    if: ${{ !inputs.benchmark_cache }}
     runs-on: ubuntu-24.04
 
     steps:
@@ -40,6 +41,7 @@ jobs:
         run: bun run oxc:ci
 
   typecheck:
+    if: ${{ !inputs.benchmark_cache }}
     runs-on: ubuntu-24.04
 
     steps:
@@ -54,6 +56,7 @@ jobs:
         run: bun run typecheck
 
   tests:
+    if: ${{ !inputs.benchmark_cache }}
     runs-on: ubuntu-24.04
 
     steps:
@@ -71,6 +74,7 @@ jobs:
         run: bun run test:www
 
   tests-d1:
+    if: ${{ !inputs.benchmark_cache }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -90,6 +94,7 @@ jobs:
         run: bun run test:d1 --shard=${{ matrix.shard }}/2
 
   build-www:
+    if: ${{ !inputs.benchmark_cache }}
     runs-on: ubuntu-24.04
 
     steps:
@@ -111,6 +116,7 @@ jobs:
         run: cd apps/www && bun run build
 
   observability-browser:
+    if: ${{ !inputs.benchmark_cache }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

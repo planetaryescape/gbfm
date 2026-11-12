@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs'
+import { cp, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -65,25 +67,53 @@ export interface MigratedD1Database extends AsyncDisposable {
   readonly dispose: () => Promise<void>
 }
 
-/** Creates an explicitly owned Miniflare D1 database with the requested forward migrations. */
-export const createMigratedD1Database = async (
-  migrations: ReadonlyArray<(typeof d1MigrationFiles)[number]> = d1MigrationFiles,
-): Promise<MigratedD1Database> => {
+export const createD1MigrationTemplate = async (directory: string) => {
   const miniflare = new Miniflare({
     script: 'export default { fetch() { return new Response() } }',
     modules: true,
     d1Databases: { DB: 'test-d1' },
+    resourcePersistencePath: directory,
   })
 
   try {
-    const database = await miniflare.getD1Database('DB')
-    await applyD1Migrations(database, migrations)
+    await applyD1Migrations(await miniflare.getD1Database('DB'))
+  } finally {
+    await miniflare.dispose()
+  }
+}
+
+export const createMigratedD1Database = async (
+  migrations?: ReadonlyArray<(typeof d1MigrationFiles)[number]>,
+): Promise<MigratedD1Database> => {
+  const template = migrations === undefined ? process.env.GBFM_D1_TEST_TEMPLATE : undefined
+  const directory = template ? await mkdtemp(path.join(tmpdir(), 'gbfm-d1-copy-')) : undefined
+  let miniflare: Miniflare | undefined
+
+  try {
+    if (template && directory) await cp(template, directory, { recursive: true })
+
+    miniflare = new Miniflare({
+      script: 'export default { fetch() { return new Response() } }',
+      modules: true,
+      d1Databases: { DB: 'test-d1' },
+      resourcePersistencePath: directory,
+    })
+
+    const runtime = miniflare
+    const database = await runtime.getD1Database('DB')
+
+    if (!template) await applyD1Migrations(database, migrations)
     let disposed = false
 
     const dispose = async () => {
       if (disposed) return
       disposed = true
-      await miniflare.dispose()
+
+      try {
+        await runtime.dispose()
+      } finally {
+        if (directory) await rm(directory, { recursive: true, force: true })
+      }
     }
 
     return {
@@ -92,7 +122,12 @@ export const createMigratedD1Database = async (
       [Symbol.asyncDispose]: dispose,
     }
   } catch (cause) {
-    await miniflare.dispose()
+    try {
+      await miniflare?.dispose()
+    } finally {
+      if (directory) await rm(directory, { recursive: true, force: true })
+    }
+
     throw cause
   }
 }

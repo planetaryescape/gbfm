@@ -288,11 +288,69 @@ describe('previewListeningImport', () => {
 
   test.each([
     '<html>Error</html>',
+    '<feed/>',
+    '<feed>Provider error</feed>',
     '<feed><entry></feed>',
     '<!DOCTYPE feed [<!ENTITY x "bad">]><feed/>',
+    '<!DOCTYPE feed SYSTEM "https://example.test/external.dtd"><feed/>',
+    '<feed><entry><yt:videoId>dQw4w9WgXcQ</yt:videoId></entry></feed>',
+    '<feed><entry><title>Missing ID</title></entry></feed>',
+    '<feed><entry><yt:videoId>dQw4w9WgXcQ</yt:videoId><yt:videoId>aaaaaaaaaaa</yt:videoId><title>Duplicate ID</title></entry></feed>',
+    '<feed><entry><yt:videoId><id>dQw4w9WgXcQ</id></yt:videoId><title>Nested ID</title></entry></feed>',
+    '<feed><entry><yt:videoId>dQw4w9WgXcQ</yt:videoId><title>  </title></entry></feed>',
+    '<feed><entry><yt:videoId>dQw4w9WgXcQ</yt:videoId><title>A</title><title>B</title></entry></feed>',
+    '<feed><entry><yt:videoId>dQw4w9WgXcQ</yt:videoId><title><b>Nested</b></title></entry></feed>',
+    '<feed><entry><yt:videoId>dQw4w9WgXcQ</yt:videoId><title>&unknown;</title></entry></feed>',
+    '<feed/><feed/>',
+    '<feed/>trailing text',
+    '<feed key="a" key="b"/>',
+    '<atom:feed xmlns:atom="http://www.w3.org/2005/Atom"/>',
   ])('rejects invalid YouTube XML', async (xml) => {
     await expect(
       preview(async () => new Response(xml), 'https://www.youtube.com/playlist?list=PL1234567890'),
+    ).rejects.toThrow('invalid public playlist feed')
+  })
+
+  test('preserves namespaced IDs, CDATA, Unicode and escaped title text', async () => {
+    const result = await preview(
+      async () =>
+        new Response(
+          '\uFEFF<?xml version="1.0" encoding="UTF-8"?>\r\n' +
+            '<feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015">' +
+            '<!-- ignored --><entry><yt:videoId> dQw4w9WgXcQ </yt:videoId>' +
+            '<title><![CDATA[A <B>]]> &amp; &#x1F3B5;</title></entry></feed>',
+        ),
+      'https://www.youtube.com/playlist?list=PL1234567890',
+    )
+
+    expect(result.items).toEqual([
+      { url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', title: 'A <B> & 🎵' },
+    ])
+  })
+
+  test('validates the complete feed even after the fifteen-item preview limit', async () => {
+    const entries = '<entry><yt:videoId>dQw4w9WgXcQ</yt:videoId><title>Good</title></entry>'.repeat(
+      15,
+    )
+
+    await expect(
+      preview(
+        async () => new Response(`<feed>${entries}<entry></feed>`),
+        'https://www.youtube.com/playlist?list=PL1234567890',
+      ),
+    ).rejects.toThrow('invalid public playlist feed')
+  })
+
+  test('validates entry fields beyond the fifteen-item preview limit', async () => {
+    const entries = '<entry><yt:videoId>dQw4w9WgXcQ</yt:videoId><title>Good</title></entry>'.repeat(
+      15,
+    )
+
+    await expect(
+      preview(
+        async () => new Response(`<feed>${entries}<entry><title>Missing ID</title></entry></feed>`),
+        'https://www.youtube.com/playlist?list=PL1234567890',
+      ),
     ).rejects.toThrow('invalid public playlist feed')
   })
 

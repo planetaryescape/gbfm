@@ -1,5 +1,5 @@
 import { McpPrincipal } from '@gbfm/core/editorial-mcp'
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { Effect, Layer, Schema } from 'effect'
 import { HttpRouter, HttpServer } from 'effect/http'
 import { afterAll, beforeAll, expect, test } from 'vitest'
@@ -434,24 +434,8 @@ test('oversize link IDs fail explicitly and typed provider mismatches are not eq
   }
 })
 
-test('canonical attachment and import display aliases remain readable without widening health destinations', async () => {
-  const target = { entityType: 'track', entityId: 'r4-display' } as const
-  await db
-    .insert(musicTracksTable)
-    .values({ id: target.entityId, title: 'Display', slug: target.entityId })
-
-  const platforms = [
-    'youtube_music',
-    'discord',
-    'website',
-    'instagram',
-    'twitter',
-    'musicbrainz',
-    'discogs',
-    'other',
-  ] as const
-
-  const dependencies = Layer.mergeAll(
+const canonicalDependencies = () =>
+  Layer.mergeAll(
     DatabaseTestLayer,
     Layer.succeed(ConfigService, createConfig()),
     Layer.succeed(MusicLinkScraperService, {
@@ -466,6 +450,48 @@ test('canonical attachment and import display aliases remain readable without wi
       Promise.reject(new Error('No artwork fetch during attachment')),
     ),
   )
+
+const removeTrack = async (entityId: string) => {
+  await db
+    .delete(musicSourceIdentitiesTable)
+    .where(
+      and(
+        eq(musicSourceIdentitiesTable.entityType, 'track'),
+        eq(musicSourceIdentitiesTable.entityId, entityId),
+      ),
+    )
+  await db
+    .delete(musicEntityLinksTable)
+    .where(
+      and(
+        eq(musicEntityLinksTable.entityType, 'track'),
+        eq(musicEntityLinksTable.entityId, entityId),
+      ),
+    )
+  await db.delete(musicTracksTable).where(eq(musicTracksTable.id, entityId))
+}
+
+test('canonical attachment display aliases remain readable without widening health destinations', async ({
+  onTestFinished,
+}) => {
+  const target = { entityType: 'track', entityId: 'r4-display' } as const
+  await db
+    .insert(musicTracksTable)
+    .values({ id: target.entityId, title: 'Display', slug: target.entityId })
+  onTestFinished(() => removeTrack(target.entityId))
+
+  const platforms = [
+    'youtube_music',
+    'discord',
+    'website',
+    'instagram',
+    'twitter',
+    'musicbrainz',
+    'discogs',
+    'other',
+  ] as const
+
+  const dependencies = canonicalDependencies()
 
   const attached = await Effect.runPromise(
     withTestLayer(
@@ -516,6 +542,20 @@ test('canonical attachment and import display aliases remain readable without wi
     )
   }
 
+  await db
+    .insert(musicEntityLinksTable)
+    .values({ ...target, platform: 'deezer', url: 'https://open.spotify.com/track/abc' })
+  expect(
+    (await call('find_platform_equivalent', { ...target, platform: 'deezer' }, EquivalentResult))
+      .result.status,
+  ).toBe('insufficient_evidence')
+})
+
+test('import display aliases remain readable without widening health destinations', async ({
+  onTestFinished,
+}) => {
+  const dependencies = canonicalDependencies()
+
   const importedLinks = [
     { platform: 'apple_music', url: 'https://itunes.apple.com/us/album/example/123?i=456' },
     { platform: 'bandcamp', url: 'https://artist.example.test/track/example' },
@@ -545,6 +585,7 @@ test('canonical attachment and import display aliases remain readable without wi
   )
 
   const importedTarget = { entityType: 'track', entityId: imported.entity.id } as const
+  onTestFinished(() => removeTrack(importedTarget.entityId))
   const importedPage = await call('get_music_links', importedTarget, LinksResult)
   expect(importedPage.scanned).toBe(6)
   expect(importedPage.links.map((link) => link.platform)).toEqual(
@@ -577,12 +618,4 @@ test('canonical attachment and import display aliases remain readable without wi
     expect(health.link?.platform).toBe(platform)
     expect(health.observation?.status).toBe('blocked')
   }
-
-  await db
-    .insert(musicEntityLinksTable)
-    .values({ ...target, platform: 'deezer', url: 'https://open.spotify.com/track/abc' })
-  expect(
-    (await call('find_platform_equivalent', { ...target, platform: 'deezer' }, EquivalentResult))
-      .result.status,
-  ).toBe('insufficient_evidence')
 })

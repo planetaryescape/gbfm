@@ -185,8 +185,28 @@ describe('getIdFromSpotifyUrl', () => {
     expect(getIdFromSpotifyUrl(url)).toBe('4iV5W9uYEdYUVa79Axb7Rh')
   })
 
-  test('returns null for URL without query params', () => {
+  test('extracts ID from Spotify URL without query params', () => {
     const url = 'https://open.spotify.com/track/4iV5W9uYEdYUVa79Axb7Rh'
+    expect(getIdFromSpotifyUrl(url)).toBe('4iV5W9uYEdYUVa79Axb7Rh')
+  })
+
+  test.each([
+    'https://open.spotify.com/playlist/651oo3KB6qwFGBCH6LLQSY',
+    'https://open.spotify.com/playlist/651oo3KB6qwFGBCH6LLQSY?si=d86bfe0a686e49a9',
+    'https://open.spotify.com/playlist/651oo3KB6qwFGBCH6LLQSY#tracks',
+    'https://open.spotify.com/playlist/651oo3KB6qwFGBCH6LLQSY/',
+    'https://open.spotify.com/intl-de/playlist/651oo3KB6qwFGBCH6LLQSY',
+  ])('extracts the same playlist ID from %s', (url) => {
+    expect(getIdFromSpotifyUrl(url)).toBe('651oo3KB6qwFGBCH6LLQSY')
+  })
+
+  test.each([
+    'https://example.com/playlist/651oo3KB6qwFGBCH6LLQSY?si=abc',
+    'https://open.spotify.com.evil.example/playlist/651oo3KB6qwFGBCH6LLQSY',
+    'https://open.spotify.com/playlist/',
+    'https://open.spotify.com/playlist/651oo3KB6qwFGBCH6LLQSY/tracks',
+    'https://open.spotify.com/search/ambient',
+  ])('rejects invalid Spotify entity URL %s', (url) => {
     expect(getIdFromSpotifyUrl(url)).toBeNull()
   })
 
@@ -198,6 +218,12 @@ describe('getIdFromSpotifyUrl', () => {
 describe('cleanId', () => {
   test('returns raw ID when not a URL', () => {
     expect(cleanId('4iV5W9uYEdYUVa79Axb7Rh')).toBe('4iV5W9uYEdYUVa79Axb7Rh')
+  })
+
+  test('extracts ID from a canonical playlist URL', () => {
+    expect(cleanId('https://open.spotify.com/playlist/651oo3KB6qwFGBCH6LLQSY')).toBe(
+      '651oo3KB6qwFGBCH6LLQSY',
+    )
   })
 
   test('extracts ID from encoded Spotify URL', () => {

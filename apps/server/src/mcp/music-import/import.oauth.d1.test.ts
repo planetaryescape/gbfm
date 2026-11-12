@@ -103,6 +103,7 @@ const setup = async () => {
     discardUpload: false,
     bytes: new Uint8Array([1, 2, 3]),
     revokeAtSql: false,
+    expireAfterCommit: false,
     metadataType,
     artworkBody,
   }
@@ -165,8 +166,8 @@ const setup = async () => {
 
   const guardedStore = Layer.succeed(McpOperationStore, {
     ...operationStore,
-    execute: (input) =>
-      operationStore.execute({
+    execute: async (input) => {
+      const result = await operationStore.execute({
         ...input,
         authorize: async (outcome) => {
           const authorized = await input.authorize(outcome)
@@ -178,7 +179,18 @@ const setup = async () => {
 
           return authorized
         },
-      }),
+      })
+
+      if (state.expireAfterCommit && result.status === 'applied') {
+        state.expireAfterCommit = false
+        await fixture.db
+          .update(oauthAccessToken)
+          .set({ expiresAt: new Date(0) })
+          .where(eq(oauthAccessToken.clientId, clientId))
+      }
+
+      return result
+    },
   })
 
   const createHandler = () =>
@@ -295,6 +307,7 @@ const setup = async () => {
     fixture,
     state,
     tokens,
+    clientId,
     readTokens,
     objects,
     call,
@@ -310,6 +323,58 @@ const setup = async () => {
     },
   }
 }
+
+test.each(['preserve', 'required'] as const)(
+  'expiry after import commit refreshes and replays %s artwork without duplicate imports',
+  async (artworkDelivery) => {
+    await using f = await setup()
+    f.state.expireAfterCommit = true
+
+    const input = {
+      requestId: crypto.randomUUID(),
+      url: 'https://open.spotify.com/album/2T3Qwtj4INKHAAXD7WzFd8',
+      expectedType: 'album' as const,
+      artworkDelivery,
+    }
+
+    const response = await f.send('tools/call', { name: 'import_music_url', arguments: input })
+    expect(response.status).toBe(401)
+    expect(response.headers.get('www-authenticate')).toContain('error="invalid_token"')
+    expect(response.headers.get('www-authenticate')).toContain('resource_metadata=')
+    expect(response.headers.get('cache-control')).toBe('private, no-store')
+    expect(await response.text()).toBe('')
+
+    const rows = await f.fixture.db.select().from(musicAlbumsTable)
+    expect(rows).toHaveLength(1)
+    expect(f.state.scrapes).toBe(1)
+    expect(f.state.puts).toBe(0)
+
+    const refreshed = await f.fixture.request('/oauth2/token', {
+      grant_type: 'refresh_token',
+      client_id: f.clientId,
+      refresh_token: Redacted.value(f.tokens.refresh_token),
+      resource: f.fixture.config.mcp.resourceUrl,
+    })
+
+    expect(refreshed.status).toBe(200)
+    const tokens = Schema.decodeUnknownSync(OAuthTokens)(await refreshed.json())
+
+    const result = imported(await f.call(input, 'import_music_url', tokens.access_token)).result
+      .structuredContent.import
+
+    expect(result).toMatchObject({
+      receipt: 'replayed',
+      completion: 'complete',
+      catalogue: { disposition: 'created', entityId: rows[0]?.id },
+    })
+    expect(f.state.scrapes).toBe(1)
+    expect(await f.fixture.db.select().from(musicAlbumsTable)).toHaveLength(1)
+    expect(result.artwork.phase).toBe(artworkDelivery === 'required' ? 'delivered' : 'preserved')
+    expect(f.state.fetches).toBe(artworkDelivery === 'required' ? 1 : 0)
+    expect(f.state.puts).toBe(artworkDelivery === 'required' ? 1 : 0)
+  },
+  30000,
+)
 
 test('composed OAuth discovery, exact source import, original receipt replay, conflict and revoked replay', async () => {
   await using f = await setup()
@@ -667,7 +732,10 @@ test('persisted OAuth revocation after the final JS authorization is rejected by
     artworkDelivery: 'required' as const,
   }
 
-  expect(await f.call(input)).toMatchObject({ result: { isError: true } })
+  const denied = await f.send('tools/call', { name: 'import_music_url', arguments: input })
+  expect(denied.status).toBe(401)
+  expect(denied.headers.get('www-authenticate')).toContain('error="invalid_token"')
+  expect(await denied.text()).toBe('')
   expect(await f.fixture.db.select().from(musicAlbumsTable)).toEqual([])
   expect(await f.fixture.db.get(sql`SELECT COUNT(*) AS count FROM mcp_operations`)).toEqual({
     count: 0,

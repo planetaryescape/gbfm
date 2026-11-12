@@ -332,6 +332,24 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
                               { status: 413 },
                             ),
                           )
+
+                        const authorization = yield* oauth.verify(token).pipe(Effect.result)
+
+                        if (Predicate.isTagged(authorization, 'Failure'))
+                          return Predicate.isTagged(
+                            authorization.failure,
+                            'EditorialOAuthInvalidToken',
+                          )
+                            ? yield* unauthorized.pipe(
+                                Effect.map(
+                                  HttpServerResponse.setHeader(
+                                    'www-authenticate',
+                                    `${challenge}, error="invalid_token"`,
+                                  ),
+                                ),
+                              )
+                            : noStore(HttpServerResponse.empty({ status: 503 }))
+
                         const text = new TextDecoder().decode(body.value)
 
                         const filterListing = (json: string) => {

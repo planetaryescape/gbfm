@@ -121,3 +121,25 @@ change during authorization is checked again by the server. Refresh cannot add
 scopes. Local, preview and production audiences and grants remain separate.
 
 No production policy activation is implied by committing this mechanism.
+
+## Credentials expiring during a command
+
+GBFM checks the bearer credential again before releasing a buffered MCP result.
+If it has become invalid, the response is an empty HTTP 401 with a
+`WWW-Authenticate` challenge containing `error="invalid_token"` and the protected
+resource metadata URL. Verification infrastructure failures return an empty 503,
+not a credential-refresh challenge. Responses remain private and non-cacheable.
+An otherwise valid credential missing a tool permission still receives the
+existing MCP permission error; refreshing cannot add that permission.
+
+A 401 does not prove the command failed to save. Clients must reauthenticate or
+refresh, then reconcile or retry with the exact original request identity and
+arguments. Music imports retain the original catalogue receipt and can resume
+unfinished artwork without importing another entity. Never generate a fresh
+`requestId` merely because the original response was rejected or lost.
+
+This handling does not extend expired credentials, remove mutation-time guards,
+or promise automatic client recovery. The client must support refreshing and
+resending the unchanged command. Empty transport acknowledgements and generic
+oversized-response rejections contain no private tool result and retain their
+existing handling.

@@ -27,8 +27,8 @@ import { decodeResponseBody } from '@gbfm/api/testing'
 import { SiteMetadata } from '@gbfm/site-metadata'
 import { SocialCardPresentation, TweetCardPresentation } from '@gbfm/social-card'
 import { and, eq, inArray } from 'drizzle-orm'
-import { Layer } from 'effect'
-import { XMLValidator } from 'fast-xml-parser'
+import { Effect, Layer, Stream } from 'effect'
+import * as Xml from 'effect/encoding/Xml'
 import { afterAll, assert, beforeAll, describe, expect, it } from 'vitest'
 
 import { audioTable } from '@/db/audio.schema'
@@ -3785,7 +3785,9 @@ describe('site routes (plain HttpRouter, Step 7)', () => {
 
       const body = await res.text()
 
-      expect(XMLValidator.validate(body)).toBe(true)
+      await Effect.runPromise(
+        Stream.make(body).pipe(Stream.pipeThroughChannel(Xml.decodeString()), Stream.runDrain),
+      )
       expect(body).toContain('<rss version="2.0"')
       expect(body).toContain('<title>Goosebumps.fm Mixes</title>')
       expect(body).toContain('<title>Published &amp; valid mix</title>')

@@ -1,8 +1,8 @@
 import { Effect, Result, Schema, Stream } from 'effect'
 import { FetchHttpClient } from 'effect/http'
-import { XMLParser, XMLValidator } from 'fast-xml-parser'
 
 import { SpotifyService } from './spotify.service'
+import { parseYoutubeFeed } from './youtube-feed'
 
 // Effect 4.0.6 names the schema-backed tagged error constructor TaggedError.
 export class ListeningImportError extends Schema.TaggedError<ListeningImportError>()(
@@ -26,19 +26,6 @@ const MixcloudPage = Schema.Struct({
   paging: Schema.optionalKey(
     Schema.Struct({ next: Schema.optionalKey(Schema.NullOr(Schema.String)) }),
   ),
-})
-
-const YoutubeFeed = Schema.Struct({
-  feed: Schema.Struct({
-    entry: Schema.optionalKey(
-      Schema.Array(
-        Schema.Struct({
-          'yt:videoId': Schema.String,
-          title: Schema.NonEmptyString,
-        }),
-      ),
-    ),
-  }),
 })
 
 const SpotifyImportPage = Schema.Struct({
@@ -307,24 +294,14 @@ export const previewListeningImport = Effect.fn('previewListeningImport')(functi
     const id = new URL(source.url).searchParams.get('list')
     const xml = yield* loadText(`https://www.youtube.com/feeds/videos.xml?playlist_id=${id}`)
 
-    const feed = yield* Effect.try({
-      try: () => {
-        if (/<!DOCTYPE|<!ENTITY/i.test(xml) || XMLValidator.validate(xml) !== true)
-          throw new Error('Invalid feed')
-
-        return Result.getOrThrow(
-          Schema.decodeUnknownResult(YoutubeFeed)(
-            new XMLParser({
-              ignoreAttributes: true,
-              parseTagValue: false,
-              isArray: (_name, path) => path === 'feed.entry',
-            }).parse(xml),
-          ),
-        )
-      },
-      catch: () =>
-        new ListeningImportError({ message: 'YouTube returned an invalid public playlist feed.' }),
-    })
+    const feed = yield* parseYoutubeFeed(xml).pipe(
+      Effect.mapError(
+        () =>
+          new ListeningImportError({
+            message: 'YouTube returned an invalid public playlist feed.',
+          }),
+      ),
+    )
 
     const warnings = [
       'Partial import: YouTube public RSS exposes at most 15 recent videos, not the full playlist. Order and completeness are not guaranteed; no further pages are available.',
@@ -333,9 +310,9 @@ export const previewListeningImport = Effect.fn('previewListeningImport')(functi
     const items: Array<{ url: string; title: string }> = []
     const seen = new Set<string>()
 
-    for (const entry of (feed.feed.entry ?? []).slice(0, 15)) {
+    for (const entry of feed.slice(0, 15)) {
       const parsed = yield* parseListeningSource(
-        `https://www.youtube.com/watch?v=${entry['yt:videoId']}`,
+        `https://www.youtube.com/watch?v=${entry.videoId}`,
       ).pipe(Effect.result)
 
       if (Result.isFailure(parsed) || !entry.title.trim()) {

@@ -51,10 +51,29 @@ jobs:
       - uses: ./.github/actions/setup-bun-workspace
 
       - name: Run unit and integration tests
-        run: bun run test
+        run: bun run test:packages
 
       - name: Run WWW unit and integration tests
         run: bun run test:www
+
+  tests-d1:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup-bun-workspace
+
+      - name: Run D1 integration tests
+        working-directory: apps/server
+        run: bun run test:d1 --shard=${{ matrix.shard }}/2
 
   build-www:
     runs-on: ubuntu-24.04

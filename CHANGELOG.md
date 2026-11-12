@@ -1,3 +1,10 @@
+## [2.132.2](https://github.com/planetaryescape/gbfm/compare/v2.132.1...v2.132.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **music:** preserve exact URL evidence before ISRC fallback ([91e8412](https://github.com/planetaryescape/gbfm/commit/91e84121b57ffd751b4fbd684255591abf2de942))
+
 ## [2.132.1](https://github.com/planetaryescape/gbfm/compare/v2.132.0...v2.132.1) (2026-11-12)
 
 

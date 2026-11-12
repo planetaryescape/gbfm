@@ -39,7 +39,6 @@
     "@sentry/browser": "10.77.1",
     "better-auth": "1.7.12",
     "clsx": "2.1.1",
-    "date-fns": "4.4.0",
     "effect": "4.0.6",
     "foldkit": "0.169.0",
     "jwt-decode": "4.0.0",

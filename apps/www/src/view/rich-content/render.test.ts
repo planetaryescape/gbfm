@@ -1,5 +1,6 @@
 import { bandcampPlayerUrl } from '@gbfm/rich-content/media'
 import type { RichContentDocument, SafeUrl } from '@gbfm/rich-content/schema'
+import { Predicate } from 'effect'
 import { inertHtml as h, type Html } from 'foldkit/html'
 import { describe, expect, it } from 'vitest'
 
@@ -248,6 +249,75 @@ describe('richContentView', () => {
     expect(attribute(iframe, 'allow')).toBe(
       'autoplay; encrypted-media; fullscreen; picture-in-picture',
     )
+  })
+
+  it('exposes music titles and artists without requiring a prose caption', () => {
+    const rendered = render()
+    const view = first(rendered === null ? [] : [rendered])
+    const card = first(findAll(view, '.rich-content-music-card'))
+    const heading = first(findAll(card, 'h3'))
+    const artist = first(findAll(card, '.rich-content-music-artists'))
+    const titleLink = first(findAll(heading, 'a'))
+    const providerLink = first(findAll(first(findAll(card, '.rich-content-music-links')), 'a'))
+
+    expect(attribute(card, 'aria-label')).toBe('Album: Stillness by Artist')
+    expect(textContent(heading)).toBe('Stillness')
+    expect(textContent(artist)).toBe('Artist')
+    expect(attribute(artist, 'aria-hidden')).toBeUndefined()
+    expect(attribute(first(findAll(card, 'img')), 'alt')).toBe('Artwork for Stillness by Artist')
+    expect(attribute(titleLink, 'aria-label')).toBe('Stillness by Artist (opens in a new tab)')
+    expect(attribute(providerLink, 'aria-label')).toBe(
+      'Listen to Stillness by Artist on Bandcamp (opens in a new tab)',
+    )
+    expect(attribute(providerLink, 'target')).toBe('_blank')
+    expect(textContent(providerLink)).toBe('Bandcamp')
+    expect(attribute(first(findAll(card, 'img')), 'loading')).toBe('lazy')
+    expect(attribute(first(findAll(card, 'img')), 'decoding')).toBe('async')
+  })
+
+  it('distinguishes repeated titles by artist and labels internal links without a new-tab notice', () => {
+    const original = document.blocks.find((block) => Predicate.isTagged(block, 'MusicEmbed'))
+
+    if (original === undefined) throw new Error('Expected the music fixture')
+
+    const rendered = richContentView(
+      {
+        version: 1,
+        blocks: [
+          original,
+          {
+            ...original,
+            music: {
+              ...original.music,
+              artists: ['Another Artist'],
+              canonicalUrl: '/collections/stillness',
+              links: [{ platform: 'gbfm', url: '/collections/stillness' }],
+            },
+          },
+          {
+            ...original,
+            music: { ...original.music, artists: [] },
+          },
+        ],
+      },
+      h,
+    )
+
+    const view = first(rendered === null ? [] : [rendered])
+    const cards = findAll(view, '.rich-content-music-card')
+
+    expect(cards.map((card) => attribute(card, 'aria-label'))).toEqual([
+      'Album: Stillness by Artist',
+      'Album: Stillness by Another Artist',
+      'Album: Stillness',
+    ])
+
+    const internal = first(
+      findAll(view, 'a').filter((a) => attribute(a, 'href') === '/collections/stillness'),
+    )
+
+    expect(attribute(internal, 'aria-label')).toBe('Stillness by Another Artist')
+    expect(attribute(internal, 'target')).toBeUndefined()
   })
 
   it('renders unavailable music as a notice and unavailable media as a provider link card', () => {

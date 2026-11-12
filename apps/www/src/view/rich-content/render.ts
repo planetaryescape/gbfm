@@ -255,8 +255,14 @@ const musicView = <Message>(
 ): Html => {
   const music = block.music
 
+  const credit =
+    music.artists.length === 0 ? music.title : `${music.title} by ${music.artists.join(', ')}`
+
   return h.article(
-    [h.Class('rich-content-music-card not-prose')],
+    [
+      h.Class('rich-content-music-card not-prose'),
+      h.AriaLabel(`${musicEntityLabels[music.entityType]}: ${credit}`),
+    ],
     [
       h.div(
         [h.Class('rich-content-music-head')],
@@ -266,7 +272,7 @@ const musicView = <Message>(
             : [
                 artwork(
                   music.imageUrl,
-                  `Artwork for ${music.title}`,
+                  `Artwork for ${credit}`,
                   '(min-width: 640px) 112px, 80px',
                   false,
                   'rich-content-music-art',
@@ -278,7 +284,17 @@ const musicView = <Message>(
               h.p([h.Class('rich-content-music-type')], [musicEntityLabels[music.entityType]]),
               h.h3(
                 [h.Class('rich-content-music-title')],
-                [h.a(linkAttributes(music.canonicalUrl, h), [music.title])],
+                [
+                  h.a(
+                    [
+                      ...linkAttributes(music.canonicalUrl, h),
+                      h.AriaLabel(
+                        `${credit}${isOutbound(music.canonicalUrl) ? ' (opens in a new tab)' : ''}`,
+                      ),
+                    ],
+                    [music.title],
+                  ),
+                ],
               ),
               ...(music.artists.length === 0
                 ? []
@@ -311,13 +327,21 @@ const musicView = <Message>(
                 h.li(
                   [],
                   [
-                    h.a(linkAttributes(link.url, h), [
-                      ...(link.platform === 'spotify'
-                        ? [spotifyIcon('rich-content-music-link-icon')]
-                        : []),
-                      musicPlatformLabel(link.platform),
-                      lucide(iconPaths.externalLink, 'rich-content-music-link-external'),
-                    ]),
+                    h.a(
+                      [
+                        ...linkAttributes(link.url, h),
+                        h.AriaLabel(
+                          `Listen to ${credit} on ${musicPlatformLabel(link.platform)}${isOutbound(link.url) ? ' (opens in a new tab)' : ''}`,
+                        ),
+                      ],
+                      [
+                        ...(link.platform === 'spotify'
+                          ? [spotifyIcon('rich-content-music-link-icon')]
+                          : []),
+                        musicPlatformLabel(link.platform),
+                        lucide(iconPaths.externalLink, 'rich-content-music-link-external'),
+                      ],
+                    ),
                   ],
                 ),
               ),

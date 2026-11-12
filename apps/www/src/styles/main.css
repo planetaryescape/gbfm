@@ -2631,6 +2631,8 @@
     text-decoration: none;
   }
   .rich-content-music-card {
+    content-visibility: auto;
+    contain-intrinsic-block-size: auto 260px;
     display: flex;
     flex-direction: column;
     gap: 0.875rem;
@@ -2647,6 +2649,12 @@
     height: 1em;
     margin-inline-start: 0.3em;
     vertical-align: -0.125em;
+  }
+  @media print {
+    .rich-content-music-card {
+      content-visibility: visible;
+      contain-intrinsic-block-size: none;
+    }
   }
   .rich-content-music-head {
     display: grid;

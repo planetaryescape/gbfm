@@ -36,6 +36,7 @@ import {
   parseMusicSource,
   type ParsedMusicSource,
 } from './music-source'
+import { isVerifiedSpotifyRecordingAlias } from './recording-alias'
 import {
   asResolvedReference,
   CanonicalMusicIdentityRepository,
@@ -501,6 +502,7 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
           const scrapedAt = new Date()
           const links = uniqueLinks(initial, result, scrapedAt)
           const sources = yield* parseDiscoveredSources(initial, links, entityType)
+          let commitLinks = links
           const incumbents = new Map<string, EntityReference>()
 
           for (const source of sources) {
@@ -598,6 +600,26 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
               ).pipe(Effect.catchTag('MusicSourceInvalid', () => Effect.succeed(undefined)))
 
               if (parsed && proposedSource && parsed.sourceKey !== proposedSource.sourceKey) {
+                if (
+                  incumbent.entityType === 'track' &&
+                  link.platform === 'spotify' &&
+                  link.status === 'verified' &&
+                  proposedSource.sourceKey === initial.sourceKey &&
+                  (yield* isVerifiedSpotifyRecordingAlias(initial, parsed, links, existingLinks))
+                ) {
+                  commitLinks = commitLinks.map((value) =>
+                    value.platform === link.platform
+                      ? {
+                          platform: link.platform,
+                          url: link.url,
+                          scrapedAt: link.scrapedAt ?? scrapedAt,
+                          metadata: link.metadata ?? undefined,
+                        }
+                      : value,
+                  )
+                  continue
+                }
+
                 return yield* new MusicIdentityConflict({
                   sourceKey: initial.sourceKey,
                   incumbentEntityType: incumbent.entityType,
@@ -654,7 +676,7 @@ export const CanonicalMusicIdentityLayer = Layer.effect(
                 reference,
                 entity,
                 slug,
-                links,
+                links: commitLinks,
                 ownerToken,
                 scrapedAt,
                 now: new Date(),

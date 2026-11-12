@@ -6,15 +6,116 @@ on:
     types: [completed]
     branches: [prod]
   workflow_dispatch:
+    inputs:
+      publish_assets:
+        description: Attach binaries to a published release; disable for build/cache verification
+        type: boolean
+        default: true
+      release_tag:
+        description: Published release receiving binaries; defaults to latest when publishing manually
+        type: string
+        default: ''
 
 permissions:
-  contents: write
+  contents: read
+  actions: read
 
 jobs:
-  build:
+  plan:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-24.04
+    outputs:
+      ref: ${{ steps.source.outputs.ref }}
+      tag: ${{ steps.source.outputs.tag }}
+      publish: ${{ steps.source.outputs.publish }}
+      cache-hit: ${{ steps.binaries.outputs.cache-hit }}
+      cache-key: ${{ steps.binaries.outputs.cache-primary-key }}
+    steps:
+      - name: Download the triggering release target
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: gbpm-release-target
+          path: ${{ runner.temp }}/gbpm-release-target
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Resolve the exact source and publication target
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          SOURCE_SHA: ${{ github.sha }}
+          REQUESTED_TAG: ${{ inputs.release_tag }}
+          PUBLISH_ASSETS: ${{ github.event_name == 'workflow_run' || inputs.publish_assets }}
+        run: |
+          tag=""
+          ref="$SOURCE_SHA"
+          if [ "$PUBLISH_ASSETS" = true ]; then
+            if [ "$EVENT_NAME" = workflow_run ]; then
+              tag=$(cat "$RUNNER_TEMP/gbpm-release-target/gbpm-release-tag.txt")
+              ref=$(cat "$RUNNER_TEMP/gbpm-release-target/gbpm-source-sha.txt")
+              [[ "$ref" =~ ^[0-9a-f]{40}$ ]]
+            else
+              tag="$REQUESTED_TAG"
+              if [ -z "$tag" ]; then
+                tag=$(gh release view --json tagName --jq .tagName)
+              fi
+            fi
+            git check-ref-format "refs/tags/$tag"
+            gh release view "$tag" --json tagName --jq .tagName > /dev/null
+          fi
+          {
+            echo "ref=$ref"
+            echo "tag=$tag"
+            echo "publish=$PUBLISH_ASSETS"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.source.outputs.ref }}
+
+      - name: Restore packaged binaries for these build inputs
+        id: binaries
+        uses: actions/cache/restore@v5
+        with:
+          path: dist/gbpm-*.tar.gz
+          key: gbpm-binaries-v1-${{ hashFiles('tools/process-mix/**', '.github/workflows/rust-build.yml', '.cargo/**', 'rust-toolchain*') }}
+
+      - name: Verify the cached target set
+        if: steps.binaries.outputs.cache-hit == 'true'
+        run: |
+          for target in linux-x86_64 linux-aarch64 darwin-aarch64; do
+            test -s "dist/gbpm-$target.tar.gz"
+          done
+
+      - name: Pass cached binaries to publication
+        if: steps.binaries.outputs.cache-hit == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gbpm-binaries
+          path: dist/gbpm-*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Report the build decision
+        env:
+          CACHE_HIT: ${{ steps.binaries.outputs.cache-hit }}
+          SOURCE_REF: ${{ steps.source.outputs.ref }}
+        run: |
+          {
+            echo "## gbpm build decision"
+            echo "- Source: $SOURCE_REF"
+            echo "- Reuse packaged binaries: ${CACHE_HIT:-false}"
+            echo "- Platform builders: $([ "$CACHE_HIT" = true ] && echo 0 || echo 3)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.cache-hit != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -33,6 +134,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -46,7 +149,7 @@ jobs:
 
       - name: Build
         working-directory: tools/process-mix
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
@@ -61,39 +164,44 @@ jobs:
         with:
           name: ${{ matrix.name }}
           path: ${{ matrix.name }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
 
   release:
-    needs: build
+    needs: [plan, build]
+    if: >-
+      always() && needs.plan.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
 
     steps:
-      - uses: actions/checkout@v6
-
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          pattern: gbpm-*
+          path: dist
           merge-multiple: true
 
-      - name: Get latest release
-        id: release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify all platform archives are present
         run: |
-          TAG=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "")
-          if [ -z "$TAG" ]; then
-            echo "No release found, skipping"
-            echo "tag=" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          fi
+          for target in linux-x86_64 linux-aarch64 darwin-aarch64; do
+            test -s "dist/gbpm-$target.tar.gz"
+          done
+
+      - name: Cache the complete packaged target set
+        if: needs.plan.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: dist/gbpm-*.tar.gz
+          key: ${{ needs.plan.outputs.cache-key }}
 
       - name: Upload binaries to release
-        if: steps.release.outputs.tag != ''
+        if: needs.plan.outputs.publish == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
         run: |
-          TAG="${{ steps.release.outputs.tag }}"
-          for f in artifacts/*.tar.gz; do
-            gh release upload "$TAG" "$f" --clobber
-          done
+          gh release upload "$RELEASE_TAG" dist/gbpm-*.tar.gz --clobber

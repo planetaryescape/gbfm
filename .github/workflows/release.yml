@@ -170,6 +170,20 @@ jobs:
         run: |
           bunx semantic-release
 
+      - name: Record the Rust binary release target
+        run: |
+          git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD > gbpm-release-tag.txt
+          git rev-parse HEAD > gbpm-source-sha.txt
+
+      - name: Publish the Rust binary release target
+        uses: actions/upload-artifact@v4
+        with:
+          name: gbpm-release-target
+          path: |
+            gbpm-release-tag.txt
+            gbpm-source-sha.txt
+          retention-days: 7
+
       - name: Trigger Prod Deployment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

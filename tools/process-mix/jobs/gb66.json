@@ -1,10 +1,12 @@
 {
   "audioPath": "/Users/guidefari/goosebumps media/gb66-vanilla 2.mp3",
   "imagePath": "../assets/covers/gbfm-mark-dark.jpg",
+  "introPath": "../intro.wav",
   "title": "gb#66",
   "description": "1. African-American Sound Recordings - mere\n2. 30/70 - Acceptance\n3. [kimetsu.] & Enocs Mae - QUASI MAQONDANA (AN INTERLUDE EHHE!!) [Feat. keyywav & 500.]\n4. Dave DK - Naschi\n5. Jabu - Us Alone\n6. Fletcher - 'Crosswind'\n7. [kimetsu.] & MHMMD - echoes of ivangeli\n8. [kimetsu.] - kosmogonia\n9. [kimetsu.] & alma del nino - SIPEO... (Feat. Girlthewoman)\n10. Baltra - Study Of You\n11. Sangre Nueva - Laine\n12. Simala - sfp 954. PART 3\n13. Barker - Wireheading\n14. Heavenchord - Schulz Audio - Small Piece 3 (Heavenchord Remix)\n15. IMIMOYA YEZI PHEPHO (feat. larada)\n16. alma del nino - Bayaphela\n17. Jespfur - ccccccc\n18. [kimetsu.] - EHLA MOYA! (feat. Enocs Mae)\n19. Kenny Segal - Local Anastasia [dub]\n20. Patrick Holland - Channel 83\n21. Contour - Love Suite no.1\n22. Laurel Halo - Airsick\n23. Fletcher - 'Hilted'\n24. [kimetsu.] & Girlthewoman - TSHABA NGWANA",
   "outputFormat": "mp3",
   "outputPath": "../output/gb66.mp3",
   "artist": "Guide Fari",
-  "album": "GBFM"
+  "album": "GBFM",
+  "genre": "Electronic"
 }

@@ -256,8 +256,8 @@ Editorial body content stored as MDX and compiled to HTML for rendering.
 ### Mix Processing
 The local CLI pipeline that embeds metadata and artwork into audio files.
 
-- **Meaning:** `tools/process-mix` Rust binary (`gbpm`) uses FFmpeg to produce MP3 or MP4 output.
-- **Used in:** `tools/process-mix/`, `gbpm` CLI.
+- **Meaning:** OpenSound's standalone `gbpm` CLI uses FFmpeg to produce MP3 or MP4 output from GBFM presets.
+- **Used in:** `tools/process-mix/` branding and job files; the external `gbpm` CLI.
 
 ### Email Delivery Log
 A record of every email sent or attempted.

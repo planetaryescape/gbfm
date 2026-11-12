@@ -170,37 +170,6 @@ jobs:
         run: |
           bunx semantic-release
 
-      - name: Record the Rust binary release target
-        id: gbpm-release
-        run: |
-          tag=$(git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD)
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Find matching Rust binaries
-        id: gbpm
-        uses: ./.github/actions/gbpm-binaries
-
-      - name: Attach unchanged Rust binaries without starting a build workflow
-        if: steps.gbpm.outputs.cache-hit == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ steps.gbpm-release.outputs.tag }}
-        run: gh release upload --clobber -- "$RELEASE_TAG" dist/gbpm-*.tar.gz
-
-      - name: Dispatch Rust builds only for missing binaries
-        if: steps.gbpm.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ steps.gbpm-release.outputs.tag }}
-          SOURCE_SHA: ${{ steps.gbpm.outputs.source-sha }}
-        run: |
-          gh workflow run rust-build.yml --ref=prod \
-            -f publish_assets=true \
-            -f release_tag="$RELEASE_TAG" \
-            -f source_sha="$SOURCE_SHA"
-
       - name: Trigger Prod Deployment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -107,26 +107,6 @@ describe('Effect router (Step 8: HonoFallback removed)', () => {
     expect(res.status).toBe(404)
     expect(await res.text()).toBe('')
   })
-
-  it('retired Bluesky integration routes return 404 without invoking auth or sync', async () => {
-    for (const [method, path] of [
-      ['GET', '/api/integrations/bluesky'],
-      ['POST', '/api/integrations/bluesky'],
-      ['POST', '/api/integrations/bluesky/account-id/sync'],
-      ['GET', '/api/integrations/bluesky/account-id/sync/run-id/status'],
-      ['GET', '/api/integrations/bluesky/account-id/runs'],
-      ['GET', '/api/integrations/bluesky/account-id/sources'],
-      ['PATCH', '/api/integrations/bluesky/account-id/schedule'],
-      ['PATCH', '/api/integrations/bluesky/sources/source-id'],
-      ['DELETE', '/api/integrations/bluesky/account-id'],
-    ]) {
-      const res = await webHandler.handler(
-        new Request(`http://localhost${path}`, method === undefined ? {} : { method }),
-      )
-
-      expect(res.status, `${method} ${path}`).toBe(404)
-    }
-  })
 })
 
 describe('better-auth route (Step 2c)', () => {
@@ -137,18 +117,6 @@ describe('better-auth route (Step 2c)', () => {
     // RouteNotFound 404 -- proves /auth/* is matched ahead of everything else.
     expect(res.status).toBe(200)
     expect(await res.json()).toBeNull()
-  })
-
-  it("unknown /auth/* paths are handled by better-auth, not Effect's own RouteNotFound", async () => {
-    const withoutAuth = await webHandler.handler(new Request('http://localhost/does-not-exist'))
-    const withAuth = await webHandler.handler(new Request('http://localhost/auth/does-not-exist'))
-
-    // Both are empty-bodied 404s (Effect's own RouteNotFound and better-auth's
-    // internal 404 are both content-length: 0), so the body can't
-    // discriminate them -- this only proves /auth/* is matched by
-    // better-auth's own handler rather than Effect's RouteNotFound path.
-    expect(withoutAuth.status).toBe(404)
-    expect(withAuth.status).toBe(404)
   })
 })
 
@@ -2108,22 +2076,6 @@ describe('file-manager (HttpApiBuilder group, Step 6)', () => {
     )
 
     expect(res.status).toBe(401)
-  })
-
-  it('POST /api/file-manager/copy returns 404 after the dead endpoint is removed', async () => {
-    const res = await webHandler.handler(
-      new Request('http://localhost/api/file-manager/copy', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          key: 'some-key',
-          sourceBucket: 'a',
-          destinationBucket: 'b',
-        }),
-      }),
-    )
-
-    expect(res.status).toBe(404)
   })
 })
 

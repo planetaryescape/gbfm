@@ -50,14 +50,17 @@ const getService = () =>
     ),
   )
 
-const fetchSeeded = async (options: {
-  limit: number
-  offset: number
-  sort?: 'plays' | 'created'
-  order?: 'asc' | 'desc'
-}) => {
+const fetchSeeded = async (
+  options: {
+    sort?: 'plays' | 'created'
+    order?: 'asc' | 'desc'
+  } = {},
+) => {
   const service = await getService()
-  const result = await Effect.runPromise(service.getByTypeForEdit('mix', options, adminId, 'admin'))
+
+  const result = await Effect.runPromise(
+    service.getByTypeForEdit('mix', { limit: 100, offset: 0, ...options }, adminId, 'admin'),
+  )
 
   return result.data.filter((audio) => seededSlugs.has(audio.slug)).map((audio) => audio.slug)
 }
@@ -84,31 +87,14 @@ afterAll(async () => {
 })
 
 describe('AudioService.getByTypeForEdit ordering', () => {
-  test('defaults to newest first when sort and order are omitted', async () => {
-    const slugs = await fetchSeeded({ limit: 100, offset: 0 })
-
-    expect(slugs).toEqual([slugAt(3), slugAt(2), slugAt(1), slugAt(0)])
+  test('browses newest first by default and can reverse chronological order', async () => {
+    expect(await fetchSeeded()).toEqual([3, 2, 1, 0].map(slugAt))
+    expect(await fetchSeeded({ sort: 'created', order: 'asc' })).toEqual([0, 1, 2, 3].map(slugAt))
   })
 
-  test('sorts by plays descending', async () => {
-    const slugs = await fetchSeeded({ limit: 100, offset: 0, sort: 'plays', order: 'desc' })
-
-    expect(slugs).toEqual([slugAt(1), slugAt(3), slugAt(0), slugAt(2)])
-  })
-
-  test('sorts by plays ascending', async () => {
-    const slugs = await fetchSeeded({ limit: 100, offset: 0, sort: 'plays', order: 'asc' })
-
-    expect(slugs).toEqual([slugAt(2), slugAt(0), slugAt(3), slugAt(1)])
-  })
-
-  test('sorts by created ascending', async () => {
-    const slugs = await fetchSeeded({ limit: 100, offset: 0, sort: 'created', order: 'asc' })
-
-    expect(slugs).toEqual([slugAt(0), slugAt(1), slugAt(2), slugAt(3)])
-  })
-
-  test('orders across all rows rather than within a page', async () => {
+  test('changes popularity order and preserves global ranking while paging', async () => {
+    expect(await fetchSeeded({ sort: 'plays', order: 'desc' })).toEqual([1, 3, 0, 2].map(slugAt))
+    expect(await fetchSeeded({ sort: 'plays', order: 'asc' })).toEqual([2, 0, 3, 1].map(slugAt))
     const service = await getService()
 
     const unsorted = await Effect.runPromise(

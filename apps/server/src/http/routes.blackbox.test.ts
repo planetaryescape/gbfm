@@ -263,54 +263,57 @@ describe('music labels', () => {
     const now = new Date()
     const future = new Date(now.getTime() + 86_400_000)
 
-    await db.insert(user).values({
-      id: adminId,
-      name: 'Affiliation admin',
-      email: `${adminId}@example.com`,
-      role: 'admin',
-    })
-    await db.insert(session).values({
-      id: crypto.randomUUID(),
-      token: adminToken,
-      userId: adminId,
-      expiresAt: new Date(now.getTime() + 60_000),
-    })
-
-    const [label] = await db
-      .insert(musicLabelsTable)
-      .values({
-        name: 'Affiliation label',
-        slug: `affiliation-label-${suffix}`,
-        content: '',
-        publishedAt: now,
-      })
-      .returning()
-
-    const [publishedArtist, draftArtist] = await db
-      .insert(musicArtistsTable)
-      .values([
-        { name: 'Alpha Artist', slug: `alpha-artist-${suffix}`, publishedAt: now },
-        { name: 'Draft Artist', slug: `draft-artist-${suffix}` },
-      ])
-      .returning()
-
-    const [publishedAlbum, futureAlbum] = await db
-      .insert(musicAlbumsTable)
-      .values([
-        {
-          title: 'Published Album',
-          slug: `published-album-${suffix}`,
-          releaseDate: now,
+    const [, , labels, artists, albums] = await db.batch([
+      db.insert(user).values({
+        id: adminId,
+        name: 'Affiliation admin',
+        email: `${adminId}@example.com`,
+        role: 'admin',
+      }),
+      db.insert(session).values({
+        id: crypto.randomUUID(),
+        token: adminToken,
+        userId: adminId,
+        expiresAt: new Date(now.getTime() + 60_000),
+      }),
+      db
+        .insert(musicLabelsTable)
+        .values({
+          name: 'Affiliation label',
+          slug: `affiliation-label-${suffix}`,
+          content: '',
           publishedAt: now,
-        },
-        {
-          title: 'Future Album',
-          slug: `future-album-${suffix}`,
-          releaseDate: future,
-          publishedAt: future,
-        },
-      ])
-      .returning()
+        })
+        .returning(),
+      db
+        .insert(musicArtistsTable)
+        .values([
+          { name: 'Alpha Artist', slug: `alpha-artist-${suffix}`, publishedAt: now },
+          { name: 'Draft Artist', slug: `draft-artist-${suffix}` },
+        ])
+        .returning(),
+      db
+        .insert(musicAlbumsTable)
+        .values([
+          {
+            title: 'Published Album',
+            slug: `published-album-${suffix}`,
+            releaseDate: now,
+            publishedAt: now,
+          },
+          {
+            title: 'Future Album',
+            slug: `future-album-${suffix}`,
+            releaseDate: future,
+            publishedAt: future,
+          },
+        ])
+        .returning(),
+    ])
+
+    const [label] = labels
+    const [publishedArtist, draftArtist] = artists
+    const [publishedAlbum, futureAlbum] = albums
 
     if (!label || !publishedArtist || !draftArtist || !publishedAlbum || !futureAlbum) {
       throw new Error('Failed to seed label affiliation test')
@@ -419,14 +422,18 @@ describe('music labels', () => {
       expect(removed.status).toBe(204)
       await expect(decodeResponseBody(LabelListResponse, afterRemove)).resolves.toEqual([])
     } finally {
-      await db.delete(musicLabelArtistsTable).where(eq(musicLabelArtistsTable.labelId, label.id))
-      await db.delete(musicLabelAlbumsTable).where(eq(musicLabelAlbumsTable.labelId, label.id))
-      await db.delete(musicAlbumsTable).where(eq(musicAlbumsTable.id, publishedAlbum.id))
-      await db.delete(musicAlbumsTable).where(eq(musicAlbumsTable.id, futureAlbum.id))
-      await db.delete(musicArtistsTable).where(eq(musicArtistsTable.id, publishedArtist.id))
-      await db.delete(musicArtistsTable).where(eq(musicArtistsTable.id, draftArtist.id))
-      await db.delete(musicLabelsTable).where(eq(musicLabelsTable.id, label.id))
-      await db.delete(user).where(eq(user.id, adminId))
+      await db.batch([
+        db.delete(musicLabelArtistsTable).where(eq(musicLabelArtistsTable.labelId, label.id)),
+        db.delete(musicLabelAlbumsTable).where(eq(musicLabelAlbumsTable.labelId, label.id)),
+        db
+          .delete(musicAlbumsTable)
+          .where(inArray(musicAlbumsTable.id, [publishedAlbum.id, futureAlbum.id])),
+        db
+          .delete(musicArtistsTable)
+          .where(inArray(musicArtistsTable.id, [publishedArtist.id, draftArtist.id])),
+        db.delete(musicLabelsTable).where(eq(musicLabelsTable.id, label.id)),
+        db.delete(user).where(eq(user.id, adminId)),
+      ])
     }
   })
 })

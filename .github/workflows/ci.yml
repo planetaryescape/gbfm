@@ -62,7 +62,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -73,7 +73,7 @@ jobs:
 
       - name: Run D1 integration tests
         working-directory: apps/server
-        run: bun run test:d1 --shard=${{ matrix.shard }}/2
+        run: bun run test:d1 --shard=${{ matrix.shard }}/4
 
   build-www:
     runs-on: ubuntu-24.04

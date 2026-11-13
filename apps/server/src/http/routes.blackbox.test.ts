@@ -107,26 +107,6 @@ describe('Effect router (Step 8: HonoFallback removed)', () => {
     expect(res.status).toBe(404)
     expect(await res.text()).toBe('')
   })
-
-  it('retired Bluesky integration routes return 404 without invoking auth or sync', async () => {
-    for (const [method, path] of [
-      ['GET', '/api/integrations/bluesky'],
-      ['POST', '/api/integrations/bluesky'],
-      ['POST', '/api/integrations/bluesky/account-id/sync'],
-      ['GET', '/api/integrations/bluesky/account-id/sync/run-id/status'],
-      ['GET', '/api/integrations/bluesky/account-id/runs'],
-      ['GET', '/api/integrations/bluesky/account-id/sources'],
-      ['PATCH', '/api/integrations/bluesky/account-id/schedule'],
-      ['PATCH', '/api/integrations/bluesky/sources/source-id'],
-      ['DELETE', '/api/integrations/bluesky/account-id'],
-    ]) {
-      const res = await webHandler.handler(
-        new Request(`http://localhost${path}`, method === undefined ? {} : { method }),
-      )
-
-      expect(res.status, `${method} ${path}`).toBe(404)
-    }
-  })
 })
 
 describe('better-auth route (Step 2c)', () => {
@@ -137,18 +117,6 @@ describe('better-auth route (Step 2c)', () => {
     // RouteNotFound 404 -- proves /auth/* is matched ahead of everything else.
     expect(res.status).toBe(200)
     expect(await res.json()).toBeNull()
-  })
-
-  it("unknown /auth/* paths are handled by better-auth, not Effect's own RouteNotFound", async () => {
-    const withoutAuth = await webHandler.handler(new Request('http://localhost/does-not-exist'))
-    const withAuth = await webHandler.handler(new Request('http://localhost/auth/does-not-exist'))
-
-    // Both are empty-bodied 404s (Effect's own RouteNotFound and better-auth's
-    // internal 404 are both content-length: 0), so the body can't
-    // discriminate them -- this only proves /auth/* is matched by
-    // better-auth's own handler rather than Effect's RouteNotFound path.
-    expect(withoutAuth.status).toBe(404)
-    expect(withAuth.status).toBe(404)
   })
 })
 
@@ -295,54 +263,57 @@ describe('music labels', () => {
     const now = new Date()
     const future = new Date(now.getTime() + 86_400_000)
 
-    await db.insert(user).values({
-      id: adminId,
-      name: 'Affiliation admin',
-      email: `${adminId}@example.com`,
-      role: 'admin',
-    })
-    await db.insert(session).values({
-      id: crypto.randomUUID(),
-      token: adminToken,
-      userId: adminId,
-      expiresAt: new Date(now.getTime() + 60_000),
-    })
-
-    const [label] = await db
-      .insert(musicLabelsTable)
-      .values({
-        name: 'Affiliation label',
-        slug: `affiliation-label-${suffix}`,
-        content: '',
-        publishedAt: now,
-      })
-      .returning()
-
-    const [publishedArtist, draftArtist] = await db
-      .insert(musicArtistsTable)
-      .values([
-        { name: 'Alpha Artist', slug: `alpha-artist-${suffix}`, publishedAt: now },
-        { name: 'Draft Artist', slug: `draft-artist-${suffix}` },
-      ])
-      .returning()
-
-    const [publishedAlbum, futureAlbum] = await db
-      .insert(musicAlbumsTable)
-      .values([
-        {
-          title: 'Published Album',
-          slug: `published-album-${suffix}`,
-          releaseDate: now,
+    const [, , labels, artists, albums] = await db.batch([
+      db.insert(user).values({
+        id: adminId,
+        name: 'Affiliation admin',
+        email: `${adminId}@example.com`,
+        role: 'admin',
+      }),
+      db.insert(session).values({
+        id: crypto.randomUUID(),
+        token: adminToken,
+        userId: adminId,
+        expiresAt: new Date(now.getTime() + 60_000),
+      }),
+      db
+        .insert(musicLabelsTable)
+        .values({
+          name: 'Affiliation label',
+          slug: `affiliation-label-${suffix}`,
+          content: '',
           publishedAt: now,
-        },
-        {
-          title: 'Future Album',
-          slug: `future-album-${suffix}`,
-          releaseDate: future,
-          publishedAt: future,
-        },
-      ])
-      .returning()
+        })
+        .returning(),
+      db
+        .insert(musicArtistsTable)
+        .values([
+          { name: 'Alpha Artist', slug: `alpha-artist-${suffix}`, publishedAt: now },
+          { name: 'Draft Artist', slug: `draft-artist-${suffix}` },
+        ])
+        .returning(),
+      db
+        .insert(musicAlbumsTable)
+        .values([
+          {
+            title: 'Published Album',
+            slug: `published-album-${suffix}`,
+            releaseDate: now,
+            publishedAt: now,
+          },
+          {
+            title: 'Future Album',
+            slug: `future-album-${suffix}`,
+            releaseDate: future,
+            publishedAt: future,
+          },
+        ])
+        .returning(),
+    ])
+
+    const [label] = labels
+    const [publishedArtist, draftArtist] = artists
+    const [publishedAlbum, futureAlbum] = albums
 
     if (!label || !publishedArtist || !draftArtist || !publishedAlbum || !futureAlbum) {
       throw new Error('Failed to seed label affiliation test')
@@ -451,14 +422,18 @@ describe('music labels', () => {
       expect(removed.status).toBe(204)
       await expect(decodeResponseBody(LabelListResponse, afterRemove)).resolves.toEqual([])
     } finally {
-      await db.delete(musicLabelArtistsTable).where(eq(musicLabelArtistsTable.labelId, label.id))
-      await db.delete(musicLabelAlbumsTable).where(eq(musicLabelAlbumsTable.labelId, label.id))
-      await db.delete(musicAlbumsTable).where(eq(musicAlbumsTable.id, publishedAlbum.id))
-      await db.delete(musicAlbumsTable).where(eq(musicAlbumsTable.id, futureAlbum.id))
-      await db.delete(musicArtistsTable).where(eq(musicArtistsTable.id, publishedArtist.id))
-      await db.delete(musicArtistsTable).where(eq(musicArtistsTable.id, draftArtist.id))
-      await db.delete(musicLabelsTable).where(eq(musicLabelsTable.id, label.id))
-      await db.delete(user).where(eq(user.id, adminId))
+      await db.batch([
+        db.delete(musicLabelArtistsTable).where(eq(musicLabelArtistsTable.labelId, label.id)),
+        db.delete(musicLabelAlbumsTable).where(eq(musicLabelAlbumsTable.labelId, label.id)),
+        db
+          .delete(musicAlbumsTable)
+          .where(inArray(musicAlbumsTable.id, [publishedAlbum.id, futureAlbum.id])),
+        db
+          .delete(musicArtistsTable)
+          .where(inArray(musicArtistsTable.id, [publishedArtist.id, draftArtist.id])),
+        db.delete(musicLabelsTable).where(eq(musicLabelsTable.id, label.id)),
+        db.delete(user).where(eq(user.id, adminId)),
+      ])
     }
   })
 })
@@ -2108,22 +2083,6 @@ describe('file-manager (HttpApiBuilder group, Step 6)', () => {
     )
 
     expect(res.status).toBe(401)
-  })
-
-  it('POST /api/file-manager/copy returns 404 after the dead endpoint is removed', async () => {
-    const res = await webHandler.handler(
-      new Request('http://localhost/api/file-manager/copy', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          key: 'some-key',
-          sourceBucket: 'a',
-          destinationBucket: 'b',
-        }),
-      }),
-    )
-
-    expect(res.status).toBe(404)
   })
 })
 

@@ -23,7 +23,7 @@ export const withoutDatabaseAutoInstrumentation = <T extends { readonly name: st
  * local and development runs must set SENTRY_ENABLED=true explicitly.
  */
 export const shouldEnableSentry = (dsn: string, environment: string, forceEnabled = false) =>
-  (dsn.length > 0 && environment === 'production') || forceEnabled
+  (dsn.length > 0 && (environment === 'production' || environment === 'prod')) || forceEnabled
 
 /**
  * Drops events and transactions created by localhost/dev machines so local

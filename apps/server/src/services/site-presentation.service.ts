@@ -226,7 +226,7 @@ const presentationForPost = (kind: 'editorial' | 'tweet' | 'post', slug: string,
 
     const post = yield* Match.value(kind).pipe(
       Match.when('tweet', () => service.getMicroPostBySlug(slug)),
-      Match.when('editorial', () => service.getEditorialBySlug(slug)),
+      Match.when('editorial', () => service.getEditorialMetadataBySlug(slug)),
       Match.when('post', () => service.getBySlug(slug)),
       Match.exhaustive,
     )

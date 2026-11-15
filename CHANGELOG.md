@@ -1,3 +1,21 @@
+# [2.134.0](https://github.com/planetaryescape/gbfm/compare/v2.133.0...v2.134.0) (2026-11-15)
+
+
+### Bug Fixes
+
+* **player:** cancel closed gestures and retain committed seek time ([99b6d35](https://github.com/planetaryescape/gbfm/commit/99b6d3598a8e3e42e4898aff16be756713833fa8))
+* **player:** make the hill a persistent grab handle ([a42aaf6](https://github.com/planetaryescape/gbfm/commit/a42aaf69323102052921b0ce4651b6d115916f2b))
+* **player:** settle seek persistence and Safari feedback ([b9cae63](https://github.com/planetaryescape/gbfm/commit/b9cae63e0648573f118e18b6650da8ad8335e536))
+
+
+### Features
+
+* **mobile:** preview exact time while fine seeking ([60171ee](https://github.com/planetaryescape/gbfm/commit/60171ee1438d9f59746f28bd922eb3c923db8c97))
+* **player:** add hold-to-fine-seek gesture lifecycle ([abd009d](https://github.com/planetaryescape/gbfm/commit/abd009d4b02e6f7d205ee3569f98f7e65b97c29f))
+* **player:** add tactile hill scrubbers on mobile ([8f744af](https://github.com/planetaryescape/gbfm/commit/8f744afaf92cdb5db2d8784eee7e0baac307e798))
+* **player:** add tactile hill scrubbers with precise seeking ([#625](https://github.com/planetaryescape/gbfm/issues/625)) ([8aac500](https://github.com/planetaryescape/gbfm/commit/8aac5009168ae793179e1a879b318f0a96139b5a))
+* **www:** add precise hold-to-seek previews on mobile ([50f9b06](https://github.com/planetaryescape/gbfm/commit/50f9b06e44265626f68c8429486956c9347f5485))
+
 # [2.133.0](https://github.com/planetaryescape/gbfm/compare/v2.132.7...v2.133.0) (2026-11-15)
 
 

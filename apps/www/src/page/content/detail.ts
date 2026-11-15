@@ -251,7 +251,8 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
         [
           item.richContent === null
             ? richContent(item.content)
-            : kind === 'editorial' && spotlightPreview(model.flags.url)
+            : kind === 'editorial' &&
+                (item.richContent.layout === 'spotlight' || spotlightPreview(model.flags.url))
               ? spotlightView(item.richContent, h, {
                   onVideo: (video) => Message.VideoOpened({ video }),
                 })

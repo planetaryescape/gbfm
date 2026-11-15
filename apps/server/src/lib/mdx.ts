@@ -256,7 +256,13 @@ const resolveDocument = (
   Effect.all(
     document.blocks.map((block) => resolveBlock(block, resolvers)),
     { concurrency: 8 },
-  ).pipe(Effect.map((blocks) => ({ version: 1 as const, blocks })))
+  ).pipe(
+    Effect.map((blocks): RichContentDocument => {
+      const resolved: RichContentDocument = { version: 1, blocks }
+
+      return document.layout === undefined ? resolved : { ...resolved, layout: document.layout }
+    }),
+  )
 
 export const renderRichContent = (source: string): RichContentDocument =>
   Effect.runSync(

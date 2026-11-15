@@ -14,6 +14,7 @@ import {
   type RichContentBlock,
   type RichContentDiagnostic,
   type RichContentInline,
+  type RichContentLayout,
 } from './schema.ts'
 
 export type UrlPurpose = 'link' | 'image' | 'media'
@@ -99,6 +100,7 @@ export type UnresolvedBlock =
 export interface UnresolvedDocument {
   readonly version: 1
   readonly blocks: ReadonlyArray<UnresolvedBlock>
+  readonly layout?: RichContentLayout
 }
 
 export interface ParseRichContentResult {
@@ -510,6 +512,24 @@ const blocks = (
     return { _tag: 'Unsupported', source: sourceOf(node, source), reason: 'invalid-directive' }
   })
 
+const isLayoutDirective = (node: Node) => node.type === 'leafDirective' && node.name === 'layout'
+
+/** A top-level `::layout{name="spotlight"}` line sets how the whole document is presented rather than adding a block. */
+const layoutOf = (
+  nodes: ReadonlyArray<Node>,
+  diagnostics: Array<RichContentDiagnostic>,
+): RichContentLayout | undefined =>
+  nodes.filter(isLayoutDirective).reduce<RichContentLayout | undefined>((layout, node) => {
+    const attrs = node.attributes ?? {}
+
+    if (attrsValid(attrs, ['name']) && attrs.name === 'spotlight') return layout ?? 'spotlight'
+    diagnostics.push(
+      diagnostic(node, 'warning', 'invalid-directive-attribute', 'Invalid layout directive'),
+    )
+
+    return layout
+  }, undefined)
+
 export const parseRichContent = (
   source: string,
   options: ParseRichContentOptions = {},
@@ -530,9 +550,11 @@ export const parseRichContent = (
   // SAFETY: unified returns mdast nodes; Node is the exact field subset read by this projector.
   // oxlint-disable-next-line typescript/consistent-type-assertions, typescript/no-unsafe-type-assertion, anti-slop/require-safety-comment-for-type-assertion
   const nodes = root.children as Array<Node>
+  const layout = layoutOf(nodes, diagnostics)
+  const content = nodes.filter((node) => !isLayoutDirective(node))
 
   const projected = blocks(
-    options.publicSourceProse ? publicSourceNodes(nodes) : nodes,
+    options.publicSourceProse ? publicSourceNodes(content) : content,
     source,
     diagnostics,
   )
@@ -578,10 +600,9 @@ export const parseRichContent = (
       column: null,
     })
 
-  return {
-    document: { version: 1, blocks: projected.slice(0, blockLimit) },
-    diagnostics,
-  }
+  const document: UnresolvedDocument = { version: 1, blocks: projected.slice(0, blockLimit) }
+
+  return { document: layout === undefined ? document : { ...document, layout }, diagnostics }
 }
 
 export const validateForWrite = (

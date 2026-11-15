@@ -84,6 +84,12 @@ afterAll(async () => {
   if (directory) await rm(directory, { recursive: true, force: true })
 })
 
+test('resolved staging bindings cannot enable the SDK through its environment fallback', async () => {
+  const response = await runtime.dispatchFetch('https://api.goosebumps.fm/fixture/staging')
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ sentryEnabled: false })
+})
+
 test('the real workerd API, Effect handler, D1 queries and warning log retain one incoming trace', async () => {
   const traceId = '33333333333333333333333333333333'
   const caller = '4444444444444444'

@@ -13,14 +13,7 @@ import type {
   SendEmail,
 } from '@cloudflare/workers-types'
 import { resolveRequestId } from '@gbfm/core/observability/request-id'
-import { traceSampleRate } from '@gbfm/core/observability/trace-sampling'
 import * as Sentry from '@sentry/cloudflare'
-import type {
-  ErrorEvent,
-  SpanJSON,
-  TracesSamplerSamplingContext,
-  TransactionEvent,
-} from '@sentry/core'
 import { Effect, Layer, Predicate, Redacted, Schema, Tracer } from 'effect'
 import { FetchHttpClient } from 'effect/http'
 
@@ -30,17 +23,11 @@ import type { NavigationLockDurableObject } from '@/durable-objects/navigation-l
 import type { SpotifyImportResolverDurableObject } from '@/durable-objects/spotify-import-resolver.do'
 import { DatabaseError, getErrorMessage } from '@/errors'
 import { createWebHandler } from '@/http/routes'
-import { sanitizeDatabaseSpan } from '@/lib/database-telemetry'
 import { localTracer, traceLocalRequest } from '@/lib/local-request-tracing'
-import {
-  sanitizeOAuthBreadcrumb,
-  sanitizeOAuthEvent,
-  sanitizeOAuthSpan,
-} from '@/lib/oauth-telemetry'
-import { omitUndefined } from '@/lib/omit-undefined'
-import { hasLocalSentryContext, shouldEnableSentry } from '@/lib/sentry'
 import { McpOperationStoreLayer } from '@/mcp/operations/store'
 import { regenerateSitemap } from '@/routes/redirect/seo/sitemap.service'
+import { withResolvedWorkerSentryBindings } from '@/runtime/sentry-bindings'
+import { workerSentryOptions } from '@/runtime/sentry-options'
 import {
   WorkerSentryEnabledLive,
   WorkerSentryEnv,
@@ -76,7 +63,7 @@ import { QRCodeServiceLayer } from '@/services/qrcode.service'
 import { processReminderJob, queryDueReminders } from '@/services/reminder-processor'
 import { ReminderQueue, ReminderQueueLayer, type ReminderJob } from '@/services/reminder-queue'
 import { RequestTelemetryLive } from '@/services/request-telemetry.service'
-import { resolveSecretBindings } from '@/services/secrets-store.service'
+import { resolveSecretBindings, type SecretBinding } from '@/services/secrets-store.service'
 import { SentryServiceLayer } from '@/services/sentry.service'
 import { SignupProtectionLayer } from '@/services/signup-protection'
 import { SitemapCacheLayer } from '@/services/sitemap-cache'
@@ -236,33 +223,6 @@ const appServicesLive = (
   })
 }
 
-const sentryOptions = (env: ApiEnv) => {
-  const dsn = env.SENTRY_DSN ?? ''
-  const environment = env.SENTRY_ENVIRONMENT ?? 'development'
-
-  if (!shouldEnableSentry(dsn, environment)) return undefined
-
-  return {
-    dsn,
-    environment,
-    tracesSampler: ({
-      inheritOrSampleWith,
-      name,
-      normalizedRequest,
-    }: TracesSamplerSamplingContext) =>
-      inheritOrSampleWith(traceSampleRate(omitUndefined({ name, url: normalizedRequest?.url }))),
-
-    sendDefaultPii: false,
-    enableLogs: true,
-    beforeBreadcrumb: sanitizeOAuthBreadcrumb,
-    beforeSendSpan: (span: SpanJSON) => sanitizeOAuthSpan(sanitizeDatabaseSpan(span)),
-    beforeSend: (event: ErrorEvent) =>
-      hasLocalSentryContext(event) ? null : sanitizeOAuthEvent(event),
-    beforeSendTransaction: (event: TransactionEvent) =>
-      hasLocalSentryContext(event) ? null : sanitizeOAuthEvent(event),
-  }
-}
-
 const reminderQueueLive = (env: ApiEnv) => ReminderQueueLayer(env.REMINDERS)
 
 const playlistEnrichmentQueueLive = (env: ApiEnv) =>
@@ -365,7 +325,7 @@ const processPlaylistEnrichmentMessage = (env: ApiEnv, payload: PlaylistEnrichme
 
 type ApiQueueJob = ReminderJob | PlaylistEnrichmentJob
 
-const instrumentedWorker = Sentry.withSentry<ApiEnv, ApiQueueJob>(sentryOptions, {
+const instrumentedWorker = Sentry.withSentry<ApiEnv, ApiQueueJob>(workerSentryOptions, {
   async fetch(request: Request, env: ApiEnv, ctx: ExecutionContext): Promise<Response> {
     return ctx.tracing.enterSpan('gbfm.api.request', async (span): Promise<Response> => {
       const incomingRequestId = request.headers.get('x-request-id')
@@ -449,4 +409,8 @@ const instrumentedWorker = Sentry.withSentry<ApiEnv, ApiQueueJob>(sentryOptions,
   },
 })
 
-export default normalizeWorkerTraceContext(instrumentedWorker)
+type WorkerBindings = Omit<ApiEnv, 'SENTRY_DSN'> & { readonly SENTRY_DSN?: SecretBinding }
+
+export default withResolvedWorkerSentryBindings<WorkerBindings, ApiQueueJob>(
+  normalizeWorkerTraceContext(instrumentedWorker),
+)

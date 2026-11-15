@@ -76,6 +76,9 @@ Only these two tools belong in the first slice. A model instruction or a client 
 The write slice adds `drafts:write`, separately consented alongside `posts:read`.
 Both tools accept UUIDv4 `requestId` values scoped to the approving account:
 
+Artwork uses the separate [native draft artwork contract](native-draft-artwork.md)
+under these same scopes. The text-tool input contracts below remain unchanged.
+
 ```text
 create_draft(requestId, title, content, description?)
   -> saved result(endpoint, post(postId, version, reviewUrl, ...))

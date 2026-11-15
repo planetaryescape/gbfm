@@ -23,6 +23,7 @@ import {
 import { ContentReadServiceLayer } from '@/mcp/content-read/service'
 import { ContentReadHandlersLayer, ContentReadToolkit } from '@/mcp/content-read/toolkit'
 import { EditorialToolError, McpToolError } from '@/mcp/contracts'
+import { DraftArtworkHandlersLive, DraftArtworkToolkit } from '@/mcp/draft-artwork/toolkit'
 import { EditorialDraftServiceLayer } from '@/mcp/drafts'
 import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from '@/mcp/editorial'
 import { FavoritesMcpServiceLayer } from '@/mcp/favorites/service'
@@ -201,7 +202,8 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
                           request.method === 'POST'
                             ? yield* boundMcpBody(
                                 request.stream,
-                                principal.scopes.includes('drafts:write')
+                                principal.scopes.includes('drafts:write') ||
+                                  principal.scopes.includes('creator:write')
                                   ? MAX_MCP_JSON_BYTES
                                   : 16 * 1024,
                               )
@@ -502,6 +504,7 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
 export const EditorialMcpRoutesLive = makeMcpRoutes(
   composeMcpToolkits(
     EditorialToolkit,
+    DraftArtworkToolkit,
     ContentReadToolkit,
     PublicResearchToolkit,
     ListeningToolkit,
@@ -511,6 +514,7 @@ export const EditorialMcpRoutesLive = makeMcpRoutes(
     MusicImportToolkit,
   ),
   Layer.mergeAll(
+    DraftArtworkHandlersLive,
     ContentReadHandlersLayer.pipe(Layer.provide(ContentReadServiceLayer)),
     PublicResearchHandlersLayer.pipe(Layer.provide(PublicResearchServiceLayer)),
     ListeningToolHandlersLayer.pipe(Layer.provide(ListeningReadServiceLive)),

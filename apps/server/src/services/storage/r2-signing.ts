@@ -139,6 +139,7 @@ export const presignedUrl = async (input: {
   readonly key: string
   readonly query: ReadonlyArray<[string, string]>
   readonly expiresSeconds: number
+  readonly headers?: Readonly<Record<string, string>>
   readonly now?: Date
 }) => {
   const now = input.now ?? new Date()
@@ -148,21 +149,28 @@ export const presignedUrl = async (input: {
   const credentialScope = `${dateStamp}/auto/s3/aws4_request`
   const path = `/${input.config.bucketName}/${encodeKeyPath(input.key)}`
 
+  const headers = Object.entries({ host, ...input.headers })
+    .map(([key, value]): [string, string] => [key.toLowerCase(), value.trim()])
+    .sort(([left], [right]) => left.localeCompare(right))
+
+  const signedHeaders = headers.map(([key]) => key).join(';')
+  const canonicalHeaders = headers.map(([key, value]) => `${key}:${value}\n`).join('')
+
   const query = canonicalQuery([
     ...input.query,
     ['X-Amz-Algorithm', 'AWS4-HMAC-SHA256'],
     ['X-Amz-Credential', `${input.config.accessKeyId}/${credentialScope}`],
     ['X-Amz-Date', amzDate],
     ['X-Amz-Expires', String(input.expiresSeconds)],
-    ['X-Amz-SignedHeaders', 'host'],
+    ['X-Amz-SignedHeaders', signedHeaders],
   ])
 
   const canonicalRequest = [
     input.method,
     path,
     query,
-    `host:${host}\n`,
-    'host',
+    canonicalHeaders,
+    signedHeaders,
     'UNSIGNED-PAYLOAD',
   ].join('\n')
 

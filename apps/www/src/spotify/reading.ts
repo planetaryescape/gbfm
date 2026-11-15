@@ -34,7 +34,6 @@ const actionButton = <M>(
   )
 }
 
-/** Play, queue and save controls for one music card, or a connect prompt when Spotify is not linked. */
 export const cardActions = <M>(
   h: HtmlBuilder<M>,
   spotify: ReadingSpotify<M>,
@@ -44,7 +43,7 @@ export const cardActions = <M>(
     (link) => link.platform === 'spotify' && spotifyEntityFromUrl(link.url),
   )?.url
 
-  if (!url) return h.empty
+  if (!url || !spotify.model.status?.connected) return h.empty
 
   const { target, notice } = operationState(spotify.model)
   const savable = spotifyEntityFromUrl(url)?.kind !== 'playlist'
@@ -54,13 +53,11 @@ export const cardActions = <M>(
     [
       h.div(
         [h.Class('spotlight-action-row')],
-        spotify.model.status?.connected
-          ? [
-              actionButton(h, spotify, 'play', url, 'Play', pixelPlayPath),
-              actionButton(h, spotify, 'queue', url, 'Queue', iconPaths.listPlus),
-              ...(savable ? [actionButton(h, spotify, 'save', url, 'Save', iconPaths.heart)] : []),
-            ]
-          : [actionButton(h, spotify, 'connect', url, 'Connect Spotify to play', null)],
+        [
+          actionButton(h, spotify, 'play', url, 'Play', pixelPlayPath),
+          actionButton(h, spotify, 'queue', url, 'Queue', iconPaths.listPlus),
+          ...(savable ? [actionButton(h, spotify, 'save', url, 'Save', iconPaths.heart)] : []),
+        ],
       ),
       target === url && notice
         ? h.p([h.Role('status'), h.Class('spotlight-action-notice')], [notice])

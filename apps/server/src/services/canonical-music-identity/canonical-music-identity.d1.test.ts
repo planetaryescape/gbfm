@@ -704,7 +704,7 @@ describe('CanonicalMusicIdentity', () => {
         const discovered = yield* service.resolveSource({
           url: deezerUrl,
           expectedType: 'track',
-          origin: 'bluesky',
+          origin: 'tweet',
           artworkDelivery: 'preserve',
         })
 
@@ -1266,7 +1266,7 @@ describe('CanonicalMusicIdentity', () => {
       Effect.forEach(cases, (candidate) =>
         service.resolveSource({
           url: candidate.sourceUrl,
-          origin: 'bluesky',
+          origin: 'tweet',
           artworkDelivery: 'preserve',
         }),
       ),

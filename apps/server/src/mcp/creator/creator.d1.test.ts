@@ -7,6 +7,7 @@ import { expect, test } from 'vitest'
 
 import { audioCreators, audioTable } from '@/db/audio.schema'
 import { user, session } from '@/db/auth.schema'
+import { blueskyPostSources } from '@/db/external-account.schema'
 import { favoritesTable } from '@/db/favorites.schema'
 import { Database } from '@/db/layer'
 import { mcpOperations } from '@/db/mcp-operation.schema'
@@ -1242,6 +1243,17 @@ test('post deletion rolls back its stamp and owned relations on storage failure,
     .insert(entityLabelsTable)
     .values({ entityType: 'post', entityId: id, labelId, position: 0 })
 
+  const [history] = await h.fixture.db
+    .insert(blueskyPostSources)
+    .values({
+      postId: id,
+      authorDid: 'did:plc:retired-import',
+      atUri: `at://did:plc:retired-import/app.bsky.feed.post/${id}`,
+      publicUrl: 'https://bsky.app/profile/retired.example/post/import',
+      sourceCreatedAt: new Date('2026-01-01T00:00:00Z'),
+    })
+    .returning()
+
   const settings = Schema.decodeUnknownSync(EditorialMcpSettings)({
     readScope: 'posts:read',
     environment: 'test',
@@ -1280,11 +1292,15 @@ test('post deletion rolls back its stamp and owned relations on storage failure,
   expect(await h.fixture.db.select().from(entityLabelsTable)).toEqual([
     { entityType: 'post', entityId: id, labelId, position: 0 },
   ])
+  expect(await h.fixture.db.select().from(blueskyPostSources)).toEqual([history])
   await h.fixture.database.prepare('DROP TRIGGER creator_delete_failure').run()
   const applied = await h.run(Effect.flatMap(CreatorCommandService, (s) => s.deleteContent(input)))
   expect(applied.target).toMatchObject({ kind: 'micro', targetId: id, state: 'deleted' })
   expect(await h.fixture.db.select().from(postsTable)).toEqual([])
   expect(await h.fixture.db.select().from(entityLabelsTable)).toEqual([])
+  expect(await h.fixture.db.select().from(blueskyPostSources)).toEqual([
+    { ...history, postId: null },
+  ])
   expect(
     await h.run(Effect.flatMap(CreatorCommandService, (s) => s.deleteContent(input))),
   ).toMatchObject({ target: applied.target, replayed: true })

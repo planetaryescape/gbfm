@@ -27,7 +27,6 @@ export type ResolutionOrigin =
   | 'editorial'
   | 'tweet'
   | 'reply'
-  | 'bluesky'
   | 'spotify_import'
   | 'playlist_enrichment'
   | 'manual'

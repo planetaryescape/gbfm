@@ -202,13 +202,11 @@ test('editorial content overlaps relation reads while retaining creators, labels
     handler.observed.reset()
     const generic = await handler.get('/api/content/posts/published-editorial')
     expect(generic.status).toBe(200)
-    expect(await generic.json()).toMatchObject({
-      blueskySource: {
-        authorDid: 'did:plc:historical-editorial',
-        publicUrl: 'https://bsky.app/profile/historical.example/post/editorial',
-      },
-    })
-    expect(handler.observed.queries).toHaveLength(4)
+    expect(await generic.json()).not.toHaveProperty('blueskySource')
+    expect(handler.observed.queries).toHaveLength(3)
+    expect(handler.observed.queries.some((query) => query.includes('bluesky_post_sources'))).toBe(
+      false,
+    )
   } finally {
     await handler.dispose()
   }

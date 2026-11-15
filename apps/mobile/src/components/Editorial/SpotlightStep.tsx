@@ -10,7 +10,7 @@ import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 
 import { SpotlightBlocks } from './SpotlightBlocks'
-import { SquareFrame } from './SquareFrame'
+import { bevel } from './SquareFrame'
 
 type Props = {
   readonly step: Step
@@ -27,10 +27,8 @@ function Eyebrow({ children }: { readonly children: string }) {
     <Text
       style={{
         color: colors.accent,
-        fontFamily: fonts.monoSemiBold,
-        fontSize: 12,
-        letterSpacing: 1.6,
-        textTransform: 'uppercase',
+        fontFamily: fonts.mono,
+        fontSize: 13,
       }}>
       {children}
     </Text>
@@ -47,7 +45,6 @@ function BigHeading({ children }: { readonly children: string }) {
         fontFamily: fonts.monoSemiBold,
         fontSize: 34,
         lineHeight: 38,
-        textTransform: 'uppercase',
       }}>
       {children}
     </Text>
@@ -58,24 +55,19 @@ function StartButton({ label, onPress }: { readonly label: string; readonly onPr
   const colors = useThemeColors()
 
   return (
-    <View style={{ alignSelf: 'flex-start' }}>
-      <SquareFrame background={colors.strong}>
-        <Pressable
-          accessibilityRole='button'
-          onPress={onPress}
-          style={{ paddingHorizontal: 22, paddingVertical: 12 }}>
-          <Text
-            style={{
-              color: colors.surface,
-              fontFamily: fonts.monoSemiBold,
-              fontSize: 14,
-              letterSpacing: 1.2,
-              textTransform: 'uppercase',
-            }}>
-            {label} ›
-          </Text>
-        </Pressable>
-      </SquareFrame>
+    <View
+      style={{ alignSelf: 'flex-start', borderWidth: 1, borderColor: colors.strong, padding: 2 }}>
+      <Pressable
+        accessibilityRole='button'
+        onPress={onPress}
+        style={({ pressed }) => [
+          bevel(pressed, colors.background, colors.muted),
+          { paddingHorizontal: 22, paddingVertical: 10, backgroundColor: colors.surface },
+        ]}>
+        <Text style={{ color: colors.strong, fontFamily: fonts.monoSemiBold, fontSize: 15 }}>
+          {label}
+        </Text>
+      </Pressable>
     </View>
   )
 }
@@ -92,7 +84,11 @@ function ChapterMoments({
   const colors = useThemeColors()
 
   return (
-    <View style={{ borderWidth: 2, borderColor: colors.strong }}>
+    <View
+      style={[
+        bevel(true, colors.surface, colors.muted),
+        { borderColor: colors.strong, backgroundColor: colors.background, padding: 2 },
+      ]}>
       {chapter.moments.map((moment, position) => (
         <View
           key={`${index + 1}.${position + 1}`}
@@ -102,7 +98,7 @@ function ChapterMoments({
             paddingHorizontal: 12,
             paddingVertical: 10,
             borderTopWidth: position === 0 ? 0 : 1,
-            borderStyle: 'dashed',
+            borderStyle: 'dotted',
             borderColor: colors.muted,
           }}>
           <Text style={{ color: colors.accent, fontFamily: fonts.monoSemiBold, fontSize: 14 }}>
@@ -113,7 +109,7 @@ function ChapterMoments({
           </Text>
           {seen.includes(`${index + 1}.${position + 1}`) ? (
             <Text accessibilityLabel='Read' style={{ color: colors.muted }}>
-              ■
+              ✓
             </Text>
           ) : null}
         </View>

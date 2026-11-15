@@ -128,6 +128,7 @@ export const Model = Schema.Struct({
   listeningDraft: Schema.NullOr(SavedMix),
   videoDialog: Dialog.Model,
   video: Schema.NullOr(Video),
+  spotlight: Schema.NullOr(Schema.Struct({ path: Schema.String, step: Schema.Number })),
 })
 
 export type Model = typeof Model.Type

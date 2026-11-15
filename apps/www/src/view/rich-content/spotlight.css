@@ -1,9 +1,66 @@
-.spotlight-chapter {
-  margin-top: 4rem;
+.spotlight {
+  scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 1rem);
+}
+
+.spotlight-progress {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+}
+
+.spotlight-progress-label {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.spotlight-progress-track {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.spotlight-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--highlight);
+  box-shadow: 0 0 6px var(--highlight);
+  transition: width 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.spotlight-stage {
+  min-height: 50dvh;
+  animation: spotlight-step-in 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes spotlight-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+.spotlight-begin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+  padding: 0.75rem 1.25rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--foreground);
+  color: var(--background);
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .spotlight-chapter-head {
-  padding-block: 2.5rem 0.5rem;
+  padding-block: 1rem 0.5rem;
 }
 
 .spotlight-chapter-eyebrow {
@@ -15,7 +72,8 @@
   color: var(--highlight);
 }
 
-.spotlight .spotlight-chapter-head h2 {
+.spotlight .spotlight-chapter-head h2,
+.spotlight .spotlight-end h2 {
   margin: 0;
   font-size: clamp(2rem, 7vw, 3rem);
   font-weight: 900;
@@ -24,69 +82,127 @@
   text-wrap: balance;
 }
 
-.spotlight-moment {
-  padding-block: 1.5rem;
+.spotlight-chapter-moments {
+  display: grid;
+  gap: 0.25rem;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: moment;
+}
+
+.spotlight-chapter-moments li {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  color: var(--muted-foreground);
+  counter-increment: moment;
+}
+
+.spotlight-chapter-moments li::before {
+  content: counter(moment, decimal-leading-zero);
+  flex-shrink: 0;
+  min-width: 2ch;
+  color: var(--highlight);
+  font-variant-numeric: tabular-nums;
 }
 
 .spotlight-moment > h3 {
-  margin: 0 0 0.75rem;
+  margin: 0 0 1rem;
   font-size: clamp(1.4rem, 4.5vw, 1.75rem);
   font-weight: 800;
   line-height: 1.2;
   text-wrap: balance;
 }
 
-.spotlight-moment > * + * {
-  margin-top: 1rem;
+.spotlight-end {
+  padding-block: 2rem;
 }
 
-@supports (animation-timeline: view()) {
-  @media (prefers-reduced-motion: no-preference) {
-    .spotlight-moment {
-      animation: spotlight-focus linear both;
-      animation-timeline: view();
-      animation-range: cover 0% cover 100%;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .spotlight-moment {
-      animation: spotlight-focus-still linear both;
-      animation-timeline: view();
-      animation-range: cover 0% cover 100%;
-    }
-  }
+.spotlight-controls {
+  position: sticky;
+  z-index: 20;
+  bottom: calc(var(--mobile-dock-height, 0px) + env(safe-area-inset-bottom, 0px) + 0.5rem);
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 2.5rem;
+  padding: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background) 90%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.18);
 }
 
-@keyframes spotlight-focus {
-  0% {
-    opacity: 0.25;
-    filter: saturate(0.3);
-    transform: scale(0.985);
-  }
-  22%,
-  78% {
-    opacity: 1;
-    filter: none;
-    transform: none;
-  }
-  100% {
-    opacity: 0.25;
-    filter: saturate(0.3);
-    transform: scale(0.985);
+@media (min-width: 1024px) {
+  .spotlight-controls {
+    bottom: 4rem;
   }
 }
 
-@keyframes spotlight-focus-still {
-  0% {
-    opacity: 0.35;
+.spotlight-back,
+.spotlight-next {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.spotlight-back {
+  justify-content: center;
+  flex-shrink: 0;
+  width: 3rem;
+  height: 3rem;
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.spotlight-back:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.spotlight-next {
+  flex: 1;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.4rem 1rem 0.4rem 1.25rem;
+  background: var(--foreground);
+  color: var(--background);
+  text-align: left;
+}
+
+.spotlight-next-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.spotlight-next-eyebrow {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.spotlight-next-title {
+  overflow: hidden;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-stage {
+    animation: none;
   }
-  22%,
-  78% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0.35;
+
+  .spotlight-progress-fill {
+    transition: none;
   }
 }
 

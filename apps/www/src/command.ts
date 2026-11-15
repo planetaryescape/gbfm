@@ -185,3 +185,11 @@ export const LoadPage = Command.define('Navigation.Load', {
       Effect.catch(() => Effect.succeed(Message.FailedPage({ key: pageKey(href), navigationId }))),
     ),
 })
+
+export const RevealSpotlight = Command.define('Editorial.RevealSpotlight', {
+  messages: [Message.SpotlightRevealed],
+  execute: Dom.scrollIntoViewAfterPaint('#spotlight', { block: 'start' }).pipe(
+    Effect.catchTag('ElementNotFound', () => Effect.void),
+    Effect.as(Message.SpotlightRevealed()),
+  ),
+})

@@ -86,3 +86,44 @@ export const youtubeVideoId = (href: string): string | null => {
     return null
   }
 }
+
+export type SpotlightStep =
+  | { readonly kind: 'intro'; readonly blocks: ReadonlyArray<RichContentBlock> }
+  | { readonly kind: 'chapter'; readonly chapter: number; readonly value: SpotlightChapter }
+  | {
+      readonly kind: 'moment'
+      readonly chapter: number
+      readonly position: number
+      readonly value: SpotlightMoment
+    }
+  | { readonly kind: 'end' }
+
+/** The reader walks the intro, then each chapter's opener and moments in the curator's order. */
+export const spotlightSteps = ({
+  intro,
+  chapters,
+}: SpotlightStructure): ReadonlyArray<SpotlightStep> => [
+  { kind: 'intro', blocks: intro },
+  ...chapters.flatMap((value, chapter): ReadonlyArray<SpotlightStep> => [
+    { kind: 'chapter', chapter, value },
+    ...value.moments.map((moment, position): SpotlightStep => ({
+      kind: 'moment',
+      chapter,
+      position,
+      value: moment,
+    })),
+  ]),
+  { kind: 'end' },
+]
+
+type Inline = Heading['children'][number]
+
+const inlineText = (inline: Inline): string => {
+  if ('value' in inline) return inline.value
+
+  if ('children' in inline) return inline.children.map(inlineText).join('')
+
+  return 'alt' in inline ? inline.alt : ''
+}
+
+export const headingText = (heading: Heading): string => heading.children.map(inlineText).join('')

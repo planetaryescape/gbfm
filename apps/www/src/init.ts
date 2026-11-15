@@ -120,6 +120,7 @@ export const initWithPlayback = (
       listeningDraft: null,
       videoDialog: Dialog.init({ id: 'video-dialog' }),
       video: null,
+      spotlight: null,
     },
     commands: [
       StartClient(),

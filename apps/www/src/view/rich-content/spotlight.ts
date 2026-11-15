@@ -5,9 +5,18 @@ import type { Html, HtmlBuilder } from 'foldkit/html'
 import type { Video } from '../../video'
 import { iconPaths, lucide } from '../icons'
 import { blockView, inlineChildren } from './render'
-import { spotlightStructure, youtubeVideoId, type SpotlightMoment } from './spotlight-structure'
+import {
+  headingText,
+  spotlightSteps,
+  spotlightStructure,
+  youtubeVideoId,
+  type SpotlightChapter,
+  type SpotlightStep,
+} from './spotlight-structure'
 
 export interface SpotlightViewOptions<Message> {
+  readonly step: number
+  readonly onStep: (step: number) => Message
   readonly onVideo: (video: Video) => Message
 }
 
@@ -76,47 +85,207 @@ const spotlightBlock =
     return id === null ? blockView(block, h) : videoPoster(block, id, h, options)
   }
 
-const momentView = <Message>(
-  moment: SpotlightMoment,
+const chapterName = (chapters: ReadonlyArray<SpotlightChapter>, index: number) => {
+  const chapter = chapters[index]
+
+  return chapter ? headingText(chapter.heading) : ''
+}
+
+const stepLabel = (step: SpotlightStep, chapters: ReadonlyArray<SpotlightChapter>): string => {
+  if (step.kind === 'intro') return 'Intro'
+
+  if (step.kind === 'end') return 'The end'
+
+  const name = chapterName(chapters, step.chapter)
+
+  return step.kind === 'chapter'
+    ? `Chapter ${step.chapter + 1} · ${name}`
+    : headingText(step.value.heading)
+}
+
+const progressView = <Message>(
+  steps: ReadonlyArray<SpotlightStep>,
+  current: number,
+  chapters: ReadonlyArray<SpotlightChapter>,
+  h: HtmlBuilder<Message>,
+): Html => {
+  const step = steps[current]
+  const chapter = step && (step.kind === 'chapter' || step.kind === 'moment') ? step.chapter : null
+  const count = chapter === null ? 0 : (chapters[chapter]?.moments.length ?? 0)
+
+  const label =
+    chapter === null
+      ? `${current + 1} of ${steps.length}`
+      : [
+          `Chapter ${chapter + 1}`,
+          chapterName(chapters, chapter),
+          ...(step?.kind === 'moment' ? [`${step.position + 1} of ${count}`] : []),
+        ].join(' · ')
+
+  return h.div(
+    [h.Class('spotlight-progress not-prose')],
+    [
+      h.p([h.Class('spotlight-progress-label')], [label]),
+      h.div(
+        [
+          h.Class('spotlight-progress-track'),
+          h.Role('progressbar'),
+          h.AriaLabel('Reading progress'),
+          h.AriaValuemin(1),
+          h.AriaValuemax(steps.length),
+          h.AriaValuenow(current + 1),
+        ],
+        [
+          h.span(
+            [
+              h.Class('spotlight-progress-fill'),
+              h.Style({ width: `${((current + 1) / steps.length) * 100}%` }),
+            ],
+            [],
+          ),
+        ],
+      ),
+    ],
+  )
+}
+
+const stepView = <Message>(
+  step: SpotlightStep,
+  chapters: ReadonlyArray<SpotlightChapter>,
   h: HtmlBuilder<Message>,
   render: (block: RichContentBlock) => Html,
-): Html =>
-  h.article(
-    [h.Class('spotlight-moment')],
-    [h.h3([], inlineChildren(moment.heading.children, h)), ...moment.blocks.map(render)],
-  )
+  start: Message,
+): Html => {
+  if (step.kind === 'intro')
+    return h.div(
+      [h.Class('spotlight-intro')],
+      [
+        ...step.blocks.map(render),
+        h.button(
+          [h.Type('button'), h.Class('spotlight-begin not-prose'), h.OnClick(start)],
+          [
+            chapters[0] ? `Start with ${headingText(chapters[0].heading)}` : 'Start reading',
+            lucide(iconPaths.chevronRight, 'h-4 w-4'),
+          ],
+        ),
+      ],
+    )
 
-/** Editorial reading layout that walks readers chapter by chapter and lights the moment in view. */
+  if (step.kind === 'end')
+    return h.div(
+      [h.Class('spotlight-end not-prose')],
+      [
+        h.p([h.Class('spotlight-chapter-eyebrow')], ['The end']),
+        h.h2([], ["That's the walk."]),
+        h.button(
+          [h.Type('button'), h.Class('spotlight-begin'), h.OnClick(start)],
+          ['Start over', lucide(iconPaths.chevronRight, 'h-4 w-4')],
+        ),
+      ],
+    )
+
+  if (step.kind === 'chapter')
+    return h.div(
+      [h.Class('spotlight-chapter')],
+      [
+        h.header(
+          [h.Class('spotlight-chapter-head not-prose')],
+          [
+            h.p(
+              [h.Class('spotlight-chapter-eyebrow')],
+              [`Chapter ${step.chapter + 1} of ${chapters.length}`],
+            ),
+            h.h2([], inlineChildren(step.value.heading.children, h)),
+          ],
+        ),
+        ...step.value.lead.map(render),
+        step.value.moments.length === 0
+          ? h.empty
+          : h.ol(
+              [h.Class('spotlight-chapter-moments not-prose'), h.AriaLabel('In this chapter')],
+              step.value.moments.map((moment) => h.li([], [headingText(moment.heading)])),
+            ),
+      ],
+    )
+
+  return h.article(
+    [h.Class('spotlight-moment')],
+    [h.h3([], inlineChildren(step.value.heading.children, h)), ...step.value.blocks.map(render)],
+  )
+}
+
+const controlsView = <Message>(
+  steps: ReadonlyArray<SpotlightStep>,
+  current: number,
+  chapters: ReadonlyArray<SpotlightChapter>,
+  h: HtmlBuilder<Message>,
+  onStep: (step: number) => Message,
+): Html => {
+  const next = steps[current + 1]
+
+  return h.nav(
+    [h.Class('spotlight-controls not-prose'), h.AriaLabel('Move through the article')],
+    [
+      h.button(
+        [
+          h.Type('button'),
+          h.Class('spotlight-back'),
+          h.Disabled(current === 0),
+          h.AriaLabel('Previous'),
+          h.OnClick(onStep(Math.max(current - 1, 0))),
+        ],
+        [lucide(iconPaths.chevronLeft, 'h-5 w-5')],
+      ),
+      next
+        ? h.button(
+            [h.Type('button'), h.Class('spotlight-next'), h.OnClick(onStep(current + 1))],
+            [
+              h.span(
+                [h.Class('spotlight-next-copy')],
+                [
+                  h.span([h.Class('spotlight-next-eyebrow')], ['Next']),
+                  h.span([h.Class('spotlight-next-title')], [stepLabel(next, chapters)]),
+                ],
+              ),
+              lucide(iconPaths.chevronRight, 'h-5 w-5'),
+            ],
+          )
+        : h.empty,
+    ],
+  )
+}
+
+/** Editorial reading layout that walks readers through one chapter opener or moment at a time. */
 export const spotlightView = <Message>(
   document: RichContentDocument,
   h: HtmlBuilder<Message>,
   options: SpotlightViewOptions<Message>,
 ): Html => {
-  const { intro, chapters } = spotlightStructure(document.blocks)
+  const structure = spotlightStructure(document.blocks)
+  const steps = spotlightSteps(structure)
+  const current = Math.min(Math.max(options.step, 0), steps.length - 1)
+  const step = steps[current]
   const render = spotlightBlock(h, options)
 
   return h.div(
-    [h.Class('rich-content spotlight')],
+    [h.Class('rich-content spotlight'), h.Id('spotlight')],
     [
-      ...intro.map(render),
-      ...chapters.map((chapter, index) => {
-        const name = inlineChildren(chapter.heading.children, h)
-
-        return h.section(
-          [h.Class('spotlight-chapter')],
-          [
-            h.header(
-              [h.Class('spotlight-chapter-head not-prose')],
-              [
-                h.p([h.Class('spotlight-chapter-eyebrow')], [`Chapter ${index + 1}`]),
-                h.h2([], name),
-              ],
-            ),
-            ...chapter.lead.map(render),
-            ...chapter.moments.map((moment) => momentView(moment, h, render)),
-          ],
-        )
-      }),
+      progressView(steps, current, structure.chapters, h),
+      step
+        ? h.div(
+            [h.Key(`spotlight-step-${current}`), h.Class('spotlight-stage')],
+            [
+              stepView(
+                step,
+                structure.chapters,
+                h,
+                render,
+                options.onStep(current === steps.length - 1 ? 0 : 1),
+              ),
+            ],
+          )
+        : h.empty,
+      current === 0 ? h.empty : controlsView(steps, current, structure.chapters, h, options.onStep),
     ],
   )
 }

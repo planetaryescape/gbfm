@@ -3,7 +3,7 @@ import { parseRichContent } from '@gbfm/rich-content/source'
 import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 
-import { spotlightStructure, youtubeVideoId } from './spotlight-structure'
+import { spotlightSteps, spotlightStructure, youtubeVideoId } from './spotlight-structure'
 
 const text = (block: RichContentBlock | undefined) =>
   block && 'children' in block && Array.isArray(block.children)
@@ -65,5 +65,33 @@ describe('youtubeVideoId', () => {
     ['not a url', null],
   ])('reads %s', (href, id) => {
     expect(youtubeVideoId(href)).toBe(id)
+  })
+})
+
+describe('spotlightSteps', () => {
+  it('walks intro, each chapter opener and its moments, then the end', () => {
+    const { document } = parseRichContent(
+      [
+        'Intro.',
+        '## Zimbabwe',
+        '### Tuku',
+        'Matope.',
+        '### Mukanya',
+        'Jairosi.',
+        '## London',
+        '### Hills',
+        'Drums.',
+      ].join('\n\n'),
+    )
+
+    const steps = spotlightSteps(
+      spotlightStructure(Schema.decodeUnknownSync(RichContentDocument)(document).blocks),
+    )
+
+    expect(
+      steps.map((step) =>
+        step.kind === 'moment' ? `${step.chapter}.${step.position}` : step.kind,
+      ),
+    ).toEqual(['intro', 'chapter', '0.0', '0.1', 'chapter', '1.0', 'end'])
   })
 })

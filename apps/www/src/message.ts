@@ -40,6 +40,8 @@ export const Message = defineMessageUnion({
   GotMobileMenuMessage: { message: Dialog.Message },
   VideoOpened: { video: Video },
   GotVideoDialogMessage: { message: Dialog.Message },
+  SpotlightStepped: { path: Schema.String, step: Schema.Number },
+  SpotlightRevealed: {},
   MenuDragStarted: { pointerId: Schema.Number, clientY: Schema.Number },
   MenuDragMoved: { pointerId: Schema.Number, clientY: Schema.Number },
   MenuDragReleased: {

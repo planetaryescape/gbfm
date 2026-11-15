@@ -14,6 +14,7 @@ import {
   PrefetchPage,
   Replace,
   ResetTweetEntry,
+  RevealSpotlight,
   SaveReadMode,
   SetResolvedUrl,
 } from './command'
@@ -334,6 +335,11 @@ const updateApplication = (
     GotMobileMenuMessage: ({ message }) => updateMobileMenu(model, message),
     VideoOpened: ({ video }) => openVideoDialog({ ...model, video }),
     GotVideoDialogMessage: ({ message }) => updateVideoDialog(model, message),
+    SpotlightStepped: ({ path, step }) => ({
+      model: { ...model, spotlight: { path, step } },
+      commands: [RevealSpotlight()],
+    }),
+    SpotlightRevealed: () => ({ model }),
     MenuDragStarted: ({ pointerId, clientY }) =>
       !model.mobileMenu.isOpen ||
       model.mobileMenu.animation.transitionState !== 'Idle' ||

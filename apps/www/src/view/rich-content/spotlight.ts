@@ -15,6 +15,8 @@ import type { Html, HtmlBuilder } from 'foldkit/html'
 import type { Video } from '../../video'
 import { iconPaths, pixelIcon, pixelPlayPath } from '../icons'
 import { blockView, inlineChildren, type BlockViewExtras } from './render'
+import { spotlightEnding } from './spotlight-ending'
+import { spotlightPresentation } from './spotlight-presentation'
 import { spotlightRecords } from './spotlight-records'
 import { spotlightReferences } from './spotlight-references'
 
@@ -26,6 +28,7 @@ export interface SpotlightViewOptions<Message> {
   readonly onVideo: (video: Video) => Message
   readonly musicActions?: BlockViewExtras['musicActions']
   readonly onboarding?: Html
+  readonly endArtwork?: Html
 }
 
 type MediaBlock = Extract<RichContentBlock, { readonly _tag: 'ExternalMediaEmbed' }>
@@ -157,6 +160,7 @@ const stepView = <Message>(
   start: Message,
   onPosition: (at: string) => Message,
   onboarding: Html,
+  ending: { readonly artwork?: Html; readonly closing: ReadonlyArray<Html> },
 ): Html => {
   if (step.kind === 'intro')
     return h.div(
@@ -175,18 +179,7 @@ const stepView = <Message>(
       ],
     )
 
-  if (step.kind === 'end')
-    return h.div(
-      [h.Class('spotlight-end not-prose')],
-      [
-        h.p([h.Class('spotlight-chapter-eyebrow')], ['The end']),
-        h.h2([], ["That's the walk."]),
-        h.button(
-          [h.Type('button'), h.Class('btn btn-primary spotlight-begin'), h.OnClick(start)],
-          ['Start over', pixelIcon(iconPaths.chevronRight, 'h-5 w-5')],
-        ),
-      ],
-    )
+  if (step.kind === 'end') return spotlightEnding(h, { ...ending, restart: start })
 
   if (step.kind === 'chapter')
     return h.div(
@@ -276,7 +269,8 @@ export const spotlightView = <Message>(
   h: HtmlBuilder<Message>,
   options: SpotlightViewOptions<Message>,
 ): Html => {
-  const structure = spotlightStructure(document.blocks)
+  const presentation = spotlightPresentation(document.blocks)
+  const structure = spotlightStructure(presentation.blocks)
   const steps = spotlightSteps(structure)
   const current = stepAt(steps, options.at)
 
@@ -317,6 +311,10 @@ export const spotlightView = <Message>(
                 go(current === steps.length - 1 ? 0 : 1),
                 options.onStep,
                 options.onboarding ?? h.empty,
+                {
+                  artwork: options.endArtwork,
+                  closing: presentation.closing.map(render),
+                },
               ),
             ],
           )

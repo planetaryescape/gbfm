@@ -6,6 +6,33 @@
   max-width: 80rem;
 }
 
+.spotlight-masthead {
+  display: grid;
+  gap: 1.5rem;
+  padding-top: 0.5rem;
+}
+
+.spotlight-masthead .spotlight-banner {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 1;
+  object-fit: cover;
+}
+
+.spotlight-masthead h1 {
+  font-size: clamp(2rem, 4vw, 3.25rem);
+  line-height: 1.1;
+}
+
+@media (min-width: 1024px) {
+  .spotlight-masthead {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 2rem;
+  }
+}
+
 .spotlight-body {
   width: 100%;
   margin-top: 0;
@@ -172,7 +199,48 @@
 }
 
 .spotlight-end {
-  padding-block: 2rem;
+  padding-block: 1rem;
+}
+
+.spotlight-end:has(> .spotlight-end-artwork) {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  align-items: start;
+  gap: 2rem;
+}
+
+.spotlight-end-artwork {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.spotlight-end-copy {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.spotlight .spotlight-end-copy h2 {
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+}
+
+.spotlight-end-copy p {
+  margin: 0;
+  line-height: 1.8;
+}
+
+.spotlight-restart {
+  justify-self: start;
+  padding-inline: 0;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 639px) {
+  .spotlight-end:has(> .spotlight-end-artwork) {
+    grid-template-columns: 5rem minmax(0, 1fr);
+    gap: 1rem;
+  }
 }
 
 .spotlight-controls {

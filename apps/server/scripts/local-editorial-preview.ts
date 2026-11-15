@@ -110,6 +110,7 @@ const [post] = await database
     slug: process.env.PREVIEW_SLUG ?? 'local-preview',
     title: process.env.PREVIEW_TITLE ?? 'Local preview',
     description: process.env.PREVIEW_DESCRIPTION ?? null,
+    thumbnailUrl: process.env.PREVIEW_ARTWORK ?? null,
     content,
     type: 'post',
     draft: false,

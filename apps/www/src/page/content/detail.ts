@@ -14,6 +14,10 @@ import { iconPaths, lucide } from '../../view/icons'
 import { richContent } from '../../view/rich-content/fallback'
 import { richContentView } from '../../view/rich-content/render'
 import { spotlightView } from '../../view/rich-content/spotlight'
+import {
+  spotlightPresentation,
+  type SpotlightBanner,
+} from '../../view/rich-content/spotlight-presentation'
 import { draftNotice } from './draft-notice'
 
 const kindLabel = (kind: string) =>
@@ -72,19 +76,39 @@ const byline = (h: HtmlBuilder<Message>, item: ContentItem) => {
   )
 }
 
-const masthead = (h: HtmlBuilder<Message>, item: ContentItem, kind: string) => {
+const masthead = (
+  h: HtmlBuilder<Message>,
+  item: ContentItem,
+  kind: string,
+  banner: SpotlightBanner | null = null,
+) => {
   const label = kindLabel(kind)
 
   return h.header(
-    [h.Class('flex flex-col gap-6 pt-6 sm:flex-row sm:items-end sm:gap-8 sm:pt-8')],
     [
-      artwork(
-        item.imageUrl,
-        item.title,
-        '(min-width: 1024px) 256px, (min-width: 640px) 208px, 192px',
-        true,
-        'w-48 shrink-0 rounded-sm shadow-2xl sm:w-52 lg:w-64',
+      h.Class(
+        banner
+          ? 'spotlight-masthead'
+          : 'flex flex-col gap-6 pt-6 sm:flex-row sm:items-end sm:gap-8 sm:pt-8',
       ),
+    ],
+    [
+      banner
+        ? artwork(
+            banner.src,
+            banner.alt,
+            '(min-width: 1280px) 750px, (min-width: 1024px) calc((100vw - 64px) * 0.6153846), calc(100vw - 32px)',
+            true,
+            'spotlight-banner',
+            { width: 2400, height: 800 },
+          )
+        : artwork(
+            item.imageUrl,
+            item.title,
+            '(min-width: 1024px) 256px, (min-width: 640px) 208px, 192px',
+            true,
+            'w-48 shrink-0 rounded-sm shadow-2xl sm:w-52 lg:w-64',
+          ),
       h.div(
         [h.Class('min-w-0 pb-1')],
         [
@@ -108,6 +132,16 @@ const controls = (model: Model, h: HtmlBuilder<Message>, item: ContentItem) => {
   const current = model.player.snapshot.queue.current?.id === item.id
   const playing = current && model.player.snapshot.transport.isPlaying
   const playLabel = playing ? 'Pause' : 'Play'
+
+  const publicControls = PublicActions.view(
+    model.publicAction,
+    h,
+    (message) => Message.GotPublicActionMessage({ message }),
+    model.interactive,
+    true,
+  )
+
+  if (!item.audioUrl && publicControls === h.empty) return h.empty
 
   return h.div(
     [h.Class('mt-8 flex items-center gap-2')],
@@ -148,13 +182,7 @@ const controls = (model: Model, h: HtmlBuilder<Message>, item: ContentItem) => {
             ),
           ]
         : []),
-      PublicActions.view(
-        model.publicAction,
-        h,
-        (message) => Message.GotPublicActionMessage({ message }),
-        model.interactive,
-        true,
-      ),
+      publicControls,
     ],
   )
 }
@@ -218,7 +246,8 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
   const spotlight = kind === 'editorial' ? spotlightDocument(model) : null
 
   const at = spotlight ? spotlightProgress(model).at : null
-  const walking = at !== null && at !== 'end'
+  const showMasthead = spotlight === null || at === null
+  const presentation = spotlight ? spotlightPresentation(spotlight.blocks) : null
 
   return h.article(
     [
@@ -230,15 +259,15 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
     ],
     [
       kind === 'editorial' && item.draft ? draftNotice(h, item.slug) : h.empty,
-      walking ? h.empty : masthead(h, item, kind),
-      walking ? h.empty : controls(model, h, item),
-      !walking && item.description
+      showMasthead ? masthead(h, item, kind, presentation?.banner) : h.empty,
+      showMasthead ? controls(model, h, item) : h.empty,
+      showMasthead && item.description
         ? h.p(
             [h.Class('mt-6 max-w-prose text-base leading-relaxed text-foreground/80')],
             [item.description],
           )
         : h.empty,
-      walking ? h.empty : metaStrip(h, item),
+      showMasthead ? metaStrip(h, item) : h.empty,
       h.div(
         [h.Class(spotlight ? 'spotlight-body mt-4' : 'mt-10 max-w-prose')],
         [
@@ -257,11 +286,22 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
                   musicActions: (music) =>
                     SpotifyReading.cardActions(h, readingSpotify(model), music.links),
                   onboarding: SpotifyReading.onboarding(h, readingSpotify(model)),
+                  endArtwork: item.imageUrl
+                    ? artwork(
+                        item.imageUrl,
+                        `Record mosaic for ${item.title}`,
+                        '160px',
+                        false,
+                        'spotlight-end-artwork',
+                      )
+                    : undefined,
                 })
               : richContentView(item.richContent, h),
         ],
       ),
-      !walking && (kind === 'mixes' || kind === 'editorial') ? emailUpdatesInvite(h) : h.empty,
+      (showMasthead || at === 'end') && (kind === 'mixes' || kind === 'editorial')
+        ? emailUpdatesInvite(h)
+        : h.empty,
     ],
   )
 }

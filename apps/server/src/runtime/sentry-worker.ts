@@ -1,8 +1,10 @@
-import { OtelTracer, Resource } from '@effect/opentelemetry'
-import { Context, Effect, Layer } from 'effect'
+import * as Sentry from '@sentry/cloudflare'
+import { Context, Effect, Layer, Tracer } from 'effect'
 
 import { shouldEnableSentry } from '@/lib/sentry'
 import { SentryEnabled } from '@/services/sentry.service'
+
+import { createSentryTracer } from './sentry-tracer'
 
 // The Worker/workerd counterpart to runtime/sentry-bun.ts. @sentry/cloudflare
 // initializes by wrapping the exported handler (Sentry.withSentry in
@@ -27,21 +29,6 @@ export const WorkerSentryEnabledLive = Layer.effect(
   }),
 )
 
-// @sentry/cloudflare's withSentry() registers the global OpenTelemetry
-// tracer provider itself (unless skipOpenTelemetrySetup is set), the same
-// role @opentelemetry/sdk-trace-node's NodeTracerProvider plays for Bun in
-// lib/otel.ts. This layer only needs to read that already-registered global
-// provider and attach Effect's Resource metadata -- it must not import
-// sdk-trace-node, sdk-trace-base, or the OTLP HTTP exporter, all of which are
-// Node-only and unreachable from workerd.
-export const WorkerTracingLive = OtelTracer.layerGlobal.pipe(
-  Layer.provide(
-    Resource.layer({
-      serviceName: 'goosebumps-fm-api',
-      serviceVersion: '1.0.0',
-      attributes: {
-        'service.namespace': 'application',
-      },
-    }),
-  ),
+export const WorkerTracingLive = Layer.sync(Tracer.Tracer, () =>
+  Sentry.isEnabled() ? createSentryTracer() : Tracer.nativeTracer,
 )

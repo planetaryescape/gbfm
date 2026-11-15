@@ -3,6 +3,7 @@ import type {
   D1Database,
   DurableObjectNamespace,
   ExecutionContext,
+  IncomingRequestCfProperties,
   Fetcher,
   KVNamespace,
   MessageBatch,
@@ -14,6 +15,7 @@ import type {
 } from '@cloudflare/workers-types'
 import { resolveRequestId } from '@gbfm/core/observability/request-id'
 import { traceSampleRate } from '@gbfm/core/observability/trace-sampling'
+import { propagatedHeaders } from '@gbfm/observability/propagation'
 import * as Sentry from '@sentry/cloudflare'
 import type {
   ErrorEvent,
@@ -47,6 +49,7 @@ import {
   WorkerTracingLive,
 } from '@/runtime/sentry-worker'
 import { AppLayer } from '@/runtime/services'
+import { requestWithinServerSpan } from '@/runtime/trace-context'
 import { dispatchScheduledJob } from '@/scheduled'
 import {
   AdminTelemetryServiceLive,
@@ -364,14 +367,14 @@ const processPlaylistEnrichmentMessage = (env: ApiEnv, payload: PlaylistEnrichme
 
 type ApiQueueJob = ReminderJob | PlaylistEnrichmentJob
 
-export default Sentry.withSentry<ApiEnv, ApiQueueJob>(sentryOptions, {
+const instrumentedWorker = Sentry.withSentry<ApiEnv, ApiQueueJob>(sentryOptions, {
   async fetch(request: Request, env: ApiEnv, ctx: ExecutionContext): Promise<Response> {
     return ctx.tracing.enterSpan('gbfm.api.request', async (span): Promise<Response> => {
       const incomingRequestId = request.headers.get('x-request-id')
       const requestId = resolveRequestId(incomingRequestId)
       const headers = new Headers(request.headers)
       headers.set('x-request-id', requestId)
-      const correlatedRequest = new Request(request, { headers })
+      const correlatedRequest = requestWithinServerSpan(new Request(request, { headers }))
 
       span.setAttribute('http.request.method', correlatedRequest.method)
       span.setAttribute('gbfm.request_id', requestId)
@@ -447,3 +450,17 @@ export default Sentry.withSentry<ApiEnv, ApiQueueJob>(sentryOptions, {
     }
   },
 })
+
+export default {
+  ...instrumentedWorker,
+  fetch(request: Request, env: ApiEnv, context: ExecutionContext) {
+    const normalized = new Request<unknown, IncomingRequestCfProperties>(request, {
+      headers: propagatedHeaders(request.headers),
+    })
+
+    return (
+      instrumentedWorker.fetch?.(normalized, env, context) ??
+      Promise.resolve(new Response(null, { status: 500 }))
+    )
+  },
+}

@@ -22,6 +22,7 @@
     "@gbfm/api": "workspace:*",
     "@gbfm/core": "workspace:*",
     "@gbfm/email": "workspace:*",
+    "@gbfm/observability": "workspace:*",
     "@gbfm/pdf-generator": "workspace:*",
     "@gbfm/rich-content": "workspace:*",
     "@gbfm/site-metadata": "workspace:*",

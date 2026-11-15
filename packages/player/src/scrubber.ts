@@ -23,18 +23,40 @@ export const scrubberCurve = (progress: number) => {
   }
 }
 
+export type ScrubberDrag = {
+  readonly fine: boolean
+  readonly timeAt: (x: number) => number
+  readonly refine: (x: number, seconds: number) => ScrubberDrag
+}
+
 export const startScrubberDrag = (
   x: number,
   width: number,
   currentTime: number,
   duration: number,
-) => {
+): ScrubberDrag => {
   const center = (scrubberCurve(scrubberProgress(currentTime, duration)).x / 320) * width
   const onHill = Math.abs(x - center) <= (44 / 320) * width
   const offset = onHill ? x - center : 0
 
+  const coarseRate = duration / ((208 / 320) * width)
+
+  const refine = (pointerX: number, seconds: number): ScrubberDrag => ({
+    fine: true,
+    timeAt: (nextX) => {
+      if (!Number.isFinite(nextX) || !Number.isFinite(pointerX)) return seconds
+
+      const rate = Number.isFinite(coarseRate) ? Math.max(0, Math.min(coarseRate, 0.25)) : 0
+
+      return scrubberProgress(seconds + (nextX - pointerX) * rate, duration) * duration
+    },
+    refine,
+  })
+
   return {
+    fine: false,
     timeAt: (pointerX: number) =>
       scrubberTime(pointerX - offset - (56 / 320) * width, (208 / 320) * width, duration),
+    refine,
   }
 }

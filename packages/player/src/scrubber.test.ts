@@ -49,4 +49,30 @@ describe('scrubber position', () => {
     expect(startScrubberDrag(160, 320, 0, 120).timeAt(160)).toBe(60)
     expect(startScrubberDrag(80, 160, 0, 120).timeAt(80)).toBe(60)
   })
+
+  it('refines at the supplied displayed second and caps fine movement at a quarter second', () => {
+    const coarse = startScrubberDrag(160, 320, 600, 1200)
+    const fine = coarse.refine(173, 675)
+    expect(coarse.fine).toBe(false)
+    expect(fine.fine).toBe(true)
+    expect(fine.timeAt(173)).toBe(675)
+    expect(fine.timeAt(177)).toBe(676)
+    expect(fine.timeAt(169)).toBe(674)
+  })
+
+  it('never accelerates short audio in fine mode', () => {
+    const fine = startScrubberDrag(160, 320, 10, 20).refine(160, 10)
+    expect(fine.timeAt(160 + 104)).toBe(20)
+    expect(fine.timeAt(160 - 104)).toBe(0)
+    expect(fine.timeAt(170)).toBeCloseTo(10.961538)
+  })
+
+  it('uses the same fine rate and clamping at either endpoint', () => {
+    const left = startScrubberDrag(24, 320, 0, 120).refine(24, 0)
+    const right = startScrubberDrag(300, 320, 120, 120).refine(300, 120)
+    expect(left.timeAt(28)).toBe(1)
+    expect(left.timeAt(20)).toBe(0)
+    expect(right.timeAt(296)).toBe(119)
+    expect(right.timeAt(304)).toBe(120)
+  })
 })

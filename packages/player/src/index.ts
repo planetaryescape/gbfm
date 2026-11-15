@@ -1,4 +1,14 @@
-export { scrubberCurve, scrubberProgress, scrubberTime, startScrubberDrag } from './scrubber'
+export {
+  scrubberCurve,
+  scrubberProgress,
+  scrubberTime,
+  startScrubberDrag,
+  type ScrubberDrag,
+} from './scrubber'
+
+export { createScrubberGesture, type ScrubberPreview } from './scrubberGesture'
+
+export { formatScrubberTime, formatScrubberDelta } from './scrubberTime'
 
 export {
   AudioStorageError,

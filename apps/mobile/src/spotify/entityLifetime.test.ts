@@ -5,6 +5,7 @@ import { expect, test } from 'vitest'
 
 import { spotifyConnectionLifecycle } from './connectionLifecycle'
 import { spotifyEntityLifetime, runSpotifyEntityAction } from './entityLifetime'
+import type { SpotifyEntityAction } from './entityOperation'
 import { spotifyFixture } from './operationFixture'
 
 const entity = spotifyEntityFromUrl('spotify:track:fixture')
@@ -27,7 +28,7 @@ test.each(['mounted', 'disposed', 'replacement'] as const)(
     const started = Deferred.makeUnsafe<void>()
     const release = Deferred.makeUnsafe<void>()
     const calls: Array<string> = []
-    const pending: Array<'play' | 'queue' | null> = []
+    const pending: Array<SpotifyEntityAction | null> = []
     const notices: Array<string> = []
 
     const f = await spotifyFixture((service) => ({
@@ -69,7 +70,7 @@ test.each(['mounted', 'disposed', 'replacement'] as const)(
       const secondInput = {
         ...shared,
         lifetime: secondLifetime,
-        setPending: (value: 'play' | 'queue' | null) => {
+        setPending: (value: SpotifyEntityAction | null) => {
           pending.push(value)
         },
         notice: (value: string) => {
@@ -116,7 +117,7 @@ test.each(['mounted', 'unmount', 'disconnect', 'replacement'] as const)(
     const release = Deferred.makeUnsafe<void>()
     const accepted: Array<string> = []
     const notices: Array<string> = []
-    const pending: Array<'play' | 'queue' | null> = []
+    const pending: Array<SpotifyEntityAction | null> = []
     let opened = 0
 
     const f = await spotifyFixture((service) => ({
@@ -146,7 +147,7 @@ test.each(['mounted', 'unmount', 'disconnect', 'replacement'] as const)(
       lifecycle,
       generation: lifecycle.current(),
       entity,
-      setPending: (action: 'play' | 'queue' | null) => {
+      setPending: (action: SpotifyEntityAction | null) => {
         pending.push(action)
       },
       notice: (message: string) => {

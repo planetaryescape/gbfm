@@ -6,6 +6,7 @@ import { useThemeColors } from '@/theme/colors'
 
 import { SpotifyConnectionState, useSpotifyConnection } from './connection'
 import { spotifyEntityLifetime, runSpotifyEntityAction } from './entityLifetime'
+import type { SpotifyEntityAction } from './entityOperation'
 import { spotifyLifecycle } from './runtime'
 import { SPOTIFY_GREEN, SpotifyIcon } from './SpotifyIcon'
 
@@ -44,7 +45,7 @@ function EntityActions({
   entity,
   generation,
 }: Props & { readonly entity: SpotifyEntityRef; readonly generation: number }) {
-  const [pending, setPending] = useState<'play' | 'queue' | null>(null)
+  const [pending, setPending] = useState<SpotifyEntityAction | null>(null)
   const colors = useThemeColors()
   const [lifetime] = useState(() => spotifyEntityLifetime())
 
@@ -58,7 +59,7 @@ function EntityActions({
     void Linking.openURL(url)
   }
 
-  const run = (action: 'play' | 'queue') =>
+  const run = (action: SpotifyEntityAction) =>
     runSpotifyEntityAction({
       lifetime,
       lifecycle: spotifyLifecycle,
@@ -114,6 +115,25 @@ function EntityActions({
           {pending === 'queue' ? 'Queueing...' : 'Queue'}
         </Text>
       </TouchableOpacity>
+      {entity.kind === SPOTIFY_ENTITY_KIND.PLAYLIST ? null : (
+        <>
+          <View style={{ width: 1, alignSelf: 'stretch', backgroundColor: `${colors.muted}40` }} />
+          <TouchableOpacity
+            accessibilityRole='button'
+            accessibilityLabel={`Save ${entityNoun[entity.kind].toLowerCase()} to your Spotify library`}
+            disabled={pending !== null}
+            onPress={() => void run('save')}
+            style={{
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              opacity: pending !== null ? 0.6 : 1,
+            }}>
+            <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '600' }}>
+              {pending === 'save' ? 'Saving...' : 'Save'}
+            </Text>
+          </TouchableOpacity>
+        </>
+      )}
     </View>
   )
 }

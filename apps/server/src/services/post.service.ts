@@ -215,6 +215,13 @@ export interface PostService {
   readonly getMicroPostBySlug: (
     slug: string,
   ) => Effect.Effect<SelectMdxCompiledMicroPost, DatabaseError | NotFoundError>
+  readonly getMicroPostScreenFocus: (slug: string) => Effect.Effect<
+    {
+      readonly post: SelectMdxCompiledMicroPost
+      readonly musicByPostId: ReadonlyMap<string, MicroPostScreenMusic> | null
+    },
+    DatabaseError | NotFoundError
+  >
   readonly getMicroPostMetadataBySlug: (
     slug: string,
   ) => Effect.Effect<MicroPostMetadata, DatabaseError | NotFoundError>
@@ -1511,7 +1518,7 @@ const getMicroPostReferenceBySlugEffect = (slug: string) =>
     return post
   }).pipe(Effect.withSpan('post.getMicroPostReferenceBySlug', { attributes: { slug } }))
 
-const getMicroPostBySlugEffect = (slug: string, mdx: MdxService) =>
+const getMicroPostSourceBySlugEffect = (slug: string) =>
   Effect.gen(function* () {
     const db = yield* Database
 
@@ -1590,9 +1597,17 @@ const getMicroPostBySlugEffect = (slug: string, mdx: MdxService) =>
       genres: genres.length > 0 ? genres : null,
     }
 
+    return { post: projectedPost, creators, replyCount: replyCounts[0]?.total ?? 0 }
+  })
+
+const compileMicroPostSource = (
+  source: Effect.Success<ReturnType<typeof getMicroPostSourceBySlugEffect>>,
+  mdx: MdxService,
+) =>
+  Effect.gen(function* () {
     const compiled = {
-      ...(yield* compilePost(projectedPost, creators, mdx)),
-      replyCount: replyCounts[0]?.total ?? 0,
+      ...(yield* compilePost(source.post, source.creators, mdx)),
+      replyCount: source.replyCount,
     }
 
     return yield* toMicroPost(compiled).pipe(
@@ -1601,11 +1616,15 @@ const getMicroPostBySlugEffect = (slug: string, mdx: MdxService) =>
           new NotFoundError({
             message: 'Micro post not found',
             resource: 'post',
-            id: slug,
+            id: source.post.slug,
           }),
       ),
     )
-  }).pipe(
+  })
+
+const getMicroPostBySlugEffect = (slug: string, mdx: MdxService) =>
+  getMicroPostSourceBySlugEffect(slug).pipe(
+    Effect.flatMap((source) => compileMicroPostSource(source, mdx)),
     Effect.withSpan('post.getMicroPostBySlug', {
       attributes: { 'post.slug': slug },
     }),
@@ -1720,7 +1739,11 @@ const getTweetCardInputEffect = (post: TweetCardPost) =>
     }
   }).pipe(Effect.withSpan('post.getTweetCardInput', { attributes: { slug: post.slug } }))
 
-const getMicroPostScreenMusicEffect = (posts: ReadonlyArray<SelectMdxCompiledMicroPost>) =>
+const getMicroPostScreenMusicEffect = (
+  posts: ReadonlyArray<
+    Pick<SelectMdxCompiledMicroPost, 'id' | 'musicEntityId' | 'musicEntityType'>
+  >,
+) =>
   Effect.gen(function* () {
     const references = posts.flatMap((post) => {
       const { musicEntityId: id, musicEntityType: type } = post
@@ -1830,6 +1853,27 @@ const getMicroPostScreenMusicEffect = (posts: ReadonlyArray<SelectMdxCompiledMic
   }).pipe(
     Effect.withSpan('post.getMicroPostScreenMusic', { attributes: { postCount: posts.length } }),
   )
+
+const getMicroPostScreenFocusEffect = (slug: string, mdx: MdxService) =>
+  Effect.gen(function* () {
+    const source = yield* getMicroPostSourceBySlugEffect(slug)
+
+    if (
+      source.post.rootPostId ||
+      source.post.quotedPostId ||
+      source.post.musicEntityType === 'playlist'
+    ) {
+      return { post: yield* compileMicroPostSource(source, mdx), musicByPostId: null }
+    }
+
+    return yield* Effect.all(
+      {
+        post: compileMicroPostSource(source, mdx),
+        musicByPostId: getMicroPostScreenMusicEffect([source.post]),
+      },
+      { concurrency: 2 },
+    )
+  })
 
 const getMicroPostByIdEffect = (id: string, mdx: MdxService) =>
   Effect.gen(function* () {
@@ -2735,6 +2779,7 @@ export const PostServiceLayer = Layer.effect(
       getMicroPosts: (opts) => provideDb(getMicroPostsEffect(opts, mdx)),
       getLatestMicroPost: provideDb(getLatestMicroPostEffect),
       getMicroPostBySlug: (slug) => provideDb(getMicroPostBySlugEffect(slug, mdx)),
+      getMicroPostScreenFocus: (slug) => provideDb(getMicroPostScreenFocusEffect(slug, mdx)),
       getMicroPostMetadataBySlug: (slug) => provideDb(getMicroPostMetadataBySlug(slug)),
       getTweetCardInput: (post) => provideDb(getTweetCardInputEffect(post)),
       getMicroPostReferenceBySlug: (slug) => provideDb(getMicroPostReferenceBySlugEffect(slug)),

@@ -6,6 +6,7 @@ type Options = {
   readonly currentTime: number
   readonly duration: number
   readonly onSeek: (seconds: number) => Promise<void>
+  readonly onSeekError: (cause: unknown) => void
   readonly onPressChange: (pressed: number) => void
   readonly onHaptic: () => void
 }
@@ -32,10 +33,29 @@ export function useHillScrubberGesture(options: Options) {
   } | null>(null)
 
   const controller = useRef<ReturnType<typeof createScrubberGesture> | null>(null)
+  const commit = useRef<((seconds: number) => void) | null>(null)
 
   useLayoutEffect(() => {
     let mounted = true
     const releasePress = () => latest.current.onPressChange(0)
+
+    const seek = (seconds: number) => {
+      setFeedback(null)
+      setCommittedSeconds(seconds)
+      const generation = ++commitGeneration.current
+      latest.current.onPressChange(0)
+
+      const settled = () => {
+        if (mounted && generation === commitGeneration.current) setCommittedSeconds(null)
+      }
+
+      latest.current.onSeek(seconds).then(settled, (cause: unknown) => {
+        settled()
+        latest.current.onSeekError(cause)
+      })
+    }
+
+    commit.current = seek
 
     const gesture = createScrubberGesture({
       scheduleHold: (callback, delay) => {
@@ -50,18 +70,7 @@ export function useHillScrubberGesture(options: Options) {
           referenceSeconds: layout.current.referenceSeconds,
         })
       },
-      onCommit: (seconds) => {
-        setFeedback(null)
-        setCommittedSeconds(seconds)
-        const generation = ++commitGeneration.current
-        latest.current.onPressChange(0)
-
-        const settled = () => {
-          if (mounted && generation === commitGeneration.current) setCommittedSeconds(null)
-        }
-
-        latest.current.onSeek(seconds).then(settled, settled)
-      },
+      onCommit: seek,
       onCancel: () => {
         setFeedback(null)
         latest.current.onPressChange(0)
@@ -77,6 +86,7 @@ export function useHillScrubberGesture(options: Options) {
       gesture.dispose()
       mounted = false
       controller.current = null
+      commit.current = null
       releasePress()
     }
   }, [])
@@ -91,9 +101,18 @@ export function useHillScrubberGesture(options: Options) {
     }
   }, [options.duration])
 
+  const position = feedback?.preview.seconds ?? committedSeconds ?? options.currentTime
+
   return {
     feedback,
-    position: feedback?.preview.seconds ?? committedSeconds ?? options.currentTime,
+    position,
+    adjustBy: (increment: number) => {
+      if (!Number.isFinite(options.duration) || options.duration <= 0) return
+      const seconds = Math.max(0, Math.min(options.duration, position + increment))
+      controller.current?.cancel()
+      commit.current?.(seconds)
+      latest.current.onHaptic()
+    },
     width,
     onLayout: (event: {
       readonly nativeEvent: {

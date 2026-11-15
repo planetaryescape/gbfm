@@ -33,7 +33,13 @@ const idleStatus: EngineStatus = {
   isBuffering: false,
 }
 
-const makeRecordingEngine = (options: { readonly rejectPlay?: boolean } = {}) =>
+const makeRecordingEngine = (
+  options: {
+    readonly rejectPlay?: boolean
+    readonly seekPosition?: (seconds: number) => number
+    readonly emitSeekStatus?: boolean
+  } = {},
+) =>
   Effect.gen(function* () {
     const pubsub = yield* PubSub.unbounded<EngineStatus>()
     const calls: Array<string> = []
@@ -70,8 +76,17 @@ const makeRecordingEngine = (options: { readonly rejectPlay?: boolean } = {}) =>
           calls.push(`muted:${muted}`)
         }),
       seekTo: (seconds) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           calls.push(`seek:${seconds}`)
+
+          if (options.seekPosition) {
+            status = { ...status, currentTime: options.seekPosition(seconds) }
+          }
+
+          if (options.emitSeekStatus) {
+            yield* PubSub.publish(pubsub, status)
+            yield* Effect.yieldNow
+          }
         }),
       currentStatus: Effect.sync(() => status),
       changes: Stream.fromPubSub(pubsub),
@@ -142,6 +157,56 @@ const makeRecordingReporter = () => {
 }
 
 describe('makePlayerCore', () => {
+  it.each([false, true])(
+    'persists each authoritative seek once with immediate status emission %s',
+    async (emitSeekStatus) => {
+      await Effect.gen(function* () {
+        const recording = yield* makeRecordingEngine({
+          seekPosition: (seconds) => Math.min(300, seconds),
+          emitSeekStatus,
+        })
+
+        const storage = makeRecordingStorage()
+        const reporter = makeRecordingReporter()
+
+        const core = yield* makePlayerCore({
+          onStatus: () => {},
+          onTrackFinished: () => {},
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              Layer.succeed(AudioEngine, recording.engine),
+              storage.layer,
+              reporter.layer,
+            ),
+          ),
+        )
+
+        yield* core.requestPlayOnReady(track.id)
+        yield* recording.setStatus({ isLoaded: true, duration: 300, currentTime: 120 })
+        yield* core.setSource(track)
+        yield* Effect.yieldNow
+        storage.saved.length = 0
+        yield* core.seekTo(150)
+        yield* Effect.yieldNow
+        expect(storage.saved).toEqual([{ id: track.id, position: 150 }])
+        yield* core.seekTo(150.25)
+        yield* Effect.yieldNow
+        expect(storage.saved).toEqual([
+          { id: track.id, position: 150 },
+          { id: track.id, position: 150.25 },
+        ])
+        yield* core.seekTo(999)
+        yield* Effect.yieldNow
+        expect(storage.saved).toEqual([
+          { id: track.id, position: 150 },
+          { id: track.id, position: 150.25 },
+          { id: track.id, position: 300 },
+        ])
+      }).pipe(Effect.scoped, Effect.runPromise)
+    },
+  )
+
   it('keeps pause intent when a source becomes ready after the pause', async () => {
     await Effect.gen(function* () {
       const recording = yield* makeRecordingEngine()

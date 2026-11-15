@@ -25,6 +25,7 @@ const mount = async () => {
   let current: ReturnType<typeof useHillScrubberGesture> | undefined
   const seeks: Array<{ seconds: number; completion: PromiseWithResolvers<void> }> = []
   const presses: Array<number> = []
+  const errors: Array<unknown> = []
   let haptics = 0
   let time = 25
   let duration = 100
@@ -40,6 +41,9 @@ const mount = async () => {
         return completion.promise
       },
       onPressChange: (pressed) => presses.push(pressed),
+      onSeekError: (cause) => {
+        errors.push(cause)
+      },
       onHaptic: () => {
         haptics++
       },
@@ -75,6 +79,7 @@ const mount = async () => {
     gesture,
     seeks,
     presses,
+    errors,
     get haptics() {
       return haptics
     },
@@ -160,10 +165,30 @@ test('failed and superseded commits settle without hiding later playback', async
   expect(f.gesture().position).toBe(71)
   await act(async () => f.seeks[0]?.completion.resolve())
   expect(f.gesture().position).toBe(71)
-  await act(async () => f.seeks[1]?.completion.reject(new Error('seek failed')))
+  const failure = new Error('seek failed')
+  await act(async () => f.seeks[1]?.completion.reject(failure))
+  expect(f.errors).toEqual([failure])
   expect(f.gesture().position).toBe(25)
   await f.render(26)
   expect(f.gesture().position).toBe(26)
+})
+
+test('accessibility adjustments use the announced pending position and own a rejected seek', async () => {
+  const f = await mount()
+  await act(async () => {
+    f.gesture().start(pointer(150, 50))
+    f.gesture().release(pointer(190))
+  })
+  expect(f.gesture().position).toBe(56)
+  await act(async () => f.gesture().adjustBy(15))
+  expect(f.seeks.map(({ seconds }) => seconds)).toEqual([56, 71])
+  expect(f.gesture().position).toBe(71)
+  await act(async () => f.seeks[0]?.completion.resolve())
+  expect(f.gesture().position).toBe(71)
+  const failure = new Error('runtime disposed')
+  await act(async () => f.seeks[1]?.completion.reject(failure))
+  expect(f.errors).toEqual([failure])
+  expect(f.gesture().position).toBe(25)
 })
 
 test('unmount disposes hold feedback and rejects retained responder callbacks', async () => {

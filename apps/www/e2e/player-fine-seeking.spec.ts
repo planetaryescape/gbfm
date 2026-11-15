@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
+test.use({ viewport: { width: 390, height: 844 } })
+
 const longAudio = () => {
   const sampleRate = 8000
   const samples = sampleRate * 7200
@@ -25,7 +27,7 @@ const openLongMix = async (page: Page) => {
     const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range ?? '')
     const start = Number(range?.[1] ?? 0)
     const end = Math.min(Number(range?.[2] || audio.length - 1), audio.length - 1)
-    const headers: Record<string, string> = {
+    const headers = {
       'content-type': 'audio/wav',
       'accept-ranges': 'bytes',
       'access-control-allow-origin': new URL(page.url()).origin,
@@ -35,10 +37,11 @@ const openLongMix = async (page: Page) => {
       await route.fulfill({ status: 416, headers, body: '' })
       return
     }
-    if (range) headers['content-range'] = `bytes ${start}-${end}/${audio.length}`
     await route.fulfill({
       status: range ? 206 : 200,
-      headers,
+      headers: range
+        ? { ...headers, 'content-range': `bytes ${start}-${end}/${audio.length}` }
+        : headers,
       body: audio.subarray(start, end + 1),
     })
   })
@@ -64,6 +67,7 @@ test('holding shows the exact time and fine dragging commits the displayed secon
   const bounds = await hill.boundingBox()
   if (!bounds) throw new Error('Expected the hill')
   const x = bounds.x + bounds.width / 2
+  expect(Number.isInteger(x)).toBe(true)
   const y = bounds.y + 40
   await page.mouse.move(x, y)
   await page.mouse.down()
@@ -118,7 +122,9 @@ test('playback ticks do not overwrite a held fine preview or its reference time'
   await expect(player.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
   const bounds = await hill.boundingBox()
   if (!bounds) throw new Error('Expected the hill')
-  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 40)
+  const x = bounds.x + bounds.width / 2
+  expect(Number.isInteger(x)).toBe(true)
+  await page.mouse.move(x, bounds.y + 40)
   await page.mouse.down()
   const bubble = hill.locator('.hill-scrubber-preview')
   await expect(bubble.locator('.hill-scrubber-preview-mode')).toHaveText('Fine seeking')

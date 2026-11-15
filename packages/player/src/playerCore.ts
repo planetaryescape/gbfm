@@ -1,4 +1,4 @@
-import { Data, Effect, Predicate, Stream } from 'effect'
+import { Data, Effect, Exit, Predicate, Stream } from 'effect'
 import type { Scope } from 'effect/Scope'
 
 import { AudioEngine, type EngineStatus, type NowPlayingMetadata } from './engine'
@@ -306,7 +306,12 @@ export const playerCore = (
         return transition.shouldPrepare ? finishPreparing(active) : Effect.void
       })
 
-    const observeStatus = (status: EngineStatus) =>
+    const observeStatus = (
+      status: EngineStatus,
+      options: { readonly positionPersistence: 'progress' | 'seek' } = {
+        positionPersistence: 'progress',
+      },
+    ) =>
       Effect.gen(function* () {
         const active = session
 
@@ -358,7 +363,13 @@ export const playerCore = (
         const previousPosition =
           lastPositionPersist?.id === active.id ? lastPositionPersist.at : null
 
-        if (!shouldPersistPosition(active.started, previousPosition, status.currentTime)) return
+        if (
+          !active.started ||
+          previousPosition === status.currentTime ||
+          (options.positionPersistence === 'progress' &&
+            !shouldPersistPosition(active.started, previousPosition, status.currentTime))
+        )
+          return
         lastPositionPersist = { id: active.id, at: status.currentTime }
         yield* runDetached(
           'Unable to persist audio position',
@@ -506,19 +517,14 @@ export const playerCore = (
         Effect.gen(function* () {
           const active = session
           yield* engine.seekTo(seconds).pipe(
-            Effect.ensuring(
+            Effect.onExit((exit) =>
               Effect.gen(function* () {
                 if (session !== active) return
-                yield* observeStatus(yield* engine.currentStatus)
+                yield* observeStatus(yield* engine.currentStatus, {
+                  positionPersistence: Exit.isSuccess(exit) ? 'seek' : 'progress',
+                })
               }),
             ),
-          )
-
-          if (session !== active || !active?.started) return
-          lastPositionPersist = { id: active.id, at: seconds }
-          yield* runDetached(
-            'Unable to persist audio position',
-            storage.savePosition(active.id, seconds),
           )
         }).pipe(
           Effect.catchCause((cause) =>

@@ -1,4 +1,5 @@
 import { formatScrubberTime, scrubberCurve, scrubberProgress } from '@gbfm/player'
+import { Effect } from 'effect'
 import type { AccessibilityActionEvent } from 'react-native'
 import { Text, View } from 'react-native'
 import Animated, {
@@ -38,6 +39,9 @@ export function HillScrubber({ currentTime, duration, onSeek }: Props) {
     currentTime,
     duration,
     onSeek,
+    onSeekError: (cause) => {
+      Effect.runFork(Effect.logError('Unable to seek audio', cause))
+    },
     onHaptic: () => {
       void haptics.select()
     },
@@ -69,9 +73,7 @@ export function HillScrubber({ currentTime, duration, onSeek }: Props) {
     const increment = increments.get(event.nativeEvent.actionName)
 
     if (increment === undefined) return
-    gesture.cancel()
-    void onSeek(Math.max(0, Math.min(duration, currentTime + increment)))
-    void haptics.select()
+    gesture.adjustBy(increment)
   }
 
   return (

@@ -3158,7 +3158,7 @@
 }
 
 .hill-scrubber[data-pressed] .hill-scrubber-thumb {
-  r: 7;
+  r: 7px;
 }
 
 .hill-scrubber:has(input:focus-visible) {

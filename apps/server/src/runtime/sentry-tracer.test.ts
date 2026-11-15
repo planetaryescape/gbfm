@@ -4,17 +4,32 @@ import { expect, test } from 'vitest'
 
 import { createSentryTracer } from './sentry-tracer'
 
-const withTracing = async (run: () => void | Promise<void>) => {
+const withTracing = async (run: () => void | Promise<void>, envelopes: Array<string> = []) => {
   Sentry.setAsyncLocalStorageAsyncContextStrategy()
+  const pending: Array<Promise<unknown>> = []
   await Sentry.wrapRequestHandler(
     {
       request: new Request('https://fixture.test/'),
-      context: undefined,
+      context: {
+        waitUntil: (promise) => {
+          pending.push(promise)
+        },
+        passThroughOnException: () => {},
+      },
       options: {
         dsn: 'https://abc123@o1.ingest.sentry.io/123',
         tracesSampleRate: 1,
         defaultIntegrations: [],
-        transport: (options) => Sentry.createTransport(options, async () => ({ statusCode: 200 })),
+        transport: (options) =>
+          Sentry.createTransport(options, async (request) => {
+            envelopes.push(
+              Predicate.isString(request.body)
+                ? request.body
+                : new TextDecoder().decode(request.body),
+            )
+
+            return { statusCode: 200 }
+          }),
       },
     },
     async () => {
@@ -23,6 +38,7 @@ const withTracing = async (run: () => void | Promise<void>) => {
       return new Response()
     },
   )
+  await Promise.all(pending)
 }
 
 test('explicit external parents override an unrelated active SDK span and roots stay independent', () =>
@@ -171,3 +187,35 @@ test('unsampled spans preserve external trace identity and never become recordin
     expect(disabled.sampled).toBe(false)
     disabled.end(2n, Exit.void)
   }))
+
+test('span events retain measurements without evaluating arbitrary log attributes', async () => {
+  const envelopes: Array<string> = []
+  await withTracing(() => {
+    const tracer = createSentryTracer()
+
+    const span = tracer.span({
+      name: 'Fixture.measurement',
+      parent: Option.none(),
+      annotations: Context.empty(),
+      links: [],
+      kind: 'internal',
+      startTime: BigInt(Date.now()) * 1_000_000n,
+      sampled: true,
+      root: false,
+    })
+
+    span.event('fixture.log', 1n, {
+      get 'effect.cause'() {
+        throw new Error('Unreviewed log attributes must not be read')
+      },
+    })
+    span.event('fixture.work', 1n, {
+      'sentry.measurement_unit': 'millisecond',
+      'sentry.measurement_value': 5,
+    })
+    span.end(BigInt(Date.now()) * 1_000_000n, Exit.void)
+  }, envelopes)
+  const payload = envelopes.join('\n')
+  expect(payload).toContain('"fixture.work":{"value":5,"unit":"millisecond"}')
+  expect(payload).not.toContain('fixture.log')
+})

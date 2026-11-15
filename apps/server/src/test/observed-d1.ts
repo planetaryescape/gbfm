@@ -2,17 +2,11 @@ import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types'
 
 export const observedD1 = (database: D1Database) => {
   const queries: Array<string> = []
-  const statements: Array<string> = []
   let active = 0
   let maxActive = 0
 
-  const execute = async <A>(
-    query: string,
-    run: () => Promise<A>,
-    templates: ReadonlyArray<string> = [query],
-  ) => {
+  const execute = async <A>(query: string, run: () => Promise<A>) => {
     queries.push(query)
-    statements.push(...templates)
     active += 1
     maxActive = Math.max(maxActive, active)
 
@@ -57,17 +51,12 @@ export const observedD1 = (database: D1Database) => {
 
   const observed: D1Database = {
     prepare: (query) => new Statement(database.prepare(query), query),
-    batch: <T>(batchStatements: Array<D1PreparedStatement>) =>
-      execute(
-        'batch',
-        () =>
-          database.batch<T>(
-            batchStatements.map((statement) =>
-              statement instanceof Statement ? statement.underlying : statement,
-            ),
+    batch: <T>(statements: Array<D1PreparedStatement>) =>
+      execute('batch', () =>
+        database.batch<T>(
+          statements.map((statement) =>
+            statement instanceof Statement ? statement.underlying : statement,
           ),
-        batchStatements.flatMap((statement) =>
-          statement instanceof Statement ? [statement.query] : [],
         ),
       ),
     exec: (query) => execute(query, () => database.exec(query)),
@@ -78,13 +67,11 @@ export const observedD1 = (database: D1Database) => {
   return {
     database: observed,
     queries,
-    statements,
     get maxActive() {
       return maxActive
     },
     reset: () => {
       queries.length = 0
-      statements.length = 0
       maxActive = 0
     },
   }

@@ -36,10 +36,8 @@ provenance field or source filter must stop using them.
 
 No database migration, production data deletion or post-content rewrite is part
 of this cleanup. `external-account.schema.ts` and the original D1 migration
-definitions remain to describe retained historical tables. Test fixtures still
-use those definitions to prove imported published posts and drafts remain
-accessible under the normal visibility rules, reads do not enrich them, and
-explicit deletion preserves detached history.
+definitions remain to describe retained historical tables. Existing hydration
+and deletion tests retain fixtures for imported content and detached history.
 
 Dropping historical tables or deleting their records needs a separate private
 data inventory and explicit approval. Historical design and migration documents

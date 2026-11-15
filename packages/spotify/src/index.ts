@@ -24,6 +24,7 @@ export const SPOTIFY_WEB_SCOPES = [
   'user-modify-playback-state',
   'user-read-currently-playing',
   'user-library-read',
+  'user-library-modify',
   'streaming',
   'playlist-read-private',
   'playlist-modify-public',
@@ -184,6 +185,27 @@ export const queueSpotifyEntityEffect = Effect.fn('queueSpotifyEntity')(function
 export const saveTrackEffect = Effect.fn('saveTrack')(function* (spotifyTrackId: string) {
   const spotify = yield* Effect.service(SpotifyBrowser)
   yield* spotify.library.saveTracks([spotifyTrackId])
+})
+
+/** Saves a track or album to the listener's library; playlists cannot be saved this way. */
+export const saveSpotifyEntityEffect = Effect.fn('saveSpotifyEntity')(function* (
+  entity: SpotifyEntityRef,
+) {
+  const spotify = yield* Effect.service(SpotifyBrowser)
+
+  if (entity.kind === SPOTIFY_ENTITY_KIND.TRACK) {
+    yield* spotify.library.saveTracks([entity.id])
+
+    return true
+  }
+
+  if (entity.kind === SPOTIFY_ENTITY_KIND.ALBUM) {
+    yield* spotify.library.saveAlbums([entity.id])
+
+    return true
+  }
+
+  return false
 })
 
 export const checkSavedTracksEffect = Effect.fn('checkSavedTracks')(function* (

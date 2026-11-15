@@ -15,6 +15,7 @@ const Export = Schema.Struct({
             Schema.Struct({
               traceId: Schema.String,
               spanId: Schema.String,
+              parentSpanId: Schema.optional(Schema.String),
               name: Schema.String,
               attributes: Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.Json })),
             }),
@@ -55,10 +56,21 @@ test('OTLP exports isolated request spans, propagates context and excludes raw f
         let context = ''
         await tracing.trace(
           new Request('http://www.local/spotify/callback?code=private-code', {
-            headers: { 'x-request-id': id, cookie: 'session_token=private-cookie' },
+            headers: {
+              'x-request-id': id,
+              cookie: 'session_token=private-cookie',
+              'sentry-trace': `${(id === 'first' ? '1' : '2').repeat(32)}-${'3'.repeat(16)}-1`,
+              'x-b3-traceid': '4'.repeat(32),
+              'x-b3-spanid': '5'.repeat(16),
+              baggage: 'customer=private-baggage',
+            },
           }),
           async (request) => {
             context = request.headers.get('traceparent') ?? ''
+            expect(request.headers.get('sentry-trace')).toBe(context.slice(3, 52) + '-1')
+            expect(request.headers.has('x-b3-traceid')).toBe(false)
+            expect(request.headers.has('x-b3-spanid')).toBe(false)
+            expect(request.headers.get('baggage')).not.toContain('private-baggage')
 
             return new Response(null, { status: id === 'first' ? 200 : 404 })
           },
@@ -99,6 +111,8 @@ test('OTLP exports isolated request spans, propagates context and excludes raw f
       )
 
       expect(span).toBeDefined()
+      expect(span?.traceId).toBe((id === 'first' ? '1' : '2').repeat(32))
+      expect(span?.parentSpanId).toBe('3'.repeat(16))
       expect(context).toBe(`00-${span?.traceId}-${span?.spanId}-01`)
       expect(span?.attributes).toContainEqual({
         key: 'http.response.status_code',

@@ -1,4 +1,5 @@
 import { resolveRequestId } from '@gbfm/core/observability/request-id'
+import { propagatedRequest } from '@gbfm/observability/propagation'
 
 import { Route } from '../route'
 
@@ -31,12 +32,18 @@ export const apiRequest = async (
 
   if (import.meta.env.PROD) {
     const { env } = await import('cloudflare:workers')
+    const { traceApiRequest } = await import('../observability/server')
 
-    return env.API.fetch(forwarded)
+    return traceApiRequest(forwarded, (request) => env.API.fetch(request))
   }
 
   return fetch(
-    new Request(new URL(path, process.env.VPS_PROXY_TARGET ?? 'http://127.0.0.1:3003'), forwarded),
+    propagatedRequest(
+      new Request(
+        new URL(path, process.env.VPS_PROXY_TARGET ?? 'http://127.0.0.1:3003'),
+        forwarded,
+      ),
+    ),
   )
 }
 

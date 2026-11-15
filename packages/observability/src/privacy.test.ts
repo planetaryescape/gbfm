@@ -111,6 +111,9 @@ test('browser and native route spans preserve bounded templates without concrete
     ['/privacy', '/privacy'],
     ['/subscribe', '/subscribe'],
     ['/(tabs)/tweet/[slug]', '/tweet/[slug]'],
+    [`GET /tweet/${secret}?token=${secret}`, 'GET /tweet/:slug'],
+    ['POST /actions/mosaic', 'POST /actions/:action'],
+    ['www.api', 'www.api'],
   ]
 
   for (const [transaction, expected] of cases) {

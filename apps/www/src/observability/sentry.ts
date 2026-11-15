@@ -7,6 +7,7 @@ import {
   sanitizeError,
   sanitizeTransaction,
 } from '@gbfm/observability/privacy'
+import { tracePropagationTargets } from '@gbfm/observability/propagation'
 import { sentryExporterLayer } from '@gbfm/observability/sentry'
 import * as Sentry from '@sentry/browser'
 import { Effect, Layer } from 'effect'
@@ -31,7 +32,11 @@ if (config.enabled) {
     replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 0,
     maxBreadcrumbs: 30,
-    tracePropagationTargets: [],
+    tracePropagationTargets: tracePropagationTargets({
+      origin: location.origin,
+      development: import.meta.env.DEV,
+    }),
+    propagateTraceparent: true,
     integrations: [Sentry.browserTracingIntegration({ instrumentNavigation: false })],
     beforeBreadcrumb: safeBreadcrumb,
     beforeSend: sanitizeError,

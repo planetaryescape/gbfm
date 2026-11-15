@@ -20,7 +20,14 @@ const safeOutcome = flow(
 
 const safeOperation = flow(
   Schema.decodeUnknownOption(
-    Schema.Literals(['gbfm.journey', 'ui.load', 'navigation', 'app.start', 'http.client']),
+    Schema.Literals([
+      'gbfm.journey',
+      'ui.load',
+      'navigation',
+      'app.start',
+      'http.client',
+      'http.server',
+    ]),
   ),
   Option.getOrElse(() => 'application.operation'),
 )
@@ -122,7 +129,12 @@ const routePrefixes = new Map(
   }),
 )
 
-const safeSpanName = (value: string | undefined) => {
+const safeSpanName = (value: string | undefined): string => {
+  const http = /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS) (\/.*)$/.exec(value ?? '')
+
+  if (http?.[1] && http[2]) return `${http[1]} ${safeSpanName(http[2])}`
+
+  if (value === 'www.api') return value
   const stripped = value?.split(/[?#]/)[0]?.replace(/\/\([^/]+\)/g, '')
   const route = value?.startsWith('/') ? stripped?.replace(/\/+$/, '') || '/' : stripped
 

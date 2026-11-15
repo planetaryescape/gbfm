@@ -169,7 +169,7 @@ function SpotlightBlock({
   if (Predicate.isTagged(block, 'ExternalMediaEmbed') && block.provider === 'youtube') {
     const id = youtubeVideoId(block.canonicalUrl)
 
-    if (id) return <SpotlightVideo id={id} title={block.title} url={block.canonicalUrl} />
+    if (id) return <SpotlightVideo id={id} title={block.title} />
   }
 
   return <TweetBlocks blocks={[block]} size={TEXT_SIZE} />

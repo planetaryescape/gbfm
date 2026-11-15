@@ -188,6 +188,33 @@ test('invalid linked and saved positions resolve to the intro in the view, URL a
 })
 
 for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`chapter-row activation restores owned focus with ${reducedMotion} motion`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion })
+    await open(page, '1')
+    const stage = page.getByRole('region', { name: 'Current editorial entry' })
+    const row = page.getByRole('button', { name: 'Second record', exact: true })
+    await row.focus()
+    await expect(row).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL(/at=1\.2$/)
+    await expect(stage).toBeFocused()
+    await expect(stage.getByRole('heading', { name: 'Second record' })).toBeVisible()
+
+    const previous = page.getByRole('button', { name: 'Previous entry', exact: true })
+    await previous.focus()
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL(/at=1\.1$/)
+    await expect(previous).toBeFocused()
+
+    const outside = page.getByRole('link', { name: 'Home', exact: true }).first()
+    await outside.focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(page).toHaveURL(/at=1\.2$/)
+    await expect(outside).toBeFocused()
+  })
+
   for (const width of [390, 1280]) {
     test(`keyboard navigation retains stage focus at ${width}px with ${reducedMotion} motion`, async ({
       page,

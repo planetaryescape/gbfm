@@ -2,7 +2,7 @@ import { MicroPostScreenRepliesResponse } from '@gbfm/api/post'
 import { observeJourney } from '@gbfm/observability'
 import { SiteMetadata } from '@gbfm/site-metadata'
 import { Effect, Schema } from 'effect'
-import { Command, Dom, Navigation } from 'foldkit'
+import { Command, Dom, Navigation, Render } from 'foldkit'
 
 import { updateDocumentHead } from './document-head'
 import { Message } from './message'
@@ -192,6 +192,11 @@ export const SyncSpotlight = Command.define('Editorial.SyncSpotlight', {
   messages: [Message.SpotlightSynced],
   execute: ({ progress }) =>
     Effect.gen(function* () {
+      const focused = document.activeElement
+
+      const ownedFocus =
+        focused !== null && document.querySelector('.spotlight-stage')?.contains(focused)
+
       const url = new URL(location.href)
 
       if (url.pathname === progress.path) {
@@ -202,7 +207,16 @@ export const SyncSpotlight = Command.define('Editorial.SyncSpotlight', {
 
       writeProgress(progress)
 
-      const stage = document.querySelector('.spotlight-stage')
+      yield* Render.afterCommit
+      const stage = document.querySelector<HTMLElement>('.spotlight-stage')
+
+      if (
+        ownedFocus &&
+        !focused?.isConnected &&
+        (document.activeElement === null || document.activeElement === document.body) &&
+        location.pathname === progress.path
+      )
+        stage?.focus({ preventScroll: true })
 
       if (stage === null || getComputedStyle(stage).overflowY !== 'auto') {
         yield* Dom.scrollIntoViewAfterPaint('.content-detail', { block: 'start' }).pipe(

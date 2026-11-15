@@ -27,7 +27,6 @@ import { Clock, Context, Effect, Layer, Match, Schema } from 'effect'
 
 import { user as usersTable } from '@/db/auth.schema'
 import { postIdsForCreator } from '@/db/creator-membership'
-import { blueskyPostSources } from '@/db/external-account.schema'
 import { changesPostMusicPrimary, guardedPostUpdate } from '@/db/guarded-post-update'
 import {
   hasEntityLabel,
@@ -94,10 +93,6 @@ import {
   UploadAssetService,
 } from '@/services/upload-asset.service'
 
-export const POST_SOURCE_FILTERS = ['bluesky', 'native'] as const
-
-export type PostSourceFilter = (typeof POST_SOURCE_FILTERS)[number]
-
 export interface MicroPostScreenMusic {
   readonly entity: {
     readonly id: string
@@ -160,7 +155,6 @@ export interface PostService {
       limit: number
       offset: number
       type?: PostType
-      source?: PostSourceFilter
       draft?: boolean
       q?: string
     },
@@ -394,43 +388,12 @@ export function normalizePostData(
   return normalizedData
 }
 
-type PostHydrationOptions = { readonly includeBlueskySource?: boolean }
-
-const buildPostWithCreators = (
-  post: PostRow,
-  mdx: MdxService,
-  options: PostHydrationOptions = {},
-) =>
+const buildPostWithCreators = (post: PostRow, mdx: MdxService) =>
   Effect.gen(function* () {
     const db = yield* Database
 
-    const { blueskySources, creators, projectedPost } = yield* Effect.all(
+    const { creators, projectedPost } = yield* Effect.all(
       {
-        blueskySources:
-          options.includeBlueskySource === false
-            ? Effect.succeed([])
-            : Effect.tryPromise({
-                try: () =>
-                  db
-                    .select({
-                      authorDid: blueskyPostSources.authorDid,
-                      authorHandle: blueskyPostSources.authorHandle,
-                      publicUrl: blueskyPostSources.publicUrl,
-                      sourceCreatedAt: blueskyPostSources.sourceCreatedAt,
-                      sourceStatus: blueskyPostSources.sourceStatus,
-                      locallyEdited: blueskyPostSources.locallyEdited,
-                      lastError: blueskyPostSources.lastError,
-                    })
-                    .from(blueskyPostSources)
-                    .where(eq(blueskyPostSources.postId, post.id))
-                    .limit(1),
-                catch: (error) =>
-                  new DatabaseError({
-                    message: `Failed to fetch Bluesky source: ${getErrorMessage(error)}`,
-                    operation: 'select',
-                    table: 'bluesky_post_sources',
-                  }),
-              }),
         creators: Effect.tryPromise({
           try: () =>
             db
@@ -460,13 +423,10 @@ const buildPostWithCreators = (
             }),
         }),
       },
-      { concurrency: 3 },
+      { concurrency: 2 },
     )
 
-    const compiled = yield* compilePost(projectedPost, creators, mdx)
-    const blueskySource = blueskySources[0]
-
-    return blueskySource ? { ...compiled, blueskySource } : compiled
+    return yield* compilePost(projectedPost, creators, mdx)
   })
 
 // Compilation only accepts label-projected rows; loading relations belongs to callers.
@@ -577,12 +537,6 @@ export const toMicroPost = (
         }),
       )
 
-export const importedPostIds = (db: Database['Service']) =>
-  db
-    .select({ postId: blueskyPostSources.postId })
-    .from(blueskyPostSources)
-    .where(sql`${blueskyPostSources.postId} is not null`)
-
 const fetchReplyCountsByParentId = (postIds: Array<string>) =>
   Effect.gen(function* () {
     const replyCountsByParentId: Record<string, number> = {}
@@ -625,7 +579,6 @@ const getPostRowsEffect = (
     type?: PostType
     tag?: string
     topLevelOnly?: boolean
-    source?: PostSourceFilter
     draft?: boolean
     q?: string
     musicEntityType?: 'album' | 'track' | 'playlist'
@@ -636,7 +589,7 @@ const getPostRowsEffect = (
 ) =>
   Effect.gen(function* () {
     const db = yield* Database
-    const { limit, offset, type, tag, topLevelOnly, source, draft, q } = options
+    const { limit, offset, type, tag, topLevelOnly, draft, q } = options
 
     const contentCondition =
       type && tag
@@ -658,12 +611,6 @@ const getPostRowsEffect = (
 
     const replyCondition = topLevelOnly ? isNull(postsTable.parentPostId) : undefined
 
-    const sourceCondition = Match.value(source).pipe(
-      Match.when('bluesky', () => inArray(postsTable.id, importedPostIds(db))),
-      Match.when('native', () => notInArray(postsTable.id, importedPostIds(db))),
-      Match.orElse(() => undefined),
-    )
-
     const draftCondition = draft === undefined ? undefined : eq(postsTable.draft, draft)
     const searchTerm = q?.trim()
 
@@ -675,7 +622,6 @@ const getPostRowsEffect = (
       visibilityCondition,
       contentCondition,
       replyCondition,
-      sourceCondition,
       draftCondition,
       searchCondition,
       options.musicEntityType ? eq(postsTable.musicEntityType, options.musicEntityType) : undefined,
@@ -738,55 +684,12 @@ const getAllEffect = (
   actor?: { userId: string; userRole: string; access?: 'owned' | 'role' | undefined },
 ) =>
   Effect.gen(function* () {
-    const db = yield* Database
     const { data, pagination } = yield* getPostRowsEffect(options, actor)
-    const postIds = data.map((p) => p.id)
-
-    const [{ rows: projectedData, creatorsByPostId }, sourcesData] = yield* Effect.all(
-      [
-        loadPostRelations(data),
-        postIds.length > 0
-          ? Effect.tryPromise({
-              try: () =>
-                db
-                  .select({
-                    postId: blueskyPostSources.postId,
-                    authorDid: blueskyPostSources.authorDid,
-                    authorHandle: blueskyPostSources.authorHandle,
-                    publicUrl: blueskyPostSources.publicUrl,
-                    sourceCreatedAt: blueskyPostSources.sourceCreatedAt,
-                    sourceStatus: blueskyPostSources.sourceStatus,
-                    locallyEdited: blueskyPostSources.locallyEdited,
-                    lastError: blueskyPostSources.lastError,
-                  })
-                  .from(blueskyPostSources)
-                  .where(inArray(blueskyPostSources.postId, postIds)),
-              catch: (error) =>
-                new DatabaseError({
-                  message: `Failed to fetch Bluesky sources: ${getErrorMessage(error)}`,
-                  operation: 'select',
-                  table: 'bluesky_post_sources',
-                }),
-            })
-          : Effect.succeed([]),
-      ],
-      { concurrency: 'unbounded' },
-    )
-
-    const sourceByPostId = new Map(
-      sourcesData.flatMap(({ postId, ...source }) => (postId ? [[postId, source] as const] : [])),
-    )
+    const { rows: projectedData, creatorsByPostId } = yield* loadPostRelations(data)
 
     const compiledData: Array<SelectMdxCompiledPost> = yield* Effect.forEach(
       projectedData,
-      (post) => {
-        const creators = creatorsByPostId.get(post.id) ?? []
-        const blueskySource = sourceByPostId.get(post.id)
-
-        return compilePost(post, creators, mdx).pipe(
-          Effect.map((compiled) => (blueskySource ? { ...compiled, blueskySource } : compiled)),
-        )
-      },
+      (post) => compilePost(post, creatorsByPostId.get(post.id) ?? [], mdx),
       { concurrency: 5 },
     )
 
@@ -1501,13 +1404,7 @@ const getByTagEffect = (tag: string, options: { limit: number; offset: number })
     }
   })
 
-const getBySlugEffect = (
-  slug: string,
-  mdx: MdxService,
-  includeDrafts = false,
-  readerId?: string,
-  options: PostHydrationOptions = {},
-) =>
+const getBySlugEffect = (slug: string, mdx: MdxService, includeDrafts = false, readerId?: string) =>
   Effect.gen(function* () {
     const db = yield* Database
 
@@ -1540,7 +1437,7 @@ const getBySlugEffect = (
       })
     }
 
-    const processedPost = yield* buildPostWithCreators(post, mdx, options)
+    const processedPost = yield* buildPostWithCreators(post, mdx)
 
     yield* Effect.annotateCurrentSpan('slug', slug)
 
@@ -1554,9 +1451,7 @@ const getBySlugEffect = (
 
 const getEditorialBySlugEffect = (slug: string, mdx: MdxService, readerId?: string) =>
   Effect.gen(function* () {
-    const post = yield* getBySlugEffect(slug, mdx, false, readerId, {
-      includeBlueskySource: false,
-    })
+    const post = yield* getBySlugEffect(slug, mdx, false, readerId)
 
     return yield* toEditorialPost(post).pipe(
       Effect.mapError(
@@ -1624,7 +1519,7 @@ const getMicroPostBySlugEffect = (slug: string, mdx: MdxService) =>
       )
       .limit(1)
 
-    const [postRecords, blueskySources, creators, labels, replyCounts] = yield* Effect.tryPromise({
+    const [postRecords, creators, labels, replyCounts] = yield* Effect.tryPromise({
       try: () =>
         db.batch([
           db
@@ -1637,19 +1532,6 @@ const getMicroPostBySlugEffect = (slug: string, mdx: MdxService) =>
                 eq(postsTable.draft, false),
               ),
             )
-            .limit(1),
-          db
-            .select({
-              authorDid: blueskyPostSources.authorDid,
-              authorHandle: blueskyPostSources.authorHandle,
-              publicUrl: blueskyPostSources.publicUrl,
-              sourceCreatedAt: blueskyPostSources.sourceCreatedAt,
-              sourceStatus: blueskyPostSources.sourceStatus,
-              locallyEdited: blueskyPostSources.locallyEdited,
-              lastError: blueskyPostSources.lastError,
-            })
-            .from(blueskyPostSources)
-            .where(inArray(blueskyPostSources.postId, postIds))
             .limit(1),
           db
             .select({
@@ -1709,10 +1591,7 @@ const getMicroPostBySlugEffect = (slug: string, mdx: MdxService) =>
       replyCount: replyCounts[0]?.total ?? 0,
     }
 
-    const blueskySource = blueskySources[0]
-    const enriched = blueskySource ? { ...compiled, blueskySource } : compiled
-
-    return yield* toMicroPost(enriched).pipe(
+    return yield* toMicroPost(compiled).pipe(
       Effect.mapError(
         () =>
           new NotFoundError({

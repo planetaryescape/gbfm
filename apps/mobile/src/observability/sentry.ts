@@ -7,6 +7,7 @@ import {
   sanitizeError,
   sanitizeTransaction,
 } from '@gbfm/observability/privacy'
+import { tracePropagationTargets } from '@gbfm/observability/propagation'
 import { sentryExporterLayer } from '@gbfm/observability/sentry'
 import * as Sentry from '@sentry/react-native'
 import { Effect, Layer } from 'effect'
@@ -42,7 +43,11 @@ if (config.enabled) {
     replaysOnErrorSampleRate: 0,
     maxBreadcrumbs: 30,
     maxQueueSize: 30,
-    tracePropagationTargets: [],
+    tracePropagationTargets: tracePropagationTargets({
+      apiUrl: process.env.EXPO_PUBLIC_API_URL,
+      development: __DEV__,
+    }),
+    propagateTraceparent: true,
     integrations: [Sentry.expoRouterIntegration()],
     beforeBreadcrumb: safeBreadcrumb,
     beforeSend: sanitizeError,

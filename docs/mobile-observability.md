@@ -23,7 +23,7 @@ The SDK initializes in `apps/mobile/index.js` before Expo Router. Metro uses Sen
 
 The owner explicitly chose **100% error capture and 100% tracing** while traffic is low. Do not silently reduce sampling. Session tracking remains enabled for crash-free-session measurements. Replay, profiling, screenshots, view hierarchy, automatic console logs, and failed-request issue autocapture remain disabled.
 
-Sentry's Expo Router integration owns navigation tracing. Bounded route templates are retained; concrete slugs and parameters are discarded. Custom journey measurements are added separately from automatic navigation, not substituted for it. API trace propagation is deliberately disabled in this first slice; verify and enable it in the client/API correlation follow-up rather than claiming an existing connected waterfall.
+Sentry's Expo Router integration owns navigation tracing. Bounded route templates are retained; concrete slugs and parameters are discarded. Custom journey measurements are added separately from automatic navigation, not substituted for it. The distributed-tracing follow-up enables matching Sentry/W3C headers for GBFM and the configured API origin, excluding third parties. The API continues that parent through Effect services and D1; see [Distributed tracing](web-observability.md#distributed-tracing). A local runtime fixture does not prove a newly built native binary or an undeployed API's retained waterfall.
 
 ## Privacy and delivery
 
@@ -86,4 +86,4 @@ The owner's notes on Bluesky and other mobile apps informed early initialization
 - [Native versus JavaScript filtering](https://docs.sentry.io/platforms/react-native/configuration/filtering/)
 - [Application metrics](https://docs.sentry.io/platforms/react-native/metrics/)
 
-The shared web slice is documented in [Web Sentry](web-observability.md). Follow-up slices cover client/API correlation, a useful Sentry dashboard, remaining journeys and playback recovery, and approved retirement of old pipelines. #478 remains open until those checks are complete.
+The shared web slice and client/API correlation implementation are documented in [Web Sentry](web-observability.md). Remaining gates include native/production delivery verification, a useful Sentry dashboard, remaining journeys and playback recovery, and approved retirement of old pipelines. #478 remains open until those checks are complete.

@@ -8,6 +8,7 @@ import {
   spotlightStructure,
   stepAt,
   stepPosition,
+  stepTitle,
   youtubeVideoId,
 } from './spotlight'
 
@@ -118,5 +119,22 @@ describe('step positions', () => {
 
   it('falls back to the intro for positions the post no longer has', () => {
     expect(stepAt(steps, '9.9')).toBe(0)
+  })
+})
+
+describe('stepTitle', () => {
+  const { document } = parseRichContent(['## Zimbabwe', '### Tuku', 'Matope.'].join('\n\n'))
+
+  const structure = spotlightStructure(
+    Schema.decodeUnknownSync(RichContentDocument)(document).blocks,
+  )
+
+  it('names chapter openers, moments and the bookends', () => {
+    expect(spotlightSteps(structure).map((step) => stepTitle(step, structure.chapters))).toEqual([
+      'Intro',
+      'Chapter 1 · Zimbabwe',
+      'Tuku',
+      'The end',
+    ])
   })
 })

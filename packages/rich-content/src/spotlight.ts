@@ -145,3 +145,19 @@ export const stepAt = (steps: ReadonlyArray<SpotlightStep>, position: string | n
 
   return index === -1 ? 0 : index
 }
+
+/** A short name for a step, used to tell readers what comes next. */
+export const stepTitle = (
+  step: SpotlightStep,
+  chapters: ReadonlyArray<SpotlightChapter>,
+): string => {
+  if (step.kind === 'intro') return 'Intro'
+
+  if (step.kind === 'end') return 'The end'
+
+  if (step.kind === 'moment') return headingText(step.value.heading)
+
+  const chapter = chapters[step.chapter]
+
+  return `Chapter ${step.chapter + 1}${chapter ? ` · ${headingText(chapter.heading)}` : ''}`
+}

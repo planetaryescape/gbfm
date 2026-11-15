@@ -1,3 +1,25 @@
+# [2.135.0](https://github.com/planetaryescape/gbfm/compare/v2.134.2...v2.135.0) (2026-11-15)
+
+
+### Bug Fixes
+
+* **observability:** normalize raw Worker ingress without fabricated baggage ([5686858](https://github.com/planetaryescape/gbfm/commit/56868589e5985c124e6785b45fa6a67e23671318))
+* **observability:** preserve Effect service and database trace parents ([73dfab5](https://github.com/planetaryescape/gbfm/commit/73dfab55d381f91ef4a24af133163700cef55dd5))
+* **www:** preserve telemetry scope and bypass disabled capture ([7fc8e70](https://github.com/planetaryescape/gbfm/commit/7fc8e7061c51dab27951e2f3923dfbf6495d1979))
+
+
+### Features
+
+* **mobile:** propagate traces to first-party API requests ([e4705e4](https://github.com/planetaryescape/gbfm/commit/e4705e4e3d585b67950b6a1aa17627ead85eea31))
+* **observability:** connect first-party Sentry traces ([#633](https://github.com/planetaryescape/gbfm/issues/633)) ([bbd3cef](https://github.com/planetaryescape/gbfm/commit/bbd3cef39b7f88bf29e9721157b890b3cd70e585))
+* **observability:** normalize first-party trace propagation ([cae33d4](https://github.com/planetaryescape/gbfm/commit/cae33d4c0ba4a165711885e83f28521a82539c1c))
+* **www:** connect browser and SSR traces through API bindings ([7e326bb](https://github.com/planetaryescape/gbfm/commit/7e326bbbd641112d299b67799aadf8f10f1869fb))
+
+
+### Performance Improvements
+
+* **observability:** avoid redundant Effect tracing scopes and log events ([52f4c6a](https://github.com/planetaryescape/gbfm/commit/52f4c6ab70f7af451c97e174ea9b2cd8f7e4919f))
+
 ## [2.134.2](https://github.com/planetaryescape/gbfm/compare/v2.134.1...v2.134.2) (2026-11-15)
 
 

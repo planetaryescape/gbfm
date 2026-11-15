@@ -24,9 +24,15 @@ The API parents its Effect HTTP handler under the SDK server span. `apps/server/
 
 Ingress normalization preserves sampled and unsampled decisions, leaves an undecided Sentry parent undecided, and strips conflicting single- and multi-header B3 context. Arbitrary baggage and trace state are discarded. Trace headers are correlation input, never authorization.
 
+Browser and mobile keep their approved 100% trace policy. The API inherits those decisions, so connected client requests now produce more API spans than independently sampled requests did. The owner explicitly chose complete waterfalls over lower API sampling on 2026-11-16. Standalone WWW requests use the existing route-aware sampling policy; a recorded parent still takes precedence. Error capture is independent of trace sampling.
+
+No synthetic dynamic sampling context is created for callers without reviewed baggage. The installed Sentry SDK intentionally freezes an empty context for a continued trace without upstream metadata; normalization does not fabricate project, release or environment metadata for it.
+
 Local verification covers real SDK WWW→API parent links, overlapping request isolation, request-body preservation, sanitized SSR metadata/logs and transport failure isolation. A workerd/D1 fixture proves SDK request → Effect HTTP → service → database parenting and a warning log attached to the service span. These are captured transport/runtime assertions, not proof that the undeployed follow-up is retained in production Sentry.
 
 The production WWW entrypoint is `apps/www/worker.mjs`, which wraps Foldkit 0.169.0 / Vite plugin 0.28.0's generated `{ fetch }` handler. Recheck its exported `instrumentWorker` and generated handler contract before a framework upgrade.
+
+The three-line ES-module entrypoint imports generated JavaScript that has no type declarations. Application instrumentation remains in typed source; changing the glue file's extension alone would not add type coverage. Disabled deployments bypass the Sentry request wrapper and preserve the original response stream.
 
 The runtime owns visibility/pagehide listeners and removes them on scope closure. Pending journeys are canceled before the final two-second flush. Background flushes are best effort, not delivery guarantees after tab termination. Only synchronous local SDK enqueue adapters are supported by the callback bridge used on mobile; Effect workflows use `observeJourney` directly.
 
@@ -51,4 +57,4 @@ Shared tests exercise real Sentry SDK envelopes, secret stripping, Effect TestCl
 
 Browser fixture evidence proves the production adapter/service composition and SDK transport projection, not a full authenticated Foldkit journey or retained Sentry delivery. Retrieve release-specific spans, completion/duration metrics and a reviewed issue through Executor before claiming delivery. Mobile hardware, native-payload privacy and native-symbol gates remain in [Mobile Sentry](mobile-observability.md).
 
-Cloudflare alert replacement is separately tracked in [#632](https://github.com/planetaryescape/gbfm/issues/632). This tracing slice does not change Grafana rules, Cloudflare exports, Analytics Engine, alert routing or existing sampling rates. Cutover requires separate approval and verified replacement delivery.
+Cloudflare alert replacement is separately tracked in [#632](https://github.com/planetaryescape/gbfm/issues/632). This tracing slice does not change Grafana rules, Cloudflare exports, Analytics Engine or alert routing. Connected API traffic inherits the client sampling policy described above. Cutover requires separate approval and verified replacement delivery.

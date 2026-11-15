@@ -70,7 +70,7 @@ test('OTLP exports isolated request spans, propagates context and excludes raw f
             expect(request.headers.get('sentry-trace')).toBe(context.slice(3, 52) + '-1')
             expect(request.headers.has('x-b3-traceid')).toBe(false)
             expect(request.headers.has('x-b3-spanid')).toBe(false)
-            expect(request.headers.get('baggage')).not.toContain('private-baggage')
+            expect(request.headers.has('baggage')).toBe(false)
 
             return new Response(null, { status: id === 'first' ? 200 : 404 })
           },

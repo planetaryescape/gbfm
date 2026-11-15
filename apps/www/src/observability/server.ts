@@ -1,3 +1,4 @@
+import { traceSampleRate } from '@gbfm/core/observability/trace-sampling'
 import { telemetryConfig } from '@gbfm/observability/config'
 import {
   safeBreadcrumb,
@@ -22,6 +23,8 @@ const config = telemetryConfig({
 
 export const serverTracingOptions: Sentry.CloudflareOptions = {
   ...config,
+  tracesSampler: ({ inheritOrSampleWith, name, normalizedRequest }) =>
+    inheritOrSampleWith(traceSampleRate({ name: normalizedRequest?.url ?? name })),
   sampleRate: 1,
   sendDefaultPii: false,
   enableLogs: true,
@@ -45,6 +48,8 @@ export const instrumentWorker = <Env>(
   return {
     fetch(request: Request, _env: Env, context: WorkerContext) {
       const owned = propagatedRequest(request)
+
+      if (settings.enabled === false) return handler.fetch(owned)
 
       return Sentry.wrapRequestHandler({ options: settings, request: owned, context }, () => {
         const span = Sentry.getActiveSpan()
@@ -107,14 +112,9 @@ export const traceApiRequest = (
     },
     async (span) => {
       const headers = new Headers(request.headers)
-      const context = span.spanContext()
-      const traceData = Sentry.getTraceData()
+      const traceData = Sentry.getTraceData({ propagateTraceparent: true })
 
       for (const [key, value] of Object.entries(traceData)) headers.set(key, value)
-      headers.set(
-        'traceparent',
-        `00-${context.traceId}-${context.spanId}-${context.traceFlags & 1 ? '01' : '00'}`,
-      )
       const response = await send(new Request(request, { headers: propagatedHeaders(headers) }))
       Sentry.setHttpStatus(span, response.status)
 

@@ -20,11 +20,19 @@ test('server logs retain reviewed correlation fields and discard arbitrary reque
       ...attributes,
       cookie: 'synthetic-secret-do-not-export',
       'sentry.trace.parent_span_id': 'b'.repeat(16),
+      'sentry.release': `gbfm-www@${'a'.repeat(40)}`,
+      'sentry.environment': 'production',
+      'sentry.sdk.name': 'sentry.javascript.cloudflare',
+      'sentry.sdk.version': '10.77.1',
     },
   })
 
   expect(log?.attributes?.route).toBe('/tweet/:slug')
   expect(log?.attributes?.['sentry.trace.parent_span_id']).toBe('b'.repeat(16))
+  expect(log?.attributes?.['sentry.release']).toBe(`gbfm-www@${'a'.repeat(40)}`)
+  expect(log?.attributes?.['sentry.environment']).toBe('production')
+  expect(log?.attributes?.['sentry.sdk.name']).toBe('sentry.javascript.cloudflare')
+  expect(log?.attributes?.['sentry.sdk.version']).toBe('10.77.1')
   expect(JSON.stringify(log)).not.toContain('synthetic-secret-do-not-export')
 })
 

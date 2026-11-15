@@ -128,6 +128,8 @@ test('the real Worker SDK continues the browser parent through API forwarding an
   expect(payload).not.toContain(secret)
   expect(payload).toContain('www.request.completed')
   expect(payload).toContain(`"trace_id":"${traceId}"`)
+  expect(payload).toContain('sentry.environment')
+  expect(payload).toContain('sentry.release')
 
   const events = envelopes.flatMap((body) =>
     body.split('\n').flatMap((line) => {
@@ -153,6 +155,103 @@ test('the real Worker SDK continues the browser parent through API forwarding an
         span.parent_span_id === wwwEvent.contexts.trace.span_id,
     ),
   ).toBe(true)
+})
+
+test('disabled tracing leaves the response stream and lifecycle unwrapped', async () => {
+  let forwarded: Request | undefined
+  const response = new Response('streamed fixture')
+  const controller = new AbortController()
+  const pending: Array<Promise<unknown>> = []
+
+  const worker = instrumentWorker(
+    {
+      fetch: (request) => {
+        forwarded = request
+
+        return response
+      },
+    },
+    { ...serverTracingOptions, enabled: false },
+  )
+
+  const actual = await worker.fetch(
+    new Request('https://goosebumps.fm/fixture', { signal: controller.signal }),
+    {},
+    {
+      waitUntil: (promise) => {
+        pending.push(promise)
+      },
+      passThroughOnException: () => {},
+    },
+  )
+
+  expect(actual).toBe(response)
+  expect(await actual.text()).toBe('streamed fixture')
+  expect(pending).toHaveLength(0)
+  controller.abort()
+  expect(forwarded?.signal.aborted).toBe(true)
+})
+
+test.each([
+  ['/health', 0.01],
+  ['/api/content/homepage-mixes', 0.5],
+  ['/api/music/resolve', 1],
+  ['/editorial', 0.2],
+])('standalone WWW %s uses the route policy while retaining parent decisions', (path, expected) => {
+  const sample = serverTracingOptions.tracesSampler
+  const input = { name: `GET ${path}`, normalizedRequest: { url: `https://goosebumps.fm${path}` } }
+  expect(sample?.({ ...input, inheritOrSampleWith: (rate) => rate })).toBe(expected)
+  expect(sample?.({ ...input, inheritOrSampleWith: () => 1 })).toBe(1)
+  expect(sample?.({ ...input, inheritOrSampleWith: () => 0 })).toBe(0)
+})
+
+test('W3C-only ingress preserves SDK-owned metadata without inventing upstream baggage', async () => {
+  const pending: Array<Promise<unknown>> = []
+
+  const worker = instrumentWorker(
+    {
+      fetch: (request) =>
+        Response.json({
+          incomingBaggage: request.headers.get('baggage'),
+          baggage: Sentry.getTraceData().baggage,
+          parent: Sentry.getTraceData()['sentry-trace'],
+        }),
+    },
+    {
+      ...serverTracingOptions,
+      enabled: true,
+      dsn: 'https://abc123@o1.ingest.sentry.io/123',
+      release: `gbfm-www@${'a'.repeat(40)}`,
+      environment: 'development',
+      transport: (options) => Sentry.createTransport(options, async () => ({ statusCode: 200 })),
+    },
+  )
+
+  const response = await worker.fetch(
+    new Request('https://goosebumps.fm/fixture', {
+      headers: { traceparent: `00-${'1'.repeat(32)}-${'2'.repeat(16)}-01` },
+    }),
+    {},
+    {
+      waitUntil: (promise) => {
+        pending.push(promise)
+      },
+      passThroughOnException: () => {},
+    },
+  )
+
+  const result = Schema.decodeUnknownSync(
+    Schema.Struct({
+      incomingBaggage: Schema.Null,
+      baggage: Schema.String,
+      parent: Schema.String,
+    }),
+  )(await response.json())
+
+  expect(result.incomingBaggage).toBeNull()
+  expect(result.baggage).toBe('sentry-sample_rate=1')
+  expect(result.parent).toMatch(/^11111111111111111111111111111111-[a-f0-9]{16}-1$/)
+  await Promise.all(pending)
 })
 
 test('overlapping requests keep SSR metadata and outgoing parents isolated', async () => {
@@ -236,6 +335,7 @@ test('overlapping requests keep SSR metadata and outgoing parents isolated', asy
 
 test('an unavailable telemetry transport does not replace the application response', async () => {
   const pending: Array<Promise<unknown>> = []
+  let attempts = 0
 
   const worker = instrumentWorker(
     { fetch: async () => new Response('ready') },
@@ -243,8 +343,10 @@ test('an unavailable telemetry transport does not replace the application respon
       ...serverTracingOptions,
       enabled: true,
       dsn: 'https://abc123@o1.ingest.sentry.io/123',
+      tracesSampler: () => 1,
       transport: (options) =>
         Sentry.createTransport(options, async () => {
+          attempts += 1
           throw new Error('Fixture transport unavailable')
         }),
     },
@@ -263,4 +365,5 @@ test('an unavailable telemetry transport does not replace the application respon
 
   expect(await response.text()).toBe('ready')
   await Promise.allSettled(pending)
+  expect(attempts).toBeGreaterThan(0)
 })

@@ -14,6 +14,16 @@ const attributes = Schema.decodeUnknownOption(
     release: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/)),
     status: Schema.Number,
     durationMs: Schema.Number,
+    'sentry.release': Schema.optional(
+      Schema.String.check(Schema.isPattern(/^gbfm-www@[a-f0-9]{40}$/)),
+    ),
+    'sentry.environment': Schema.optional(
+      Schema.Literals(['production', 'preview', 'development']),
+    ),
+    'sentry.sdk.name': Schema.optional(Schema.Literal('sentry.javascript.cloudflare')),
+    'sentry.sdk.version': Schema.optional(
+      Schema.String.check(Schema.isPattern(/^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/)),
+    ),
     'sentry.trace.parent_span_id': Schema.optional(
       Schema.String.check(Schema.isPattern(/^[a-f0-9]{16}$/)),
     ),

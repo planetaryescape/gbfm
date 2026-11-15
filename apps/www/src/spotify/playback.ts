@@ -6,7 +6,7 @@ import { defineMessageUnion } from 'foldkit/message'
 
 import { disconnected, SpotifyConnection, SpotifyStatus } from './connection'
 
-const Action = Schema.Literals(['connect', 'play', 'queue'])
+const Action = Schema.Literals(['connect', 'play', 'queue', 'save'])
 
 const Operation = Schema.TaggedUnion({
   Idle: { target: Schema.NullOr(Schema.String), notice: Schema.String },

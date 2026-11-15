@@ -240,6 +240,9 @@ export const checkSavedTrackEffect = Effect.fn('checkSavedTrack')(function* (
   return results.get(spotifyTrackId) ?? false
 })
 
+export const isSpotifyForbidden = (error: SpotifyRequestError): boolean =>
+  error instanceof SpotifyHttpError && error.status === 403
+
 export const spotifyErrorMessage = (error: SpotifyRequestError): string => {
   if (error instanceof SpotifyHttpError && error.status === 404) return 'No active Spotify device'
 

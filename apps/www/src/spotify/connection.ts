@@ -17,7 +17,7 @@ export class SpotifyConnection extends Context.Service<
     readonly status: Effect.Effect<typeof SpotifyStatus.Type, SpotifyConnectionError>
     readonly playback: (input: {
       readonly url: string
-      readonly action: 'play' | 'queue'
+      readonly action: 'play' | 'queue' | 'save'
     }) => Effect.Effect<string, SpotifyConnectionError>
     readonly connect: Effect.Effect<void, SpotifyConnectionError>
     readonly disconnect: Effect.Effect<typeof SpotifyStatus.Type, SpotifyConnectionError>

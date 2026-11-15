@@ -127,20 +127,21 @@ const connectionLayer = Layer.effect(
             : `Added ${count} ${count === 1 ? 'track' : 'tracks'} to your Spotify queue.`
         }).pipe(
           Effect.provideService(SpotifyBrowser, spotify),
-          Effect.mapError((error) =>
-            error instanceof SpotifyConnectionError
-              ? error
-              : isSpotifyForbidden(error)
-                ? new SpotifyConnectionError({
-                    message: 'Reconnect Spotify to allow saving to your library.',
-                  })
-                : new SpotifyConnectionError({
-                    message:
-                      spotifyErrorMessage(error) === 'No active Spotify device'
-                        ? 'No active Spotify device. Open Spotify, start playback on a device, then try again.'
-                        : 'Spotify could not complete this action. Check your Premium account and device, then try again. Queue actions may have partially completed.',
-                  }),
-          ),
+          Effect.mapError((error) => {
+            if (error instanceof SpotifyConnectionError) return error
+
+            if (action === 'save' && isSpotifyForbidden(error))
+              return new SpotifyConnectionError({
+                message: 'Reconnect Spotify to allow saving to your library.',
+              })
+
+            return new SpotifyConnectionError({
+              message:
+                spotifyErrorMessage(error) === 'No active Spotify device'
+                  ? 'No active Spotify device. Open Spotify, start playback on a device, then try again.'
+                  : 'Spotify could not complete this action. Check your Premium account and device, then try again. Queue actions may have partially completed.',
+            })
+          }),
         ),
       connect: Effect.gen(function* () {
         const state = yield* boundary(() => crypto.randomUUID())

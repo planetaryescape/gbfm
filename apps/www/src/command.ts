@@ -221,6 +221,6 @@ export const RestoreSpotlight = Command.define('Editorial.RestoreSpotlight', {
     Effect.sync(() => {
       const progress = readProgress(path)
 
-      return progress ? Message.SpotlightRestored({ progress }) : Message.SpotlightSynced()
+      return Message.SpotlightRestored({ progress: progress ?? { path, at: null, seen: [] } })
     }),
 })

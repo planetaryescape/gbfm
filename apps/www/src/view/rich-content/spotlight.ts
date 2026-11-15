@@ -296,25 +296,30 @@ export const spotlightView = <Message>(
       step
         ? h.div(
             [
-              h.Key(`spotlight-step-${current}`),
               h.Class('spotlight-stage'),
               h.DataAttribute('direction', options.direction ?? 'none'),
               h.Role('region'),
               h.AriaLabel('Current editorial entry'),
+              h.AriaLive('polite'),
               h.Tabindex(0),
             ],
             [
-              stepView(
-                step,
-                h,
-                render,
-                go(current === steps.length - 1 ? 0 : 1),
-                options.onStep,
-                options.onboarding ?? h.empty,
-                {
-                  artwork: options.endArtwork,
-                  closing: presentation.closing.map(render),
-                },
+              h.div(
+                [h.Key(`spotlight-step-${current}`), h.Class('spotlight-step')],
+                [
+                  stepView(
+                    step,
+                    h,
+                    render,
+                    go(current === steps.length - 1 ? 0 : 1),
+                    options.onStep,
+                    options.onboarding ?? h.empty,
+                    {
+                      artwork: options.endArtwork,
+                      closing: presentation.closing.map(render),
+                    },
+                  ),
+                ],
               ),
             ],
           )

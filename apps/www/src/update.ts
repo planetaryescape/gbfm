@@ -39,7 +39,7 @@ import { isServerPath, Route } from './route'
 import * as Search from './search'
 import { dragOffset, shouldDismiss, startDrag } from './sheet-drag'
 import * as SpotifyPlayback from './spotify/playback'
-import { spotlightDocument, spotlightProgress } from './spotlight-page'
+import { normalizeSpotlightProgress, spotlightDocument, spotlightProgress } from './spotlight-page'
 import { withSeen } from './spotlight-progress'
 
 const mobileMenuFold = {
@@ -104,8 +104,10 @@ const stepSpotlight = (
   path: string,
   at: string | null,
 ): Update.Return<Model, Message, Services> => {
-  const progress = withSeen(model.spotlight, path, at)
   const document = spotlightDocument(model)
+
+  if (document === null) return { model }
+  const progress = normalizeSpotlightProgress(document, withSeen(model.spotlight, path, at))
   const steps = document ? spotlightSteps(spotlightStructure(document.blocks)) : []
   const offset = stepAt(steps, at) - stepAt(steps, spotlightProgress(model).at)
   let spotlightMotion: Model['spotlightMotion'] = 'none'
@@ -404,13 +406,16 @@ const updateApplication = (
         : { model }
     },
     SpotlightRestored: ({ progress }) => {
+      const document = spotlightDocument(model)
+
+      if (document === null || progress.path !== new URL(model.flags.url).pathname) return { model }
       const linked = new URL(model.flags.url).searchParams.get('at')
       const at = linked ?? progress.at
-      const restored = withSeen(progress, progress.path, at)
+      const restored = normalizeSpotlightProgress(document, withSeen(progress, progress.path, at))
 
       return {
         model: { ...model, spotlight: restored, spotlightMotion: 'none' },
-        commands: linked === null && at !== null ? [SyncSpotlight({ progress: restored })] : [],
+        commands: [SyncSpotlight({ progress: restored })],
       }
     },
     SpotlightSynced: () => ({ model }),

@@ -111,7 +111,7 @@
   text-overflow: ellipsis;
 }
 
-.spotlight-stage > * > * + *,
+.spotlight-step > * > * + *,
 .spotlight-intro > * + * {
   margin-top: 1.5rem;
 }
@@ -450,7 +450,7 @@
     margin: 0;
   }
 
-  .spotlight-stage > * > * + * {
+  .spotlight-step > * > * + * {
     margin-top: 1rem;
   }
 

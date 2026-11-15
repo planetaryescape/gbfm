@@ -1,5 +1,6 @@
-import type { RichContentBlock } from '@gbfm/rich-content/schema'
 import { Predicate } from 'effect'
+
+import type { RichContentBlock } from './schema.ts'
 
 type Heading = Extract<RichContentBlock, { readonly _tag: 'Heading' }>
 

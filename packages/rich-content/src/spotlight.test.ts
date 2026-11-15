@@ -1,15 +1,15 @@
-import { RichContentDocument, type RichContentBlock } from '@gbfm/rich-content/schema'
-import { parseRichContent } from '@gbfm/rich-content/source'
 import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 
+import { RichContentDocument, type RichContentBlock } from './schema'
+import { parseRichContent } from './source'
 import {
   spotlightSteps,
   spotlightStructure,
   stepAt,
   stepPosition,
   youtubeVideoId,
-} from './spotlight-structure'
+} from './spotlight'
 
 const text = (block: RichContentBlock | undefined) =>
   block && 'children' in block && Array.isArray(block.children)

@@ -1,10 +1,4 @@
 import type { RichContentBlock, RichContentDocument } from '@gbfm/rich-content/schema'
-import { Predicate } from 'effect'
-import type { Html, HtmlBuilder } from 'foldkit/html'
-
-import type { Video } from '../../video'
-import { iconPaths, lucide } from '../icons'
-import { blockView, inlineChildren, type BlockViewExtras } from './render'
 import {
   headingText,
   spotlightSteps,
@@ -14,7 +8,13 @@ import {
   youtubeVideoId,
   type SpotlightChapter,
   type SpotlightStep,
-} from './spotlight-structure'
+} from '@gbfm/rich-content/spotlight'
+import { Predicate } from 'effect'
+import type { Html, HtmlBuilder } from 'foldkit/html'
+
+import type { Video } from '../../video'
+import { iconPaths, lucide } from '../icons'
+import { blockView, inlineChildren, type BlockViewExtras } from './render'
 
 export interface SpotlightViewOptions<Message> {
   readonly at: string | null

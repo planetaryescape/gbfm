@@ -6,19 +6,13 @@ import { EditorialToolError } from '../contracts'
 export const validatePostEditContent = (source: string | null | undefined) => {
   if (!source) return Effect.void
   const layout = /^\s*::layout\{[^\r\n]*\}[ \t]*(?:\r?\n|$)/.exec(source)
-  const layoutLine = source.slice(0, source.indexOf('::layout')).split('\n').length
+  const { document, diagnostics } = parseRichContent(source)
 
-  const diagnostics = parseRichContent(source).diagnostics.filter(
-    (item) =>
-      !(
-        layout &&
-        item.code === 'unknown-directive' &&
-        item.message === 'Unknown directive: layout' &&
-        item.line === layoutLine
-      ),
-  )
+  const misplacedLayout =
+    document.layout !== undefined &&
+    (!layout || parseRichContent(source.slice(layout[0].length)).document.layout !== undefined)
 
-  return diagnostics.length === 0
+  return diagnostics.length === 0 && !misplacedLayout
     ? Effect.void
     : Effect.fail(
         new EditorialToolError({

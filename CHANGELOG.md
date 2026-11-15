@@ -1,3 +1,11 @@
+## [2.134.1](https://github.com/planetaryescape/gbfm/compare/v2.134.0...v2.134.1) (2026-11-15)
+
+
+### Performance Improvements
+
+* **api:** overlap primary music and tweet body reads ([61322ae](https://github.com/planetaryescape/gbfm/commit/61322ae9bf9bfe4240445c21697fb64875c10ef2))
+* **api:** overlap primary music and tweet body reads ([#631](https://github.com/planetaryescape/gbfm/issues/631)) ([b10a352](https://github.com/planetaryescape/gbfm/commit/b10a35263670b59e12d9bf14200bbb06df14a3bf))
+
 # [2.134.0](https://github.com/planetaryescape/gbfm/compare/v2.133.0...v2.134.0) (2026-11-15)
 
 

@@ -67,6 +67,7 @@ export type EmbedReference =
       readonly _tag: 'MusicCatalog'
       readonly entityType: 'track' | 'album' | 'playlist'
       readonly entityId: string
+      readonly blurb: string | null
       readonly showTracks: boolean
     }
   | { readonly _tag: 'ExternalMedia'; readonly url: SafeUrl }
@@ -326,7 +327,13 @@ const directive = (
     if (attrs.id)
       return {
         _tag: 'EmbedReference',
-        reference: { _tag: 'MusicCatalog', entityType: name, entityId: attrs.id, showTracks },
+        reference: {
+          _tag: 'MusicCatalog',
+          entityType: name,
+          entityId: attrs.id,
+          blurb: attrs.blurb ?? null,
+          showTracks,
+        },
       }
     const url = safeUrl(attrs.url ?? '', 'media')
     const parsed = url ? mediaReference(new URL(url)) : null
@@ -364,6 +371,7 @@ const directive = (
         _tag: 'MusicCatalog',
         entityType,
         entityId: attrs.id,
+        blurb: null,
         showTracks: attrs.tracks !== 'false',
       },
     }

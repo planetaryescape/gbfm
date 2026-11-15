@@ -22,8 +22,7 @@ L3 resumes above reviewed `77cd30c3bd9abb1270be6c4c84cba9edc850e561` and owns
 reminder commands/contracts/tests plus allocated reminder service, processor,
 HTTP/API and reminder-statistic methods. P1 retains shared dashboard assembly.
 The common receipt owner supplies `mcp/operations/**` and migration 0016; the
-sole domain-schema owner supplies reminder fields/historical constraints in
-0017. L3 makes no declarations/migration/replay/export edits. New work needs a
+sole domain-schema owner supplies reminder fields/historical constraints in 0017. L3 makes no declarations/migration/replay/export edits. New work needs a
 single tested combined prerequisite before integrating those shared changes.
 
 Frozen schema-owner names: `commandRevision`, `dispatchState`, and physical
@@ -111,12 +110,12 @@ dashboard required-field fixture and stable request-ID/observed-revision plumbin
 
 ## Capability mapping
 
-| Selected capability | Scope | Delivery |
-| --- | --- | --- |
-| `list_music_reminders` | `reminders:read` | Owner-only summary page; default 20, max 50, offset 0–10,000, UTC dates, date/ID order, sentinel `hasMore`, 64 KiB result-payload budget. Listener accounts eligible; admin cannot read others. |
-| `create_music_reminder` | `reminders:write` | Withheld pending durable create identity and atomic receipt/mutation. Not a registered placeholder. |
-| `reschedule_music_reminder` | `reminders:write` | Withheld pending expected-revision CAS, durable replay and send arbitration. |
-| `cancel_music_reminder` | `reminders:write` | Withheld pending expected-revision CAS, cancellation tombstone/replay and send arbitration. |
+| Selected capability         | Scope             | Delivery                                                                                                                                                                                        |
+| --------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_music_reminders`      | `reminders:read`  | Owner-only summary page; default 20, max 50, offset 0–10,000, UTC dates, date/ID order, sentinel `hasMore`, 64 KiB result-payload budget. Listener accounts eligible; admin cannot read others. |
+| `create_music_reminder`     | `reminders:write` | Withheld pending durable create identity and atomic receipt/mutation. Not a registered placeholder.                                                                                             |
+| `reschedule_music_reminder` | `reminders:write` | Withheld pending expected-revision CAS, durable replay and send arbitration.                                                                                                                    |
+| `cancel_music_reminder`     | `reminders:write` | Withheld pending expected-revision CAS, cancellation tombstone/replay and send arbitration.                                                                                                     |
 
 Writes must derive recipient from the actor; never accept an arbitrary recipient.
 Read authority is independent of write authority. Command UTC input accepts
@@ -221,10 +220,10 @@ real migrated D1. No production scheduling or real sends without separate approv
 Add exactly two columns to `music_reminder`, not a second scheduler or reminder
 ledger. This is a candidate for the migration coordinator, not tracked schema:
 
-| Column | SQLite type/default | Constraint |
-| --- | --- | --- |
-| `command_revision` | INTEGER NOT NULL DEFAULT 1 | `typeof(command_revision) = 'integer' AND command_revision BETWEEN 1 AND 9007199254740991` |
-| `dispatch_state` | TEXT NOT NULL DEFAULT 'open' | `dispatch_state IN ('open','fenced','accepted','cancelled')` |
+| Column             | SQLite type/default          | Constraint                                                                                 |
+| ------------------ | ---------------------------- | ------------------------------------------------------------------------------------------ |
+| `command_revision` | INTEGER NOT NULL DEFAULT 1   | `typeof(command_revision) = 'integer' AND command_revision BETWEEN 1 AND 9007199254740991` |
+| `dispatch_state`   | TEXT NOT NULL DEFAULT 'open' | `dispatch_state IN ('open','fenced','accepted','cancelled')`                               |
 
 Keep the existing four-value `status` and `is_sent` for processor compatibility;
 `dispatch_state` is authoritative for mutability and suppression. Cancel keeps
@@ -274,7 +273,7 @@ is inspected or migrated here; previously deleted rows cannot be reconstructed.
 - **Crash:** a fence can precede a crash before send, or provider acceptance can
   precede a crash before terminal persistence. The existing sweeper retries
   fenced attempts under a new owned claim; duplicates remain possible. This is
-  at-least-once, never exactly-once, and `fenced` means *may have started*, not
+  at-least-once, never exactly-once, and `fenced` means _may have started_, not
   proof of acceptance. Retaining this conservative fence sacrifices later edit/
   cancellation convenience rather than lying about delivery suppression.
 

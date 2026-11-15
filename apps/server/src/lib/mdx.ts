@@ -200,7 +200,7 @@ const musicEmbed = (
     _tag: 'MusicEmbed',
     music,
     genres: reference._tag === 'MusicUrl' ? reference.genres : [],
-    blurb: reference._tag === 'MusicUrl' ? reference.blurb : null,
+    blurb: reference.blurb,
     showTracks: reference.showTracks,
   }
 }

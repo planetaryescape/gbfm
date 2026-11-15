@@ -93,6 +93,7 @@ test('real rich-content resolver refuses unpublished/future playlist snapshots',
           _tag: 'MusicCatalog',
           entityType: 'playlist',
           entityId: id,
+          blurb: null,
           showTracks: true,
         })
       }),

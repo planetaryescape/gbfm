@@ -141,6 +141,23 @@ describe('canonical rich content source', () => {
     ])
   })
 
+  test('keeps commentary on catalog music cards', () => {
+    const [card] = parseRichContent(
+      '::track{id="dcfae01d" blurb="Matope has such a nice tempo to it."}',
+    ).document.blocks
+
+    expect(card).toEqual({
+      _tag: 'EmbedReference',
+      reference: {
+        _tag: 'MusicCatalog',
+        entityType: 'track',
+        entityId: 'dcfae01d',
+        blurb: 'Matope has such a nice tempo to it.',
+        showTracks: true,
+      },
+    })
+  })
+
   test('reads a top-level layout directive as document presentation, not a block', () => {
     const result = parseRichContent('::layout{name="spotlight"}\n\n## Zimbabwe')
 

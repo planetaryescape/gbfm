@@ -9,17 +9,17 @@ Keep its PR unmerged for the owner's overview review. R3 is a sibling, not a par
 All nine wire names are retained. Every operation requires a live recognized account
 and `catalogue:read`, including service calls outside the MCP transport.
 
-| Tool | Input | Structured success |
-| --- | --- | --- |
-| `search_music` | query; optional kind, limit, offset | `SearchMusicResult`: complete page or explicit exhaustion |
-| `filter_music` | kind; optional exact name, limit, offset | `MusicListResult` |
-| `get_music_entity` | kind + stable ID | `GetMusicEntityResult` |
-| `get_music_entities` | ordered references, 1–50 | `GetMusicEntitiesResult` |
-| `lookup_music_url` | HTTPS source URL | `LookupMusicUrlResult` |
-| `get_artist_discography` | artist ID; limit, offset | `MusicRelationshipsResult` |
-| `get_album_tracks` | album ID; limit, offset | `MusicRelationshipsResult` |
-| `get_label_catalogue` | label ID; limit, offset | `MusicRelationshipsResult` |
-| `get_music_relationships` | kind + stable ID; limit, offset | `MusicRelationshipsResult` |
+| Tool                      | Input                                    | Structured success                                        |
+| ------------------------- | ---------------------------------------- | --------------------------------------------------------- |
+| `search_music`            | query; optional kind, limit, offset      | `SearchMusicResult`: complete page or explicit exhaustion |
+| `filter_music`            | kind; optional exact name, limit, offset | `MusicListResult`                                         |
+| `get_music_entity`        | kind + stable ID                         | `GetMusicEntityResult`                                    |
+| `get_music_entities`      | ordered references, 1–50                 | `GetMusicEntitiesResult`                                  |
+| `lookup_music_url`        | HTTPS source URL                         | `LookupMusicUrlResult`                                    |
+| `get_artist_discography`  | artist ID; limit, offset                 | `MusicRelationshipsResult`                                |
+| `get_album_tracks`        | album ID; limit, offset                  | `MusicRelationshipsResult`                                |
+| `get_label_catalogue`     | label ID; limit, offset                  | `MusicRelationshipsResult`                                |
+| `get_music_relationships` | kind + stable ID; limit, offset          | `MusicRelationshipsResult`                                |
 
 Contracts live in `contracts.ts`. Shared failures use `EditorialToolError` with
 `failureMode: return`: access denied, not found, invalid input or unavailable.
@@ -93,17 +93,17 @@ Exactly limit apparent matches without sentinel/EOF still exhaust. No automatic 
 cap increase, scan fallback, provider work or hidden progress state exists. Rare/missing
 queries and deep offsets can repeatedly exhaust even when matches exist.
 
-| Operation | Source predicate and ordered access |
-| --- | --- |
-| Artist relationships/discography | Reverse `(artistId,albumId)` and `(artistId,trackId)` SEARCH; optional `(artist_id,label_id)` SEARCH |
-| Album relationships | `(albumId,id)` track SEARCH; source-leading credit PK and `(album_id,label_id)` SEARCH |
-| Album tracks | `(albumId,(trackNumber IS NULL),trackNumber,id)` SEARCH preserves null-last order |
-| Label catalogue | Existing label-leading junction PK SEARCH |
-| Track relationships | Existing track-credit PK and exact track PK SEARCH |
-| Named filter | `(lower(name/title),id)` expression-index SEARCH, unchanged equality and ID order |
-| Kind-only filter | ID PK walk stopping after offset + limit + 1 |
-| Search | ID PK walks selecting capped prefixes, then bounded-stage matching/sorts; not an indexed substring lookup |
-| URL/entity/link projection | Existing unique/PK point lookups and bounded stored-link projection, unchanged |
+| Operation                        | Source predicate and ordered access                                                                       |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Artist relationships/discography | Reverse `(artistId,albumId)` and `(artistId,trackId)` SEARCH; optional `(artist_id,label_id)` SEARCH      |
+| Album relationships              | `(albumId,id)` track SEARCH; source-leading credit PK and `(album_id,label_id)` SEARCH                    |
+| Album tracks                     | `(albumId,(trackNumber IS NULL),trackNumber,id)` SEARCH preserves null-last order                         |
+| Label catalogue                  | Existing label-leading junction PK SEARCH                                                                 |
+| Track relationships              | Existing track-credit PK and exact track PK SEARCH                                                        |
+| Named filter                     | `(lower(name/title),id)` expression-index SEARCH, unchanged equality and ID order                         |
+| Kind-only filter                 | ID PK walk stopping after offset + limit + 1                                                              |
+| Search                           | ID PK walks selecting capped prefixes, then bounded-stage matching/sorts; not an indexed substring lookup |
+| URL/entity/link projection       | Existing unique/PK point lookups and bounded stored-link projection, unchanged                            |
 
 Each relationship branch selects its first `p = offset + limit + 1` rows in the real
 target order before UNION ALL; at most three p-sized prefixes feed the final sort.

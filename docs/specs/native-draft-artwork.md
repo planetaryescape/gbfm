@@ -43,7 +43,9 @@ The existing editorial operation ledger owns request identity and saved results.
 - General tools instead require current `creator:write` and authorship for execution/replay, preserving whichever publication state the full-snapshot CAS observed. Draft tools still require unpublished state.
 - Post CAS, owned-asset transition and saved attachment result commit in one D1 batch behind live command authority.
 
-Failed uploads or abandoned preparation can leave pending private assets. Existing cleanup bookkeeping owns these orphans. This feature adds no cleanup worker or schema migration.
+Failed uploads or abandoned preparation can leave pending private assets. Upload-asset rows are bookkeeping for a future cleanup job, not an implemented reclamation process. Expiring an editorial receipt only clears its saved result; it does not delete upload-asset rows or stored objects. Abandoned uploads and replaced private originals are retained indefinitely today, including a possible new object on every replacement. Public copies also remain permanent.
+
+Rollout must account for that accumulating storage usage. Orphan identification, reference-safe cleanup, retention policy and any deletion/GC implementation require an explicit follow-up and separate authorization. This feature implements no deletion, cleanup worker or schema migration.
 
 ## Published media delivery
 
@@ -55,7 +57,9 @@ Recovery rechecks live authority and authorship and copies only media still refe
 
 ## Image delivery scope
 
-The 10 MiB limit is the shared storage limit, not a recommended banner transfer budget. Originals remain canonical and unchanged. The spotlight presentation handles its banner through responsive artwork delivery. Ordinary rich-content images still follow the existing renderer's original-image delivery path; adding responsive delivery there is deliberately outside this server/tooling change. Generate appropriately compressed originals until that separate renderer work is approved.
+The 10 MiB limit is the shared storage limit, not a recommended banner transfer budget. Originals remain canonical and unchanged. This tool inserts a rich-content image and does not set the database banner field or itself provide responsive delivery. Only an explicitly opted-in reader that extracts the leading standalone image, as specified by the separate spotlight contract in #626, can render it through responsive artwork. That behavior depends on the matching reader change being deployed and active; banner-field-based presentation cannot discover this image automatically.
+
+Without that opt-in extraction, the inserted banner is an ordinary inline image and follows the existing original-size delivery path at every breakpoint. Responsive ordinary-inline-image rendering remains explicitly deferred outside this server/tooling change. Generate appropriately compressed originals until that separate renderer work is approved.
 
 ## Verification and rollout
 

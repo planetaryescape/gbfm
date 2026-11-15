@@ -1,3 +1,50 @@
+# [2.133.0](https://github.com/planetaryescape/gbfm/compare/v2.132.7...v2.133.0) (2026-11-15)
+
+
+### Bug Fixes
+
+* **deps:** preserve existing react-refresh resolutions ([cde11b7](https://github.com/planetaryescape/gbfm/commit/cde11b76770e4bec2a574a45530bb7f10943b3d0))
+* **editorial:** align artwork validation with canonical spotlight layout ([2a89b08](https://github.com/planetaryescape/gbfm/commit/2a89b085d2bc7a56f5724b686dc4aa1a73b9e750))
+* **editorial:** drop duplicate chapter label and serif chapter heading ([4319f93](https://github.com/planetaryescape/gbfm/commit/4319f93f1662c78c5b65e2ba981e3f3dff314fe0))
+* **editorial:** keep Spotify connection prompts off music cards ([ce5dd43](https://github.com/planetaryescape/gbfm/commit/ce5dd437ccdf60515f208b13fda81e48fa275c48))
+* **editorial:** keep the spotlight canvas width consistent ([b6a2499](https://github.com/planetaryescape/gbfm/commit/b6a2499293eb1b45c0c75d90f286a78dc8795974))
+* **editorial:** move step navigation below the content ([7afe080](https://github.com/planetaryescape/gbfm/commit/7afe08026ceb3081992b2bc821b7d89b36f0dd5f))
+* **editorial:** normalize reader state and preserve keyboard focus ([3f06377](https://github.com/planetaryescape/gbfm/commit/3f063779a5d4d7c1b3e420e9ada73e1715a96fc1))
+* **editorial:** restore focus from detached step controls ([ec71ef8](https://github.com/planetaryescape/gbfm/commit/ec71ef85aacf25355f835c2c41b4ee21168691ae))
+* **editorial:** stabilize reading with compact header controls ([59511e0](https://github.com/planetaryescape/gbfm/commit/59511e03e46c172129406789b2c9214c23b0cb68))
+* **mobile:** own editorial cancellation and reset slug state ([a33843d](https://github.com/planetaryescape/gbfm/commit/a33843db7ad42210397007ce2d627c6cf66d4e87))
+* **mobile:** preserve spotlight content and video playback ownership ([c84313a](https://github.com/planetaryescape/gbfm/commit/c84313ab3c9514dfbefedf9860cb623009a65699))
+* **mobile:** respect authored card groups and idle audio startup ([2434702](https://github.com/planetaryescape/gbfm/commit/243470214a53eb61d886a656a897790fc4d97138))
+* **rich-content:** keep blurbs on catalog music cards ([df32650](https://github.com/planetaryescape/gbfm/commit/df32650d26509864add222f3ec1476733f3d3426))
+
+
+### Features
+
+* **artwork:** reserve non-square image geometry ([dab8c8e](https://github.com/planetaryescape/gbfm/commit/dab8c8e73ee1a463ec8428d48b757898d3009a2c))
+* **editorial:** add a guided spotlight reader ([#626](https://github.com/planetaryescape/gbfm/issues/626)) ([b769da7](https://github.com/planetaryescape/gbfm/commit/b769da79ab5694bf543c433e6b0bba117733003d))
+* **editorial:** add spotlight reading layout and YouTube player dialog ([f12a025](https://github.com/planetaryescape/gbfm/commit/f12a0259aa2bb453a1baea380341287f2f52b7d9))
+* **editorial:** animate directional steps with reduced-motion support ([2af957d](https://github.com/planetaryescape/gbfm/commit/2af957db9c5083fc7b41718e048fb5e775741299))
+* **editorial:** encode spotlight steps as URL positions ([45aa381](https://github.com/planetaryescape/gbfm/commit/45aa3810085f99110a815570bd17dd59c1353632))
+* **editorial:** frame spotlight with a banner and authored ending ([435c992](https://github.com/planetaryescape/gbfm/commit/435c992833f2e5b32dfa08031b7ebf5017499e0b))
+* **editorial:** hide the masthead while walking a spotlight post ([99778cb](https://github.com/planetaryescape/gbfm/commit/99778cb5a5ceafd734ae3fd480da5c92ec750e39))
+* **editorial:** highlight music cards from prose references ([93d90c6](https://github.com/planetaryescape/gbfm/commit/93d90c6f211b403070a57116a51c3475c213fd7c))
+* **editorial:** keep the spotlight position in the URL and resume it ([8637e80](https://github.com/planetaryescape/gbfm/commit/8637e80ae7d0a70b82b505e637d4a1e0ca8d37ea))
+* **editorial:** keyboard reading for spotlight posts ([c390d45](https://github.com/planetaryescape/gbfm/commit/c390d45e02a066a1aaa5f971639c84ca8624031c))
+* **editorial:** make chapter entries directly navigable ([a9cceb0](https://github.com/planetaryescape/gbfm/commit/a9cceb039f3200a362857ca540b3edc93f583ef1))
+* **editorial:** opt posts into the spotlight layout with a layout directive ([74995bc](https://github.com/planetaryescape/gbfm/commit/74995bc499135d71fc67cb50fdb9b6282c546bb9))
+* **editorial:** play, queue and save on spotlight cards with Spotify onboarding ([9ffa2d5](https://github.com/planetaryescape/gbfm/commit/9ffa2d5e55cb175fd095c1c23be7a9891deb2567))
+* **editorial:** walk spotlight posts one moment at a time ([5cc5029](https://github.com/planetaryescape/gbfm/commit/5cc5029369a5212e7869e0724093244815286a93))
+* **mcp:** edit authored editorials and attach artwork ([#629](https://github.com/planetaryescape/gbfm/issues/629)) ([f4f669d](https://github.com/planetaryescape/gbfm/commit/f4f669d319a0428af631e68e441c979ad5509705))
+* **mobile:** complete spotlight reading, saving and in-app video ([#630](https://github.com/planetaryescape/gbfm/issues/630)) ([c3d2c63](https://github.com/planetaryescape/gbfm/commit/c3d2c633360775747ddc2b1f2aefe5edfb4c54aa))
+* **mobile:** mirror the web spotlight walk in the editorial reader ([4bf5311](https://github.com/planetaryescape/gbfm/commit/4bf53118bd2472f3d840fb7afb7b8038a19d2d54))
+* **mobile:** play YouTube in an in-app sheet ([efc3303](https://github.com/planetaryescape/gbfm/commit/efc33034a65bab11e7eee7cea5276b548e8331c1))
+* **mobile:** read editorials in the app, with the spotlight walk ([6b85050](https://github.com/planetaryescape/gbfm/commit/6b850501ae379c95026cb0fcc63952c0a80a6a72))
+* **mobile:** save tracks and albums to Spotify from music cards ([0bfdc2f](https://github.com/planetaryescape/gbfm/commit/0bfdc2f13e652019f9c31a6ba701ce1c606e7983))
+* **rich-content:** let pages add controls to music cards ([af619cc](https://github.com/planetaryescape/gbfm/commit/af619cc01d1ea288f89cc1699b1066457d0591b0))
+* **rich-content:** name spotlight steps for next-step labels ([97fbe33](https://github.com/planetaryescape/gbfm/commit/97fbe33c636234a727aae8cac53969143c66cfef))
+* **spotify:** request library-modify and save tracks or albums ([8ce91ae](https://github.com/planetaryescape/gbfm/commit/8ce91ae1d93083700d563b22bada5160e63c90be))
+* **spotify:** save tracks and albums from the web app ([42fc279](https://github.com/planetaryescape/gbfm/commit/42fc279ee06f0351ed1a6b377d3f4660dcba8ca4))
+
 ## [2.132.7](https://github.com/planetaryescape/gbfm/compare/v2.132.6...v2.132.7) (2026-11-15)
 
 

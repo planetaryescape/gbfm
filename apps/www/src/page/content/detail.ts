@@ -247,27 +247,34 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
       [h.p([h.Role('alert')], [model.flags.failure ?? 'Content not found.'])],
     )
 
+  const spotlight =
+    kind === 'editorial' &&
+    item.richContent !== null &&
+    (item.richContent.layout === 'spotlight' || spotlightPreview(model.flags.url))
+
+  const at = spotlight ? spotlightProgress(model).at : null
+  const walking = at !== null && at !== 'end'
+
   return h.article(
     [h.Class('content-detail mx-auto max-w-5xl px-4 pb-32 pt-6')],
     [
       breadcrumbs([...ancestors(item, kind).map(crumbLink), crumbCurrent(item.slug)]),
       kind === 'editorial' && item.draft ? draftNotice(h, item.slug) : h.empty,
-      masthead(h, item, kind),
-      controls(model, h, item),
-      item.description
+      walking ? h.empty : masthead(h, item, kind),
+      walking ? h.empty : controls(model, h, item),
+      !walking && item.description
         ? h.p(
             [h.Class('mt-6 max-w-prose text-base leading-relaxed text-foreground/80')],
             [item.description],
           )
         : h.empty,
-      metaStrip(h, item),
+      walking ? h.empty : metaStrip(h, item),
       h.div(
-        [h.Class('mt-10 max-w-prose')],
+        [h.Class(walking ? 'mt-4 max-w-prose' : 'mt-10 max-w-prose')],
         [
           item.richContent === null
             ? richContent(item.content)
-            : kind === 'editorial' &&
-                (item.richContent.layout === 'spotlight' || spotlightPreview(model.flags.url))
+            : spotlight
               ? spotlightView(item.richContent, h, {
                   ...spotlightProgress(model),
                   onStep: (at) =>
@@ -280,7 +287,7 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
               : richContentView(item.richContent, h),
         ],
       ),
-      kind === 'mixes' || kind === 'editorial' ? emailUpdatesInvite(h) : h.empty,
+      !walking && (kind === 'mixes' || kind === 'editorial') ? emailUpdatesInvite(h) : h.empty,
     ],
   )
 }

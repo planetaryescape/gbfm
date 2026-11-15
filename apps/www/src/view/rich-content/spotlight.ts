@@ -249,16 +249,6 @@ const controlsView = <Message>(
   return h.nav(
     [h.Class('spotlight-controls not-prose'), h.AriaLabel('Move through the article')],
     [
-      h.button(
-        [
-          h.Type('button'),
-          h.Class('btn btn-quiet btn-icon spotlight-back'),
-          h.Disabled(current === 0),
-          h.AriaLabel('Previous'),
-          h.OnClick(onStep(Math.max(current - 1, 0))),
-        ],
-        [pixelIcon(iconPaths.chevronLeft, 'h-5 w-5')],
-      ),
       next
         ? h.button(
             [
@@ -267,19 +257,26 @@ const controlsView = <Message>(
               h.OnClick(onStep(current + 1)),
             ],
             [
-              steps[current]?.kind === 'chapter'
-                ? h.span([h.Class('spotlight-next-copy')], ['Next'])
-                : h.span(
-                    [h.Class('spotlight-next-copy')],
-                    [
-                      h.span([h.Class('spotlight-next-eyebrow')], ['Next']),
-                      h.span([h.Class('spotlight-next-title')], [stepLabel(next, chapters)]),
-                    ],
-                  ),
+              h.span(
+                [h.Class('spotlight-next-copy')],
+                [
+                  h.span([h.Class('spotlight-next-eyebrow')], ['Up next']),
+                  h.span([h.Class('spotlight-next-title')], [stepLabel(next, chapters)]),
+                ],
+              ),
               pixelIcon(iconPaths.chevronRight, 'h-5 w-5'),
             ],
           )
         : h.empty,
+      h.button(
+        [
+          h.Type('button'),
+          h.Class('btn btn-quiet spotlight-back'),
+          h.Disabled(current === 0),
+          h.OnClick(onStep(Math.max(current - 1, 0))),
+        ],
+        [pixelIcon(iconPaths.chevronLeft, 'h-4 w-4'), 'Previous'],
+      ),
     ],
   )
 }

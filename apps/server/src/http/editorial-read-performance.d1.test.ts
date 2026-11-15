@@ -4,6 +4,7 @@ import { Layer, Predicate, Schema } from 'effect'
 import { beforeAll, expect, test } from 'vitest'
 
 import { user } from '@/db/auth.schema'
+import { blueskyPostSources } from '@/db/external-account.schema'
 import { postCreators, postsTable } from '@/db/post.schema'
 import { entityLabelsTable, labelsTable } from '@/db/tags.schema'
 import { ExternalMediaFetcher } from '@/lib/external-media'
@@ -70,6 +71,13 @@ beforeAll(async () => {
     db
       .insert(entityLabelsTable)
       .values({ entityType: 'post', entityId: 'published', labelId: 'editorial-tag', position: 0 }),
+    db.insert(blueskyPostSources).values({
+      postId: 'published',
+      authorDid: 'did:plc:historical-editorial',
+      atUri: 'at://did:plc:historical-editorial/app.bsky.feed.post/editorial',
+      publicUrl: 'https://bsky.app/profile/historical.example/post/editorial',
+      sourceCreatedAt: publishedAt,
+    }),
   ])
 })
 
@@ -184,8 +192,23 @@ test('editorial content overlaps relation reads while retaining creators, labels
     expect(post.creators?.map((creator) => creator.name).sort()).toEqual(['Collaborator', 'Owner'])
     expect(post.richContent?.blocks.some(Predicate.isTagged('ExternalMediaEmbed'))).toBe(true)
     expect(handler.providerRequests).toEqual([content])
+    expect(post).not.toHaveProperty('blueskySource')
+    expect(handler.observed.queries).toHaveLength(3)
+    expect(handler.observed.queries.some((query) => query.includes('bluesky_post_sources'))).toBe(
+      false,
+    )
+    expect(handler.observed.maxActive).toBe(2)
+
+    handler.observed.reset()
+    const generic = await handler.get('/api/content/posts/published-editorial')
+    expect(generic.status).toBe(200)
+    expect(await generic.json()).toMatchObject({
+      blueskySource: {
+        authorDid: 'did:plc:historical-editorial',
+        publicUrl: 'https://bsky.app/profile/historical.example/post/editorial',
+      },
+    })
     expect(handler.observed.queries).toHaveLength(4)
-    expect(handler.observed.maxActive).toBe(3)
   } finally {
     await handler.dispose()
   }

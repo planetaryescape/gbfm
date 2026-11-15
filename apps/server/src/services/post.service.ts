@@ -394,34 +394,43 @@ export function normalizePostData(
   return normalizedData
 }
 
-const buildPostWithCreators = (post: PostRow, mdx: MdxService) =>
+type PostHydrationOptions = { readonly includeBlueskySource?: boolean }
+
+const buildPostWithCreators = (
+  post: PostRow,
+  mdx: MdxService,
+  options: PostHydrationOptions = {},
+) =>
   Effect.gen(function* () {
     const db = yield* Database
 
     const { blueskySources, creators, projectedPost } = yield* Effect.all(
       {
-        blueskySources: Effect.tryPromise({
-          try: () =>
-            db
-              .select({
-                authorDid: blueskyPostSources.authorDid,
-                authorHandle: blueskyPostSources.authorHandle,
-                publicUrl: blueskyPostSources.publicUrl,
-                sourceCreatedAt: blueskyPostSources.sourceCreatedAt,
-                sourceStatus: blueskyPostSources.sourceStatus,
-                locallyEdited: blueskyPostSources.locallyEdited,
-                lastError: blueskyPostSources.lastError,
-              })
-              .from(blueskyPostSources)
-              .where(eq(blueskyPostSources.postId, post.id))
-              .limit(1),
-          catch: (error) =>
-            new DatabaseError({
-              message: `Failed to fetch Bluesky source: ${getErrorMessage(error)}`,
-              operation: 'select',
-              table: 'bluesky_post_sources',
-            }),
-        }),
+        blueskySources:
+          options.includeBlueskySource === false
+            ? Effect.succeed([])
+            : Effect.tryPromise({
+                try: () =>
+                  db
+                    .select({
+                      authorDid: blueskyPostSources.authorDid,
+                      authorHandle: blueskyPostSources.authorHandle,
+                      publicUrl: blueskyPostSources.publicUrl,
+                      sourceCreatedAt: blueskyPostSources.sourceCreatedAt,
+                      sourceStatus: blueskyPostSources.sourceStatus,
+                      locallyEdited: blueskyPostSources.locallyEdited,
+                      lastError: blueskyPostSources.lastError,
+                    })
+                    .from(blueskyPostSources)
+                    .where(eq(blueskyPostSources.postId, post.id))
+                    .limit(1),
+                catch: (error) =>
+                  new DatabaseError({
+                    message: `Failed to fetch Bluesky source: ${getErrorMessage(error)}`,
+                    operation: 'select',
+                    table: 'bluesky_post_sources',
+                  }),
+              }),
         creators: Effect.tryPromise({
           try: () =>
             db
@@ -1492,7 +1501,13 @@ const getByTagEffect = (tag: string, options: { limit: number; offset: number })
     }
   })
 
-const getBySlugEffect = (slug: string, mdx: MdxService, includeDrafts = false, readerId?: string) =>
+const getBySlugEffect = (
+  slug: string,
+  mdx: MdxService,
+  includeDrafts = false,
+  readerId?: string,
+  options: PostHydrationOptions = {},
+) =>
   Effect.gen(function* () {
     const db = yield* Database
 
@@ -1525,7 +1540,7 @@ const getBySlugEffect = (slug: string, mdx: MdxService, includeDrafts = false, r
       })
     }
 
-    const processedPost = yield* buildPostWithCreators(post, mdx)
+    const processedPost = yield* buildPostWithCreators(post, mdx, options)
 
     yield* Effect.annotateCurrentSpan('slug', slug)
 
@@ -1539,7 +1554,9 @@ const getBySlugEffect = (slug: string, mdx: MdxService, includeDrafts = false, r
 
 const getEditorialBySlugEffect = (slug: string, mdx: MdxService, readerId?: string) =>
   Effect.gen(function* () {
-    const post = yield* getBySlugEffect(slug, mdx, false, readerId)
+    const post = yield* getBySlugEffect(slug, mdx, false, readerId, {
+      includeBlueskySource: false,
+    })
 
     return yield* toEditorialPost(post).pipe(
       Effect.mapError(

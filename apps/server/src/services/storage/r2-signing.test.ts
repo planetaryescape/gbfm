@@ -12,6 +12,40 @@ const config: R2SigningConfig = {
 const now = new Date('2026-06-16T22:27:59.000Z')
 
 describe('R2 SigV4 signing', () => {
+  test('signs create-only artwork integrity headers and changes the signature when they change', async () => {
+    const headers = {
+      'content-type': 'image/png',
+      'content-length': '68',
+      'content-md5': 'AAAAAAAAAAAAAAAAAAAAAA==',
+      'if-none-match': '*',
+      'x-amz-meta-artwork-receipt': 'fixture-receipt',
+    }
+
+    const input = {
+      config,
+      method: 'PUT',
+      key: 'private/owner/image/fixture.png',
+      query: [],
+      expiresSeconds: 300,
+      now,
+      headers,
+    }
+
+    const original = new URL(await presignedUrl(input))
+    expect(original.searchParams.get('X-Amz-SignedHeaders')).toBe(
+      'content-length;content-md5;content-type;host;if-none-match;x-amz-meta-artwork-receipt',
+    )
+
+    for (const name of Object.keys(headers)) {
+      const changed = new URL(
+        await presignedUrl({ ...input, headers: { ...headers, [name]: 'changed' } }),
+      )
+
+      expect(changed.searchParams.get('X-Amz-Signature')).not.toBe(
+        original.searchParams.get('X-Amz-Signature'),
+      )
+    }
+  })
   test('sorts encoded query parameters by byte order', () => {
     expect(
       canonicalQuery([

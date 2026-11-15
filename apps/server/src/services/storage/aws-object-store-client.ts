@@ -16,6 +16,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Effect, Layer, Option, Schema } from 'effect'
 
+import { omitUndefined } from '@/lib/omit-undefined'
 import { ConfigService } from '@/services/config.service'
 
 import {
@@ -70,11 +71,25 @@ export const makeAwsObjectStoreClientLayer = (makeClient: () => S3Client) =>
             }),
           )
         },
-        presignPutObject: ({ bucketName, key, contentType, expiresInSeconds }) =>
+        presignPutObject: ({ bucketName, key, contentType, expiresInSeconds, integrity }) =>
           getSignedUrl(
             client,
-            new PutObjectCommand({ Bucket: bucketName, Key: key, ContentType: contentType }),
-            { expiresIn: expiresInSeconds },
+            new PutObjectCommand({
+              Bucket: bucketName,
+              Key: key,
+              ContentType: contentType,
+              ContentMD5: integrity?.contentMd5,
+              ContentLength: integrity?.fileSize,
+              IfNoneMatch: integrity ? '*' : undefined,
+              Metadata: integrity ? { 'artwork-receipt': integrity.receipt } : undefined,
+            }),
+            omitUndefined({
+              expiresIn: expiresInSeconds,
+              unhoistableHeaders: integrity ? new Set(['x-amz-meta-artwork-receipt']) : undefined,
+              signableHeaders: integrity
+                ? new Set(['content-type', 'content-md5', 'content-length', 'if-none-match'])
+                : undefined,
+            }),
           ),
         deleteObject: async (bucketName, key) => {
           await client.send(new DeleteObjectCommand({ Bucket: bucketName, Key: key }))

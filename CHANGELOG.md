@@ -1,3 +1,10 @@
+## [2.132.6](https://github.com/planetaryescape/gbfm/compare/v2.132.5...v2.132.6) (2026-11-15)
+
+
+### Performance Improvements
+
+* **api:** trim tweet metadata and music embed reads ([#627](https://github.com/planetaryescape/gbfm/issues/627)) ([6605837](https://github.com/planetaryescape/gbfm/commit/6605837b4bab3d4506982aedf5da83f2d5ce5271))
+
 ## [2.132.5](https://github.com/planetaryescape/gbfm/compare/v2.132.4...v2.132.5) (2026-11-15)
 
 

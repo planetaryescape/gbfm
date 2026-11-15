@@ -19,6 +19,8 @@ class PlatformPlayer implements ExpoAudioEnginePlayer {
   volume = 1
   muted = false
   rejectPlay = false
+  rejectSeek = false
+  pendingSeek: Promise<void> | null = null
   readonly calls: Array<string> = []
   readonly listeners = new Set<(status: AudioStatus) => void>()
   currentStatus: AudioStatus = {
@@ -70,6 +72,9 @@ class PlatformPlayer implements ExpoAudioEnginePlayer {
   }
 
   async seekTo(seconds: number) {
+    if (this.pendingSeek) await this.pendingSeek
+
+    if (this.rejectSeek) throw new Error('platform refused seek')
     this.currentStatus = { ...this.currentStatus, currentTime: seconds }
   }
 
@@ -221,6 +226,50 @@ const fixture = () => {
 }
 
 describe('Expo native adapter with shared playback orchestration', () => {
+  it('acknowledges an asynchronous native seek without waiting for a periodic status event', async () => {
+    const f = fixture()
+
+    try {
+      await f.runtime.runPromise(
+        Effect.gen(function* () {
+          const playback = yield* makeAudioPlayback(f.runtime, {
+            onError: (message) =>
+              Effect.sync(() => {
+                f.errors.push(message)
+              }),
+          })
+
+          yield* Effect.yieldNow
+          yield* playback.playTrack(track('one'))
+          f.audio.ready(120)
+          yield* Effect.promise(async () => {
+            await expect.poll(() => playback.getSnapshot().transport.isLoaded).toBe(true)
+          })
+          yield* playback.pause
+          const completion = Promise.withResolvers<void>()
+          f.audio.pendingSeek = completion.promise
+          const seeking = yield* Effect.forkScoped(playback.seekTo(42))
+          yield* Effect.yieldNow
+          expect(playback.getSnapshot().transport.currentTime).toBe(0)
+          completion.resolve()
+          yield* Fiber.join(seeking)
+          expect(playback.getSnapshot().transport.currentTime).toBe(42)
+          f.audio.pendingSeek = null
+          f.audio.emit({ currentTime: 43 })
+          yield* Effect.promise(async () => {
+            await expect.poll(() => playback.getSnapshot().transport.currentTime).toBe(43)
+          })
+          f.audio.rejectSeek = true
+          yield* playback.seekTo(80)
+          expect(playback.getSnapshot().transport.currentTime).toBe(43)
+          expect(f.errors).toContain('Unable to seek audio')
+        }).pipe(Effect.scoped),
+      )
+    } finally {
+      await f.runtime.dispose()
+    }
+  })
+
   it.each(['replace', 'clear', 'dispose'] as const)(
     'keeps journey delivery bound to the owning native source after %s',
     async (action) => {

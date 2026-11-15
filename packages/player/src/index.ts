@@ -1,4 +1,16 @@
 export {
+  scrubberCurve,
+  scrubberProgress,
+  scrubberTime,
+  startScrubberDrag,
+  type ScrubberDrag,
+} from './scrubber'
+
+export { createScrubberGesture, type ScrubberPreview } from './scrubberGesture'
+
+export { formatScrubberTime, formatScrubberDelta } from './scrubberTime'
+
+export {
   AudioStorageError,
   hasCompleteCreators,
   PersistedQueue,

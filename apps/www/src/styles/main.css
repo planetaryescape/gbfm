@@ -3090,3 +3090,130 @@
     display: none;
   }
 }
+.hill-scrubber {
+  position: relative;
+  height: 64px;
+  isolation: isolate;
+  touch-action: none;
+  cursor: grab;
+}
+
+.hill-scrubber-art {
+  width: 100%;
+  height: 64px;
+  overflow: visible;
+  pointer-events: none;
+  transform-origin: center;
+  transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.hill-scrubber-track,
+.hill-scrubber-played {
+  stroke-width: 12;
+  transition: stroke-width 160ms ease;
+}
+
+.hill-scrubber-track {
+  stroke: var(--muted-foreground);
+  stroke-opacity: 0.35;
+}
+
+.hill-scrubber-played {
+  stroke: var(--primary);
+}
+
+.hill-scrubber-thumb {
+  fill: var(--primary);
+  transition: r 160ms ease;
+}
+
+.hill-scrubber-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 64px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.hill-scrubber-input::-webkit-slider-thumb {
+  width: 24px;
+}
+
+.hill-scrubber-input::-moz-range-thumb {
+  width: 24px;
+}
+
+.hill-scrubber[data-pressed] .hill-scrubber-art {
+  transform: translateY(-1px);
+}
+
+.hill-scrubber[data-pressed] {
+  cursor: grabbing;
+}
+
+.hill-scrubber[data-pressed] .hill-scrubber-played,
+.hill-scrubber[data-pressed] .hill-scrubber-track {
+  stroke-width: 13;
+}
+
+.hill-scrubber[data-pressed] .hill-scrubber-thumb {
+  r: 7px;
+}
+
+.hill-scrubber:has(input:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  border-radius: 12px;
+}
+
+.hill-scrubber[data-disabled='true'] {
+  opacity: 0.4;
+}
+
+.hill-scrubber-preview {
+  position: absolute;
+  z-index: 3;
+  bottom: calc(100% + 16px);
+  left: clamp(min(50%, 5.5rem), var(--scrub-x), max(50%, calc(100% - 5.5rem)));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: min(11rem, 100%);
+  padding: 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--foreground);
+  background: var(--background);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.2);
+  pointer-events: none;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.hill-scrubber-preview-time {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.hill-scrubber-preview-delta,
+.hill-scrubber-preview-mode {
+  font-size: 11px;
+}
+
+.hill-scrubber-preview-mode {
+  color: var(--primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hill-scrubber-art,
+  .hill-scrubber-thumb,
+  .hill-scrubber-track,
+  .hill-scrubber-played {
+    transition: none;
+  }
+}

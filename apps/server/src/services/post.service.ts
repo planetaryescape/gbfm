@@ -76,6 +76,7 @@ import {
   prepareCreatorMicro,
   prepareCreatorPostTransition,
 } from '@/services/creator-command/prepare-post'
+import { getEditorialMetadataBySlug, type EditorialMetadata } from '@/services/editorial-metadata'
 import {
   attachedMediaUrls,
   makeMediaPublication,
@@ -201,6 +202,9 @@ export interface PostService {
     slug: string,
     readerId?: string,
   ) => Effect.Effect<SelectMdxCompiledEditorialPost, DatabaseError | NotFoundError>
+  readonly getEditorialMetadataBySlug: (
+    slug: string,
+  ) => Effect.Effect<EditorialMetadata, DatabaseError | NotFoundError>
   readonly getMicroPosts: (options: {
     limit: number
     offset: number
@@ -390,62 +394,74 @@ export function normalizePostData(
   return normalizedData
 }
 
-const buildPostWithCreators = (post: PostRow, mdx: MdxService) =>
+type PostHydrationOptions = { readonly includeBlueskySource?: boolean }
+
+const buildPostWithCreators = (
+  post: PostRow,
+  mdx: MdxService,
+  options: PostHydrationOptions = {},
+) =>
   Effect.gen(function* () {
     const db = yield* Database
 
-    const { blueskySources, creators, projectedPost } = yield* Effect.all({
-      blueskySources: Effect.tryPromise({
-        try: () =>
-          db
-            .select({
-              authorDid: blueskyPostSources.authorDid,
-              authorHandle: blueskyPostSources.authorHandle,
-              publicUrl: blueskyPostSources.publicUrl,
-              sourceCreatedAt: blueskyPostSources.sourceCreatedAt,
-              sourceStatus: blueskyPostSources.sourceStatus,
-              locallyEdited: blueskyPostSources.locallyEdited,
-              lastError: blueskyPostSources.lastError,
-            })
-            .from(blueskyPostSources)
-            .where(eq(blueskyPostSources.postId, post.id))
-            .limit(1),
-        catch: (error) =>
-          new DatabaseError({
-            message: `Failed to fetch Bluesky source: ${getErrorMessage(error)}`,
-            operation: 'select',
-            table: 'bluesky_post_sources',
-          }),
-      }),
-      creators: Effect.tryPromise({
-        try: () =>
-          db
-            .select({
-              id: usersTable.id,
-              name: usersTable.name,
-              username: usersTable.username,
-              image: usersTable.image,
-            })
-            .from(postCreators)
-            .innerJoin(usersTable, eq(postCreators.creatorId, usersTable.id))
-            .where(eq(postCreators.postId, post.id)),
-        catch: (error) =>
-          new DatabaseError({
-            message: `Failed to fetch creators: ${getErrorMessage(error)}`,
-            operation: 'select',
-            table: 'post_creators',
-          }),
-      }).pipe(Effect.withSpan('post.getCreators', { attributes: { postId: post.id } })),
-      projectedPost: Effect.tryPromise({
-        try: () => projectEntityLabels(db, 'post', post),
-        catch: (error) =>
-          new DatabaseError({
-            message: getErrorMessage(error),
-            operation: 'select',
-            table: 'labels',
-          }),
-      }),
-    })
+    const { blueskySources, creators, projectedPost } = yield* Effect.all(
+      {
+        blueskySources:
+          options.includeBlueskySource === false
+            ? Effect.succeed([])
+            : Effect.tryPromise({
+                try: () =>
+                  db
+                    .select({
+                      authorDid: blueskyPostSources.authorDid,
+                      authorHandle: blueskyPostSources.authorHandle,
+                      publicUrl: blueskyPostSources.publicUrl,
+                      sourceCreatedAt: blueskyPostSources.sourceCreatedAt,
+                      sourceStatus: blueskyPostSources.sourceStatus,
+                      locallyEdited: blueskyPostSources.locallyEdited,
+                      lastError: blueskyPostSources.lastError,
+                    })
+                    .from(blueskyPostSources)
+                    .where(eq(blueskyPostSources.postId, post.id))
+                    .limit(1),
+                catch: (error) =>
+                  new DatabaseError({
+                    message: `Failed to fetch Bluesky source: ${getErrorMessage(error)}`,
+                    operation: 'select',
+                    table: 'bluesky_post_sources',
+                  }),
+              }),
+        creators: Effect.tryPromise({
+          try: () =>
+            db
+              .select({
+                id: usersTable.id,
+                name: usersTable.name,
+                username: usersTable.username,
+                image: usersTable.image,
+              })
+              .from(postCreators)
+              .innerJoin(usersTable, eq(postCreators.creatorId, usersTable.id))
+              .where(eq(postCreators.postId, post.id)),
+          catch: (error) =>
+            new DatabaseError({
+              message: `Failed to fetch creators: ${getErrorMessage(error)}`,
+              operation: 'select',
+              table: 'post_creators',
+            }),
+        }).pipe(Effect.withSpan('post.getCreators', { attributes: { postId: post.id } })),
+        projectedPost: Effect.tryPromise({
+          try: () => projectEntityLabels(db, 'post', post),
+          catch: (error) =>
+            new DatabaseError({
+              message: getErrorMessage(error),
+              operation: 'select',
+              table: 'labels',
+            }),
+        }),
+      },
+      { concurrency: 3 },
+    )
 
     const compiled = yield* compilePost(projectedPost, creators, mdx)
     const blueskySource = blueskySources[0]
@@ -1485,7 +1501,13 @@ const getByTagEffect = (tag: string, options: { limit: number; offset: number })
     }
   })
 
-const getBySlugEffect = (slug: string, mdx: MdxService, includeDrafts = false, readerId?: string) =>
+const getBySlugEffect = (
+  slug: string,
+  mdx: MdxService,
+  includeDrafts = false,
+  readerId?: string,
+  options: PostHydrationOptions = {},
+) =>
   Effect.gen(function* () {
     const db = yield* Database
 
@@ -1518,7 +1540,7 @@ const getBySlugEffect = (slug: string, mdx: MdxService, includeDrafts = false, r
       })
     }
 
-    const processedPost = yield* buildPostWithCreators(post, mdx)
+    const processedPost = yield* buildPostWithCreators(post, mdx, options)
 
     yield* Effect.annotateCurrentSpan('slug', slug)
 
@@ -1532,7 +1554,9 @@ const getBySlugEffect = (slug: string, mdx: MdxService, includeDrafts = false, r
 
 const getEditorialBySlugEffect = (slug: string, mdx: MdxService, readerId?: string) =>
   Effect.gen(function* () {
-    const post = yield* getBySlugEffect(slug, mdx, false, readerId)
+    const post = yield* getBySlugEffect(slug, mdx, false, readerId, {
+      includeBlueskySource: false,
+    })
 
     return yield* toEditorialPost(post).pipe(
       Effect.mapError(
@@ -2847,6 +2871,7 @@ export const PostServiceLayer = Layer.effect(
       getEditorialSummaries: (opts) => provideDb(getEditorialSummariesEffect(opts)),
       getEditorialBySlug: (slug, readerId) =>
         provideDb(getEditorialBySlugEffect(slug, mdx, readerId)),
+      getEditorialMetadataBySlug: (slug) => provideDb(getEditorialMetadataBySlug(slug)),
       getMicroPosts: (opts) => provideDb(getMicroPostsEffect(opts, mdx)),
       getLatestMicroPost: provideDb(getLatestMicroPostEffect),
       getMicroPostBySlug: (slug) => provideDb(getMicroPostBySlugEffect(slug, mdx)),

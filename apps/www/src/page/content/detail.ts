@@ -251,7 +251,11 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
       ),
     ],
     [
-      breadcrumbs([...ancestors(item, kind).map(crumbLink), crumbCurrent(item.slug)]),
+      breadcrumbs(
+        walking
+          ? ancestors(item, kind).map(crumbLink)
+          : [...ancestors(item, kind).map(crumbLink), crumbCurrent(item.slug)],
+      ),
       kind === 'editorial' && item.draft ? draftNotice(h, item.slug) : h.empty,
       walking ? h.empty : masthead(h, item, kind),
       walking ? h.empty : controls(model, h, item),

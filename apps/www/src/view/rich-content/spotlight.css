@@ -8,7 +8,7 @@
 
 .spotlight-body {
   width: 100%;
-  margin-top: 0.5rem;
+  margin-top: 0.25rem;
 }
 
 .spotlight-body:has(.spotlight-intro, .spotlight-end) {
@@ -61,13 +61,13 @@
 
 .spotlight-header {
   display: grid;
-  gap: 0.5rem;
-  margin: 0 0 1.5rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 1.25rem;
 }
 
 .spotlight-progress {
-  display: grid;
-  gap: 0.75rem;
   min-width: 0;
   margin: 0;
 }
@@ -82,29 +82,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.spotlight-progress-cells {
-  display: flex;
-  gap: 3px;
-}
-
-.spotlight-progress-cell {
-  flex: 1;
-  height: 3px;
-  background: var(--border);
-}
-
-.spotlight-progress-cell[data-state='done'] {
-  background: color-mix(in srgb, var(--highlight) 45%, var(--border));
-}
-
-.spotlight-progress-cell[data-state='current'] {
-  background: var(--highlight);
-}
-
-.spotlight-progress-cell[data-chapter-start] {
-  margin-left: 5px;
 }
 
 .spotlight-stage > * > * + *,
@@ -303,12 +280,6 @@
 }
 
 @media (min-width: 768px) {
-  .spotlight-header {
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: start;
-    gap: 2rem;
-  }
-
   .spotlight-records,
   .spotlight .rich-content-card-group {
     display: grid;
@@ -373,7 +344,7 @@
 @media (min-width: 1200px) {
   .spotlight {
     display: grid;
-    grid-template-rows: 4rem minmax(0, 1fr);
+    grid-template-rows: 3.25rem minmax(0, 1fr);
     height: calc(100dvh - 8rem);
     min-height: 24rem;
   }

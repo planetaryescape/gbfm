@@ -121,14 +121,15 @@ const progressView = <Message>(
 ): Html => {
   const step = steps[current]
 
-  const label =
-    step?.kind === 'moment'
-      ? [
-          `Chapter ${step.chapter + 1}`,
-          chapterName(chapters, step.chapter),
-          `${step.position + 1} of ${chapters[step.chapter]?.moments.length ?? 0}`,
-        ].join(' · ')
-      : ''
+  let label = ''
+
+  if (step?.kind === 'moment') {
+    label = `${chapterName(chapters, step.chapter)} · ${step.position + 1} / ${chapters[step.chapter]?.moments.length ?? 0}`
+  }
+
+  if (step?.kind === 'chapter') {
+    label = `Chapter ${step.chapter + 1} / ${chapters.length}`
+  }
 
   return h.div(
     [h.Class('spotlight-progress not-prose')],
@@ -136,26 +137,14 @@ const progressView = <Message>(
       h.p([h.Class('spotlight-progress-label')], [label]),
       h.div(
         [
-          h.Class('spotlight-progress-cells'),
+          h.Class('sr-only'),
           h.Role('progressbar'),
           h.AriaLabel('Reading progress'),
           h.AriaValuemin(1),
           h.AriaValuemax(steps.length),
           h.AriaValuenow(current + 1),
         ],
-        steps.map((item, index) =>
-          h.span(
-            [
-              h.Class('spotlight-progress-cell'),
-              h.DataAttribute(
-                'state',
-                index < current ? 'done' : index === current ? 'current' : 'ahead',
-              ),
-              ...(item.kind === 'chapter' ? [h.DataAttribute('chapter-start', '')] : []),
-            ],
-            [],
-          ),
-        ),
+        [],
       ),
     ],
   )
@@ -163,7 +152,6 @@ const progressView = <Message>(
 
 const stepView = <Message>(
   step: SpotlightStep,
-  chapters: ReadonlyArray<SpotlightChapter>,
   h: HtmlBuilder<Message>,
   render: (block: RichContentBlock) => Html,
   start: Message,
@@ -206,13 +194,7 @@ const stepView = <Message>(
       [
         h.header(
           [h.Class('spotlight-chapter-head not-prose')],
-          [
-            h.p(
-              [h.Class('spotlight-chapter-eyebrow')],
-              [`Chapter ${step.chapter + 1} of ${chapters.length}`],
-            ),
-            h.h2([], inlineChildren(step.value.heading.children, h)),
-          ],
+          [h.h2([], inlineChildren(step.value.heading.children, h))],
         ),
         ...step.value.lead.map(render),
         step.value.moments.length === 0
@@ -330,7 +312,6 @@ export const spotlightView = <Message>(
             [
               stepView(
                 step,
-                structure.chapters,
                 h,
                 render,
                 go(current === steps.length - 1 ? 0 : 1),

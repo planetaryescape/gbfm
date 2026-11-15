@@ -1,4 +1,4 @@
-export { scrubberCurve, scrubberProgress, scrubberTime } from './scrubber'
+export { scrubberCurve, scrubberProgress, scrubberTime, startScrubberDrag } from './scrubber'
 
 export {
   AudioStorageError,

@@ -35,6 +35,7 @@ export const Model = Schema.Struct({
   draggedIndex: Schema.NullOr(Schema.Number),
   playerDrag: SheetDrag,
   playerOffset: Schema.Number,
+  seekPreview: Schema.NullOr(Schema.Number),
   hasHadTrack: Schema.Boolean,
   favorite: Favorite.Model,
 })
@@ -61,6 +62,7 @@ export const initialModel: Model = {
   draggedIndex: null,
   playerDrag: null,
   playerOffset: 0,
+  seekPreview: null,
   hasHadTrack: false,
   favorite: Favorite.initialModel,
 }
@@ -69,6 +71,8 @@ export const Message = defineMessageUnion({
   SnapshotChanged: { snapshot: Snapshot },
   TogglePlayPause: {},
   SeekTo: { seconds: Schema.Number },
+  PreviewSeek: { seconds: Schema.Number },
+  CancelSeek: {},
   Jump: { seconds: Schema.Number },
   SetVolume: { volume: Schema.Number },
   ToggleMute: {},
@@ -238,7 +242,8 @@ const openPlayerDialog = Update.foldChildStep({ ...playerDialogFold, update: Dia
 
 const closePlayerDialog = Update.foldChildStep({ ...playerDialogFold, update: Dialog.close })
 
-export const closeOverlays = Update.combine([closeQueueDialog, closePlayerDialog])
+export const closeOverlays = (model: Model) =>
+  Update.combine({ ...model, seekPreview: null }, [closeQueueDialog, closePlayerDialog])
 
 const withFavorite = (
   model: Model,
@@ -260,12 +265,23 @@ export const update = (
         {
           ...model,
           snapshot,
+          seekPreview:
+            model.snapshot.queue.current?.id === snapshot.queue.current?.id
+              ? model.seekPreview
+              : null,
           hasHadTrack: model.hasHadTrack || snapshot.queue.current !== null,
         },
         Favorite.sync(model.favorite, snapshot.queue.current, model.favorite.principalId),
       ),
     TogglePlayPause: () => ({ model, commands: [Toggle()] }),
-    SeekTo: ({ seconds }) => ({ model, commands: [Seek({ seconds })] }),
+    SeekTo: ({ seconds }) => ({
+      model: model.seekPreview === null ? model : { ...model, seekPreview: null },
+      commands: [Seek({ seconds })],
+    }),
+    PreviewSeek: ({ seconds }) => ({ model: { ...model, seekPreview: seconds } }),
+    CancelSeek: () => ({
+      model: model.seekPreview === null ? model : { ...model, seekPreview: null },
+    }),
     Jump: ({ seconds }) => ({ model, commands: [Jump({ seconds })] }),
     SetVolume: ({ volume }) => ({ model, commands: [SetVolume({ volume })] }),
     ToggleMute: () => ({ model, commands: [ToggleMute()] }),
@@ -293,7 +309,13 @@ export const update = (
     Clear: () =>
       Update.combine(model, [closeOverlays, (model) => ({ model, commands: [Clear()] })]),
     GotQueueDialogMessage: ({ message }) => updateQueueDialog(model, message),
-    GotPlayerDialogMessage: ({ message }) => updatePlayerDialog(model, message),
+    GotPlayerDialogMessage: ({ message }) => {
+      const next = updatePlayerDialog(model, message)
+
+      if (next.model.playerDialog.isOpen || next.model.seekPreview === null) return next
+
+      return { ...next, model: { ...next.model, seekPreview: null } }
+    },
     ToggleQueue: () =>
       model.queueDialog.isOpen ? closeQueueDialog(model) : openQueueDialog(model),
     CloseQueue: () => closeQueueDialog(model),

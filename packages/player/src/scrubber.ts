@@ -11,14 +11,30 @@ export const scrubberTime = (x: number, width: number, duration: number) => {
 }
 
 export const scrubberCurve = (progress: number) => {
-  const x = 12 + scrubberProgress(progress, 1) * 296
-  const left = Math.max(12, x - 44)
-  const right = Math.min(308, x + 44)
-  const rise = `M 12 44 L ${left} 44 C ${left + (x - left) * 0.55} 44 ${x - (x - left) * 0.45} 22 ${x} 22`
+  const x = 56 + scrubberProgress(progress, 1) * 208
+  const left = x - 44
+  const right = x + 44
+  const rise = `M 12 44 L ${left} 44 C ${x - 19.8} 44 ${x - 19.8} 18 ${x} 18`
 
   return {
     x,
     played: rise,
-    track: `${rise} C ${x + (right - x) * 0.45} 22 ${right - (right - x) * 0.55} 44 ${right} 44 L 308 44`,
+    track: `${rise} C ${x + 19.8} 18 ${x + 19.8} 44 ${right} 44 L 308 44`,
+  }
+}
+
+export const startScrubberDrag = (
+  x: number,
+  width: number,
+  currentTime: number,
+  duration: number,
+) => {
+  const center = (scrubberCurve(scrubberProgress(currentTime, duration)).x / 320) * width
+  const onHill = Math.abs(x - center) <= (44 / 320) * width
+  const offset = onHill ? x - center : 0
+
+  return {
+    timeAt: (pointerX: number) =>
+      scrubberTime(pointerX - offset - (56 / 320) * width, (208 / 320) * width, duration),
   }
 }

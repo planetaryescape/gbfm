@@ -3092,6 +3092,8 @@
   position: relative;
   height: 64px;
   isolation: isolate;
+  touch-action: none;
+  cursor: grab;
 }
 
 .hill-scrubber-art {
@@ -3105,7 +3107,7 @@
 
 .hill-scrubber-track,
 .hill-scrubber-played {
-  stroke-width: 10;
+  stroke-width: 12;
   transition: stroke-width 160ms ease;
 }
 
@@ -3120,11 +3122,7 @@
 
 .hill-scrubber-thumb {
   fill: var(--primary);
-  stroke: var(--background);
-  stroke-width: 3;
-  transition:
-    r 160ms ease,
-    stroke-width 160ms ease;
+  transition: r 160ms ease;
 }
 
 .hill-scrubber-input {
@@ -3134,7 +3132,7 @@
   height: 64px;
   margin: 0;
   opacity: 0;
-  cursor: grab;
+  pointer-events: none;
   touch-action: none;
 }
 
@@ -3147,16 +3145,20 @@
 }
 
 .hill-scrubber[data-pressed] .hill-scrubber-art {
-  transform: translateY(-3px) scaleY(1.08);
+  transform: translateY(-1px);
+}
+
+.hill-scrubber[data-pressed] {
+  cursor: grabbing;
 }
 
 .hill-scrubber[data-pressed] .hill-scrubber-played,
 .hill-scrubber[data-pressed] .hill-scrubber-track {
-  stroke-width: 12;
+  stroke-width: 13;
 }
 
 .hill-scrubber[data-pressed] .hill-scrubber-thumb {
-  r: 9;
+  r: 7;
 }
 
 .hill-scrubber:has(input:focus-visible) {

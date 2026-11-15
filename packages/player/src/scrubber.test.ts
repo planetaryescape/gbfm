@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { scrubberCurve, scrubberProgress, scrubberTime } from './scrubber'
+import { scrubberCurve, scrubberProgress, scrubberTime, startScrubberDrag } from './scrubber'
 
 describe('scrubber position', () => {
   it('maps dragging to time and clamps drags beyond either edge', () => {
@@ -18,12 +18,35 @@ describe('scrubber position', () => {
   })
 
   it('keeps the hill and playhead inside the timeline at the start, middle and end', () => {
-    expect(scrubberCurve(0).x).toBe(12)
+    expect(scrubberCurve(0).x).toBe(56)
     expect(scrubberCurve(0.5).x).toBe(160)
-    expect(scrubberCurve(1).x).toBe(308)
-    expect(scrubberCurve(-1).x).toBe(12)
-    expect(scrubberCurve(2).x).toBe(308)
-    expect(scrubberCurve(0.5).played).toBe('M 12 44 L 116 44 C 140.2 44 140.2 22 160 22')
-    expect(scrubberCurve(0.5).track).toContain('C 179.8 22 179.8 44 204 44 L 308 44')
+    expect(scrubberCurve(1).x).toBe(264)
+    expect(scrubberCurve(-1).x).toBe(56)
+    expect(scrubberCurve(2).x).toBe(264)
+    expect(scrubberCurve(0).played).toBe('M 12 44 L 12 44 C 36.2 44 36.2 18 56 18')
+    expect(scrubberCurve(0.5).played).toBe('M 12 44 L 116 44 C 140.2 44 140.2 18 160 18')
+    expect(scrubberCurve(1).track).toContain('C 283.8 18 283.8 44 308 44 L 308 44')
+  })
+
+  it('grabs either hill shoulder without jumping and follows relative movement', () => {
+    const left = startScrubberDrag(130, 320, 60, 120)
+    const right = startScrubberDrag(190, 320, 60, 120)
+    expect(left.timeAt(130)).toBe(60)
+    expect(right.timeAt(190)).toBe(60)
+    expect(left.timeAt(150)).toBeCloseTo(71.53846)
+    expect(right.timeAt(170)).toBeCloseTo(48.46154)
+    expect(left.timeAt(-100)).toBe(0)
+    expect(right.timeAt(500)).toBe(120)
+  })
+
+  it('keeps the full hill grabbable at both endpoints and maps track taps to time', () => {
+    const start = startScrubberDrag(24, 320, 0, 120)
+    expect(start.timeAt(24)).toBe(0)
+    expect(start.timeAt(232)).toBe(120)
+    const end = startScrubberDrag(300, 320, 120, 120)
+    expect(end.timeAt(300)).toBe(120)
+    expect(end.timeAt(92)).toBe(0)
+    expect(startScrubberDrag(160, 320, 0, 120).timeAt(160)).toBe(60)
+    expect(startScrubberDrag(80, 160, 0, 120).timeAt(80)).toBe(60)
   })
 })

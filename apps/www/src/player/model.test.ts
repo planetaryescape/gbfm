@@ -19,6 +19,22 @@ describe('player submodel', () => {
     expect(result.commands?.map(({ name }) => name)).toEqual(['PlayerSeek'])
   })
 
+  it('previews a hill drag without seeking until release and discards cancelled previews', () => {
+    const preview = update(initialModel, Message.PreviewSeek({ seconds: 15 }))
+    expect(preview.commands ?? []).toEqual([])
+    expect(preview.model.snapshot).toBe(initialModel.snapshot)
+    expect(preview.model.seekPreview).toBe(15)
+    const committed = update(preview.model, Message.SeekTo({ seconds: 15 }))
+    expect(committed.model.seekPreview).toBeNull()
+    expect(committed.commands?.map(({ name, args }) => ({ name, args }))).toEqual([
+      { name: 'PlayerSeek', args: { seconds: 15 } },
+    ])
+    const cancelled = update(preview.model, Message.CancelSeek())
+    expect(cancelled.model.seekPreview).toBeNull()
+    expect(cancelled.commands ?? []).toEqual([])
+    expect(update(preview.model, Message.CloseFullscreen()).model.seekPreview).toBeNull()
+  })
+
   it('converts a drag/drop gesture to one reorder command', () => {
     const dragging = update(initialModel, Message.DragStarted({ index: 2 })).model
     const dropped = update(dragging, Message.DroppedAt({ index: 0 }))

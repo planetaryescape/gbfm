@@ -1,4 +1,4 @@
-import { scrubberCurve, scrubberProgress, scrubberTime } from '@gbfm/player'
+import { scrubberCurve, scrubberProgress, startScrubberDrag } from '@gbfm/player'
 import { useRef, useState } from 'react'
 import type { AccessibilityActionEvent, GestureResponderEvent } from 'react-native'
 import { Text, View } from 'react-native'
@@ -35,7 +35,14 @@ const AnimatedPath = createAnimatedComponent(Path)
 export function HillScrubber({ currentTime, duration, onSeek }: Props) {
   const colors = useThemeColors()
   const [preview, setPreview] = useState<number | null>(null)
-  const gesture = useRef({ width: 0, origin: 0, seconds: 0 })
+
+  const gesture = useRef<{
+    width: number
+    origin: number
+    seconds: number
+    drag: ReturnType<typeof startScrubberDrag> | null
+  }>({ width: 0, origin: 0, seconds: 0, drag: null })
+
   const pressed = useSharedValue(0)
   const reducedMotion = useReducedMotion()
   const enabled = Number.isFinite(duration) && duration > 0
@@ -43,25 +50,21 @@ export function HillScrubber({ currentTime, duration, onSeek }: Props) {
   const curve = scrubberCurve(scrubberProgress(position, duration))
 
   const motion = useAnimatedStyle(() => ({
-    transform: [{ translateY: -3 * pressed.get() }, { scaleY: 1 + 0.08 * pressed.get() }],
+    transform: [{ translateY: -pressed.get() }],
   }))
 
-  const thumbMotion = useAnimatedProps(() => ({ r: 6 + 3 * pressed.get() }))
-  const trackMotion = useAnimatedProps(() => ({ strokeWidth: 10 + 2 * pressed.get() }))
+  const thumbMotion = useAnimatedProps(() => ({ r: 6 + pressed.get() }))
+  const trackMotion = useAnimatedProps(() => ({ strokeWidth: 12 + pressed.get() }))
 
   const acknowledge = (value: number) => {
     pressed.set(reducedMotion ? value : withSpring(value, { damping: 18, stiffness: 260 }))
   }
 
   const move = (event: GestureResponderEvent) => {
-    const width = gesture.current.width
-    const inset = width * (12 / 320)
+    const drag = gesture.current.drag
 
-    const seconds = scrubberTime(
-      event.nativeEvent.pageX - gesture.current.origin - inset,
-      width - inset * 2,
-      duration,
-    )
+    if (!drag) return
+    const seconds = drag.timeAt(event.nativeEvent.pageX - gesture.current.origin)
 
     gesture.current.seconds = seconds
     setPreview(seconds)
@@ -69,6 +72,7 @@ export function HillScrubber({ currentTime, duration, onSeek }: Props) {
 
   const finish = () => {
     acknowledge(0)
+    gesture.current.drag = null
     setPreview(null)
   }
 
@@ -107,6 +111,12 @@ export function HillScrubber({ currentTime, duration, onSeek }: Props) {
         onResponderTerminationRequest={() => false}
         onResponderGrant={(event) => {
           gesture.current.origin = event.nativeEvent.pageX - event.nativeEvent.locationX
+          gesture.current.drag = startScrubberDrag(
+            event.nativeEvent.locationX,
+            gesture.current.width,
+            currentTime,
+            duration,
+          )
           void haptics.select()
           acknowledge(1)
           move(event)
@@ -135,14 +145,7 @@ export function HillScrubber({ currentTime, duration, onSeek }: Props) {
               stroke={colors.accent}
               strokeLinecap='round'
             />
-            <AnimatedCircle
-              animatedProps={thumbMotion}
-              cx={curve.x}
-              cy={22}
-              fill={colors.accent}
-              stroke={colors.background}
-              strokeWidth={3}
-            />
+            <AnimatedCircle animatedProps={thumbMotion} cx={curve.x} cy={44} fill={colors.accent} />
           </Svg>
         </Animated.View>
       </View>

@@ -2,7 +2,7 @@ import { scrubberCurve, scrubberProgress } from '@gbfm/player'
 import type { HtmlBuilder } from 'foldkit/html'
 
 import { Message } from './model'
-import { ScrubberPress } from './scrubber-press'
+import { ScrubberGesture } from './scrubber-gesture'
 
 export const hillScrubber = (
   h: HtmlBuilder<typeof Message.Type>,
@@ -20,7 +20,7 @@ export const hillScrubber = (
     [
       h.Class('hill-scrubber sm:hidden'),
       h.DataAttribute('disabled', String(!enabled)),
-      h.OnMount(ScrubberPress({})),
+      h.OnMount(ScrubberGesture({})),
     ],
     [
       h.svg(
@@ -33,7 +33,7 @@ export const hillScrubber = (
         [
           path(curve.track, 'hill-scrubber-track'),
           path(curve.played, 'hill-scrubber-played'),
-          h.circle([h.Cx(String(curve.x)), h.Cy('22'), h.R('6'), h.Class('hill-scrubber-thumb')]),
+          h.circle([h.Cx(String(curve.x)), h.Cy('44'), h.R('6'), h.Class('hill-scrubber-thumb')]),
         ],
       ),
       h.input([

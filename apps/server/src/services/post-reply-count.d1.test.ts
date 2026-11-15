@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop-effect/no-manual-tagged-construction -- Structural expectations describe decoded rich-content response values at the service boundary. */
 import { randomUUID } from 'node:crypto'
 
+import { eq } from 'drizzle-orm'
 import { Effect, Layer } from 'effect'
 import { beforeAll, describe, expect, test } from 'vitest'
 
@@ -331,7 +332,7 @@ describe('post hydration through the service interface', () => {
     })
   })
 
-  test('list and single reads retain labels, creators, attribution and inert rich content', async () => {
+  test('list and single reads retain imported content without source enrichment', async () => {
     const list = await runPostEffect((service) => service.getAll({ limit: 100, offset: 0 }))
     const single = await runPostEffect((service) => service.getBySlug(replySlug))
     const bySlug = await runPostEffect((service) => service.getMicroPostBySlug(replySlug))
@@ -353,9 +354,12 @@ describe('post hydration through the service interface', () => {
           },
         ],
       },
-      blueskySource: source,
     })
     expect(single.creators).toHaveLength(2)
+    expect(single).not.toHaveProperty('blueskySource')
+    expect(
+      await db.select().from(blueskyPostSources).where(eq(blueskyPostSources.postId, replyId)),
+    ).toMatchObject([{ ...source, postId: replyId }])
     expect(single.creators).toEqual(expect.arrayContaining([creator, coauthor]))
     expect(list.data.find((post) => post.id === emptyId)).toMatchObject({
       tags: null,

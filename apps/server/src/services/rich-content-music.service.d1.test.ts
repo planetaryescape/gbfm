@@ -5,16 +5,20 @@ import { eq } from 'drizzle-orm'
 import { Effect, Layer } from 'effect'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
 
+import { DatabaseLayer } from '@/db/layer'
 import {
+  musicAlbumsTable,
   musicEntityLinksTable,
   musicEntityTypesTable,
   musicPlatformsTable,
+  musicPlaylistsTable,
   musicSourceIdentitiesTable,
   musicTracksTable,
 } from '@/db/music-entity.schema'
 import { MdxService, MdxServiceCatalogLayer } from '@/lib/mdx'
-import { DatabaseTestLayer, db } from '@/test/database'
+import { DatabaseTestLayer, d1, db } from '@/test/database'
 import { withTestLayer } from '@/test/effect'
+import { observedD1 } from '@/test/observed-d1'
 
 import { RichContentMusicResolverLayer } from './rich-content-music.service'
 
@@ -74,7 +78,7 @@ afterAll(async () => {
   await db.delete(musicTracksTable).where(eq(musicTracksTable.id, entityId))
 })
 
-const render = (source: string) =>
+const render = (source: string, layer = MdxCatalogTestLayer) =>
   Effect.runPromise(
     withTestLayer(
       Effect.gen(function* () {
@@ -82,7 +86,7 @@ const render = (source: string) =>
 
         return yield* mdx.render(source)
       }),
-      MdxCatalogTestLayer,
+      layer,
     ),
   )
 
@@ -123,5 +127,107 @@ describe('catalog-backed rich content', () => {
         href: unknownUrl,
       },
     ])
+  })
+
+  test('album snapshots use one batch and preserve ordered tracks', async () => {
+    const albumId = randomUUID()
+    await db.insert(musicAlbumsTable).values({
+      id: albumId,
+      slug: `snapshot-${albumId}`,
+      title: 'Snapshot album',
+      artistNames: ['Album artist'],
+      coverImageUrl: 'https://example.com/album.png',
+    })
+    await db.insert(musicTracksTable).values([
+      { slug: `second-${albumId}`, title: 'Second', albumId, trackNumber: 2 },
+      { slug: `first-${albumId}`, title: 'First', albumId, trackNumber: 1, artistNames: ['Guest'] },
+    ])
+
+    const observed = observedD1(d1)
+
+    const layer = MdxServiceCatalogLayer.pipe(
+      Layer.provide(
+        RichContentMusicResolverLayer.pipe(Layer.provide(DatabaseLayer(observed.database))),
+      ),
+    )
+
+    const document = await render(`::album{id="${albumId}"}`, layer)
+    expect(document.blocks).toEqual([
+      {
+        _tag: 'MusicEmbed',
+        music: {
+          entityType: 'album',
+          entityId: albumId,
+          title: 'Snapshot album',
+          artists: ['Album artist'],
+          description: null,
+          imageUrl: 'https://example.com/album.png',
+          canonicalUrl: '/',
+          links: [],
+          tracks: [
+            { title: 'First', artists: ['Guest'], url: null },
+            { title: 'Second', artists: [], url: null },
+          ],
+        },
+        genres: [],
+        blurb: null,
+        showTracks: true,
+      },
+    ])
+    expect(observed.queries).toEqual(['batch'])
+
+    observed.reset()
+    const compact = await render(`::album{id="${albumId}" tracks="false"}`, layer)
+    expect(compact.blocks[0]).toMatchObject({
+      _tag: 'MusicEmbed',
+      music: { title: 'Snapshot album', tracks: [] },
+      showTracks: false,
+    })
+    expect(observed.queries).toEqual(['batch'])
+  })
+
+  test('playlist snapshots retain public visibility and unavailable-entity fallbacks', async () => {
+    const publishedId = randomUUID()
+    const draftId = randomUUID()
+    const futureId = randomUUID()
+    await db.insert(musicPlaylistsTable).values([
+      {
+        id: publishedId,
+        title: 'Public playlist',
+        description: 'Public description',
+        slug: `public-${publishedId}`,
+        publishedAt: new Date('2020-01-01'),
+      },
+      { id: draftId, title: 'Private playlist', slug: `draft-${draftId}` },
+      {
+        id: futureId,
+        title: 'Scheduled playlist',
+        slug: `future-${futureId}`,
+        publishedAt: new Date('2100-01-01'),
+      },
+    ])
+    const published = await render(`::playlist{id="${publishedId}" tracks="false"}`)
+    expect(published.blocks[0]).toMatchObject({
+      _tag: 'MusicEmbed',
+      music: { title: 'Public playlist', description: 'Public description', tracks: [] },
+    })
+
+    for (const [type, id] of [
+      ['playlist', draftId],
+      ['playlist', futureId],
+      ['playlist', randomUUID()],
+      ['album', randomUUID()],
+      ['track', randomUUID()],
+    ]) {
+      const document = await render(`::${type}{id="${id}"}`)
+      expect(document.blocks).toEqual([
+        {
+          _tag: 'UnavailableEmbed',
+          kind: 'music',
+          label: 'This music embed is unavailable.',
+          href: null,
+        },
+      ])
+    }
   })
 })

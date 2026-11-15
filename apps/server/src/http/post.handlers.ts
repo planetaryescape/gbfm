@@ -34,38 +34,14 @@ const toDateStrings = <
   T extends {
     createdAt: Date
     updatedAt: Date
-    blueskySource?: {
-      readonly authorDid: string
-      readonly authorHandle: string | null
-      readonly publicUrl: string
-      readonly sourceCreatedAt: Date | string
-      readonly sourceStatus: string
-      readonly locallyEdited: boolean
-      readonly lastError: string | null
-    }
   },
 >(
   post: T,
 ) => {
-  const { blueskySource, ...rest } = post
-
-  const response = {
-    ...rest,
+  return {
+    ...post,
     createdAt: post.createdAt.toISOString(),
     updatedAt: post.updatedAt.toISOString(),
-  }
-
-  if (!blueskySource) return response
-
-  return {
-    ...response,
-    blueskySource: {
-      ...blueskySource,
-      sourceCreatedAt:
-        blueskySource.sourceCreatedAt instanceof Date
-          ? blueskySource.sourceCreatedAt.toISOString()
-          : blueskySource.sourceCreatedAt,
-    },
   }
 }
 
@@ -104,7 +80,6 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
               limit: query.limit ?? 20,
               offset: query.offset ?? 0,
               type: query.type,
-              source: query.source,
               draft: query.status === undefined ? undefined : query.status === 'draft',
               q: query.q,
             }),

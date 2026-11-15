@@ -29,8 +29,7 @@ const dependencyGuard = (kind: typeof DeleteContentInput.Type.target.kind, id: s
       'post',
       'micro',
       () => sql`NOT EXISTS(SELECT 1 FROM posts p WHERE p.parent_post_id=${id} OR p.root_post_id=${id} OR p.quoted_post_id=${id})
-    AND NOT EXISTS(SELECT 1 FROM navigation_trail_entries n WHERE n.postId=${id})
-    AND NOT EXISTS(SELECT 1 FROM bluesky_post_sources b WHERE b.post_id=${id})`,
+    AND NOT EXISTS(SELECT 1 FROM navigation_trail_entries n WHERE n.postId=${id})`,
     ),
     Match.when(
       'mix',

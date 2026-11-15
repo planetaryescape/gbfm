@@ -655,7 +655,8 @@ test('default/max pages, max batch, invalid bounds and encoded response ceiling 
     slug: `bounded-${i}`,
   }))
 
-  for (const row of rows) await db.insert(musicArtistsTable).values(row)
+  for (let offset = 0; offset < rows.length; offset += 10)
+    await db.insert(musicArtistsTable).values(rows.slice(offset, offset + 10))
 
   try {
     const first = await completeSearch({ query: 'Boundary' })
@@ -708,8 +709,14 @@ test('default/max pages, max batch, invalid bounds and encoded response ceiling 
 test('the duplicated MCP text/structured result stays inside D5 and oversized results retain actionable guidance', async () => {
   const ids = Array.from({ length: 50 }, (_, i) => `wire-${i}`)
 
-  for (const id of ids)
-    await db.insert(musicArtistsTable).values({ id, name: `Wire ${'x'.repeat(2000)}`, slug: id })
+  for (let offset = 0; offset < ids.length; offset += 10)
+    await db
+      .insert(musicArtistsTable)
+      .values(
+        ids
+          .slice(offset, offset + 10)
+          .map((id) => ({ id, name: `Wire ${'x'.repeat(2000)}`, slug: id })),
+      )
 
   try {
     const below = await exchange('search_music', { query: 'Wire ', limit: 50 }, 'x'.repeat(15500))

@@ -2,7 +2,7 @@ import type { SpotifyEntityRef } from '@gbfm/spotify'
 import { Effect } from 'effect'
 
 import type { SpotifyConnectionLifecycle } from './connectionLifecycle'
-import { spotifyEntityOperation } from './entityOperation'
+import { spotifyEntityOperation, type SpotifyEntityAction } from './entityOperation'
 
 type EntityOperationOwner = { readonly sequence: number }
 
@@ -41,8 +41,8 @@ export const runSpotifyEntityAction = async (input: {
   readonly lifecycle: SpotifyConnectionLifecycle
   readonly generation: number
   readonly entity: SpotifyEntityRef
-  readonly action: 'play' | 'queue'
-  readonly setPending: (action: 'play' | 'queue' | null) => void
+  readonly action: SpotifyEntityAction
+  readonly setPending: (action: SpotifyEntityAction | null) => void
   readonly notice: (message: string) => void
   readonly open: () => void
 }) => {

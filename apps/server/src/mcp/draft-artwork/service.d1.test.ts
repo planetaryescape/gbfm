@@ -210,7 +210,7 @@ beforeEach(async () => {
       title: 'Disposable editorial',
       type: 'post' as const,
       draft: true,
-      content: '::layout{variant="spotlight"}\n\nOriginal prose.',
+      content: '::layout{name="spotlight"}\n\nOriginal prose.',
       createdAt: new Date(),
       updatedAt: new Date(),
     })),
@@ -262,7 +262,7 @@ describe('native draft artwork with migrated D1 and R2', () => {
     expect(concurrent).toEqual(saved)
     expect(saved.post.thumbnailUrl).toBe(cover.upload.publicUrl)
     expect(saved.post.content).toContain(
-      `::layout{variant="spotlight"}\n\n![Synthetic banner](${banner.upload.publicUrl})`,
+      `::layout{name="spotlight"}\n\n![Synthetic banner](${banner.upload.publicUrl})`,
     )
     expect(saved.post.content).toContain('Original prose.')
     expect(saved.post.draft).toBe(true)
@@ -519,8 +519,14 @@ describe('native draft artwork with migrated D1 and R2', () => {
   test.each([
     ['UTF8 byte limit', 'é'.repeat(51_190)],
     ['block limit', Array.from({ length: 2_000 }, () => 'Paragraph.').join('\n\n')],
+    ['misplaced canonical layout', 'Prose.\n\n::layout{name="spotlight"}'],
+    [
+      'repeated canonical layout',
+      '::layout{name="spotlight"}\n\nProse.\n\n::layout{name="spotlight"}',
+    ],
+    ['noncanonical layout attribute', '::layout{variant="spotlight"}\n\nProse.'],
   ])(
-    'rejects merged banner content beyond the %s before every coupled mutation',
+    'rejects invalid merged banner content (%s) before every coupled mutation',
     async (_label, content) => {
       await db.update(postsTable).set({ content }).where(eq(postsTable.id, postId))
       const prepared = await prepare(await input())

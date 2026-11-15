@@ -20,6 +20,8 @@ import { observedD1 } from '@/test/observed-d1'
 
 const bodyUrl = 'https://open.spotify.com/track/1234567890123456789012'
 
+const authoredBody = `Before the record.\n\n::track{url="${bodyUrl}" blurb="Authored listening note."}\n\nAfter the record.`
+
 const decodeScreen = Schema.decodeUnknownSync(MicroPostScreenResponse)
 
 const get = (handler: ReturnType<typeof createTestWebHandler>, slug: string, main = true) =>
@@ -102,7 +104,7 @@ beforeAll(async () => {
   const selected = { musicEntityType: 'album', musicEntityId: 'selected' }
 
   const posts = [
-    { id: 'flat', content: bodyUrl, ...selected },
+    { id: 'flat', content: authoredBody, ...selected },
     { id: 'same', content: '::album{id="selected"}', ...selected },
     { id: 'plain', content: 'Prose with a selected record.', ...selected },
     { id: 'body-only', content: bodyUrl },
@@ -185,17 +187,18 @@ test.each([
   'reply',
   'quoted',
 ])('main screen preserves the existing full-screen projection for %s', async (slug) => {
-  const handler = createTestWebHandler(d1)
+  const controlHandler = createTestWebHandler(d1)
+  const mainHandler = createTestWebHandler(d1)
 
   try {
-    const control = await get(handler, slug, false)
+    const control = await get(controlHandler, slug, false)
     expect(control.status).toBe(200)
     const expected = decodeScreen(await control.json())
-    const response = await get(handler, slug)
+    const response = await get(mainHandler, slug)
     expect(response.status).toBe(200)
     expect(decodeScreen(await response.json())).toEqual({ ...expected, replies: [] })
   } finally {
-    await handler.dispose()
+    await Promise.all([controlHandler.dispose(), mainHandler.dispose()])
   }
 })
 
@@ -237,7 +240,8 @@ test.each(['draft', 'editorial', 'absent'])(
 )
 
 test('selected music finishes while body hydration is paused, without sending an early response', async () => {
-  const body = gatedPostDatabase(d1, 'before', /from "music_source_aliases"/i)
+  const observed = observedD1(d1)
+  const body = gatedPostDatabase(observed.database, 'before', /from "music_source_aliases"/i)
   const music = gatedPostDatabase(body.database, 'after', /from "music_playlists"/i)
   const handler = createTestWebHandler(music.database)
   let responded = false
@@ -266,7 +270,17 @@ test('selected music finishes while body hydration is paused, without sending an
     body.release()
     const result = await response
     expect(result.status).toBe(200)
-    expect(decodeScreen(await result.json()).post.music?.entity.title).toBe('Selected album')
+    const screen = decodeScreen(await result.json())
+    expect(screen.post.music?.entity.title).toBe('Selected album')
+    const blocks = screen.post.richContent?.blocks
+    expect(blocks?.map((block) => block._tag)).toEqual(['Paragraph', 'MusicEmbed', 'Paragraph'])
+    expect(blocks?.[0]).toMatchObject({ children: [{ value: 'Before the record.' }] })
+    expect(blocks?.[1]).toMatchObject({
+      music: { entityId: 'body-track', title: 'Body track' },
+      blurb: 'Authored listening note.',
+    })
+    expect(blocks?.[2]).toMatchObject({ children: [{ value: 'After the record.' }] })
+    expect(observed.queries).toEqual(Array(4).fill('batch'))
     await handler.dispose()
   }
 })

@@ -1,4 +1,5 @@
 import { Match } from 'effect'
+import type { ReactNode } from 'react'
 import { Text, View } from 'react-native'
 
 import { useThemeColors } from '@/theme/colors'
@@ -60,12 +61,16 @@ export function InlineText({ inlines }: { readonly inlines: ReadonlyArray<Inline
   return keyedContent(inlines).map(({ item, key }) => <InlineNode key={key} inline={item} />)
 }
 
+const renderInlineText = (inlines: ReadonlyArray<Inline>) => <InlineText inlines={inlines} />
+
 export function TweetInlineContent({
   inlines,
   size,
+  renderText = renderInlineText,
 }: {
   readonly inlines: ReadonlyArray<Inline>
   readonly size: number
+  readonly renderText?: (inlines: ReadonlyArray<Inline>) => ReactNode
 }) {
   const colors = useThemeColors()
 
@@ -84,7 +89,7 @@ export function TweetInlineContent({
               fontSize: size,
               lineHeight: size * 1.45,
             }}>
-            <InlineText inlines={item.inlines} />
+            {renderText(item.inlines)}
           </Text>
         ),
       )}

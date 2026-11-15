@@ -5,12 +5,12 @@ import { useEffect, useState } from 'react'
 import { Text, View } from 'react-native'
 
 import { TweetBlocks } from '@/components/Tweets/TweetBlocks'
-import { InlineText } from '@/components/Tweets/TweetInline'
+import { InlineText, TweetInlineContent } from '@/components/Tweets/TweetInline'
 import { mentionSegments, musicMentions } from '@/editorial/musicMentions'
 import { useThemeColors } from '@/theme/colors'
-import { fonts } from '@/theme/fonts'
 import { keyedContent } from '@/tweets/tweetContent'
 
+import { SpotlightBlockFlow } from './SpotlightBlockFlow'
 import { SpotlightMusicCard } from './SpotlightMusicCard'
 import { SpotlightVideo } from './SpotlightVideo'
 
@@ -31,65 +31,10 @@ const musicIn = (blocks: ReadonlyArray<RichContentBlock>): ReadonlyArray<MusicEm
     return []
   })
 
-/** Consecutive records sit together in a grid, as on the web walk. */
-const groupRecords = (blocks: ReadonlyArray<RichContentBlock>) => {
-  const groups: Array<Array<RichContentBlock>> = []
-
-  for (const block of blocks) {
-    const previous = groups.at(-1)
-
-    if (
-      Predicate.isTagged(block, 'MusicEmbed') &&
-      previous?.[0] &&
-      Predicate.isTagged(previous[0], 'MusicEmbed')
-    )
-      previous.push(block)
-    else groups.push([block])
-  }
-
-  return groups
-}
-
-const pairs = <A,>(items: ReadonlyArray<A>) => {
-  const rows: Array<ReadonlyArray<A>> = []
-
-  for (let index = 0; index < items.length; index += 2) rows.push(items.slice(index, index + 2))
-
-  return rows
-}
-
 type Context = {
   readonly music: ReadonlyArray<MusicEmbed>
   readonly highlighted: number | null
   readonly onMention: (reference: number) => void
-}
-
-function RecordGrid({
-  cards,
-  context,
-}: {
-  readonly cards: ReadonlyArray<RichContentBlock>
-  readonly context: Context
-}) {
-  return (
-    <View style={{ gap: 12 }}>
-      {keyedContent(pairs(cards)).map(({ item: row, key }) => (
-        <View key={key} style={{ flexDirection: 'row', gap: 12 }}>
-          {keyedContent(row).map(({ item, key: cardKey }) =>
-            Predicate.isTagged(item, 'MusicEmbed') ? (
-              <SpotlightMusicCard
-                key={cardKey}
-                block={item}
-                compact
-                highlighted={context.highlighted === context.music.indexOf(item)}
-              />
-            ) : null,
-          )}
-          {row.length === 1 ? <View style={{ flex: 1 }} /> : null}
-        </View>
-      ))}
-    </View>
-  )
 }
 
 function MentionParagraph({
@@ -103,45 +48,44 @@ function MentionParagraph({
   const titles = context.music.map((item) => item.music.title)
 
   return (
-    <Text
-      selectable
-      style={{
-        color: colors.strong,
-        fontFamily: fonts.mono,
-        fontSize: TEXT_SIZE,
-        lineHeight: TEXT_SIZE * 1.45,
-      }}>
-      {keyedContent(block.children).map(({ item, key }) => {
-        if (!Predicate.isTagged(item, 'Text')) return <InlineText key={key} inlines={[item]} />
+    <TweetInlineContent
+      inlines={block.children}
+      size={TEXT_SIZE}
+      renderText={(inlines) =>
+        keyedContent(inlines).map(({ item, key }) => {
+          if (!Predicate.isTagged(item, 'Text')) return <InlineText key={key} inlines={[item]} />
 
-        const matches = musicMentions(item.value, titles)
+          const matches = musicMentions(item.value, titles)
 
-        if (matches.length === 0) return <Text key={key}>{item.value}</Text>
+          if (matches.length === 0) return <Text key={key}>{item.value}</Text>
 
-        return (
-          <Text key={key}>
-            {mentionSegments(item.value, matches).map((segment) =>
-              segment.reference === null ? (
-                <Text key={segment.start}>{segment.text}</Text>
-              ) : (
-                <Text
-                  key={segment.start}
-                  accessibilityRole='button'
-                  accessibilityHint='Highlights this record below'
-                  onPress={() => segment.reference !== null && context.onMention(segment.reference)}
-                  style={{
-                    textDecorationLine: 'underline',
-                    textDecorationColor: colors.accentSurface,
-                    textDecorationStyle: 'dotted',
-                  }}>
-                  {segment.text}
-                </Text>
-              ),
-            )}
-          </Text>
-        )
-      })}
-    </Text>
+          return (
+            <Text key={key}>
+              {mentionSegments(item.value, matches).map((segment) =>
+                segment.reference === null ? (
+                  <Text key={segment.start}>{segment.text}</Text>
+                ) : (
+                  <Text
+                    key={segment.start}
+                    accessibilityRole='button'
+                    accessibilityHint='Highlights this record below'
+                    onPress={() =>
+                      segment.reference !== null && context.onMention(segment.reference)
+                    }
+                    style={{
+                      textDecorationLine: 'underline',
+                      textDecorationColor: colors.accentSurface,
+                      textDecorationStyle: 'dotted',
+                    }}>
+                    {segment.text}
+                  </Text>
+                ),
+              )}
+            </Text>
+          )
+        })
+      }
+    />
   )
 }
 
@@ -160,8 +104,7 @@ function SpotlightBlock({
       />
     )
 
-  if (Predicate.isTagged(block, 'CardGroup'))
-    return <RecordGrid cards={block.children} context={context} />
+  if (Predicate.isTagged(block, 'CardGroup')) return <SpotlightBlocks blocks={block.children} />
 
   if (Predicate.isTagged(block, 'Paragraph') && context.music.length > 0)
     return <MentionParagraph block={block} context={context} />
@@ -169,7 +112,7 @@ function SpotlightBlock({
   if (Predicate.isTagged(block, 'ExternalMediaEmbed') && block.provider === 'youtube') {
     const id = youtubeVideoId(block.canonicalUrl)
 
-    if (id) return <SpotlightVideo id={id} title={block.title} />
+    if (id) return <SpotlightVideo id={id} title={block.title} canonicalUrl={block.canonicalUrl} />
   }
 
   return <TweetBlocks blocks={[block]} size={TEXT_SIZE} />
@@ -191,13 +134,23 @@ export function SpotlightBlocks({ blocks }: { readonly blocks: ReadonlyArray<Ric
 
   return (
     <View style={{ gap: 20 }}>
-      {keyedContent(groupRecords(blocks)).map(({ item: group, key }) =>
-        group.length > 1 ? (
-          <RecordGrid key={key} cards={group} context={context} />
-        ) : group[0] ? (
-          <SpotlightBlock key={key} block={group[0]} context={context} />
-        ) : null,
-      )}
+      <SpotlightBlockFlow
+        blocks={blocks}
+        renderMusic={(block, compact) => (
+          <SpotlightMusicCard
+            block={block}
+            compact={compact}
+            highlighted={highlighted === music.indexOf(block)}
+          />
+        )}
+        renderBlock={(block) => <SpotlightBlock block={block} context={context} />}
+        renderRow={(children, count) => (
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            {children}
+            {count === 1 ? <View style={{ flex: 1 }} /> : null}
+          </View>
+        )}
+      />
     </View>
   )
 }

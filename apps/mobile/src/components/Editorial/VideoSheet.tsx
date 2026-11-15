@@ -1,14 +1,13 @@
 import { radii } from '@gbfm/theme'
-import { Linking, Modal, Pressable, Text, View } from 'react-native'
+import { Modal, Pressable, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
 
+import { useTweetLink } from '@/components/Tweets/TweetLink'
+import { PLAYER_ORIGIN, videoNavigationAllowed, videoWatchUrl } from '@/editorial/videoNavigation'
 import { Glyph } from '@/icons/Glyph'
 import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
-
-/** YouTube refuses embeds without a referring page, so the iframe is served from the site's origin. */
-const PLAYER_ORIGIN = 'https://goosebumps.fm'
 
 const playerHtml = (id: string) => `<!doctype html>
 <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -21,12 +20,14 @@ allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscree
 type Props = {
   readonly id: string
   readonly title: string
+  readonly canonicalUrl: string
   readonly visible: boolean
   readonly onClose: () => void
 }
 
-export function VideoSheet({ id, title, visible, onClose }: Props) {
+export function VideoSheet({ id, title, canonicalUrl, visible, onClose }: Props) {
   const colors = useThemeColors()
+  const watch = useTweetLink(videoWatchUrl(canonicalUrl, id))
 
   return (
     <Modal
@@ -72,18 +73,25 @@ export function VideoSheet({ id, title, visible, onClose }: Props) {
               allowsFullscreenVideo
               mediaPlaybackRequiresUserAction={false}
               javaScriptEnabled
+              onShouldStartLoadWithRequest={(request) => videoNavigationAllowed(request.url, id)}
+              onOpenWindow={() => {}}
               style={{ backgroundColor: '#000' }}
             />
           ) : null}
         </View>
         <Pressable
           accessibilityRole='link'
-          onPress={() => void Linking.openURL(`https://www.youtube.com/watch?v=${id}`)}
+          onPress={() => {
+            void watch.open()
+          }}
           style={{ padding: 16 }}>
           <Text style={{ color: colors.muted, fontFamily: fonts.monoSemiBold, fontSize: 13 }}>
             Watch on YouTube ↗
           </Text>
         </Pressable>
+        {watch.failed ? (
+          <Text accessibilityRole='alert'>Could not open YouTube. Tap to retry.</Text>
+        ) : null}
       </SafeAreaView>
     </Modal>
   )

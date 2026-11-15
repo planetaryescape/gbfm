@@ -9,13 +9,16 @@ import {
   type SpotlightChapter,
   type SpotlightStep as Step,
 } from '@gbfm/rich-content/spotlight'
+import { useFocusEffect } from 'expo-router'
 import { type ComponentRef, useMemo, useRef, useState } from 'react'
-import { ScrollView, Text, View } from 'react-native'
+import { AccessibilityInfo, Platform, ScrollView, Text, View } from 'react-native'
 import Animated, { FadeIn, FadeInLeft, FadeInRight } from 'react-native-reanimated'
 
+import { useReaderReducedMotion } from '@/components/Tweets/useReaderMotion'
 import { stepTo } from '@/editorial/progressState'
 import { readSpotlightProgress, saveSpotlightProgress } from '@/editorial/spotlightProgress'
 import { useEditorial } from '@/editorial/useEditorial'
+import { useStepAnnouncement } from '@/editorial/useStepAnnouncement'
 import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 
@@ -27,6 +30,10 @@ import { SpotlightStep } from './SpotlightStep'
 type Direction = 'none' | 'forward' | 'backward'
 
 const contentStyle = { padding: 16, paddingBottom: 48 }
+
+const announceStep = (label: string) => {
+  if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(label)
+}
 
 const entering = (direction: Direction) => {
   if (direction === 'forward') return FadeInRight.duration(220)
@@ -40,10 +47,22 @@ const stepLabel = (step: Step | undefined, chapters: ReadonlyArray<SpotlightChap
   if (step?.kind === 'moment') {
     const chapter = chapters[step.chapter]
 
-    return `${chapter ? headingText(chapter.heading) : ''} · ${step.position + 1} / ${chapter?.moments.length ?? 0}`
+    return {
+      heading: chapter ? headingText(chapter.heading) : '',
+      position: `${step.position + 1} / ${chapter?.moments.length ?? 0}`,
+      announcement: `${chapter ? headingText(chapter.heading) : ''}, entry ${step.position + 1} of ${chapter?.moments.length ?? 0}: ${headingText(step.value.heading)}`,
+    }
   }
 
-  return step?.kind === 'chapter' ? `Chapter ${step.chapter + 1} / ${chapters.length}` : ''
+  if (step?.kind === 'chapter')
+    return {
+      heading: headingText(step.value.heading),
+      position: `Chapter ${step.chapter + 1} / ${chapters.length}`,
+      announcement: `Chapter ${step.chapter + 1} of ${chapters.length}: ${headingText(step.value.heading)}`,
+    }
+  const heading = step?.kind === 'end' ? 'End of article' : 'Introduction'
+
+  return { heading, position: '', announcement: heading }
 }
 
 function Title({ children }: { readonly children: string }) {
@@ -80,12 +99,20 @@ function Walk({
   const current = stepAt(steps, progress.at)
   const step = steps[current]
   const next = steps[current + 1]
+  const label = stepLabel(step, structure.chapters)
+  const reduced = useReaderReducedMotion()
+  useFocusEffect(useStepAnnouncement(label.announcement, announceStep))
 
   const goTo = (at: string | null) => {
     const index = stepAt(steps, at)
-    const updated = stepTo(progress, at)
+    const updated = stepTo(at)
 
-    setDirection(index > current ? 'forward' : index < current ? 'backward' : 'none')
+    let direction: Direction = 'none'
+
+    if (index > current) direction = 'forward'
+
+    if (index < current) direction = 'backward'
+    setDirection(direction)
     setProgress(updated)
     saveSpotlightProgress(slug, updated)
     scroll.current?.scrollTo({ y: 0, animated: false })
@@ -100,7 +127,9 @@ function Walk({
   return (
     <View style={{ flex: 1 }}>
       <SpotlightHeader
-        label={stepLabel(step, structure.chapters)}
+        label={label.heading}
+        position={label.position}
+        announcement={label.announcement}
         canGoBack={current > 0}
         nextTitle={next ? stepTitle(next, structure.chapters) : null}
         onBack={() => go(current - 1)}
@@ -109,7 +138,7 @@ function Walk({
       <ScrollView ref={scroll} contentContainerStyle={contentStyle}>
         {current === 0 ? <Title>{title}</Title> : null}
         {step ? (
-          <Animated.View key={current} entering={entering(direction)}>
+          <Animated.View key={current} {...(reduced ? {} : { entering: entering(direction) })}>
             <SpotlightStep
               step={step}
               onStart={() => go(current === steps.length - 1 ? 0 : 1)}

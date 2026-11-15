@@ -7,6 +7,8 @@ import { fonts } from '@/theme/fonts'
 
 type Props = {
   readonly label: string
+  readonly position: string
+  readonly announcement: string
   readonly canGoBack: boolean
   readonly nextTitle: string | null
   readonly onBack: () => void
@@ -47,7 +49,15 @@ function StepButton({
   )
 }
 
-export function SpotlightHeader({ label, canGoBack, nextTitle, onBack, onNext }: Props) {
+export function SpotlightHeader({
+  label,
+  position,
+  announcement,
+  canGoBack,
+  nextTitle,
+  onBack,
+  onNext,
+}: Props) {
   const colors = useThemeColors()
 
   return (
@@ -62,6 +72,34 @@ export function SpotlightHeader({ label, canGoBack, nextTitle, onBack, onNext }:
         borderColor: `${colors.muted}26`,
         backgroundColor: colors.background,
       }}>
+      <View
+        accessible
+        accessibilityLabel={announcement}
+        accessibilityLiveRegion='polite'
+        style={{
+          flex: 1,
+          marginLeft: 6,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+        <Text
+          numberOfLines={1}
+          style={{
+            flex: 1,
+            color: colors.muted,
+            fontFamily: fonts.mono,
+            fontSize: 12,
+          }}>
+          {label}
+        </Text>
+        {position ? (
+          <Text
+            style={{ flexShrink: 0, color: colors.muted, fontFamily: fonts.mono, fontSize: 12 }}>
+            {position}
+          </Text>
+        ) : null}
+      </View>
       <StepButton
         glyph='chevronLeft'
         label='Previous entry'
@@ -74,17 +112,6 @@ export function SpotlightHeader({ label, canGoBack, nextTitle, onBack, onNext }:
         disabled={nextTitle === null}
         onPress={onNext}
       />
-      <Text
-        numberOfLines={1}
-        style={{
-          flex: 1,
-          marginLeft: 6,
-          color: colors.muted,
-          fontFamily: fonts.mono,
-          fontSize: 12,
-        }}>
-        {label}
-      </Text>
     </View>
   )
 }

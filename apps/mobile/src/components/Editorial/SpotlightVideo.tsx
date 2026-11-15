@@ -1,7 +1,8 @@
 import { radii } from '@gbfm/theme'
-import { useState } from 'react'
 import { ImageBackground, Pressable, Text, View } from 'react-native'
 
+import { useNowPlaying } from '@/audio/NowPlayingProvider'
+import { useVideoSession } from '@/editorial/useVideoSession'
 import { Glyph } from '@/icons/Glyph'
 import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
@@ -11,18 +12,20 @@ import { VideoSheet } from './VideoSheet'
 type Props = {
   readonly id: string
   readonly title: string
+  readonly canonicalUrl: string
 }
 
-export function SpotlightVideo({ id, title }: Props) {
+export function SpotlightVideo({ id, title, canonicalUrl }: Props) {
   const colors = useThemeColors()
-  const [open, setOpen] = useState(false)
+  const { pauseForExternalAudio } = useNowPlaying()
+  const session = useVideoSession(pauseForExternalAudio)
 
   return (
     <>
       <Pressable
         accessibilityRole='button'
         accessibilityLabel={`Play video: ${title}`}
-        onPress={() => setOpen(true)}
+        onPress={() => void session.open()}
         style={{
           overflow: 'hidden',
           borderWidth: 1,
@@ -62,7 +65,16 @@ export function SpotlightVideo({ id, title }: Props) {
           </View>
         </ImageBackground>
       </Pressable>
-      <VideoSheet id={id} title={title} visible={open} onClose={() => setOpen(false)} />
+      {session.failed ? (
+        <Text accessibilityLiveRegion='polite'>Could not pause audio. Tap to retry.</Text>
+      ) : null}
+      <VideoSheet
+        id={id}
+        title={title}
+        canonicalUrl={canonicalUrl}
+        visible={session.visible}
+        onClose={session.close}
+      />
     </>
   )
 }

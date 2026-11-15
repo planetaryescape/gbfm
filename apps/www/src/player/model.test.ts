@@ -1,6 +1,25 @@
+import type { QueueTrackType } from '@gbfm/player'
 import { describe, expect, it } from 'vitest'
 
 import { initialModel, Message, update } from './model'
+
+const track: QueueTrackType = {
+  id: 'scrubber-track',
+  title: 'Scrubber fixture',
+  slug: 'scrubber-fixture',
+  url: '/scrubber.wav',
+  type: 'mix',
+  thumbnailUrl: null,
+}
+
+const playingModel = {
+  ...initialModel,
+  snapshot: {
+    ...initialModel.snapshot,
+    queue: { tracks: [track], currentIndex: 0, current: track },
+    transport: { ...initialModel.snapshot.transport, currentTime: 60, duration: 7200 },
+  },
+}
 
 describe('player submodel', () => {
   it('models queue and fullscreen visibility independently', () => {
@@ -20,19 +39,106 @@ describe('player submodel', () => {
   })
 
   it('previews a hill drag without seeking until release and discards cancelled previews', () => {
-    const preview = update(initialModel, Message.PreviewSeek({ seconds: 15 }))
+    const preview = update(
+      playingModel,
+      Message.PreviewSeek({
+        trackId: track.id,
+        seconds: 15,
+        fine: true,
+        referenceSeconds: 60,
+        pointerRatio: 0.5,
+      }),
+    )
+
     expect(preview.commands ?? []).toEqual([])
-    expect(preview.model.snapshot).toBe(initialModel.snapshot)
-    expect(preview.model.seekPreview).toBe(15)
-    const committed = update(preview.model, Message.SeekTo({ seconds: 15 }))
+    expect(preview.model.snapshot).toBe(playingModel.snapshot)
+    expect(preview.model.seekPreview).toEqual({
+      seconds: 15,
+      fine: true,
+      referenceSeconds: 60,
+      pointerRatio: 0.5,
+    })
+    const committed = update(preview.model, Message.CommitSeek({ trackId: track.id, seconds: 15 }))
     expect(committed.model.seekPreview).toBeNull()
     expect(committed.commands?.map(({ name, args }) => ({ name, args }))).toEqual([
       { name: 'PlayerSeek', args: { seconds: 15 } },
     ])
-    const cancelled = update(preview.model, Message.CancelSeek())
+    const cancelled = update(preview.model, Message.CancelSeek({ trackId: track.id }))
     expect(cancelled.model.seekPreview).toBeNull()
     expect(cancelled.commands ?? []).toEqual([])
     expect(update(preview.model, Message.CloseFullscreen()).model.seekPreview).toBeNull()
+  })
+
+  it('keeps a fine preview across playback ticks and ignores stale track gestures', () => {
+    const preview = update(
+      playingModel,
+      Message.PreviewSeek({
+        trackId: track.id,
+        seconds: 75,
+        fine: true,
+        referenceSeconds: 60,
+        pointerRatio: 0.75,
+      }),
+    ).model
+
+    const ticked = update(
+      preview,
+      Message.SnapshotChanged({
+        snapshot: {
+          ...preview.snapshot,
+          transport: { ...preview.snapshot.transport, currentTime: 63 },
+        },
+      }),
+    ).model
+
+    expect(ticked.seekPreview).toEqual({
+      seconds: 75,
+      fine: true,
+      referenceSeconds: 60,
+      pointerRatio: 0.75,
+    })
+    const nextTrack = { ...track, id: 'next-track' }
+
+    const changed = update(
+      ticked,
+      Message.SnapshotChanged({
+        snapshot: {
+          ...ticked.snapshot,
+          queue: { tracks: [nextTrack], currentIndex: 0, current: nextTrack },
+        },
+      }),
+    ).model
+
+    expect(changed.seekPreview).toBeNull()
+    expect(update(changed, Message.CommitSeek({ trackId: track.id, seconds: 75 }))).toEqual({
+      model: changed,
+    })
+    expect(
+      update(
+        changed,
+        Message.PreviewSeek({
+          trackId: track.id,
+          seconds: 75,
+          fine: true,
+          referenceSeconds: 60,
+          pointerRatio: 0.75,
+        }),
+      ),
+    ).toEqual({ model: changed })
+
+    const fresh = update(
+      changed,
+      Message.PreviewSeek({
+        trackId: nextTrack.id,
+        seconds: 10,
+        fine: false,
+        referenceSeconds: 63,
+        pointerRatio: 0.25,
+      }),
+    ).model
+
+    expect(update(fresh, Message.CancelSeek({ trackId: track.id })).model).toBe(fresh)
+    expect(update(fresh, Message.SeekTo({ seconds: 11 })).model.seekPreview).toBeNull()
   })
 
   it('converts a drag/drop gesture to one reorder command', () => {

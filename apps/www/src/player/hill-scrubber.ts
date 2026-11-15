@@ -1,13 +1,27 @@
-import { scrubberCurve, scrubberProgress } from '@gbfm/player'
+import {
+  formatScrubberDelta,
+  formatScrubberTime,
+  scrubberCurve,
+  scrubberProgress,
+} from '@gbfm/player'
 import type { HtmlBuilder } from 'foldkit/html'
 
-import { Message } from './model'
+import { Message, type SeekPreview } from './model'
 import { ScrubberGesture } from './scrubber-gesture'
 
 export const hillScrubber = (
   h: HtmlBuilder<typeof Message.Type>,
-  currentTime: number,
-  duration: number,
+  {
+    currentTime,
+    duration,
+    trackId,
+    preview,
+  }: {
+    readonly currentTime: number
+    readonly duration: number
+    readonly trackId: string
+    readonly preview: SeekPreview | null
+  },
 ) => {
   const enabled = Number.isFinite(duration) && duration > 0
   const position = scrubberProgress(currentTime, duration)
@@ -19,10 +33,31 @@ export const hillScrubber = (
   return h.div(
     [
       h.Class('hill-scrubber sm:hidden'),
+      h.Key(trackId),
       h.DataAttribute('disabled', String(!enabled)),
-      h.OnMount(ScrubberGesture({})),
+      h.Style({ '--scrub-x': `${(preview?.pointerRatio ?? curve.x / 320) * 100}%` }),
+      h.OnMount(ScrubberGesture({ trackId })),
     ],
     [
+      preview
+        ? h.div(
+            [h.Class('hill-scrubber-preview'), h.AriaHidden(true)],
+            [
+              h.span(
+                [h.Class('hill-scrubber-preview-time')],
+                [formatScrubberTime(preview.seconds, duration)],
+              ),
+              h.span(
+                [h.Class('hill-scrubber-preview-delta')],
+                [formatScrubberDelta(preview.seconds, preview.referenceSeconds, duration)],
+              ),
+              h.span(
+                [h.Class('hill-scrubber-preview-mode')],
+                [preview.fine ? 'Fine seeking' : 'Hold to fine-seek'],
+              ),
+            ],
+          )
+        : h.empty,
       h.svg(
         [
           h.Class('hill-scrubber-art'),
@@ -45,6 +80,9 @@ export const hillScrubber = (
         h.Disabled(!enabled),
         h.OnInput((value) => Message.SeekTo({ seconds: Number(value) })),
         h.AriaLabel('Playback position'),
+        h.AriaValuetext(
+          `${formatScrubberTime(currentTime, duration)} of ${formatScrubberTime(duration, duration)}`,
+        ),
         h.Class('hill-scrubber-input'),
       ]),
     ],

@@ -211,7 +211,7 @@ const utilityRow = (model: Model, h: H) => {
 
 const fullscreen = (model: Model, h: H, current: QueueTrackType, inputs: ViewInputs) => {
   const playback = model.snapshot.transport
-  const currentTime = model.seekPreview ?? playback.currentTime
+  const currentTime = model.seekPreview?.seconds ?? playback.currentTime
 
   return h.section(
     [
@@ -276,7 +276,12 @@ const fullscreen = (model: Model, h: H, current: QueueTrackType, inputs: ViewInp
               h.div(
                 [h.Class('mb-4 shrink-0 sm:mb-8')],
                 [
-                  hillScrubber(h, currentTime, playback.duration),
+                  hillScrubber(h, {
+                    currentTime,
+                    duration: playback.duration,
+                    trackId: current.id,
+                    preview: model.seekPreview,
+                  }),
                   h.input([
                     h.Type('range'),
                     h.Min('0'),

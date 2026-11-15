@@ -28,6 +28,15 @@ const Volume = Schema.Struct({ volume: Schema.Number, isMuted: Schema.Boolean })
 
 export const Snapshot = Schema.Struct({ queue: QueueView, transport: Transport, volume: Volume })
 
+export const SeekPreview = Schema.Struct({
+  seconds: Schema.Number,
+  fine: Schema.Boolean,
+  referenceSeconds: Schema.Number,
+  pointerRatio: Schema.Number,
+})
+
+export type SeekPreview = typeof SeekPreview.Type
+
 export const Model = Schema.Struct({
   snapshot: Snapshot,
   queueDialog: Dialog.Model,
@@ -35,7 +44,7 @@ export const Model = Schema.Struct({
   draggedIndex: Schema.NullOr(Schema.Number),
   playerDrag: SheetDrag,
   playerOffset: Schema.Number,
-  seekPreview: Schema.NullOr(Schema.Number),
+  seekPreview: Schema.NullOr(SeekPreview),
   hasHadTrack: Schema.Boolean,
   favorite: Favorite.Model,
 })
@@ -71,8 +80,15 @@ export const Message = defineMessageUnion({
   SnapshotChanged: { snapshot: Snapshot },
   TogglePlayPause: {},
   SeekTo: { seconds: Schema.Number },
-  PreviewSeek: { seconds: Schema.Number },
-  CancelSeek: {},
+  PreviewSeek: {
+    trackId: Schema.String,
+    seconds: Schema.Number,
+    fine: Schema.Boolean,
+    referenceSeconds: Schema.Number,
+    pointerRatio: Schema.Number,
+  },
+  CommitSeek: { trackId: Schema.String, seconds: Schema.Number },
+  CancelSeek: { trackId: Schema.String },
   Jump: { seconds: Schema.Number },
   SetVolume: { volume: Schema.Number },
   ToggleMute: {},
@@ -278,10 +294,18 @@ export const update = (
       model: model.seekPreview === null ? model : { ...model, seekPreview: null },
       commands: [Seek({ seconds })],
     }),
-    PreviewSeek: ({ seconds }) => ({ model: { ...model, seekPreview: seconds } }),
-    CancelSeek: () => ({
-      model: model.seekPreview === null ? model : { ...model, seekPreview: null },
-    }),
+    PreviewSeek: ({ trackId, seconds, fine, referenceSeconds, pointerRatio }) =>
+      model.snapshot.queue.current?.id === trackId
+        ? { model: { ...model, seekPreview: { seconds, fine, referenceSeconds, pointerRatio } } }
+        : { model },
+    CommitSeek: ({ trackId, seconds }) =>
+      model.snapshot.queue.current?.id === trackId
+        ? { model: { ...model, seekPreview: null }, commands: [Seek({ seconds })] }
+        : { model },
+    CancelSeek: ({ trackId }) =>
+      model.snapshot.queue.current?.id === trackId && model.seekPreview !== null
+        ? { model: { ...model, seekPreview: null } }
+        : { model },
     Jump: ({ seconds }) => ({ model, commands: [Jump({ seconds })] }),
     SetVolume: ({ volume }) => ({ model, commands: [SetVolume({ volume })] }),
     ToggleMute: () => ({ model, commands: [ToggleMute()] }),

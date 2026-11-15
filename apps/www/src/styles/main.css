@@ -3171,6 +3171,42 @@
   opacity: 0.4;
 }
 
+.hill-scrubber-preview {
+  position: absolute;
+  z-index: 3;
+  bottom: calc(100% + 16px);
+  left: clamp(min(50%, 5.5rem), var(--scrub-x), max(50%, calc(100% - 5.5rem)));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: min(11rem, 100%);
+  padding: 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--foreground);
+  background: var(--background);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.2);
+  pointer-events: none;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.hill-scrubber-preview-time {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.hill-scrubber-preview-delta,
+.hill-scrubber-preview-mode {
+  font-size: 11px;
+}
+
+.hill-scrubber-preview-mode {
+  color: var(--primary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hill-scrubber-art,
   .hill-scrubber-thumb,

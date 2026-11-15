@@ -82,6 +82,7 @@ import {
   type MediaActor,
   type MediaPublication,
 } from '@/services/media-publication'
+import { getMicroPostMetadataBySlug, type MicroPostMetadata } from '@/services/micro-post-metadata'
 import { publicPlaylistPredicate } from '@/services/music-entity/playlist.service'
 import { getPublicMicroThreadEffect, type PublicMicroThread } from '@/services/public-micro-thread'
 import { SentryService } from '@/services/sentry.service'
@@ -214,6 +215,9 @@ export interface PostService {
   readonly getMicroPostBySlug: (
     slug: string,
   ) => Effect.Effect<SelectMdxCompiledMicroPost, DatabaseError | NotFoundError>
+  readonly getMicroPostMetadataBySlug: (
+    slug: string,
+  ) => Effect.Effect<MicroPostMetadata, DatabaseError | NotFoundError>
   readonly getTweetCardInput: (
     post: TweetCardPost,
   ) => Effect.Effect<TweetCardPresentationInput, DatabaseError>
@@ -1699,30 +1703,7 @@ type TweetCardPost = Pick<
 const getTweetCardInputEffect = (post: TweetCardPost) =>
   Effect.gen(function* () {
     const creator = post.creators?.[0]
-    const db = yield* Database
-
-    const [entity, avatarRows] = yield* Effect.all(
-      [
-        getTweetCardEntity(post.musicEntityType, post.musicEntityId),
-        creator
-          ? Effect.tryPromise({
-              try: () =>
-                db
-                  .select({ image: usersTable.image })
-                  .from(usersTable)
-                  .where(eq(usersTable.id, creator.id))
-                  .limit(1),
-              catch: (error) =>
-                new DatabaseError({
-                  message: `Failed to fetch tweet creator avatar: ${getErrorMessage(error)}`,
-                  operation: 'select',
-                  table: 'user',
-                }),
-            })
-          : Effect.succeed([]),
-      ],
-      { concurrency: 'unbounded' },
-    )
+    const entity = yield* getTweetCardEntity(post.musicEntityType, post.musicEntityId)
 
     return {
       slug: post.slug,
@@ -1732,7 +1713,7 @@ const getTweetCardInputEffect = (post: TweetCardPost) =>
         ? {
             name: creator.name,
             username: creator.username,
-            avatarUrl: avatarRows[0]?.image ?? null,
+            avatarUrl: creator.image,
           }
         : null,
       entity,
@@ -2754,6 +2735,7 @@ export const PostServiceLayer = Layer.effect(
       getMicroPosts: (opts) => provideDb(getMicroPostsEffect(opts, mdx)),
       getLatestMicroPost: provideDb(getLatestMicroPostEffect),
       getMicroPostBySlug: (slug) => provideDb(getMicroPostBySlugEffect(slug, mdx)),
+      getMicroPostMetadataBySlug: (slug) => provideDb(getMicroPostMetadataBySlug(slug)),
       getTweetCardInput: (post) => provideDb(getTweetCardInputEffect(post)),
       getMicroPostReferenceBySlug: (slug) => provideDb(getMicroPostReferenceBySlugEffect(slug)),
       getMicroPostById: (id) => provideDb(getMicroPostByIdEffect(id, mdx)),

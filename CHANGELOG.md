@@ -1,3 +1,15 @@
+## [2.132.5](https://github.com/planetaryescape/gbfm/compare/v2.132.4...v2.132.5) (2026-11-15)
+
+
+### Bug Fixes
+
+* **observability:** enable API Sentry for the prod stage ([#622](https://github.com/planetaryescape/gbfm/issues/622)) ([a4a6763](https://github.com/planetaryescape/gbfm/commit/a4a6763e9fe6c9385e9ac35ddfddd396f41d8d88))
+
+
+### Performance Improvements
+
+* **editorial:** avoid rendering metadata and overlap relation reads ([#623](https://github.com/planetaryescape/gbfm/issues/623)) ([ded8432](https://github.com/planetaryescape/gbfm/commit/ded84322f283f9a48f2ac73000a69f0b80603fc4))
+
 ## [2.132.4](https://github.com/planetaryescape/gbfm/compare/v2.132.3...v2.132.4) (2026-11-12)
 
 

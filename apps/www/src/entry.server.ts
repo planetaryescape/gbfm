@@ -3,6 +3,7 @@ import { resolveRequestId } from '@gbfm/core/observability/request-id'
 import { Effect, Predicate } from 'effect'
 import * as Server from 'foldkit/experimental/server'
 
+import { logServerRequest } from './observability/server'
 import { apiRequest, endpointFor } from './server/api'
 import { renderResponse } from './server/request-dispatch'
 import { routeTemplate } from './telemetry/privacy'
@@ -10,6 +11,8 @@ import { routeTemplate } from './telemetry/privacy'
 export { apiRequest, endpointFor }
 
 export { renderDocument } from './server/document'
+
+export { instrumentWorker } from './observability/server'
 
 /** One request-owned correlation ID covers SSR, actions, redirects, and API forwarding. Logs exclude raw URLs and payloads. */
 export const renderPage = async (request: Request): Promise<Server.EntryResult> => {
@@ -47,6 +50,11 @@ export const renderPage = async (request: Request): Promise<Server.EntryResult> 
     )
 
     headers.set('x-request-id', requestId)
+    logServerRequest({
+      ...attributes,
+      status,
+      durationMs: Math.round(performance.now() - startedAt),
+    })
     await Effect.runPromise(
       Effect.logInfo({
         ...attributes,
@@ -77,6 +85,11 @@ export const renderPage = async (request: Request): Promise<Server.EntryResult> 
         )
   } catch (cause) {
     if (request.signal.aborted) throw cause
+    logServerRequest({
+      ...attributes,
+      status: 500,
+      durationMs: Math.round(performance.now() - startedAt),
+    })
     await Effect.runPromise(
       Effect.logError({
         ...attributes,

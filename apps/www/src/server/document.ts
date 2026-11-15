@@ -1,6 +1,7 @@
 import { dark, light } from '@gbfm/theme'
 import * as Server from 'foldkit/experimental/server'
 
+import { serverTraceMeta } from '../observability/server'
 import { fallbackArtwork } from '../view/artwork'
 
 // Foldkit passes the same application object from Rendered to renderDocument.
@@ -55,7 +56,7 @@ ${import.meta.env.DEV ? '<link rel="stylesheet" href="/src/styles/main.css">' : 
 /** Renders the shell and request head with the host's resolved browser assets. */
 export const renderDocument: Server.DocumentRenderer = (application, assets) =>
   Server.renderDocument(application, assets, {
-    head: shellHead + (pageHeads.get(application) ?? ''),
+    head: shellHead + serverTraceMeta() + (pageHeads.get(application) ?? ''),
   }).replace(
     // Foldkit 0.167 has no viewport option. Replace its default, never add a duplicate.
     '<meta name="viewport" content="width=device-width, initial-scale=1.0">',

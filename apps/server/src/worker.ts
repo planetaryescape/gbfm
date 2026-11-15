@@ -47,6 +47,7 @@ import {
   WorkerTracingLive,
 } from '@/runtime/sentry-worker'
 import { AppLayer } from '@/runtime/services'
+import { normalizeWorkerTraceContext, requestWithinServerSpan } from '@/runtime/trace-context'
 import { dispatchScheduledJob } from '@/scheduled'
 import {
   AdminTelemetryServiceLive,
@@ -364,14 +365,14 @@ const processPlaylistEnrichmentMessage = (env: ApiEnv, payload: PlaylistEnrichme
 
 type ApiQueueJob = ReminderJob | PlaylistEnrichmentJob
 
-export default Sentry.withSentry<ApiEnv, ApiQueueJob>(sentryOptions, {
+const instrumentedWorker = Sentry.withSentry<ApiEnv, ApiQueueJob>(sentryOptions, {
   async fetch(request: Request, env: ApiEnv, ctx: ExecutionContext): Promise<Response> {
     return ctx.tracing.enterSpan('gbfm.api.request', async (span): Promise<Response> => {
       const incomingRequestId = request.headers.get('x-request-id')
       const requestId = resolveRequestId(incomingRequestId)
       const headers = new Headers(request.headers)
       headers.set('x-request-id', requestId)
-      const correlatedRequest = new Request(request, { headers })
+      const correlatedRequest = requestWithinServerSpan(request, headers)
 
       span.setAttribute('http.request.method', correlatedRequest.method)
       span.setAttribute('gbfm.request_id', requestId)
@@ -447,3 +448,5 @@ export default Sentry.withSentry<ApiEnv, ApiQueueJob>(sentryOptions, {
     }
   },
 })
+
+export default normalizeWorkerTraceContext(instrumentedWorker)

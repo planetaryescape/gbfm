@@ -145,7 +145,31 @@ document.getElementById('playback')?.addEventListener('click', async () => {
   }
 })
 
-for (const id of ['run', 'reader', 'playback']) {
+document.getElementById('propagation')?.addEventListener('click', async () => {
+  const result = document.getElementById('result')
+  const runtime = ManagedRuntime.make(webObservabilityLayer)
+  try {
+    await runtime.runPromise(
+      observeJourney(
+        'navigation',
+        Effect.tryPromise(async () => {
+          const first = await fetch(
+            '/api/observability-smoke?private=synthetic-secret-do-not-export',
+          )
+          const third = await fetch('https://third-party.example/observability-smoke')
+          if (!first.ok || !third.ok) throw new Error('Fixture unavailable')
+        }),
+      ),
+    )
+    await runtime.dispose()
+    if (result) result.textContent = 'Propagation delivered'
+  } catch {
+    await runtime.dispose()
+    if (result) result.textContent = 'Propagation fixture failed'
+  }
+})
+
+for (const id of ['run', 'reader', 'playback', 'propagation']) {
   const button = document.getElementById(id)
 
   if (button instanceof HTMLButtonElement) button.disabled = false

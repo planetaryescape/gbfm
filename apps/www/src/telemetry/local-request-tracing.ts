@@ -1,5 +1,6 @@
 import { resolveRequestId } from '@gbfm/core/observability/request-id'
-import { Data, Effect, Layer, ManagedRuntime } from 'effect'
+import { propagatedRequest, remoteTraceContext } from '@gbfm/observability/propagation'
+import { Data, Effect, Layer, ManagedRuntime, Tracer } from 'effect'
 import { FetchHttpClient } from 'effect/http'
 import { OtlpSerialization, OtlpTracer } from 'effect/observability'
 
@@ -28,16 +29,22 @@ export const createLocalRequestTracing = (endpoint: string) => {
     ) => {
       const route = routeTemplate(undefined, new URL(request.url).pathname)
       const requestId = resolveRequestId(request.headers.get('x-request-id'))
+      const parent = remoteTraceContext(request.headers)
 
       return runtime.runPromise(
         Effect.gen(function* () {
           const span = yield* Effect.currentSpan
-          const traced = new Request(request)
+          const traced = propagatedRequest(request)
           traced.headers.set('x-request-id', requestId)
           traced.headers.set(
             'traceparent',
             `00-${span.traceId}-${span.spanId}-${span.sampled ? '01' : '00'}`,
           )
+          traced.headers.set(
+            'sentry-trace',
+            `${span.traceId}-${span.spanId}-${span.sampled ? '1' : '0'}`,
+          )
+          traced.headers.delete('b3')
 
           const response = yield* Effect.tryPromise({
             try: () => run(traced),
@@ -50,6 +57,7 @@ export const createLocalRequestTracing = (endpoint: string) => {
           return response
         }).pipe(
           Effect.withSpan(`www ${request.method} ${route}`, {
+            ...(parent ? { parent: Tracer.externalSpan(parent) } : undefined),
             attributes: {
               'http.request.method': request.method,
               'http.route': route,

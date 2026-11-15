@@ -37,6 +37,7 @@
     "@guide/utils": "npm:@jsr/guide__utils@0.1.1",
     "@radix-ui/colors": "3.0.0",
     "@sentry/browser": "10.77.1",
+    "@sentry/cloudflare": "10.77.1",
     "better-auth": "1.7.12",
     "clsx": "2.1.1",
     "effect": "4.0.6",

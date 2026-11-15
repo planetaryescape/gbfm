@@ -8,6 +8,7 @@
     "./callbacks": "./src/callbacks.ts",
     "./reader": "./src/reader.ts",
     "./playback": "./src/playback.ts",
+    "./propagation": "./src/propagation.ts",
     "./sentry": "./src/sentry.ts",
     "./privacy": "./src/privacy.ts",
     "./config": "./src/config.ts"

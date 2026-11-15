@@ -281,10 +281,15 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
       Effect.gen(function* () {
         const svc = yield* PostService
 
-        const result = yield* dieOnDatabaseError(
+        const loaded = yield* dieOnDatabaseError(
           Effect.all(
             {
-              post: svc.getMicroPostBySlug(params.slug),
+              focus:
+                query.part === 'main'
+                  ? svc.getMicroPostScreenFocus(params.slug)
+                  : svc
+                      .getMicroPostBySlug(params.slug)
+                      .pipe(Effect.map((post) => ({ post, musicByPostId: null }))),
               replies:
                 query.part === 'main'
                   ? Effect.succeed({ data: [] })
@@ -293,6 +298,8 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
             { concurrency: 'unbounded' },
           ).pipe(Effect.catchTag('NotFoundError', () => new HttpApiError.NotFound())),
         )
+
+        const result = { post: loaded.focus.post, replies: loaded.replies }
 
         const related = yield* dieOnDatabaseError(
           Effect.all(
@@ -316,7 +323,12 @@ export const PostHandlersLive = HttpApiBuilder.group(Api, 'post', (handlers) =>
           ).values(),
         ]
 
-        const musicByPostId = yield* dieOnDatabaseError(svc.getMicroPostScreenMusic(screenPosts))
+        const pendingMusic = screenPosts.filter(
+          (post) => loaded.focus.musicByPostId === null || post.id !== result.post.id,
+        )
+
+        const remainingMusic = yield* dieOnDatabaseError(svc.getMicroPostScreenMusic(pendingMusic))
+        const musicByPostId = new Map([...(loaded.focus.musicByPostId ?? []), ...remainingMusic])
 
         const toScreenPost = (post: (typeof screenPosts)[number]) => ({
           ...toDateStrings(post),

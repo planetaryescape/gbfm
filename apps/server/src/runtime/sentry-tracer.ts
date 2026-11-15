@@ -11,14 +11,20 @@ const attributeValue = Schema.decodeUnknownOption(
 
 const spanStatus = Data.taggedEnum<Tracer.SpanStatus>()
 
-export const createSentryTracer = (): Tracer.Tracer => {
-  const spans = new WeakMap<Tracer.AnySpan, SdkSpan>()
+const measurement = Schema.decodeUnknownOption(
+  Schema.Struct({
+    'sentry.measurement_unit': Schema.String,
+    'sentry.measurement_value': Schema.Number,
+  }),
+)
 
-  return Tracer.make({
+export const createSentryTracer = (): Tracer.Tracer =>
+  Tracer.make({
     span(options) {
       const parent = Option.getOrUndefined(options.parent)
       const active = Sentry.getActiveSpan()
-      const owned = parent ? spans.get(parent) : active
+      const owned = parent instanceof EffectSentrySpan ? parent.sdk : undefined
+      const sdkParent = parent ? owned : active
 
       const create = () =>
         Sentry.startInactiveSpan({
@@ -29,7 +35,11 @@ export const createSentryTracer = (): Tracer.Tracer => {
             Match.orElse(() => 'function'),
           ),
           startTime: Number(options.startTime) / 1_000_000_000,
-          ...(options.root ? { parentSpan: null } : owned ? { parentSpan: owned } : undefined),
+          ...(options.root
+            ? { parentSpan: null }
+            : sdkParent
+              ? { parentSpan: sdkParent }
+              : undefined),
           attributes: { 'service.name': 'goosebumps-fm-api' },
         })
 
@@ -52,21 +62,17 @@ export const createSentryTracer = (): Tracer.Tracer => {
 
       const sdk = startWithParent()
 
-      const span = new EffectSentrySpan(options, sdk)
-      spans.set(span, sdk)
-
-      return span
+      return new EffectSentrySpan(options, sdk)
     },
     context(primitive, fiber) {
       const span = fiber.cache.span
-      const sdk = span ? spans.get(span) : undefined
+      const sdk = span instanceof EffectSentrySpan ? span.sdk : undefined
 
-      return sdk
+      return sdk && Sentry.getActiveSpan() !== sdk
         ? Sentry.withActiveSpan(sdk, () => primitive['~effect/Effect/evaluate'](fiber))
         : primitive['~effect/Effect/evaluate'](fiber)
     },
   })
-}
 
 class EffectSentrySpan implements Tracer.Span {
   readonly _tag = 'Span' as const
@@ -82,7 +88,7 @@ class EffectSentrySpan implements Tracer.Span {
   status: Tracer.SpanStatus
 
   constructor(
-    readonly options: SpanOptions,
+    options: SpanOptions,
     readonly sdk: SdkSpan,
   ) {
     this.name = options.name
@@ -106,17 +112,12 @@ class EffectSentrySpan implements Tracer.Span {
   }
 
   event(name: string, time: bigint, attributes?: Parameters<Tracer.Span['event']>[2]) {
-    this.sdk.addEvent(
-      name,
-      Object.fromEntries(
-        Object.entries(attributes ?? {}).flatMap(([key, value]) => {
-          const safe = attributeValue(value)
+    if (!attributes || !('sentry.measurement_value' in attributes)) return
+    const decoded = measurement(attributes)
 
-          return Option.isNone(safe) ? [] : [[key, safe.value]]
-        }),
-      ),
-      Number(time) / 1_000_000_000,
-    )
+    if (Option.isNone(decoded)) return
+
+    this.sdk.addEvent(name, decoded.value, Number(time) / 1_000_000_000)
   }
 
   addLinks(links: ReadonlyArray<Tracer.SpanLink>) {
@@ -134,7 +135,7 @@ class EffectSentrySpan implements Tracer.Span {
 
   end(endTime: bigint, exit: Exit.Exit<unknown, unknown>) {
     if (Predicate.isTagged(this.status, 'Ended')) return
-    this.status = spanStatus.Ended({ startTime: this.options.startTime, endTime, exit })
+    this.status = spanStatus.Ended({ startTime: this.status.startTime, endTime, exit })
     const failed = Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
     this.sdk.setStatus({ code: failed ? 2 : 1 })
     this.sdk.end(Number(endTime) / 1_000_000_000)

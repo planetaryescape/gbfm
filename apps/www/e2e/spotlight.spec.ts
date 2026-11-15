@@ -34,7 +34,12 @@ const richContent = Schema.decodeUnknownSync(RichContentDocument)({
   layout: 'spotlight',
 })
 
-const open = async (page: Page, at: string | null, stored: string | null = null) => {
+const open = async (
+  page: Page,
+  at: string | null,
+  stored: string | null = null,
+  options: { draft?: boolean; document?: typeof RichContentDocument.Type } = {},
+) => {
   await page.goto('/editorial')
   await expect(page.locator('.site')).toHaveAttribute('data-interactive', 'true')
   await page.evaluate(
@@ -60,7 +65,8 @@ const open = async (page: Page, at: string | null, stored: string | null = null)
           href: path,
           meta: null,
           content: '',
-          richContent,
+          richContent: options.document ?? richContent,
+          draft: options.draft ?? false,
           audioUrl: null,
           audioType: null,
           show: null,
@@ -100,6 +106,66 @@ const open = async (page: Page, at: string | null, stored: string | null = null)
   )
   await expect(page.locator('.spotlight-stage')).toBeVisible()
 }
+
+for (const height of [633, 900]) {
+  test(`desktop draft entries scroll inside the reader at ${height}px height`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height })
+    await open(page, '1.2', null, {
+      draft: true,
+      document: Schema.decodeUnknownSync(RichContentDocument)({
+        ...richContent,
+        blocks: [
+          ...richContent.blocks,
+          ...parseRichContent(
+            Array.from({ length: 30 }, (_, index) => `Listening note ${index + 1}.`).join('\n\n'),
+          ).document.blocks,
+        ],
+      }),
+    })
+    await expect(page.getByRole('complementary', { name: 'Private draft' })).toBeVisible()
+    const stage = page.getByRole('region', { name: 'Current editorial entry' })
+    await expect(stage).toHaveCSS('overflow-y', 'auto')
+    const frame = await stage.boundingBox()
+    expect(frame).not.toBeNull()
+    expect(frame?.y).toBeGreaterThan(0)
+    expect((frame?.y ?? 0) + (frame?.height ?? 0)).toBeLessThanOrEqual(height - 48)
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight)).toBe(height)
+    await stage.hover()
+    await page.mouse.wheel(0, 900)
+    await expect.poll(() => stage.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+    expect(await page.evaluate(() => window.scrollY)).toBe(0)
+    await page.getByRole('button', { name: 'Previous entry', exact: true }).click()
+    await expect(page).toHaveURL(/at=1\.1$/)
+    await expect.poll(() => stage.evaluate((element) => element.scrollTop)).toBe(0)
+    expect(await page.evaluate(() => window.scrollY)).toBe(0)
+  })
+}
+
+for (const at of [null, 'end']) {
+  test(`draft ${at ?? 'intro'} keeps its natural document layout`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 633 })
+    await open(page, at, null, { draft: true })
+    await expect(page.getByRole('complementary', { name: 'Private draft' })).toBeVisible()
+    await expect(page.locator('.spotlight-stage')).toHaveCSS('overflow-y', 'visible')
+    await expect(page.locator('.spotlight-detail')).toHaveCSS('display', 'block')
+  })
+}
+
+test('published desktop entries keep their existing reader height', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await open(page, '1.2')
+  await expect(page.getByRole('complementary', { name: 'Private draft' })).toHaveCount(0)
+  await expect(page.locator('.spotlight')).toHaveCSS('height', '804px')
+  await expect(page.locator('.spotlight-detail')).toHaveCSS('display', 'block')
+})
+
+test('mobile draft entries retain document scrolling', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await open(page, '1.2', null, { draft: true })
+  await expect(page.getByRole('complementary', { name: 'Private draft' })).toBeVisible()
+  await expect(page.locator('.spotlight-stage')).toHaveCSS('overflow-y', 'visible')
+  await expect(page.locator('.spotlight-detail')).toHaveCSS('display', 'block')
+})
 
 for (const action of ['Play', 'Queue', 'Save']) {
   test(`Spotify ${action} 403 uses action-specific recovery guidance`, async ({ page }) => {

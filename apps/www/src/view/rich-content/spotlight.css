@@ -410,11 +410,42 @@
 }
 
 @media (min-width: 1200px) {
+  .spotlight-detail:has(> aside[aria-label='Private draft']):not(
+      :has(.spotlight-intro, .spotlight-end)
+    ) {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 3rem);
+    padding-bottom: 1.5rem;
+  }
+
+  .spotlight-detail:not(:has(.spotlight-intro, .spotlight-end))
+    > aside[aria-label='Private draft'] {
+    flex-shrink: 0;
+    margin: 0 0 1.5rem;
+  }
+
+  .spotlight-detail:has(> aside[aria-label='Private draft']):not(
+      :has(.spotlight-intro, .spotlight-end)
+    )
+    .spotlight-body {
+    flex: 1;
+    min-height: 0;
+  }
+
   .spotlight {
     display: grid;
     grid-template-rows: 3.25rem minmax(0, 1fr);
     height: calc(100dvh - 6rem);
     min-height: 24rem;
+  }
+
+  .spotlight-detail:has(> aside[aria-label='Private draft']):not(
+      :has(.spotlight-intro, .spotlight-end)
+    )
+    .spotlight {
+    height: 100%;
+    min-height: 0;
   }
 
   .spotlight-stage {

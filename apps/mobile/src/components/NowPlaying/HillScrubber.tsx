@@ -21,7 +21,7 @@ import { useHillScrubberGesture } from './useHillScrubberGesture'
 type Props = {
   readonly currentTime: number
   readonly duration: number
-  readonly onSeek: (seconds: number) => void
+  readonly onSeek: (seconds: number) => Promise<void>
 }
 
 const AnimatedCircle = createAnimatedComponent(Circle)
@@ -38,12 +38,15 @@ export function HillScrubber({ currentTime, duration, onSeek }: Props) {
     currentTime,
     duration,
     onSeek,
+    onHaptic: () => {
+      void haptics.select()
+    },
     onPressChange: (value) => {
       pressed.set(reducedMotion ? value : withSpring(value, { damping: 18, stiffness: 260 }))
     },
   })
 
-  const position = gesture.feedback?.preview.seconds ?? currentTime
+  const position = gesture.position
   const curve = scrubberCurve(scrubberProgress(position, duration))
 
   const motion = useAnimatedStyle(() => ({
@@ -67,7 +70,7 @@ export function HillScrubber({ currentTime, duration, onSeek }: Props) {
 
     if (increment === undefined) return
     gesture.cancel()
-    onSeek(Math.max(0, Math.min(duration, currentTime + increment)))
+    void onSeek(Math.max(0, Math.min(duration, currentTime + increment)))
     void haptics.select()
   }
 

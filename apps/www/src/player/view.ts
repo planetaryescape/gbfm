@@ -281,6 +281,7 @@ const fullscreen = (model: Model, h: H, current: QueueTrackType, inputs: ViewInp
                     duration: playback.duration,
                     trackId: current.id,
                     preview: model.seekPreview,
+                    isOpen: model.playerDialog.isOpen,
                   }),
                   h.input([
                     h.Type('range'),

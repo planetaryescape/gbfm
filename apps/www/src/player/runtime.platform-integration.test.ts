@@ -9,11 +9,20 @@ import {
 import { Effect, Fiber, Layer, ManagedRuntime, Stream } from 'effect'
 import { describe, expect, it } from 'vitest'
 
-import { makeHtmlAudioEngineLayer, type AudioPort } from './runtime'
+import { initialModel, Message, update } from './model'
+import { makeHtmlAudioEngineLayer, PlayerClient, type AudioPort } from './runtime'
 
 class PlatformAudio extends EventTarget implements AudioPort {
   src = ''
-  currentTime = 0
+  private position = 0
+  rejectSeek = false
+  get currentTime() {
+    return this.position
+  }
+  set currentTime(seconds: number) {
+    if (this.rejectSeek) throw new Error('platform refused seek')
+    this.position = seconds
+  }
   duration = Number.NaN
   paused = true
   ended = false
@@ -27,7 +36,7 @@ class PlatformAudio extends EventTarget implements AudioPort {
   }
 
   load() {
-    this.currentTime = 0
+    this.position = 0
     this.readyState = 0
     this.duration = Number.NaN
     this.paused = true
@@ -156,6 +165,83 @@ const fixture = () => {
 }
 
 describe('browser adapter with shared playback orchestration', () => {
+  it('keeps the released second through the real seek command and reconciles playback and failures', async () => {
+    const f = fixture()
+
+    try {
+      await f.runtime.runPromise(
+        Effect.gen(function* () {
+          const controller = yield* makeAudioPlayback(f.runtime, {
+            onError: (message) =>
+              Effect.sync(() => {
+                f.errors.push(message)
+              }),
+          })
+
+          yield* Effect.yieldNow
+          yield* controller.playTrack(track('one'))
+          f.audio.ready(120)
+          yield* Effect.promise(async () => {
+            await expect.poll(() => controller.getSnapshot().transport.isLoaded).toBe(true)
+          })
+          yield* controller.pause
+
+          let model = {
+            ...initialModel,
+            snapshot: controller.getSnapshot(),
+            playerDialog: { ...initialModel.playerDialog, isOpen: true },
+          }
+
+          const displayed: Array<number> = []
+
+          const unsubscribe = controller.subscribeSnapshot((snapshot) => {
+            model = update(model, Message.SnapshotChanged({ snapshot })).model
+            displayed.push(model.seekPreview?.seconds ?? model.snapshot.transport.currentTime)
+          })
+
+          yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
+
+          const release = (seconds: number) => {
+            model = update(
+              model,
+              Message.PreviewSeek({
+                trackId: 'one',
+                seconds,
+                fine: false,
+                referenceSeconds: 0,
+                pointerRatio: 0.5,
+              }),
+            ).model
+            const result = update(model, Message.CommitSeek({ trackId: 'one', seconds }))
+            model = result.model
+            displayed.push(model.snapshot.transport.currentTime)
+
+            return Effect.forEach(result.commands ?? [], (command) =>
+              command.effect.pipe(Effect.provideService(PlayerClient, { controller })),
+            )
+          }
+
+          displayed.length = 0
+          yield* release(42)
+          expect(f.audio.currentTime).toBe(42)
+          expect(displayed).toEqual([42, 42])
+          f.audio.currentTime = 43
+          f.audio.dispatchEvent(new Event('timeupdate'))
+          yield* Effect.promise(async () => {
+            await expect.poll(() => model.snapshot.transport.currentTime).toBe(43)
+          })
+          f.audio.rejectSeek = true
+          displayed.length = 0
+          yield* release(80)
+          expect(displayed).toEqual([80, 43])
+          expect(f.errors).toContain('Unable to seek audio')
+        }).pipe(Effect.scoped),
+      )
+    } finally {
+      await f.runtime.dispose()
+    }
+  })
+
   it('ignores completion already queued by the adapter before source replacement', async () => {
     const f = fixture()
 

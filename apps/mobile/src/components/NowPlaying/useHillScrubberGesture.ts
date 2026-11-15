@@ -1,14 +1,17 @@
 import { createScrubberGesture, type ScrubberPreview } from '@gbfm/player'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { GestureResponderEvent, LayoutChangeEvent } from 'react-native'
-
-import { haptics } from '@/feedback/haptics'
 
 type Options = {
   readonly currentTime: number
   readonly duration: number
-  readonly onSeek: (seconds: number) => void
+  readonly onSeek: (seconds: number) => Promise<void>
   readonly onPressChange: (pressed: number) => void
+  readonly onHaptic: () => void
+}
+
+type Pointer = {
+  readonly nativeEvent: Pick<GestureResponderEvent['nativeEvent'], 'pageX' | 'pageY' | 'locationX'>
 }
 
 export function useHillScrubberGesture(options: Options) {
@@ -19,6 +22,8 @@ export function useHillScrubberGesture(options: Options) {
   }, [options])
   const layout = useRef({ width: 0, origin: 0, x: 0, referenceSeconds: 0 })
   const [width, setWidth] = useState(0)
+  const [committedSeconds, setCommittedSeconds] = useState<number | null>(null)
+  const commitGeneration = useRef(0)
 
   const [feedback, setFeedback] = useState<{
     readonly preview: ScrubberPreview
@@ -29,6 +34,9 @@ export function useHillScrubberGesture(options: Options) {
   const controller = useRef<ReturnType<typeof createScrubberGesture> | null>(null)
 
   useLayoutEffect(() => {
+    let mounted = true
+    const releasePress = () => latest.current.onPressChange(0)
+
     const gesture = createScrubberGesture({
       scheduleHold: (callback, delay) => {
         const timer = setTimeout(callback, delay)
@@ -44,15 +52,22 @@ export function useHillScrubberGesture(options: Options) {
       },
       onCommit: (seconds) => {
         setFeedback(null)
+        setCommittedSeconds(seconds)
+        const generation = ++commitGeneration.current
         latest.current.onPressChange(0)
-        latest.current.onSeek(seconds)
+
+        const settled = () => {
+          if (mounted && generation === commitGeneration.current) setCommittedSeconds(null)
+        }
+
+        latest.current.onSeek(seconds).then(settled, settled)
       },
       onCancel: () => {
         setFeedback(null)
         latest.current.onPressChange(0)
       },
       onFine: () => {
-        void haptics.select()
+        latest.current.onHaptic()
       },
     })
 
@@ -60,49 +75,70 @@ export function useHillScrubberGesture(options: Options) {
 
     return () => {
       gesture.dispose()
+      mounted = false
       controller.current = null
+      releasePress()
     }
   }, [])
   const previousDuration = useRef(options.duration)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (previousDuration.current !== options.duration) {
       controller.current?.cancel()
+      commitGeneration.current++
+      setCommittedSeconds(null)
       previousDuration.current = options.duration
     }
   }, [options.duration])
 
   return {
     feedback,
+    position: feedback?.preview.seconds ?? committedSeconds ?? options.currentTime,
     width,
-    onLayout: (event: LayoutChangeEvent) => {
+    onLayout: (event: {
+      readonly nativeEvent: {
+        readonly layout: Pick<LayoutChangeEvent['nativeEvent']['layout'], 'width'>
+      }
+    }) => {
       layout.current.width = event.nativeEvent.layout.width
       setWidth(layout.current.width)
     },
-    start: (event: GestureResponderEvent) => {
-      if (layout.current.width <= 0) return
+    start: (event: Pointer) => {
+      if (
+        !controller.current ||
+        layout.current.width <= 0 ||
+        !Number.isFinite(latest.current.duration) ||
+        latest.current.duration <= 0
+      )
+        return
 
       layout.current.origin = event.nativeEvent.pageX - event.nativeEvent.locationX
       layout.current.x = event.nativeEvent.locationX
-      layout.current.referenceSeconds = latest.current.currentTime
+      commitGeneration.current++
+      layout.current.referenceSeconds = committedSeconds ?? latest.current.currentTime
+      setCommittedSeconds(null)
       controller.current?.start({
         x: layout.current.x,
         y: event.nativeEvent.pageY,
         width: layout.current.width,
-        currentTime: latest.current.currentTime,
+        currentTime: layout.current.referenceSeconds,
         duration: latest.current.duration,
       })
-      void haptics.select()
+      latest.current.onHaptic()
       latest.current.onPressChange(1)
     },
-    move: (event: GestureResponderEvent) => {
+    move: (event: Pointer) => {
       layout.current.x = event.nativeEvent.pageX - layout.current.origin
       controller.current?.move(layout.current.x, event.nativeEvent.pageY)
     },
-    release: (event: GestureResponderEvent) => {
+    release: (event: Pointer) => {
       layout.current.x = event.nativeEvent.pageX - layout.current.origin
       controller.current?.release(layout.current.x, event.nativeEvent.pageY)
     },
-    cancel: () => controller.current?.cancel(),
+    cancel: () => {
+      controller.current?.cancel()
+      commitGeneration.current++
+      setCommittedSeconds(null)
+    },
   }
 }

@@ -14,6 +14,11 @@ const track: QueueTrackType = {
 
 const playingModel = {
   ...initialModel,
+  playerDialog: {
+    ...initialModel.playerDialog,
+    isOpen: true,
+    animation: { ...initialModel.playerDialog.animation, isShowing: true },
+  },
   snapshot: {
     ...initialModel.snapshot,
     queue: { tracks: [track], currentIndex: 0, current: track },
@@ -60,6 +65,7 @@ describe('player submodel', () => {
     })
     const committed = update(preview.model, Message.CommitSeek({ trackId: track.id, seconds: 15 }))
     expect(committed.model.seekPreview).toBeNull()
+    expect(committed.model.snapshot.transport.currentTime).toBe(15)
     expect(committed.commands?.map(({ name, args }) => ({ name, args }))).toEqual([
       { name: 'PlayerSeek', args: { seconds: 15 } },
     ])
@@ -67,6 +73,30 @@ describe('player submodel', () => {
     expect(cancelled.model.seekPreview).toBeNull()
     expect(cancelled.commands ?? []).toEqual([])
     expect(update(preview.model, Message.CloseFullscreen()).model.seekPreview).toBeNull()
+  })
+
+  it('rejects gesture events during close/leave while preserving intentional external seeking', () => {
+    const previewMessage = Message.PreviewSeek({
+      trackId: track.id,
+      seconds: 15,
+      fine: false,
+      referenceSeconds: 60,
+      pointerRatio: 0.5,
+    })
+
+    const preview = update(playingModel, previewMessage).model
+    const closed = update(preview, Message.CloseFullscreen()).model
+    expect(closed.playerDialog.isOpen).toBe(false)
+    expect(closed.playerDialog.animation.transitionState).not.toBe('Idle')
+    expect(update(closed, previewMessage)).toEqual({ model: closed })
+    expect(update(closed, Message.CommitSeek({ trackId: track.id, seconds: 15 }))).toEqual({
+      model: closed,
+    })
+    const reopened = update(closed, Message.ToggleFullscreen()).model
+    expect(update(reopened, Message.CommitSeek({ trackId: track.id, seconds: 15 }))).toEqual({
+      model: reopened,
+    })
+    expect(update(closed, Message.SeekTo({ seconds: 20 })).commands?.[0]?.name).toBe('PlayerSeek')
   })
 
   it('keeps a fine preview across playback ticks and ignores stale track gestures', () => {

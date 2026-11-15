@@ -56,7 +56,7 @@ type NowPlayingContextValue = {
   readonly skipNext: () => void
   readonly skipPrevious: () => void
   readonly togglePlayback: () => void
-  readonly seekTo: (seconds: number) => void
+  readonly seekTo: (seconds: number) => Promise<void>
   readonly clearQueue: () => void
 }
 
@@ -218,12 +218,13 @@ export function NowPlayingProvider({ children }: PropsWithChildren) {
     runPlayback((playback) => playback.togglePlayPause)
   }, [runPlayback])
 
-  const seekTo = useCallback(
-    (seconds: number) => {
-      runPlayback((playback) => playback.seekTo(seconds))
-    },
-    [runPlayback],
-  )
+  const seekTo = useCallback(async (seconds: number) => {
+    const playback = playbackRef.current
+    const runtime = runtimeRef.current
+
+    if (!playback || !runtime) return
+    await runtime.runPromise(playback.seekTo(seconds))
+  }, [])
 
   const clearQueue = useCallback(() => {
     runPlayback((playback) => playback.clearQueue)

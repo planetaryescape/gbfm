@@ -14,6 +14,30 @@ const openPausedPlayer = async (page: Page) => {
   await expect(page.locator('#fullscreen-player-panel')).not.toHaveAttribute('data-transition')
 }
 
+test('closing during a held preview cancels the mounted gesture before the leave animation ends', async ({
+  page,
+}) => {
+  await openPausedPlayer(page)
+  const hill = page.locator('.hill-scrubber')
+  const slider = hill.getByRole('slider')
+  await slider.focus()
+  await page.keyboard.press('Home')
+  await expect(slider).toHaveAttribute('value', '0')
+  const bounds = await hill.boundingBox()
+  if (!bounds) throw new Error('Expected a mobile scrubber')
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 20)
+  await page.mouse.down()
+  await expect(slider).toHaveValue('15')
+  await page.keyboard.press('Escape')
+  await page.mouse.move(bounds.x + bounds.width * 0.75, bounds.y + 20)
+  await page.mouse.up()
+  await expect(page.getByRole('dialog', { name: 'Now playing', exact: true })).toBeHidden()
+  await page.getByRole('button', { name: 'Now playing', exact: true }).click()
+  await expect(slider).toHaveValue('0')
+  await expect(hill).not.toHaveAttribute('data-pressed')
+  await expect(hill.locator('.hill-scrubber-preview')).toHaveCount(0)
+})
+
 test('the full hill target seeks, acknowledges press, drags outside bounds and settles', async ({
   page,
 }, testInfo) => {

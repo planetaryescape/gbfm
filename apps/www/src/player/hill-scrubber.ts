@@ -16,11 +16,13 @@ export const hillScrubber = (
     duration,
     trackId,
     preview,
+    isOpen,
   }: {
     readonly currentTime: number
     readonly duration: number
     readonly trackId: string
     readonly preview: SeekPreview | null
+    readonly isOpen: boolean
   },
 ) => {
   const enabled = Number.isFinite(duration) && duration > 0
@@ -33,10 +35,10 @@ export const hillScrubber = (
   return h.div(
     [
       h.Class('hill-scrubber sm:hidden'),
-      h.Key(trackId),
+      h.Key(`${trackId}:${String(isOpen)}`),
       h.DataAttribute('disabled', String(!enabled)),
       h.Style({ '--scrub-x': `${(preview?.pointerRatio ?? curve.x / 320) * 100}%` }),
-      h.OnMount(ScrubberGesture({ trackId })),
+      ...(isOpen ? [h.OnMount(ScrubberGesture({ trackId }))] : []),
     ],
     [
       preview

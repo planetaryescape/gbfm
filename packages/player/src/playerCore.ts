@@ -505,7 +505,14 @@ export const playerCore = (
       seekTo: (seconds: number) =>
         Effect.gen(function* () {
           const active = session
-          yield* engine.seekTo(seconds)
+          yield* engine.seekTo(seconds).pipe(
+            Effect.ensuring(
+              Effect.gen(function* () {
+                if (session !== active) return
+                yield* observeStatus(yield* engine.currentStatus)
+              }),
+            ),
+          )
 
           if (session !== active || !active?.started) return
           lastPositionPersist = { id: active.id, at: seconds }

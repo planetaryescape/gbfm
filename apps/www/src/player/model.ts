@@ -295,12 +295,24 @@ export const update = (
       commands: [Seek({ seconds })],
     }),
     PreviewSeek: ({ trackId, seconds, fine, referenceSeconds, pointerRatio }) =>
-      model.snapshot.queue.current?.id === trackId
+      model.playerDialog.isOpen && model.snapshot.queue.current?.id === trackId
         ? { model: { ...model, seekPreview: { seconds, fine, referenceSeconds, pointerRatio } } }
         : { model },
     CommitSeek: ({ trackId, seconds }) =>
+      model.playerDialog.isOpen &&
+      model.seekPreview !== null &&
       model.snapshot.queue.current?.id === trackId
-        ? { model: { ...model, seekPreview: null }, commands: [Seek({ seconds })] }
+        ? {
+            model: {
+              ...model,
+              seekPreview: null,
+              snapshot: {
+                ...model.snapshot,
+                transport: { ...model.snapshot.transport, currentTime: seconds },
+              },
+            },
+            commands: [Seek({ seconds })],
+          }
         : { model },
     CancelSeek: ({ trackId }) =>
       model.snapshot.queue.current?.id === trackId && model.seekPreview !== null

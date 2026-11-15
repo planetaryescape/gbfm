@@ -117,3 +117,26 @@ test('fetch, scheduled and queue retain lifecycle inputs with resolved bindings'
   expect(pending).toHaveLength(1)
   expect(withResolvedWorkerSentryBindings<Env, unknown>({})).toEqual({})
 })
+
+test('a stalled telemetry lookup falls back without waiting indefinitely', async () => {
+  const pending = Promise.withResolvers<string>()
+  const logs: Array<unknown> = []
+
+  try {
+    const result = await Effect.runPromise(
+      withTestLayer(
+        resolveWorkerSentryBindings({
+          SENTRY_DSN: { get: () => pending.promise },
+          retained: 'application-binding',
+        }),
+        Logger.layer([Logger.make(({ message }) => logs.push(message))]),
+      ),
+    )
+
+    expect(result).toEqual({ retained: 'application-binding' })
+    expect(JSON.stringify(logs)).toContain('sentry.secret.unavailable')
+  } finally {
+    pending.resolve('late-dsn')
+    await pending.promise
+  }
+})

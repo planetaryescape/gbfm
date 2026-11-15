@@ -27,6 +27,8 @@ export const resolveWorkerSentryBindings = <Env extends SentryBindings>(
     try: () => binding.get(),
     catch: () => new SentrySecretUnavailable(),
   }).pipe(
+    Effect.timeout('1 second'),
+    Effect.catchTag('TimeoutError', () => Effect.fail(new SentrySecretUnavailable())),
     Effect.map((dsn) => ({ ...rest, SENTRY_DSN: dsn })),
     Effect.catchTag('SentrySecretUnavailable', () =>
       Effect.as(Effect.logWarning('sentry.secret.unavailable'), rest),

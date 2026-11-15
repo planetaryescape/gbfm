@@ -8,6 +8,7 @@ import { artworkUrl, imageSource } from '../view/artwork'
 import { iconPaths, lucide } from '../view/icons'
 import { SuppressDragClick } from './drag-handle'
 import * as Favorite from './favorite'
+import { hillScrubber } from './hill-scrubber'
 import { Message, type Model } from './model'
 import { queueSheet } from './queue-view'
 import { fallbackArtwork, ghostButton, progressRangeClass, volumeRangeClass } from './view-styles'
@@ -274,6 +275,7 @@ const fullscreen = (model: Model, h: H, current: QueueTrackType, inputs: ViewInp
               h.div(
                 [h.Class('mb-4 shrink-0 sm:mb-8')],
                 [
+                  hillScrubber(h, playback.currentTime, playback.duration),
                   h.input([
                     h.Type('range'),
                     h.Min('0'),
@@ -282,7 +284,7 @@ const fullscreen = (model: Model, h: H, current: QueueTrackType, inputs: ViewInp
                     h.Value(String(playback.currentTime)),
                     h.OnInput((value) => Message.SeekTo({ seconds: Number(value) })),
                     h.AriaLabel('Playback position'),
-                    h.Class(progressRangeClass),
+                    h.Class(`${progressRangeClass} hidden sm:block`),
                   ]),
                   h.div(
                     [

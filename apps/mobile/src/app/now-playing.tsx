@@ -1,27 +1,15 @@
 import { radii } from '@gbfm/theme'
 import { useRouter } from 'expo-router'
-import { useRef } from 'react'
-import type { AccessibilityActionEvent, LayoutChangeEvent } from 'react-native'
 import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native'
 
 import { useNowPlaying } from '@/audio/NowPlayingProvider'
+import { HillScrubber } from '@/components/NowPlaying/HillScrubber'
 import { NowPlayingTitle } from '@/components/NowPlaying/NowPlayingTitle'
 import { PlayerSheetHeader } from '@/components/NowPlaying/PlayerSheetHeader'
 import { QueueSheet } from '@/components/NowPlaying/QueueSheet'
 import { Screen } from '@/components/Screen'
 import { Glyph } from '@/icons/Glyph'
 import { useThemeColors, withAlpha } from '@/theme/colors'
-import { fonts } from '@/theme/fonts'
-
-const SEEK_STEP_SECONDS = 15
-
-function formatTime(seconds: number) {
-  if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
-  const mins = Math.floor(seconds / 60)
-  const secs = Math.floor(seconds % 60)
-
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-}
 
 export default function NowPlaying() {
   const {
@@ -42,30 +30,7 @@ export default function NowPlaying() {
 
   const canSkipPrev = queue.currentIndex > 0
   const canSkipNext = queue.currentIndex >= 0 && queue.currentIndex + 1 < queue.tracks.length
-  const progress = duration > 0 ? Math.min(currentTime / duration, 1) : 0
-  const scrubWidthRef = useRef(0)
   const displayTrack = track ?? queue.current
-
-  const handleScrubLayout = (event: LayoutChangeEvent) => {
-    scrubWidthRef.current = event.nativeEvent.layout.width
-  }
-
-  const handleScrub = (x: number) => {
-    const width = scrubWidthRef.current
-
-    if (width > 0 && duration > 0) {
-      const ratio = Math.max(0, Math.min(1, x / width))
-      seekTo(ratio * duration)
-    }
-  }
-
-  const handleScrubAccessibilityAction = (event: AccessibilityActionEvent) => {
-    if (event.nativeEvent.actionName === 'increment') {
-      seekTo(Math.min(duration, currentTime + SEEK_STEP_SECONDS))
-    } else if (event.nativeEvent.actionName === 'decrement') {
-      seekTo(Math.max(0, currentTime - SEEK_STEP_SECONDS))
-    }
-  }
 
   return (
     <Screen>
@@ -111,67 +76,12 @@ export default function NowPlaying() {
 
             <NowPlayingTitle track={displayTrack} />
 
-            <View style={{ gap: 6 }}>
-              <Pressable
-                accessibilityRole='adjustable'
-                accessibilityLabel='Playback position'
-                accessibilityHint='Tap to seek, or swipe up and down to seek 15 seconds'
-                accessibilityValue={{
-                  min: 0,
-                  max: Math.max(0, Math.round(duration)),
-                  now: Math.max(0, Math.min(Math.round(duration), Math.round(currentTime))),
-                  text: `${formatTime(currentTime)} of ${formatTime(duration)}`,
-                }}
-                accessibilityActions={[
-                  { name: 'increment', label: 'Seek forward 15 seconds' },
-                  { name: 'decrement', label: 'Seek backward 15 seconds' },
-                ]}
-                onAccessibilityAction={handleScrubAccessibilityAction}
-                onPress={(event) => handleScrub(event.nativeEvent.locationX)}
-                onLayout={handleScrubLayout}
-                style={({ pressed }) => ({
-                  height: 44,
-                  justifyContent: 'center',
-                  opacity: pressed ? 0.85 : 1,
-                })}>
-                <View
-                  style={{
-                    height: 4,
-                    backgroundColor: withAlpha(colors.muted, 0.3),
-                    borderRadius: 2,
-                  }}>
-                  <View
-                    style={{
-                      height: '100%',
-                      width: `${progress * 100}%`,
-                      borderRadius: 2,
-                      backgroundColor: colors.accent,
-                    }}
-                  />
-                </View>
-                <View
-                  style={{
-                    position: 'absolute',
-                    left: `${progress * 100}%`,
-                    marginLeft: -7,
-                    width: 14,
-                    height: 14,
-                    borderRadius: 7,
-                    backgroundColor: colors.accent,
-                    borderWidth: 2,
-                    borderColor: colors.background,
-                  }}
-                />
-              </Pressable>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 11 }}>
-                  {formatTime(currentTime)}
-                </Text>
-                <Text style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 11 }}>
-                  {formatTime(duration)}
-                </Text>
-              </View>
-            </View>
+            <HillScrubber
+              key={displayTrack.id}
+              currentTime={currentTime}
+              duration={duration}
+              onSeek={seekTo}
+            />
 
             <View
               style={{

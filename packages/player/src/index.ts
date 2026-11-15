@@ -1,3 +1,5 @@
+export { scrubberCurve, scrubberProgress, scrubberTime } from './scrubber'
+
 export {
   AudioStorageError,
   hasCompleteCreators,

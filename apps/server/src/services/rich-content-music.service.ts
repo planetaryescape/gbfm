@@ -17,8 +17,9 @@ import { requireOne } from '@/services/music-entity/shared'
 
 import { parseMusicSource } from './canonical-music-identity/music-source'
 import { CanonicalMusicIdentityRepository } from './canonical-music-identity/repository'
+import { resolveMusicBatch } from './rich-content-music-batch'
 
-type MusicReference = Extract<EmbedReference, { readonly _tag: 'MusicUrl' | 'MusicCatalog' }>
+export type MusicReference = Extract<EmbedReference, { readonly _tag: 'MusicUrl' | 'MusicCatalog' }>
 
 type SnapshotEntity = {
   readonly entityType: MusicReference['entityType']
@@ -34,6 +35,9 @@ class RichContentCatalogError extends Data.TaggedError('RichContentCatalogError'
 /** Resolves an authored music reference into an inert catalog snapshot for a render document. */
 export interface RichContentMusicResolver {
   readonly resolve: (reference: MusicReference) => Effect.Effect<MusicSnapshotValue | null>
+  readonly resolveMany: (
+    references: ReadonlyArray<MusicReference>,
+  ) => Effect.Effect<ReadonlyArray<MusicSnapshotValue | null>>
 }
 
 /** Effect service used by the rich-content renderer to read GBFM catalog entities. */
@@ -231,6 +235,8 @@ export const RichContentMusicResolverLayer = Layer.effect(
 
     return RichContentMusicResolver.of({
       resolve: (reference) => resolve(db, repository, reference),
+      resolveMany: (references) =>
+        resolveMusicBatch(db, references, (reference) => resolve(db, repository, reference)),
     })
   }),
 )

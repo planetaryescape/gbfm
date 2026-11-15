@@ -129,7 +129,7 @@ describe('catalog-backed rich content', () => {
     ])
   })
 
-  test('album snapshots overlap three bounded reads and preserve ordered tracks', async () => {
+  test('album snapshots use one batch and preserve ordered tracks', async () => {
     const albumId = randomUUID()
     await db.insert(musicAlbumsTable).values({
       id: albumId,
@@ -174,8 +174,7 @@ describe('catalog-backed rich content', () => {
         showTracks: true,
       },
     ])
-    expect(observed.queries).toHaveLength(3)
-    expect(observed.maxActive).toBe(3)
+    expect(observed.queries).toEqual(['batch'])
 
     observed.reset()
     const compact = await render(`::album{id="${albumId}" tracks="false"}`, layer)
@@ -184,8 +183,7 @@ describe('catalog-backed rich content', () => {
       music: { title: 'Snapshot album', tracks: [] },
       showTracks: false,
     })
-    expect(observed.queries).toHaveLength(2)
-    expect(observed.maxActive).toBe(2)
+    expect(observed.queries).toEqual(['batch'])
   })
 
   test('playlist snapshots retain public visibility and unavailable-entity fallbacks', async () => {

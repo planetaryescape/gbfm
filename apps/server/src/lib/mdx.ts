@@ -7,7 +7,7 @@ import {
   type UnresolvedBlock,
   type UnresolvedDocument,
 } from '@gbfm/rich-content/source'
-import { Cache, Context, Data, Duration, Effect, Exit, Layer } from 'effect'
+import { Cache, Context, Data, Duration, Effect, Exit, Layer, Match } from 'effect'
 
 import { ValidationError } from '@/errors'
 import { makeExternalMediaResolver, type ExternalMediaResolver } from '@/lib/external-media'
@@ -52,6 +52,7 @@ const defaultFn = (_content: string): Promise<string> => Promise.resolve('')
 
 const unavailableMusicResolver: RichContentMusicResolverService = {
   resolve: () => Effect.succeed(null),
+  resolveMany: (references) => Effect.succeed(references.map(() => null)),
 }
 
 const directMediaResolver: ExternalMediaResolver = {
@@ -249,14 +250,57 @@ const resolveBlock = (
   return Effect.succeed(block)
 }
 
+const collectMusicReferences = (blocks: ReadonlyArray<UnresolvedBlock>): Array<MusicReference> =>
+  blocks.flatMap((block) =>
+    Match.value(block).pipe(
+      Match.tag('EmbedReference', ({ reference }) =>
+        Match.value(reference).pipe(
+          Match.tag('ExternalMedia', () => []),
+          Match.orElse((music) => [music]),
+        ),
+      ),
+      Match.tag('Quote', 'CardGroup', ({ children }) => collectMusicReferences(children)),
+      Match.tag('List', ({ items }) =>
+        items.flatMap((item) => collectMusicReferences(item.children)),
+      ),
+      Match.orElse(() => []),
+    ),
+  )
+
 const resolveDocument = (
   document: UnresolvedDocument,
   resolvers: Resolvers,
 ): Effect.Effect<RichContentDocument> =>
-  Effect.all(
-    document.blocks.map((block) => resolveBlock(block, resolvers)),
-    { concurrency: 8 },
-  ).pipe(Effect.map((blocks) => ({ version: 1 as const, blocks })))
+  Effect.gen(function* () {
+    const references = collectMusicReferences(document.blocks)
+
+    const snapshots = yield* Effect.cached(
+      resolvers.music
+        .resolveMany(references)
+        .pipe(
+          Effect.map(
+            (values) =>
+              new Map(references.map((reference, index) => [reference, values[index] ?? null])),
+          ),
+        ),
+    )
+
+    const hydrated: Resolvers = {
+      ...resolvers,
+      music: {
+        ...resolvers.music,
+        resolve: (reference) =>
+          snapshots.pipe(Effect.map((values) => values.get(reference) ?? null)),
+      },
+    }
+
+    const blocks = yield* Effect.all(
+      document.blocks.map((block) => resolveBlock(block, hydrated)),
+      { concurrency: 8 },
+    )
+
+    return { version: 1 as const, blocks }
+  })
 
 export const renderRichContent = (source: string): RichContentDocument =>
   Effect.runSync(

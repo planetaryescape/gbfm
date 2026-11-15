@@ -12,6 +12,7 @@ import { formatDate } from '../../view/format-date'
 import { iconPaths, lucide } from '../../view/icons'
 import { richContent } from '../../view/rich-content/fallback'
 import { richContentView } from '../../view/rich-content/render'
+import { spotlightView } from '../../view/rich-content/spotlight'
 import { draftNotice } from './draft-notice'
 
 const kindLabel = (kind: string) =>
@@ -219,6 +220,9 @@ const metaStrip = (h: HtmlBuilder<Message>, item: ContentItem) => {
   )
 }
 
+const spotlightPreview = (url: string) =>
+  import.meta.env.DEV && new URL(url).searchParams.get('layout') === 'spotlight'
+
 export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) => {
   const item = model.flags.items[0]
 
@@ -247,7 +251,11 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
         [
           item.richContent === null
             ? richContent(item.content)
-            : richContentView(item.richContent, h),
+            : kind === 'editorial' && spotlightPreview(model.flags.url)
+              ? spotlightView(item.richContent, h, {
+                  onVideo: (video) => Message.VideoOpened({ video }),
+                })
+              : richContentView(item.richContent, h),
         ],
       ),
       kind === 'mixes' || kind === 'editorial' ? emailUpdatesInvite(h) : h.empty,

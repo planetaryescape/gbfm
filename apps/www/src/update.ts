@@ -73,7 +73,28 @@ const closeSearch = (model: Model): Update.Return<Model, Message> => {
   }
 }
 
-const closeOverlays = Update.combine([closeMobileMenu, closeAccountMenu, closeSearch])
+const videoDialogFold = {
+  read: (model: Model) => Option.some(model.videoDialog),
+  write: (model: Model, videoDialog: Dialog.Model): Model => ({ ...model, videoDialog }),
+  toParentMessage: (message: Dialog.Message) => Message.GotVideoDialogMessage({ message }),
+  foldOutMessage: Dialog.OutMessage.match<Update.Step<Model, Message>>({
+    Opened: () => (model) => ({ model }),
+    Closed: () => (model) => ({ model: { ...model, video: null } }),
+  }),
+}
+
+const updateVideoDialog = Update.foldChild({ ...videoDialogFold, update: Dialog.update })
+
+const openVideoDialog = Update.foldChildStep({ ...videoDialogFold, update: Dialog.open })
+
+const closeVideoDialog = Update.foldChildStep({ ...videoDialogFold, update: Dialog.close })
+
+const closeOverlays = Update.combine([
+  closeMobileMenu,
+  closeAccountMenu,
+  closeSearch,
+  closeVideoDialog,
+])
 
 const acceptTweet = (model: Model, initial = false): Update.Return<Model, Message> => {
   const slug = TweetReader.concreteSlug(model.flags.url)
@@ -311,6 +332,8 @@ const updateApplication = (
     MenuToggled: () => (model.mobileMenu.isOpen ? closeMobileMenu(model) : openMobileMenu(model)),
     NavMinimizeChanged: ({ minimized }) => ({ model: { ...model, navMinimized: minimized } }),
     GotMobileMenuMessage: ({ message }) => updateMobileMenu(model, message),
+    VideoOpened: ({ video }) => openVideoDialog({ ...model, video }),
+    GotVideoDialogMessage: ({ message }) => updateVideoDialog(model, message),
     MenuDragStarted: ({ pointerId, clientY }) =>
       !model.mobileMenu.isOpen ||
       model.mobileMenu.animation.transitionState !== 'Idle' ||

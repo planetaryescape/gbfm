@@ -96,7 +96,7 @@ const inlineView = <Message>(inline: RichContentInline, h: HtmlBuilder<Message>)
   }
 }
 
-const inlineChildren = <Message>(
+export const inlineChildren = <Message>(
   children: ReadonlyArray<RichContentInline>,
   h: HtmlBuilder<Message>,
 ): ReadonlyArray<Html | string> => children.map((child) => inlineView(child, h))
@@ -522,7 +522,7 @@ const unavailableMediaView = <Message>(
   )
 }
 
-const blockView = <Message>(block: RichContentBlock, h: HtmlBuilder<Message>): Html => {
+export const blockView = <Message>(block: RichContentBlock, h: HtmlBuilder<Message>): Html => {
   // oxlint-disable-next-line anti-slop-effect/no-manual-tag-comparison -- Schema-owned recursive unions have no generated matcher; this switch provides compile-time exhaustiveness.
   switch (block._tag) {
     case 'Paragraph':

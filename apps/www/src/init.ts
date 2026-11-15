@@ -118,6 +118,8 @@ export const initWithPlayback = (
       creator: creator.model,
       dashboard: preparedDashboard.model,
       listeningDraft: null,
+      videoDialog: Dialog.init({ id: 'video-dialog' }),
+      video: null,
     },
     commands: [
       StartClient(),

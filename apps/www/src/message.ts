@@ -16,6 +16,7 @@ import * as PublicActions from './public-actions'
 import * as Search from './search'
 import { Status as ChallengeStatus } from './signup-challenge/model'
 import * as SpotifyPlayback from './spotify/playback'
+import { Video } from './video'
 
 export const Message = defineMessageUnion({
   ClientStarted: {},
@@ -37,6 +38,8 @@ export const Message = defineMessageUnion({
     ]),
   },
   GotMobileMenuMessage: { message: Dialog.Message },
+  VideoOpened: { video: Video },
+  GotVideoDialogMessage: { message: Dialog.Message },
   MenuDragStarted: { pointerId: Schema.Number, clientY: Schema.Number },
   MenuDragMoved: { pointerId: Schema.Number, clientY: Schema.Number },
   MenuDragReleased: {

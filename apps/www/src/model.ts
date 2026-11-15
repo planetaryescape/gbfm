@@ -25,6 +25,7 @@ import * as Search from './search'
 import { SheetDrag } from './sheet-drag'
 import { Status as ChallengeStatus } from './signup-challenge/model'
 import * as SpotifyPlayback from './spotify/playback'
+import { Video } from './video'
 
 export const Principal = Schema.Struct({
   id: Schema.String,
@@ -125,6 +126,8 @@ export const Model = Schema.Struct({
   creator: Creator.Model,
   dashboard: Dashboard.Model,
   listeningDraft: Schema.NullOr(SavedMix),
+  videoDialog: Dialog.Model,
+  video: Schema.NullOr(Video),
 })
 
 export type Model = typeof Model.Type

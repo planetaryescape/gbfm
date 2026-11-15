@@ -5,6 +5,7 @@ import { Fragment, type ReactNode } from 'react'
 import { keyedContent } from '@/tweets/tweetContent'
 
 type MusicEmbed = Extract<RichContentBlock, { readonly _tag: 'MusicEmbed' }>
+
 type FlowBlock = { readonly block: RichContentBlock; readonly cardGroup: number | null }
 
 export function SpotlightBlockFlow({

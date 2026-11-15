@@ -2,29 +2,6 @@
   margin-top: 4rem;
 }
 
-.spotlight-chapter-label {
-  position: sticky;
-  top: env(safe-area-inset-top, 0px);
-  z-index: 10;
-  display: flex;
-  gap: 0.5rem;
-  margin: 0 -1rem;
-  padding: 0.6rem 1rem;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--highlight);
-  background: color-mix(in srgb, var(--background) 88%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-}
-
-.spotlight-chapter-label-name {
-  color: var(--muted-foreground);
-}
-
 .spotlight-chapter-head {
   padding-block: 2.5rem 0.5rem;
 }
@@ -40,9 +17,8 @@
 
 .spotlight .spotlight-chapter-head h2 {
   margin: 0;
-  font-family: var(--font-sans-alt, Georgia, 'Times New Roman', serif);
-  font-size: clamp(2.25rem, 8vw, 3.5rem);
-  font-weight: 400;
+  font-size: clamp(2rem, 7vw, 3rem);
+  font-weight: 900;
   line-height: 1.05;
   letter-spacing: -0.015em;
   text-wrap: balance;

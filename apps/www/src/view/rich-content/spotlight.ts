@@ -105,10 +105,6 @@ export const spotlightView = <Message>(
         return h.section(
           [h.Class('spotlight-chapter')],
           [
-            h.p(
-              [h.Class('spotlight-chapter-label not-prose'), h.AriaHidden(true)],
-              [`Chapter ${index + 1}`, h.span([h.Class('spotlight-chapter-label-name')], name)],
-            ),
             h.header(
               [h.Class('spotlight-chapter-head not-prose')],
               [

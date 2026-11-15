@@ -7,7 +7,7 @@ import {
   type UnresolvedBlock,
   type UnresolvedDocument,
 } from '@gbfm/rich-content/source'
-import { Cache, Context, Data, Duration, Effect, Exit, Layer } from 'effect'
+import { Cache, Context, Data, Duration, Effect, Exit, Layer, Match } from 'effect'
 
 import { ValidationError } from '@/errors'
 import { makeExternalMediaResolver, type ExternalMediaResolver } from '@/lib/external-media'
@@ -250,25 +250,29 @@ const resolveBlock = (
   return Effect.succeed(block)
 }
 
+const collectMusicReferences = (blocks: ReadonlyArray<UnresolvedBlock>): Array<MusicReference> =>
+  blocks.flatMap((block) =>
+    Match.value(block).pipe(
+      Match.tag('EmbedReference', ({ reference }) =>
+        Match.value(reference).pipe(
+          Match.tag('ExternalMedia', () => []),
+          Match.orElse((music) => [music]),
+        ),
+      ),
+      Match.tag('Quote', 'CardGroup', ({ children }) => collectMusicReferences(children)),
+      Match.tag('List', ({ items }) =>
+        items.flatMap((item) => collectMusicReferences(item.children)),
+      ),
+      Match.orElse(() => []),
+    ),
+  )
+
 const resolveDocument = (
   document: UnresolvedDocument,
   resolvers: Resolvers,
 ): Effect.Effect<RichContentDocument> =>
   Effect.gen(function* () {
-    const references: Array<MusicReference> = []
-
-    const collect = (blocks: ReadonlyArray<UnresolvedBlock>): void => {
-      for (const block of blocks) {
-        if (block._tag === 'EmbedReference' && block.reference._tag !== 'ExternalMedia')
-          references.push(block.reference)
-
-        if (block._tag === 'Quote' || block._tag === 'CardGroup') collect(block.children)
-
-        if (block._tag === 'List') for (const item of block.items) collect(item.children)
-      }
-    }
-
-    collect(document.blocks)
+    const references = collectMusicReferences(document.blocks)
 
     const snapshots = yield* Effect.cached(
       resolvers.music

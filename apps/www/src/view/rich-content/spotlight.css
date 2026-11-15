@@ -23,8 +23,31 @@
 }
 
 .spotlight-moment > .rich-content-music-card,
+.spotlight-moment > .spotlight-reference-card,
 .spotlight-moment > .spotlight-video {
   max-width: 75ch;
+}
+
+.spotlight-reference-card {
+  display: grid;
+  min-width: 0;
+}
+
+.spotlight-mention {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--muted-foreground);
+  text-underline-offset: 3px;
+}
+
+.spotlight-mention:hover,
+.spotlight-mention:focus-within {
+  color: var(--highlight);
+  text-decoration-color: var(--highlight);
+}
+
+.spotlight-mention:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 .spotlight-records {

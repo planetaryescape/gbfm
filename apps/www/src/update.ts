@@ -105,8 +105,19 @@ const stepSpotlight = (
   at: string | null,
 ): Update.Return<Model, Message, Services> => {
   const progress = withSeen(model.spotlight, path, at)
+  const document = spotlightDocument(model)
+  const steps = document ? spotlightSteps(spotlightStructure(document.blocks)) : []
+  const offset = stepAt(steps, at) - stepAt(steps, spotlightProgress(model).at)
+  let spotlightMotion: Model['spotlightMotion'] = 'none'
 
-  return { model: { ...model, spotlight: progress }, commands: [SyncSpotlight({ progress })] }
+  if (offset > 0) spotlightMotion = 'forward'
+
+  if (offset < 0) spotlightMotion = 'backward'
+
+  return {
+    model: { ...model, spotlight: progress, spotlightMotion },
+    commands: [SyncSpotlight({ progress })],
+  }
 }
 
 const isEditorialPath = (pathname: string) => /^\/editorial\/[^/]+$/.test(pathname)
@@ -398,7 +409,7 @@ const updateApplication = (
       const restored = withSeen(progress, progress.path, at)
 
       return {
-        model: { ...model, spotlight: restored },
+        model: { ...model, spotlight: restored, spotlightMotion: 'none' },
         commands: linked === null && at !== null ? [SyncSpotlight({ progress: restored })] : [],
       }
     },

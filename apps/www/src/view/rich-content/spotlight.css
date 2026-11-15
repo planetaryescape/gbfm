@@ -224,6 +224,40 @@
   outline-offset: -2px;
 }
 
+.spotlight-stage {
+  overflow-x: clip;
+}
+
+.spotlight-stage[data-direction='forward'] > * {
+  animation: spotlight-forward 180ms ease-out;
+}
+
+.spotlight-stage[data-direction='backward'] > * {
+  animation: spotlight-backward 180ms ease-out;
+}
+
+@keyframes spotlight-forward {
+  from {
+    opacity: 0;
+    transform: translateX(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes spotlight-backward {
+  from {
+    opacity: 0;
+    transform: translateX(-0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 .spotlight-actions {
   display: grid;
   gap: 0.5rem;
@@ -385,5 +419,11 @@
     max-width: 100ch;
     font-size: 0.875rem;
     line-height: 1.75;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-stage[data-direction] > * {
+    animation: none;
   }
 }

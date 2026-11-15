@@ -21,6 +21,7 @@ import { spotlightReferences } from './spotlight-references'
 export interface SpotlightViewOptions<Message> {
   readonly at: string | null
   readonly seen: ReadonlyArray<string>
+  readonly direction?: 'none' | 'forward' | 'backward'
   readonly onStep: (at: string | null) => Message
   readonly onVideo: (video: Video) => Message
   readonly musicActions?: BlockViewExtras['musicActions']
@@ -321,6 +322,7 @@ export const spotlightView = <Message>(
             [
               h.Key(`spotlight-step-${current}`),
               h.Class('spotlight-stage'),
+              h.DataAttribute('direction', options.direction ?? 'none'),
               h.Role('region'),
               h.AriaLabel('Current editorial entry'),
               h.Tabindex(0),

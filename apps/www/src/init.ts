@@ -121,6 +121,7 @@ export const initWithPlayback = (
       videoDialog: Dialog.init({ id: 'video-dialog' }),
       video: null,
       spotlight: null,
+      spotlightMotion: 'none',
     },
     commands: [
       StartClient(),

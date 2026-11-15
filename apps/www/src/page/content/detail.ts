@@ -270,6 +270,10 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
             : spotlight
               ? spotlightView(spotlight, h, {
                   ...spotlightProgress(model),
+                  direction:
+                    model.spotlight?.path === new URL(model.flags.url).pathname
+                      ? model.spotlightMotion
+                      : 'none',
                   onStep: (at) =>
                     Message.SpotlightStepped({ path: new URL(model.flags.url).pathname, at }),
                   onVideo: (video) => Message.VideoOpened({ video }),

@@ -130,6 +130,7 @@ export const Model = Schema.Struct({
   videoDialog: Dialog.Model,
   video: Schema.NullOr(Video),
   spotlight: Schema.NullOr(SpotlightProgress),
+  spotlightMotion: Schema.Literals(['none', 'forward', 'backward']),
 })
 
 export type Model = typeof Model.Type

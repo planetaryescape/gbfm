@@ -5,6 +5,7 @@ import { Message } from '../../message'
 import type { ContentItem, Model } from '../../model'
 import * as Player from '../../player'
 import * as PublicActions from '../../public-actions'
+import * as SpotifyReading from '../../spotify/reading'
 import { artwork } from '../../view/artwork'
 import { breadcrumbs, crumbCurrent, crumbLink } from '../../view/breadcrumbs'
 import { emailUpdatesInvite } from '../../view/email-updates'
@@ -220,6 +221,12 @@ const metaStrip = (h: HtmlBuilder<Message>, item: ContentItem) => {
   )
 }
 
+const readingSpotify = (model: Model): SpotifyReading.ReadingSpotify<Message> => ({
+  model: model.spotifyPlayback,
+  toMessage: (message) => Message.GotSpotifyPlaybackMessage({ message }),
+  interactive: model.interactive,
+})
+
 const spotlightProgress = ({ spotlight, flags }: Model) => {
   const url = new URL(flags.url)
 
@@ -266,6 +273,9 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
                   onStep: (at) =>
                     Message.SpotlightStepped({ path: new URL(model.flags.url).pathname, at }),
                   onVideo: (video) => Message.VideoOpened({ video }),
+                  musicActions: (music) =>
+                    SpotifyReading.cardActions(h, readingSpotify(model), music.links),
+                  onboarding: SpotifyReading.onboarding(h, readingSpotify(model)),
                 })
               : richContentView(item.richContent, h),
         ],

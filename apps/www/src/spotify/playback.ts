@@ -117,6 +117,19 @@ export const update = (
           },
   })
 
+/** Whether a Spotify action is running, which link it targets and the latest notice for it. */
+export const operationState = (model: Model) => ({
+  busy: Operation.guards.Running(model.operation),
+  target: Operation.match(model.operation, {
+    Idle: ({ target }) => target,
+    Running: ({ url }) => url,
+  }),
+  notice: Operation.match(model.operation, {
+    Idle: ({ notice }) => notice,
+    Running: () => 'Working…',
+  }),
+})
+
 export const view = <M>(
   model: Model,
   h: HtmlBuilder<M>,

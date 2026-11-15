@@ -4,7 +4,7 @@ import type { Html, HtmlBuilder } from 'foldkit/html'
 
 import type { Video } from '../../video'
 import { iconPaths, lucide } from '../icons'
-import { blockView, inlineChildren } from './render'
+import { blockView, inlineChildren, type BlockViewExtras } from './render'
 import {
   headingText,
   spotlightSteps,
@@ -21,6 +21,8 @@ export interface SpotlightViewOptions<Message> {
   readonly seen: ReadonlyArray<string>
   readonly onStep: (at: string | null) => Message
   readonly onVideo: (video: Video) => Message
+  readonly musicActions?: BlockViewExtras['musicActions']
+  readonly onboarding?: Html
 }
 
 type MediaBlock = Extract<RichContentBlock, { readonly _tag: 'ExternalMediaEmbed' }>
@@ -81,11 +83,13 @@ const spotlightBlock =
   <Message>(h: HtmlBuilder<Message>, options: SpotlightViewOptions<Message>) =>
   (block: RichContentBlock): Html => {
     if (!Predicate.isTagged(block, 'ExternalMediaEmbed') || block.provider !== 'youtube')
-      return blockView(block, h)
+      return blockView(block, h, { musicActions: options.musicActions })
 
     const id = youtubeVideoId(block.canonicalUrl)
 
-    return id === null ? blockView(block, h) : videoPoster(block, id, h, options)
+    return id === null
+      ? blockView(block, h, { musicActions: options.musicActions })
+      : videoPoster(block, id, h, options)
   }
 
 const chapterName = (chapters: ReadonlyArray<SpotlightChapter>, index: number) => {
@@ -161,12 +165,14 @@ const stepView = <Message>(
   render: (block: RichContentBlock) => Html,
   start: Message,
   seen: ReadonlyArray<string>,
+  onboarding: Html,
 ): Html => {
   if (step.kind === 'intro')
     return h.div(
       [h.Class('spotlight-intro')],
       [
         ...step.blocks.map(render),
+        onboarding,
         h.button(
           [h.Type('button'), h.Class('spotlight-begin not-prose'), h.OnClick(start)],
           ['Start', lucide(iconPaths.chevronRight, 'h-4 w-4')],
@@ -304,6 +310,7 @@ export const spotlightView = <Message>(
                 render,
                 go(current === steps.length - 1 ? 0 : 1),
                 options.seen,
+                options.onboarding ?? h.empty,
               ),
             ],
           )

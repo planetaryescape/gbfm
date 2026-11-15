@@ -100,7 +100,17 @@ const withSpotlightRestore =
     const { pathname } = new URL(url)
 
     return isEditorialPath(pathname)
-      ? { ...result, commands: [...(result.commands ?? []), RestoreSpotlight({ path: pathname })] }
+      ? {
+          ...result,
+          commands: [
+            ...(result.commands ?? []),
+            RestoreSpotlight({ path: pathname }),
+            Command.mapMessage(
+              SpotifyPlayback.Load({ requestId: result.model.spotifyPlayback.statusRequestId }),
+              (message) => Message.GotSpotifyPlaybackMessage({ message }),
+            ),
+          ],
+        }
       : result
   }
 

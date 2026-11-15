@@ -1,3 +1,10 @@
+## [2.134.2](https://github.com/planetaryescape/gbfm/compare/v2.134.1...v2.134.2) (2026-11-15)
+
+
+### Bug Fixes
+
+* **editorial:** keep draft spotlight scrolling within the viewport ([a10e50d](https://github.com/planetaryescape/gbfm/commit/a10e50d63a35d6c3e70d5d3932a159733a8fbc36))
+
 ## [2.134.1](https://github.com/planetaryescape/gbfm/compare/v2.134.0...v2.134.1) (2026-11-15)
 
 

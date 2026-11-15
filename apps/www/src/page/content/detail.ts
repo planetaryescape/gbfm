@@ -8,7 +8,6 @@ import * as PublicActions from '../../public-actions'
 import * as SpotifyReading from '../../spotify/reading'
 import { spotlightDocument, spotlightProgress } from '../../spotlight-page'
 import { artwork } from '../../view/artwork'
-import { breadcrumbs, crumbCurrent, crumbLink } from '../../view/breadcrumbs'
 import { emailUpdatesInvite } from '../../view/email-updates'
 import { formatDate } from '../../view/format-date'
 import { iconPaths, lucide } from '../../view/icons'
@@ -42,27 +41,6 @@ const track = (item: ContentItem, url: string) => ({
   type: item.audioType ?? 'mix',
   creators: item.creators,
 })
-
-const sectionCrumb = (kind: string) =>
-  Match.value(kind).pipe(
-    Match.when('mixes', () => ({ label: 'Radio shows', href: '/shows' })),
-    Match.when('editorial', () => ({ label: 'Editorial', href: '/editorial' })),
-    Match.when('labels', () => ({ label: 'Record labels', href: '/labels' })),
-    Match.when('releases', () => ({ label: 'Releases', href: '/releases' })),
-    Match.when('tracks', () => ({ label: 'Tracks', href: '/tracks' })),
-    Match.when('djs', () => ({ label: 'DJs', href: '/djs' })),
-    Match.orElse(() => null),
-  )
-
-const ancestors = (item: ContentItem, kind: string) => {
-  const section = sectionCrumb(kind)
-
-  if (!section) return []
-
-  return item.show
-    ? [section, { label: item.show.title, href: `/shows/${encodeURIComponent(item.show.slug)}` }]
-    : [section]
-}
 
 const creatorLinks = (h: HtmlBuilder<Message>, item: ContentItem) =>
   (item.creators ?? []).flatMap((creator, index) => [
@@ -251,11 +229,6 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
       ),
     ],
     [
-      breadcrumbs(
-        walking
-          ? ancestors(item, kind).map(crumbLink)
-          : [...ancestors(item, kind).map(crumbLink), crumbCurrent(item.slug)],
-      ),
       kind === 'editorial' && item.draft ? draftNotice(h, item.slug) : h.empty,
       walking ? h.empty : masthead(h, item, kind),
       walking ? h.empty : controls(model, h, item),

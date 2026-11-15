@@ -8,7 +8,7 @@
 
 .spotlight-body {
   width: 100%;
-  margin-top: 0.25rem;
+  margin-top: 0;
 }
 
 .spotlight-body:has(.spotlight-intro, .spotlight-end) {
@@ -345,7 +345,7 @@
   .spotlight {
     display: grid;
     grid-template-rows: 3.25rem minmax(0, 1fr);
-    height: calc(100dvh - 8rem);
+    height: calc(100dvh - 6rem);
     min-height: 24rem;
   }
 

@@ -404,3 +404,103 @@
     animation: none;
   }
 }
+
+.spotlight-stage > * > * + *,
+.spotlight-intro > * + * {
+  margin-top: 1.25rem;
+}
+
+.spotlight .rich-content-music-card {
+  gap: 0;
+  padding: 0;
+  border: var(--spotlight-edge);
+  border-radius: 0;
+  background: var(--card);
+  box-shadow: var(--spotlight-drop);
+}
+
+.spotlight .rich-content-music-head {
+  grid-template-columns: 7rem minmax(0, 1fr);
+  padding: 0.875rem;
+}
+
+.spotlight .rich-content-music-art {
+  border: 2px solid var(--spotlight-ink);
+  box-shadow: none;
+}
+
+.spotlight .rich-content-music-type {
+  justify-self: start;
+  padding: 0.1rem 0.4rem;
+  background: var(--spotlight-ink);
+  color: var(--spotlight-paper);
+  letter-spacing: 0.16em;
+}
+
+.spotlight .rich-content-music-title {
+  margin-top: 0.35rem;
+}
+
+.spotlight .rich-content-music-blurb {
+  margin: 0;
+  padding: 0.75rem 0.875rem;
+  border-top: 2px solid var(--spotlight-ink);
+  border-left: 0;
+  background: color-mix(in srgb, var(--highlight) 10%, var(--card));
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.spotlight .rich-content-music-blurb::before {
+  content: '▸ ';
+  color: var(--highlight);
+}
+
+.spotlight .rich-content-music-links {
+  margin: 0;
+  padding: 0.625rem 0.875rem;
+  border-top: 2px solid var(--spotlight-ink);
+}
+
+.spotlight .rich-content-music-links a {
+  border: 2px solid var(--spotlight-ink);
+  border-radius: 0;
+  color: var(--spotlight-ink);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  transition: none;
+}
+
+.spotlight .rich-content-music-links a:hover {
+  background: var(--spotlight-ink);
+  color: var(--spotlight-paper);
+}
+
+.spotlight .rich-content-card-group {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  padding: 0 6px 10px 0;
+  scroll-snap-type: x mandatory;
+}
+
+.spotlight .rich-content-card-group > * {
+  flex: 0 0 min(16rem, 82%);
+  scroll-snap-align: start;
+}
+
+.spotlight .rich-content-card-group .rich-content-music-head {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 640px) {
+  .spotlight .rich-content-music-head {
+    grid-template-columns: 9rem minmax(0, 1fr);
+    padding: 1rem;
+  }
+
+  .spotlight .rich-content-music-links {
+    margin: 0;
+    padding: 0.625rem 1rem;
+  }
+}

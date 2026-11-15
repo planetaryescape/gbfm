@@ -7,17 +7,18 @@
 }
 
 .spotlight-body {
-  max-width: 75ch;
-}
-
-.spotlight-body:has(.spotlight-records, .rich-content-card-group) {
-  max-width: none;
+  width: 100%;
 }
 
 .spotlight-intro,
 .spotlight-chapter,
 .spotlight-end,
 .spotlight-moment > p {
+  max-width: 75ch;
+}
+
+.spotlight-moment > .rich-content-music-card,
+.spotlight-moment > .spotlight-video {
   max-width: 75ch;
 }
 

@@ -20,6 +20,7 @@
     "@gbfm/api": "workspace:*",
     "@gbfm/core": "workspace:*",
     "@gbfm/player": "workspace:*",
+    "@gbfm/rich-content": "workspace:*",
     "@gbfm/observability": "workspace:*",
     "@gbfm/spotify": "workspace:*",
     "@gbfm/theme": "workspace:*",

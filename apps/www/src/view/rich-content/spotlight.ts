@@ -165,6 +165,7 @@ const stepView = <Message>(
   h: HtmlBuilder<Message>,
   render: (block: RichContentBlock) => Html,
   start: Message,
+  onPosition: (at: string) => Message,
   seen: ReadonlyArray<string>,
   onboarding: Html,
 ): Html => {
@@ -225,7 +226,16 @@ const stepView = <Message>(
                         h.AriaLabel(`${headingText(moment.heading)}, read`),
                       ]
                     : [],
-                  [headingText(moment.heading)],
+                  [
+                    h.button(
+                      [
+                        h.Type('button'),
+                        h.Class('spotlight-chapter-link'),
+                        h.OnClick(onPosition(`${step.chapter + 1}.${position + 1}`)),
+                      ],
+                      [headingText(moment.heading)],
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -323,7 +333,8 @@ export const spotlightView = <Message>(
                 structure.chapters,
                 h,
                 render,
-                go(current === steps.length - 1 ? 0 : 1),
+                 go(current === steps.length - 1 ? 0 : 1),
+                 options.onStep,
                 options.seen,
                 options.onboarding ?? h.empty,
               ),

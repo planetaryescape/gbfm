@@ -121,17 +121,41 @@
 }
 
 .spotlight-chapter-moments li {
-  display: flex;
-  gap: 1rem;
-  padding: 0.875rem 0;
+  margin: 0;
   counter-increment: moment;
+}
+
+.spotlight-chapter-link {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 0.875rem 0.5rem;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.spotlight-chapter-link:hover {
+  background: color-mix(in srgb, var(--highlight) 6%, transparent);
+  color: var(--highlight);
+}
+
+.spotlight-chapter-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 
 .spotlight-chapter-moments li + li {
   border-top: 1px solid var(--border);
 }
 
-.spotlight-chapter-moments li::before {
+.spotlight-chapter-link::before {
   content: counter(moment, decimal-leading-zero);
   flex-shrink: 0;
   min-width: 2ch;
@@ -139,7 +163,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.spotlight-chapter-moments li[data-seen]::after {
+.spotlight-chapter-moments li[data-seen] .spotlight-chapter-link::after {
   content: '✓';
   margin-left: auto;
   color: var(--highlight);

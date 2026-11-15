@@ -167,7 +167,6 @@ const stepView = <Message>(
   render: (block: RichContentBlock) => Html,
   start: Message,
   onPosition: (at: string) => Message,
-  seen: ReadonlyArray<string>,
   onboarding: Html,
 ): Html => {
   if (step.kind === 'intro')
@@ -221,12 +220,7 @@ const stepView = <Message>(
               [h.Class('spotlight-chapter-moments not-prose'), h.AriaLabel('In this chapter')],
               step.value.moments.map((moment, position) =>
                 h.li(
-                  seen.includes(`${step.chapter + 1}.${position + 1}`)
-                    ? [
-                        h.DataAttribute('seen', ''),
-                        h.AriaLabel(`${headingText(moment.heading)}, read`),
-                      ]
-                    : [],
+                  [],
                   [
                     h.button(
                       [
@@ -339,7 +333,6 @@ export const spotlightView = <Message>(
                 render,
                 go(current === steps.length - 1 ? 0 : 1),
                 options.onStep,
-                options.seen,
                 options.onboarding ?? h.empty,
               ),
             ],

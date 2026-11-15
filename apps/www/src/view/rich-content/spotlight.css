@@ -186,12 +186,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.spotlight-chapter-moments li[data-seen] .spotlight-chapter-link::after {
-  content: '✓';
-  margin-left: auto;
-  color: var(--highlight);
-}
-
 .spotlight-moment > h3 {
   margin: 0 0 1.25rem;
   font-size: clamp(1.25rem, 4.5vw, 1.625rem);

@@ -12,12 +12,14 @@ import { editorialOperations } from '@/db/editorial-operation.schema'
 import { postCreators, postsTable } from '@/db/post.schema'
 import { uploadAssetsTable } from '@/db/upload-asset.schema'
 import { createConfig, ConfigService } from '@/services/config.service'
+import { ObjectStoreClient } from '@/services/storage/object-store-client'
 import { R2ObjectStoreClientLayer } from '@/services/storage/r2-object-store-client'
 import { DatabaseTestLayer, db } from '@/test/database'
 import { withTestLayer } from '@/test/effect'
 
 import { McpActor } from '../authorization'
 import { CommandAuthority } from '../command-authority'
+import type { UpdateDraftInput } from '../contracts'
 import { EditorialMcpConfig } from '../editorial'
 import { loadEditorialSnapshot } from '../editorial-music/snapshot'
 import { EditorialMcpSettings, projectPost } from '../model'
@@ -67,16 +69,36 @@ afterAll(() => runtime.dispose())
 
 const configuration = Layer.succeed(ConfigService, config)
 
-const store = R2ObjectStoreClientLayer({ userContent: bucket, mixes: bucket }).pipe(
-  Layer.provide(configuration),
-)
+let failCopies = false
 
-const layer = DraftArtworkServiceLayer.pipe(
-  Layer.provide(store),
-  Layer.provide(configuration),
-  Layer.provide(Layer.succeed(EditorialMcpConfig, endpoint)),
-  Layer.provide(DatabaseTestLayer),
-)
+let copies: Array<string> = []
+
+const store = R2ObjectStoreClientLayer({ userContent: bucket, mixes: bucket }, async (request) => {
+  if (failCopies) throw new Error('Disposable copy outage')
+  const source = request.headers?.['x-amz-copy-source']
+
+  if (!source) throw new Error('Unexpected storage request')
+  const original = await bucket.get(source.split('/').slice(2).join('/'))
+
+  if (!original) throw new Error('Missing private original')
+  await bucket.put(request.key, await original.arrayBuffer(), {
+    httpMetadata: original.httpMetadata ?? {},
+    customMetadata: original.customMetadata ?? {},
+  })
+  copies.push(request.key)
+
+  return new Response('<CopyObjectResult><ETag>fixture</ETag></CopyObjectResult>')
+}).pipe(Layer.provide(configuration))
+
+const makeLayer = (storage = store) =>
+  DraftArtworkServiceLayer.pipe(
+    Layer.provide(storage),
+    Layer.provide(configuration),
+    Layer.provide(Layer.succeed(EditorialMcpConfig, endpoint)),
+    Layer.provide(DatabaseTestLayer),
+  )
+
+const layer = makeLayer()
 
 const bytes = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==',
@@ -92,6 +114,7 @@ const run = <A, E>(
     readonly scopes?: ReadonlyArray<string>
     readonly live?: boolean
     readonly authenticated?: boolean
+    readonly storage?: Layer.Layer<ObjectStoreClient>
   } = {},
 ) => {
   const actorId = options.actorId ?? ownerId
@@ -102,7 +125,7 @@ const run = <A, E>(
     scopes: options.scopes ?? ['posts:read', 'drafts:write'],
   })
 
-  const provided = withTestLayer(effect, layer).pipe(
+  const provided = withTestLayer(effect, options.storage ? makeLayer(options.storage) : layer).pipe(
     Effect.provideService(
       CommandAuthority,
       CommandAuthority.of({
@@ -162,6 +185,8 @@ const put = (prepared: typeof PreparedDraftImage.Type) =>
   })
 
 beforeEach(async () => {
+  failCopies = false
+  copies = []
   await db.delete(editorialOperations)
   await db.delete(uploadAssetsTable)
   await db.delete(postCreators)
@@ -463,6 +488,13 @@ describe('native draft artwork with migrated D1 and R2', () => {
 
   test('validates bounded raster metadata before allocating an asset', async () => {
     const request = await input()
+
+    for (const fileName of ['.', '..']) {
+      await expect(prepare({ ...request, fileName })).rejects.toMatchObject({
+        code: 'invalid_input',
+      })
+    }
+
     await expect(prepare({ ...request, fileSize: 0 })).rejects.toMatchObject({
       code: 'invalid_input',
     })
@@ -482,5 +514,365 @@ describe('native draft artwork with migrated D1 and R2', () => {
         md5: Buffer.from(contentMd5, 'base64'),
       }),
     ).rejects.toThrow()
+  })
+
+  test.each([
+    ['UTF8 byte limit', 'é'.repeat(51_190)],
+    ['block limit', Array.from({ length: 2_000 }, () => 'Paragraph.').join('\n\n')],
+  ])(
+    'rejects merged banner content beyond the %s before every coupled mutation',
+    async (_label, content) => {
+      await db.update(postsTable).set({ content }).where(eq(postsTable.id, postId))
+      const prepared = await prepare(await input())
+      await put(prepared)
+
+      const before = await Promise.all([
+        db.select().from(postsTable),
+        db.select().from(uploadAssetsTable),
+        db.select().from(editorialOperations),
+      ])
+
+      await expect(
+        attach({
+          requestId: crypto.randomUUID(),
+          postId,
+          expectedVersion: await version(),
+          coverUploadRequestId: prepared.upload.requestId,
+          banner: { uploadRequestId: prepared.upload.requestId, alt: 'Synthetic limit fixture' },
+        }),
+      ).rejects.toMatchObject({ code: 'invalid_input' })
+      expect(
+        await Promise.all([
+          db.select().from(postsTable),
+          db.select().from(uploadAssetsTable),
+          db.select().from(editorialOperations),
+        ]),
+      ).toEqual(before)
+    },
+  )
+})
+
+const postScopes = ['posts:read', 'creator:write']
+
+const preparePost = (
+  request: typeof PrepareDraftImageInput.Type,
+  options: Parameters<typeof run>[1] = {},
+) =>
+  run(
+    Effect.flatMap(DraftArtworkService, (service) => service.preparePostImage(request)),
+    { scopes: postScopes, ...options },
+  )
+
+const attachPost = (
+  request: typeof AttachDraftArtworkInput.Type,
+  options: Parameters<typeof run>[1] = {},
+) =>
+  run(
+    Effect.flatMap(DraftArtworkService, (service) => service.attachPostArtwork(request)),
+    { scopes: postScopes, ...options },
+  )
+
+const updatePost = (
+  request: typeof UpdateDraftInput.Type,
+  options: Parameters<typeof run>[1] = {},
+) =>
+  run(
+    Effect.flatMap(DraftArtworkService, (service) => service.updatePost(request)),
+    { scopes: postScopes, ...options },
+  )
+
+describe('authored editorial edits including published posts', () => {
+  test('rejects publication fields and noncanonical prose before changing any rows', async () => {
+    await db.update(postsTable).set({ draft: false }).where(eq(postsTable.id, postId))
+
+    const request = {
+      requestId: crypto.randomUUID(),
+      postId,
+      expectedVersion: await version(),
+      title: 'Forbidden transition',
+      draft: true,
+    }
+
+    const before = await Promise.all([
+      db.select().from(postsTable),
+      db.select().from(editorialOperations),
+    ])
+
+    await expect(updatePost(request)).rejects.toMatchObject({ code: 'invalid_input' })
+    await expect(
+      updatePost({
+        requestId: crypto.randomUUID(),
+        postId,
+        expectedVersion: request.expectedVersion,
+        content: 'é'.repeat(60_000),
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_input' })
+    expect(
+      await Promise.all([db.select().from(postsTable), db.select().from(editorialOperations)]),
+    ).toEqual(before)
+  })
+  test('edits published prose, preserves state and replays exact results after later edits', async () => {
+    await db.update(postsTable).set({ draft: false }).where(eq(postsTable.id, postId))
+
+    const request = {
+      requestId: crypto.randomUUID(),
+      postId,
+      expectedVersion: await version(),
+      title: 'Edited published title',
+      content: 'Edited published prose.',
+      description: 'New description',
+    }
+
+    const [saved, concurrent] = await Promise.all([updatePost(request), updatePost(request)])
+    expect(concurrent).toEqual(saved)
+    expect(saved.post).toMatchObject({
+      draft: false,
+      postId,
+      content: request.content,
+      title: request.title,
+      description: request.description,
+    })
+
+    const later = await updatePost({
+      requestId: crypto.randomUUID(),
+      postId,
+      expectedVersion: saved.post.version,
+      description: null,
+    })
+
+    expect(later.post.description).toBeNull()
+    expect(later.post.content).toBe(request.content)
+    expect(await updatePost(request)).toEqual(saved)
+    await expect(updatePost({ ...request, content: 'Changed retry.' })).rejects.toMatchObject({
+      code: 'conflict',
+    })
+    await expect(updatePost({ ...request, requestId: crypto.randomUUID() })).rejects.toMatchObject({
+      code: 'conflict',
+    })
+    expect((await db.select().from(postsTable).where(eq(postsTable.id, postId)))[0]?.draft).toBe(
+      false,
+    )
+  })
+
+  test('copies attached artwork to canonical public delivery and retains private originals', async () => {
+    await db.update(postsTable).set({ draft: false }).where(eq(postsTable.id, postId))
+    const cover = await preparePost(await input())
+    const banner = await preparePost(await input())
+    await put(cover)
+    await put(banner)
+    expect(copies).toHaveLength(0)
+
+    const request = {
+      requestId: crypto.randomUUID(),
+      postId,
+      expectedVersion: await version(),
+      coverUploadRequestId: cover.upload.requestId,
+      banner: { uploadRequestId: banner.upload.requestId, alt: 'Published banner' },
+    }
+
+    const saved = await attachPost(request)
+    const publicKey = cover.upload.key.replace(/^private\//, 'public/')
+    expect(saved.post.thumbnailUrl).toBe(cover.upload.publicUrl.replace('/private/', '/public/'))
+    expect(saved.post.content).toContain(banner.upload.publicUrl.replace('/private/', '/public/'))
+    expect(saved.post.content).not.toContain('/private/')
+    expect(saved.post.draft).toBe(false)
+    expect(copies).toHaveLength(2)
+    const delivered = await bucket.get(publicKey)
+
+    if (!delivered) throw new Error('Expected delivered public artwork')
+    expect(new Uint8Array(await delivered.arrayBuffer())).toEqual(new Uint8Array(bytes))
+    expect(delivered.httpMetadata?.contentType).toBe('image/png')
+    expect(await bucket.head(cover.upload.key)).not.toBeNull()
+    expect(
+      (await db.select().from(uploadAssetsTable)).map((asset) => [asset.key, asset.status]),
+    ).toEqual([
+      [cover.upload.key, 'attached'],
+      [banner.upload.key, 'attached'],
+    ])
+    expect(await attachPost(request)).toEqual(saved)
+    expect(copies).toHaveLength(2)
+  })
+
+  test('repairs a committed public copy on exact retry without repeating the edit', async () => {
+    await db.update(postsTable).set({ draft: false }).where(eq(postsTable.id, postId))
+    const prepared = await preparePost(await input())
+    await put(prepared)
+
+    const request = {
+      requestId: crypto.randomUUID(),
+      postId,
+      expectedVersion: await version(),
+      coverUploadRequestId: prepared.upload.requestId,
+    }
+
+    failCopies = true
+    await expect(attachPost(request)).rejects.toMatchObject({ code: 'unavailable' })
+    const committedVersion = await version()
+    const operationCount = (await db.select().from(editorialOperations)).length
+    expect(committedVersion).not.toBe(request.expectedVersion)
+    expect(await bucket.head(prepared.upload.key.replace(/^private\//, 'public/'))).toBeNull()
+    failCopies = false
+    const saved = await attachPost(request)
+    expect(saved.post.version).toBe(committedVersion)
+    expect((await db.select().from(editorialOperations)).length).toBe(operationCount)
+    expect(await bucket.head(prepared.upload.key.replace(/^private\//, 'public/'))).not.toBeNull()
+  })
+
+  test('does not create public copies after a committed post is unpublished', async () => {
+    await db.update(postsTable).set({ draft: false }).where(eq(postsTable.id, postId))
+    const prepared = await preparePost(await input())
+    await put(prepared)
+
+    const request = {
+      requestId: crypto.randomUUID(),
+      postId,
+      expectedVersion: await version(),
+      coverUploadRequestId: prepared.upload.requestId,
+    }
+
+    failCopies = true
+    await expect(attachPost(request)).rejects.toMatchObject({ code: 'unavailable' })
+    await db.update(postsTable).set({ draft: true }).where(eq(postsTable.id, postId))
+    failCopies = false
+    await attachPost(request)
+    expect(copies).toHaveLength(0)
+    expect((await db.select().from(postsTable).where(eq(postsTable.id, postId)))[0]?.draft).toBe(
+      true,
+    )
+  })
+
+  test('keeps draft media private and excludes micros from general editing', async () => {
+    const prepared = await preparePost(await input())
+    await put(prepared)
+
+    const saved = await attachPost({
+      requestId: crypto.randomUUID(),
+      postId,
+      expectedVersion: await version(),
+      coverUploadRequestId: prepared.upload.requestId,
+    })
+
+    expect(saved.post.thumbnailUrl).toBe(prepared.upload.publicUrl)
+    expect(saved.post.draft).toBe(true)
+    expect(copies).toHaveLength(0)
+
+    const updated = await updatePost({
+      requestId: crypto.randomUUID(),
+      postId,
+      expectedVersion: saved.post.version,
+      title: 'Still private',
+    })
+
+    expect(updated.post.draft).toBe(true)
+    await db.update(postsTable).set({ type: 'micro' }).where(eq(postsTable.id, postId))
+    await expect(preparePost(await input())).rejects.toMatchObject({ code: 'not_found' })
+    await expect(
+      updatePost({
+        requestId: crypto.randomUUID(),
+        postId,
+        expectedVersion: await version(),
+        content: 'No micro edit',
+      }),
+    ).rejects.toMatchObject({ code: 'not_found' })
+  })
+
+  test('draft-write consent alone cannot authorize general edit tools', async () => {
+    const request = await input()
+    await expect(
+      preparePost(request, { scopes: ['posts:read', 'drafts:write'] }),
+    ).rejects.toMatchObject({ code: 'access_denied' })
+    await expect(
+      updatePost(
+        {
+          requestId: crypto.randomUUID(),
+          postId,
+          expectedVersion: request.expectedVersion,
+          title: 'Denied',
+        },
+        { scopes: ['posts:read', 'drafts:write'] },
+      ),
+    ).rejects.toMatchObject({ code: 'access_denied' })
+    expect(await db.select().from(editorialOperations)).toHaveLength(0)
+  })
+
+  test('revoked authorship and bans prevent mutation and original-result replay', async () => {
+    const request = {
+      requestId: crypto.randomUUID(),
+      postId,
+      expectedVersion: await version(),
+      title: 'Owned edit',
+    }
+
+    const saved = await updatePost(request)
+    await expect(
+      updatePost(
+        { ...request, requestId: crypto.randomUUID(), expectedVersion: saved.post.version },
+        { actorId: otherId },
+      ),
+    ).rejects.toMatchObject({ code: 'not_found' })
+    await db.update(postCreators).set({ creatorId: otherId }).where(eq(postCreators.postId, postId))
+    await expect(updatePost(request)).rejects.toMatchObject({ code: 'not_found' })
+    await db.update(user).set({ banned: true }).where(eq(user.id, otherId))
+    await expect(
+      updatePost(
+        { ...request, requestId: crypto.randomUUID(), expectedVersion: await version() },
+        { actorId: otherId },
+      ),
+    ).rejects.toMatchObject({ code: 'access_denied' })
+  })
+
+  test('rechecks authorship immediately before public copy side effects', async () => {
+    await db.update(postsTable).set({ draft: false }).where(eq(postsTable.id, postId))
+    const prepared = await preparePost(await input())
+    await put(prepared)
+
+    const revokeAtPublicHead = Layer.effect(
+      ObjectStoreClient,
+      Effect.gen(function* () {
+        const actual = yield* ObjectStoreClient
+
+        return {
+          ...actual,
+          headObject: async (bucketName: string, key: string) => {
+            if (key.startsWith('public/')) {
+              await db
+                .update(postCreators)
+                .set({ creatorId: otherId })
+                .where(eq(postCreators.postId, postId))
+            }
+
+            return actual.headObject(bucketName, key)
+          },
+        }
+      }),
+    ).pipe(Layer.provide(store))
+
+    await expect(
+      attachPost(
+        {
+          requestId: crypto.randomUUID(),
+          postId,
+          expectedVersion: await version(),
+          coverUploadRequestId: prepared.upload.requestId,
+        },
+        { storage: revokeAtPublicHead },
+      ),
+    ).rejects.toMatchObject({ code: 'unavailable' })
+    expect(copies).toHaveLength(0)
+  })
+
+  test('refuses another post receipt even when the target is published', async () => {
+    const prepared = await preparePost(await input(otherPostId))
+    await put(prepared)
+    await db.update(postsTable).set({ draft: false }).where(eq(postsTable.id, postId))
+    await expect(
+      attachPost({
+        requestId: crypto.randomUUID(),
+        postId,
+        expectedVersion: await version(),
+        coverUploadRequestId: prepared.upload.requestId,
+      }),
+    ).rejects.toMatchObject({ code: 'not_found' })
+    expect(copies).toHaveLength(0)
   })
 })

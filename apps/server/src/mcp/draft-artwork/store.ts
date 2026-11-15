@@ -1,3 +1,4 @@
+import { EDITORIAL_DRAFT_RETRY_WINDOW_MS } from '@gbfm/core/editorial-mcp'
 import type { UserId } from '@gbfm/core/identity'
 import { and, eq, exists, sql, type SQL } from 'drizzle-orm'
 import { Effect } from 'effect'
@@ -19,13 +20,16 @@ export const savePreparedImage = (
   result: typeof PreparedDraftImage.Type,
   now: Date,
   liveGuard: SQL,
+  access: 'draft' | 'authored' = 'draft',
 ) =>
   Effect.tryPromise({
     try: () => {
       const eligible = and(
         eq(postsTable.id, previous.id),
-        eq(postsTable.draft, true),
-        eq(postsTable.type, 'post'),
+        access === 'draft' ? eq(postsTable.draft, true) : eq(postsTable.draft, previous.draft),
+        access === 'draft'
+          ? eq(postsTable.type, 'post')
+          : sql`${postsTable.type} IS ${previous.type}`,
         editorialSnapshotGuard(previous),
         exists(
           db
@@ -82,7 +86,9 @@ export const savePreparedImage = (
               attachedToId: sql`NULL`.as('attached_to_id'),
               createdAt: sql<Date>`${now.getTime()}`.as('created_at'),
               updatedAt: sql<Date>`${now.getTime()}`.as('updated_at'),
-              expiresAt: sql<Date>`${now.getTime() + 24 * 60 * 60 * 1000}`.as('expires_at'),
+              expiresAt: sql<Date>`${now.getTime() + EDITORIAL_DRAFT_RETRY_WINDOW_MS}`.as(
+                'expires_at',
+              ),
             })
             .from(postsTable)
             .where(and(eligible, winner)),

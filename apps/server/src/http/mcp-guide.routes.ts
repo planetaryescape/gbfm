@@ -113,6 +113,30 @@ Draft tools never publish, delete, change creators or edit published posts.
 They do not control playback or access your private listening library.
 Review and publishing stay in GBFM.
 
+## Authored editorial editing, including live posts
+
+The general tools require posts:read plus creator:write, not merely drafts:write:
+- update_post: edit supplied title, content or description on an authored editorial.
+- prepare_post_image_upload: prepare a checked, private, create-only original image upload.
+- attach_post_artwork: attach the owned image receipts as cover and/or leading Markdown banner.
+
+WARNING: edits to an already published editorial immediately affect live pages.
+Each operation requires the exact postId, latest get_post expectedVersion and a new requestId.
+Omitted prose fields stay unchanged; description:null clears it. No update parameter can
+publish, unpublish, change creators, change type or mutate music/thread associations.
+Micro posts are excluded. Existing draft tools remain draft-only, including on replay.
+The general write envelope is bounded to 256 KiB.
+
+Published artwork uses the existing deterministic public-copy flow; unpublished content
+keeps private originals. A storage failure can occur after the edit commits. Retry the exact
+same request to recover currently attached public copies without repeating the edit.
+Previously public image bytes are permanent. Unpublishing does not revoke them.
+The source, byte size, ownership, live authority and current attachment are checked;
+an original saved result is not a current-state snapshot.
+
+creator:write uses its existing explicit resource-policy and consent checks. Registration
+does not enable that permission in production or upgrade any existing draft-only grant.
+
 Tool discovery reflects the connection's current scopes and role on each request.
 Remembered tool names do not authorize calls. Seven public-content reads are also
 registered, but require content:read and a resource policy explicitly allowing it:

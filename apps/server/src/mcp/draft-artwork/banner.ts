@@ -18,5 +18,7 @@ export const attachLeadingBanner = (content: string, url: string, alt: string): 
     return `${layout}${body.slice(0, first.position.start.offset)}${image}${body.slice(first.position.end.offset)}`
   }
 
-  return `${layout}${layout && !layout.endsWith('\n') ? '\n' : ''}\n${image}\n\n${body}`.trimStart()
+  const prefix = layout ? `${layout}${layout.endsWith('\n') ? '' : '\n'}\n` : ''
+
+  return `${prefix}${image}\n\n${body}`
 }

@@ -1109,6 +1109,7 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
           'catalogue:import',
           'catalogue:write',
           'content:read',
+          'creator:write',
           'drafts:write',
           'favorites:read',
           'favorites:write',

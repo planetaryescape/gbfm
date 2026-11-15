@@ -47,7 +47,8 @@ export const editorialConflict = () =>
 
 /** Authored fields only. Omitted musicReferences preserves the entire collection and managed marker. */
 export interface EditorialPatch {
-  readonly thumbnailUrl?: string
+  readonly thumbnailUrl?: string | null
+  readonly bannerImageUrl?: string | null
   readonly title?: string | undefined
   readonly content?: string | undefined
   readonly description?: string | null | undefined
@@ -89,6 +90,15 @@ export const loadOwnedEditorialDraft = (db: DatabaseClient, postId: PostId, acto
     ),
   )
 
+export const loadOwnedEditorialPost = (db: DatabaseClient, postId: PostId, actorId: UserId) =>
+  loadEditorialSnapshot(db, postId).pipe(
+    Effect.flatMap((post) =>
+      post.type !== 'micro' && post.creators?.some((creator) => creator.id === actorId)
+        ? Effect.succeed(post)
+        : Effect.fail(notFound()),
+    ),
+  )
+
 /** Operation-specific receipt decoder; caller supplies live scope/role checks and a subtraction-only mask. */
 export const replayEditorialOperation = <A extends { readonly post: { readonly postId: PostId } }>(
   db: DatabaseClient,
@@ -97,6 +107,7 @@ export const replayEditorialOperation = <A extends { readonly post: { readonly p
   resultSchema: Schema.Codec<A, unknown>,
   authorize: Effect.Effect<unknown, EditorialToolError>,
   mask: (result: A) => Effect.Effect<A, EditorialToolError> = Effect.succeed,
+  access: 'draft' | 'authored' = 'draft',
 ) =>
   Effect.gen(function* () {
     yield* authorize
@@ -120,7 +131,8 @@ export const replayEditorialOperation = <A extends { readonly post: { readonly p
       Effect.mapError(unavailable),
     )
 
-    yield* loadOwnedEditorialDraft(db, postId, actorId)
+    const load = access === 'draft' ? loadOwnedEditorialDraft : loadOwnedEditorialPost
+    yield* load(db, postId, actorId)
 
     if (
       row.result === null ||
@@ -139,7 +151,7 @@ export const replayEditorialOperation = <A extends { readonly post: { readonly p
     if (result.post.postId !== postId) return yield* unavailable()
     const masked = yield* mask(result)
     yield* authorize
-    yield* loadOwnedEditorialDraft(db, postId, actorId)
+    yield* load(db, postId, actorId)
 
     return Option.some(yield* boundEditorialWireResult(masked))
   })
@@ -162,6 +174,7 @@ export const saveEditorialChange = (
     readonly bucket: string
     readonly expectedSize: number
   }> = [],
+  access: 'draft' | 'authored' = 'draft',
 ) =>
   Effect.gen(function* () {
     if (new TextEncoder().encode(receipt.result).byteLength > 256 * 1024)
@@ -204,8 +217,10 @@ export const saveEditorialChange = (
       now: receipt.createdAt,
       guard: and(
         editorialSnapshotGuard(previous),
-        eq(postsTable.draft, true),
-        eq(postsTable.type, 'post'),
+        access === 'draft' ? eq(postsTable.draft, true) : eq(postsTable.draft, previous.draft),
+        access === 'draft'
+          ? eq(postsTable.type, 'post')
+          : sql`${postsTable.type} IS ${previous.type}`,
         eligible,
         targetGuard,
         ...assets.map((asset) =>

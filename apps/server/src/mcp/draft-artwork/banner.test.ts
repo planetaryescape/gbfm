@@ -24,6 +24,10 @@ describe('leading editorial banner', () => {
     const content = 'Here ![Inline](https://example.test/inline.png) is prose.'
     expect(attachLeadingBanner(content, url, 'Art')).toBe(`![Art](${url})\n\n${content}`)
   })
+  test('prepends without replacing a leading image that has caption siblings', () => {
+    const content = '![Authored image](https://example.test/inline.png) Authored caption.'
+    expect(attachLeadingBanner(content, url, 'Banner')).toBe(`![Banner](${url})\n\n${content}`)
+  })
 
   test('escapes Markdown alt text without adding another node', () => {
     expect(attachLeadingBanner('Prose', url, '[link](bad)')).toBe(

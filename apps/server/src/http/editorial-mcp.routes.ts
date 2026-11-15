@@ -202,7 +202,8 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
                           request.method === 'POST'
                             ? yield* boundMcpBody(
                                 request.stream,
-                                principal.scopes.includes('drafts:write')
+                                principal.scopes.includes('drafts:write') ||
+                                  principal.scopes.includes('creator:write')
                                   ? MAX_MCP_JSON_BYTES
                                   : 16 * 1024,
                               )

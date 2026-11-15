@@ -110,17 +110,15 @@ const progressView = <Message>(
   h: HtmlBuilder<Message>,
 ): Html => {
   const step = steps[current]
-  const chapter = step && (step.kind === 'chapter' || step.kind === 'moment') ? step.chapter : null
-  const count = chapter === null ? 0 : (chapters[chapter]?.moments.length ?? 0)
 
   const label =
-    chapter === null
-      ? `${current + 1} of ${steps.length}`
-      : [
-          `Chapter ${chapter + 1}`,
-          chapterName(chapters, chapter),
-          ...(step?.kind === 'moment' ? [`${step.position + 1} of ${count}`] : []),
+    step?.kind === 'moment'
+      ? [
+          `Chapter ${step.chapter + 1}`,
+          chapterName(chapters, step.chapter),
+          `${step.position + 1} of ${chapters[step.chapter]?.moments.length ?? 0}`,
         ].join(' · ')
+      : ''
 
   return h.div(
     [h.Class('spotlight-progress not-prose')],
@@ -128,22 +126,26 @@ const progressView = <Message>(
       h.p([h.Class('spotlight-progress-label')], [label]),
       h.div(
         [
-          h.Class('spotlight-progress-track'),
+          h.Class('spotlight-progress-cells'),
           h.Role('progressbar'),
           h.AriaLabel('Reading progress'),
           h.AriaValuemin(1),
           h.AriaValuemax(steps.length),
           h.AriaValuenow(current + 1),
         ],
-        [
+        steps.map((item, index) =>
           h.span(
             [
-              h.Class('spotlight-progress-fill'),
-              h.Style({ width: `${((current + 1) / steps.length) * 100}%` }),
+              h.Class('spotlight-progress-cell'),
+              h.DataAttribute(
+                'state',
+                index < current ? 'done' : index === current ? 'current' : 'ahead',
+              ),
+              ...(item.kind === 'chapter' ? [h.DataAttribute('chapter-start', '')] : []),
             ],
             [],
           ),
-        ],
+        ),
       ),
     ],
   )
@@ -163,10 +165,7 @@ const stepView = <Message>(
         ...step.blocks.map(render),
         h.button(
           [h.Type('button'), h.Class('spotlight-begin not-prose'), h.OnClick(start)],
-          [
-            chapters[0] ? `Start with ${headingText(chapters[0].heading)}` : 'Start reading',
-            lucide(iconPaths.chevronRight, 'h-4 w-4'),
-          ],
+          ['Start', lucide(iconPaths.chevronRight, 'h-4 w-4')],
         ),
       ],
     )
@@ -240,13 +239,15 @@ const controlsView = <Message>(
         ? h.button(
             [h.Type('button'), h.Class('spotlight-next'), h.OnClick(onStep(current + 1))],
             [
-              h.span(
-                [h.Class('spotlight-next-copy')],
-                [
-                  h.span([h.Class('spotlight-next-eyebrow')], ['Next']),
-                  h.span([h.Class('spotlight-next-title')], [stepLabel(next, chapters)]),
-                ],
-              ),
+              steps[current]?.kind === 'chapter'
+                ? h.span([h.Class('spotlight-next-copy')], ['Next'])
+                : h.span(
+                    [h.Class('spotlight-next-copy')],
+                    [
+                      h.span([h.Class('spotlight-next-eyebrow')], ['Next']),
+                      h.span([h.Class('spotlight-next-title')], [stepLabel(next, chapters)]),
+                    ],
+                  ),
               lucide(iconPaths.chevronRight, 'h-5 w-5'),
             ],
           )

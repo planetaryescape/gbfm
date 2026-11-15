@@ -80,6 +80,17 @@ No restart is required. To verify, ask: "List my GBFM editorial drafts."
   reuse the exact request within 24 hours to replay its saved result. A new edit requires a new requestId.
   Conflicts require rereading, not blind retries. Replayed results describe the original save,
   not the current draft; use get_post before starting another edit.
+- prepare_draft_image_upload: prepare a private JPEG, PNG or WebP upload for an authored
+  unpublished editorial, with its latest expectedVersion, a new requestId, byte size
+  and base64 Content-MD5. PUT the original bytes within five minutes using ALL returned
+  headers. The signed URL is create-only and cannot overwrite an existing object.
+  Exact retries return the original URL, never extend its expiry; changed retries conflict.
+- attach_draft_artwork: attach completed uploads by their preparation requestIds.
+  coverUploadRequestId sets the cover. banner: { uploadRequestId, alt } inserts or replaces
+  the leading standalone Markdown image while preserving a leading ::layout directive.
+  Both uploads must belong to this actor and draft and be less than 24 hours old.
+  Requires the latest expectedVersion and a new edit requestId. Exact retries replay the
+  saved result for 24 hours; changed retries conflict. Existing prose and later images stay intact.
 
 Existing connections remain read-only. For draft-write access, request
 posts:read drafts:write offline_access during authorization and approve fresh consent.
@@ -98,7 +109,7 @@ read requests retain their 16 KiB limit. JSON escaping and multibyte text count 
 the byte limit, so a schema-valid draft can still be too large. Oversize bodies fail
 explicitly without truncation. After an ambiguous write response, reconcile using
 the same requestId, never a new create key.
-Draft tools never publish, delete, change creators, change media or edit published posts.
+Draft tools never publish, delete, change creators or edit published posts.
 They do not control playback or access your private listening library.
 Review and publishing stay in GBFM.
 

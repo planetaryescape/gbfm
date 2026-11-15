@@ -41,16 +41,21 @@ const required = (name: string) => {
 const readJson = <A>(name: string): A => JSON.parse(readFileSync(required(name), 'utf8'))
 
 const port = Number(process.env.PORT ?? 3004)
+
 const frontend = process.env.FRONTEND_URL ?? 'http://127.0.0.1:5173'
+
 const content = readFileSync(required('PREVIEW_CONTENT'), 'utf8')
+
 const music = [
   ...new Map(
     readJson<Array<MusicFixture>>('PREVIEW_MUSIC').map((item) => [item.id, item]),
   ).values(),
 ]
+
 const links = readJson<Array<Array<LinkFixture>>>('PREVIEW_LINKS').flat()
 
 const resource = await createMigratedD1Database()
+
 const database = makeDatabaseClient(resource.database)
 
 await seedLocalUsers(database)
@@ -76,8 +81,9 @@ const chunks = <A>(items: ReadonlyArray<A>, size = 10) =>
     items.slice(index * size, index * size + size),
   )
 
-const albums = music.filter((item) => item.kind === 'album').map(row)
-const tracks = music.filter((item) => item.kind === 'track').map(row)
+const albums = music.flatMap((item) => (item.kind === 'album' ? [row(item)] : []))
+
+const tracks = music.flatMap((item) => (item.kind === 'track' ? [row(item)] : []))
 
 for (const batch of chunks(albums)) await database.insert(musicAlbumsTable).values(batch)
 
@@ -113,6 +119,7 @@ const [post] = await database
 if (!post) throw new Error('Preview post was not seeded')
 
 await database.insert(postCreators).values({ postId: post.id, creatorId: creator.id })
+
 await replaceEntityLabels(database, 'post', post.id, {
   tags: (process.env.PREVIEW_TAGS ?? '').split(',').filter(Boolean),
 })

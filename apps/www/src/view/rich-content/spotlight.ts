@@ -13,7 +13,7 @@ import { Predicate } from 'effect'
 import type { Html, HtmlBuilder } from 'foldkit/html'
 
 import type { Video } from '../../video'
-import { iconPaths, lucide } from '../icons'
+import { iconPaths, pixelIcon, pixelPlayPath } from '../icons'
 import { blockView, inlineChildren, type BlockViewExtras } from './render'
 
 export interface SpotlightViewOptions<Message> {
@@ -65,7 +65,7 @@ const videoPoster = <Message>(
         [
           h.span(
             [h.Class('spotlight-video-play'), h.AriaHidden(true)],
-            [lucide(iconPaths.play, 'h-7 w-7 fill-current')],
+            [pixelIcon(pixelPlayPath, 'h-6 w-6', true)],
           ),
           h.span(
             [h.Class('spotlight-video-meta')],
@@ -174,8 +174,12 @@ const stepView = <Message>(
         ...step.blocks.map(render),
         onboarding,
         h.button(
-          [h.Type('button'), h.Class('spotlight-begin not-prose'), h.OnClick(start)],
-          ['Start', lucide(iconPaths.chevronRight, 'h-4 w-4')],
+          [
+            h.Type('button'),
+            h.Class('btn btn-primary spotlight-begin not-prose'),
+            h.OnClick(start),
+          ],
+          ['Start', pixelIcon(iconPaths.chevronRight, 'h-5 w-5')],
         ),
       ],
     )
@@ -187,8 +191,8 @@ const stepView = <Message>(
         h.p([h.Class('spotlight-chapter-eyebrow')], ['The end']),
         h.h2([], ["That's the walk."]),
         h.button(
-          [h.Type('button'), h.Class('spotlight-begin'), h.OnClick(start)],
-          ['Start over', lucide(iconPaths.chevronRight, 'h-4 w-4')],
+          [h.Type('button'), h.Class('btn btn-primary spotlight-begin'), h.OnClick(start)],
+          ['Start over', pixelIcon(iconPaths.chevronRight, 'h-5 w-5')],
         ),
       ],
     )
@@ -248,16 +252,20 @@ const controlsView = <Message>(
       h.button(
         [
           h.Type('button'),
-          h.Class('spotlight-back'),
+          h.Class('btn btn-quiet btn-icon spotlight-back'),
           h.Disabled(current === 0),
           h.AriaLabel('Previous'),
           h.OnClick(onStep(Math.max(current - 1, 0))),
         ],
-        [lucide(iconPaths.chevronLeft, 'h-5 w-5')],
+        [pixelIcon(iconPaths.chevronLeft, 'h-5 w-5')],
       ),
       next
         ? h.button(
-            [h.Type('button'), h.Class('spotlight-next'), h.OnClick(onStep(current + 1))],
+            [
+              h.Type('button'),
+              h.Class('btn btn-quiet spotlight-next'),
+              h.OnClick(onStep(current + 1)),
+            ],
             [
               steps[current]?.kind === 'chapter'
                 ? h.span([h.Class('spotlight-next-copy')], ['Next'])
@@ -268,7 +276,7 @@ const controlsView = <Message>(
                       h.span([h.Class('spotlight-next-title')], [stepLabel(next, chapters)]),
                     ],
                   ),
-              lucide(iconPaths.chevronRight, 'h-5 w-5'),
+              pixelIcon(iconPaths.chevronRight, 'h-5 w-5'),
             ],
           )
         : h.empty,

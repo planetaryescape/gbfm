@@ -1,7 +1,7 @@
 import { spotifyEntityFromUrl } from '@gbfm/spotify/entity'
 import type { Html, HtmlBuilder } from 'foldkit/html'
 
-import { iconPaths, lucide } from '../view/icons'
+import { iconPaths, pixelIcon, pixelPlayPath } from '../view/icons'
 import { Message, operationState, type Model } from './playback'
 
 const onboardingTarget = 'spotify:onboarding'
@@ -25,12 +25,12 @@ const actionButton = <M>(
   return h.button(
     [
       h.Type('button'),
-      h.Class(`spotlight-action spotlight-action-${action}`),
+      h.Class(`btn spotlight-action spotlight-action-${action}`),
       h.Disabled(!interactive || model.status === null || busy),
       h.AriaBusy(busy && target === url),
       h.OnClick(toMessage(Message.Requested({ action, url }))),
     ],
-    [...(icon ? [lucide(icon, 'h-4 w-4')] : []), label],
+    [...(icon ? [pixelIcon(icon, 'h-5 w-5', action === 'play')] : []), label],
   )
 }
 
@@ -56,7 +56,7 @@ export const cardActions = <M>(
         [h.Class('spotlight-action-row')],
         spotify.model.status?.connected
           ? [
-              actionButton(h, spotify, 'play', url, 'Play', iconPaths.play),
+              actionButton(h, spotify, 'play', url, 'Play', pixelPlayPath),
               actionButton(h, spotify, 'queue', url, 'Queue', iconPaths.listPlus),
               ...(savable ? [actionButton(h, spotify, 'save', url, 'Save', iconPaths.heart)] : []),
             ]

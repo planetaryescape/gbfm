@@ -1,121 +1,78 @@
-:root {
-  --os-ink: var(--foreground);
-  --os-face: var(--card);
-  --os-desk: var(--background);
-  --os-hi: color-mix(in srgb, #fff 70%, var(--card));
-  --os-lo: color-mix(in srgb, var(--foreground) 30%, var(--card));
-  --os-select: var(--highlight);
-  --os-label: 'Pixelify Sans', var(--font-jetbrains);
-  --os-stripes: repeating-linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--os-ink) 55%, transparent) 0 1px,
-    transparent 1px 3px
-  );
-  --os-raised: inset 1px 1px 0 var(--os-hi), inset -1px -1px 0 var(--os-lo);
-  --os-sunken: inset 1px 1px 0 var(--os-lo), inset -1px -1px 0 var(--os-hi);
+.spotlight .rich-content-music-card {
+  gap: 1rem;
+  padding: 1.25rem;
+  border-color: var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--card);
 }
 
-.rich-content .rich-content-music-card {
-  position: relative;
-  gap: 0;
-  padding: 0;
-  border: 1px solid var(--os-ink);
-  border-radius: 0;
-  background: var(--os-face);
-  box-shadow: 1px 1px 0 var(--os-ink);
+.spotlight .rich-content-music-head {
+  grid-template-columns: 7rem minmax(0, 1fr);
+  align-items: center;
 }
 
-.rich-content .rich-content-music-card::before {
-  content: '';
-  display: block;
-  height: 13px;
-  margin: 3px 4px 0;
-  border-bottom: 1px solid var(--os-ink);
-  background: var(--os-stripes);
+.spotlight .rich-content-music-head:not(:has(> img)) {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.rich-content .rich-content-music-head {
-  padding: 0.75rem;
-}
-
-.rich-content .rich-content-music-art {
-  border: 1px solid var(--os-ink);
-  box-shadow: none;
-}
-
-.rich-content .rich-content-music-type {
-  font-family: var(--os-label);
-  font-size: 0.85rem;
+.spotlight .rich-content-music-type {
+  font-size: 0.65rem;
   font-weight: 500;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.12em;
 }
 
-.rich-content .rich-content-music-blurb {
-  margin: 0 0.75rem 0.75rem;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--os-ink);
-  border-left: 1px solid var(--os-ink);
-  background: var(--os-desk);
-  box-shadow: var(--os-sunken);
-  font-size: 0.9rem;
+.spotlight .rich-content-music-title {
+  font-weight: 600;
 }
 
-.rich-content .rich-content-music-links {
+.spotlight .rich-content-music-blurb {
+  padding: 0.25rem 0 0.25rem 0.875rem;
+  border-left: 2px solid var(--highlight);
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+
+.spotlight .rich-content-music-links {
   margin: 0;
-  padding: 0 0.75rem 0.75rem;
-  border-top: 0;
+  padding: 0;
+  border: 0;
+  gap: 0.75rem;
 }
 
-.rich-content .rich-content-music-links a,
-.os-button {
+.spotlight .rich-content-music-links a {
   display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
-  min-height: 2rem;
-  padding: 0 0.75rem;
-  border: 1px solid var(--os-ink);
-  border-radius: 0;
-  background: var(--os-face);
-  box-shadow: var(--os-raised);
-  color: var(--os-ink);
-  font: inherit;
+  min-height: var(--control-height);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
   font-size: 0.75rem;
-  font-weight: 600;
   text-decoration: none;
-  cursor: pointer;
-  transition: none;
 }
 
-.rich-content .rich-content-music-links a:hover {
-  background: var(--os-face);
-  color: var(--os-ink);
+.spotlight .rich-content-music-links a:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
-.rich-content .rich-content-music-links a:active,
-.os-button:active:not(:disabled) {
-  box-shadow: var(--os-sunken);
-  transform: translate(1px, 1px);
-}
-
-.rich-content .rich-content-card-group {
+.spotlight .rich-content-card-group {
   display: flex;
   gap: 1rem;
+  max-width: 100%;
   overflow-x: auto;
-  padding: 0 2px 6px 0;
-  scroll-snap-type: x mandatory;
+  padding-bottom: 0.75rem;
+  scroll-snap-type: x proximity;
 }
 
-.rich-content .rich-content-card-group > * {
+.spotlight .rich-content-card-group > * {
   flex: 0 0 min(17rem, 85%);
   scroll-snap-align: start;
 }
 
-.rich-content .rich-content-card-group .rich-content-music-head {
+.spotlight .rich-content-card-group .rich-content-music-head {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.content-detail .rich-content .rich-content-card-group {
-  width: min(62rem, calc(100vw - 2rem));
 }
 
 .spotlight-video {
@@ -128,16 +85,15 @@
   width: 100%;
   aspect-ratio: 16 / 9;
   padding: 0;
-  border: 1px solid var(--os-ink);
-  border-radius: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
   overflow: hidden;
   cursor: pointer;
-  color: var(--os-ink);
+  color: #fff;
   text-align: left;
   background-color: #000;
   background-size: cover;
   background-position: center;
-  box-shadow: 1px 1px 0 var(--os-ink);
 }
 
 .spotlight-video-play {
@@ -150,17 +106,15 @@
   place-items: center;
   width: 3.5rem;
   height: 3.5rem;
-  padding-left: 0.2rem;
-  border: 1px solid var(--os-ink);
-  background: var(--os-face);
-  box-shadow:
-    var(--os-raised),
-    1px 1px 0 var(--os-ink);
+  border-radius: var(--radius-round);
+  background: var(--card);
+  color: var(--foreground);
 }
 
 .spotlight-video-poster:hover .spotlight-video-play,
 .spotlight-video-poster:focus-visible .spotlight-video-play {
-  background: var(--os-select);
+  background: var(--highlight);
+  color: var(--highlight-foreground);
 }
 
 .spotlight-video-meta {
@@ -172,14 +126,12 @@
   display: flex;
   gap: 0.6rem;
   align-items: baseline;
-  padding: 0.4rem 0.7rem;
-  border-top: 1px solid var(--os-ink);
-  background: var(--os-face);
+  padding: 1.5rem 1rem 0.75rem;
+  background: linear-gradient(transparent, rgb(0 0 0 / 85%));
 }
 
 .spotlight-video-source {
-  font-family: var(--os-label);
-  font-size: 0.75rem;
+  font-size: 0.7rem;
 }
 
 .spotlight-video-title {
@@ -213,12 +165,7 @@
 .video-dialog-backdrop {
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, var(--os-desk) 70%, transparent);
-  background-image: radial-gradient(
-    color-mix(in srgb, var(--os-ink) 35%, transparent) 1px,
-    transparent 1px
-  );
-  background-size: 3px 3px;
+  background: rgb(0 0 0 / 75%);
 }
 
 .video-dialog-panel {
@@ -229,61 +176,56 @@
   display: flex;
   flex-direction: column;
   width: min(960px, calc(100vw - 2rem), calc((100dvh - 8rem) * 16 / 9));
-  border: 1px solid var(--os-ink);
-  background: var(--os-face);
-  color: var(--os-ink);
-  box-shadow: 2px 2px 0 var(--os-ink);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-overlay);
+  overflow: hidden;
+  background: var(--card);
+  color: var(--foreground);
 }
 
 .video-dialog-foot {
   order: -1;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 3px 4px;
-  border-bottom: 1px solid var(--os-ink);
-  background: var(--os-stripes);
-  background-origin: content-box;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
 }
 
 .video-dialog-close {
-  order: -1;
   display: grid;
   flex-shrink: 0;
   place-items: center;
-  width: 1.25rem;
-  height: 1.25rem;
-  border: 1px solid var(--os-ink);
-  border-radius: 0;
-  background: var(--os-face);
-  color: var(--os-ink);
+  width: var(--control-height);
+  height: var(--control-height);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--foreground);
   cursor: pointer;
 }
 
+.video-dialog-close:hover {
+  background: var(--muted);
+}
+
 .video-dialog-close svg {
-  width: 0.75rem;
-  height: 0.75rem;
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
 .video-dialog-title {
   flex: 1;
   min-width: 0;
-  margin: 0 auto;
+  margin: 0;
   overflow: hidden;
-  padding: 0 0.5rem;
-  background: var(--os-face);
-  font-family: var(--os-label);
   font-size: 0.85rem;
-  text-align: center;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 .video-dialog-link {
   flex-shrink: 0;
-  padding: 0 0.5rem;
-  background: var(--os-face);
-  color: var(--os-ink);
+  color: var(--muted-foreground);
   font-size: 0.75rem;
   text-underline-offset: 3px;
 }
@@ -298,4 +240,21 @@
   width: 100%;
   height: 100%;
   border: 0;
+}
+
+.spotlight-video-poster:focus-visible,
+.video-dialog-close:focus-visible,
+.spotlight .rich-content-music-links a:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+@media (max-width: 480px) {
+  .spotlight .rich-content-music-card {
+    padding: 1rem;
+  }
+
+  .spotlight .rich-content-music-head {
+    grid-template-columns: 5rem minmax(0, 1fr);
+  }
 }

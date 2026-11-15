@@ -243,7 +243,13 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
   const walking = at !== null && at !== 'end'
 
   return h.article(
-    [h.Class('content-detail mx-auto max-w-5xl px-4 pb-32 pt-6')],
+    [
+      h.Class(
+        spotlight
+          ? 'content-detail spotlight-detail mx-auto px-4 pb-32 pt-6'
+          : 'content-detail mx-auto max-w-5xl px-4 pb-32 pt-6',
+      ),
+    ],
     [
       breadcrumbs([...ancestors(item, kind).map(crumbLink), crumbCurrent(item.slug)]),
       kind === 'editorial' && item.draft ? draftNotice(h, item.slug) : h.empty,
@@ -257,7 +263,7 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
         : h.empty,
       walking ? h.empty : metaStrip(h, item),
       h.div(
-        [h.Class(walking ? 'mt-4 max-w-prose' : 'mt-10 max-w-prose')],
+        [h.Class(spotlight ? 'spotlight-body mt-4' : 'mt-10 max-w-prose')],
         [
           item.richContent === null
             ? richContent(item.content)

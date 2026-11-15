@@ -15,6 +15,7 @@ import type { Html, HtmlBuilder } from 'foldkit/html'
 import type { Video } from '../../video'
 import { iconPaths, pixelIcon, pixelPlayPath } from '../icons'
 import { blockView, inlineChildren, type BlockViewExtras } from './render'
+import { spotlightRecords } from './spotlight-records'
 
 export interface SpotlightViewOptions<Message> {
   readonly at: string | null
@@ -233,7 +234,10 @@ const stepView = <Message>(
 
   return h.article(
     [h.Class('spotlight-moment')],
-    [h.h3([], inlineChildren(step.value.heading.children, h)), ...step.value.blocks.map(render)],
+    [
+      h.h3([], inlineChildren(step.value.heading.children, h)),
+      ...spotlightRecords(step.value.blocks, h, render),
+    ],
   )
 }
 

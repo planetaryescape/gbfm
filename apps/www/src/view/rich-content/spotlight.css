@@ -2,6 +2,34 @@
   scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 1rem);
 }
 
+.spotlight-detail {
+  max-width: 80rem;
+}
+
+.spotlight-body {
+  max-width: 75ch;
+}
+
+.spotlight-body:has(.spotlight-records, .rich-content-card-group) {
+  max-width: none;
+}
+
+.spotlight-intro,
+.spotlight-chapter,
+.spotlight-end,
+.spotlight-moment > p {
+  max-width: 75ch;
+}
+
+.spotlight-records {
+  display: grid;
+  gap: 1rem;
+}
+
+.spotlight-records > * {
+  margin: 0;
+}
+
 .spotlight-progress {
   display: grid;
   gap: 0.75rem;
@@ -204,4 +232,107 @@
   color: var(--foreground);
   font-size: 0.875rem;
   font-weight: 600;
+}
+
+@media (min-width: 768px) {
+  .spotlight-records,
+  .spotlight .rich-content-card-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .spotlight-records .rich-content-music-card,
+  .spotlight .rich-content-card-group .rich-content-music-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-content: start;
+    gap: 0.5rem;
+    padding: 0.875rem;
+    content-visibility: visible;
+  }
+
+  .spotlight-records .rich-content-music-head,
+  .spotlight .rich-content-card-group .rich-content-music-head {
+    grid-column: 1;
+    grid-row: 1;
+    grid-template-columns: 3.5rem minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+
+  .spotlight-records .rich-content-music-head:not(:has(> img)),
+  .spotlight .rich-content-card-group .rich-content-music-head:not(:has(> img)) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .spotlight-records .rich-content-music-title,
+  .spotlight .rich-content-card-group .rich-content-music-title {
+    font-size: 0.9375rem;
+  }
+
+  .spotlight-records .rich-content-music-artists,
+  .spotlight-records .rich-content-music-blurb,
+  .spotlight .rich-content-card-group .rich-content-music-artists,
+  .spotlight .rich-content-card-group .rich-content-music-blurb {
+    font-size: 0.75rem;
+  }
+
+  .spotlight-records .rich-content-music-links,
+  .spotlight .rich-content-card-group .rich-content-music-links {
+    grid-column: 2;
+    grid-row: 1;
+    flex-direction: column;
+    align-items: end;
+    gap: 0;
+  }
+
+  .spotlight-records .rich-content-music-blurb,
+  .spotlight-records .spotlight-actions,
+  .spotlight-records .rich-content-music-tracks,
+  .spotlight .rich-content-card-group .rich-content-music-blurb,
+  .spotlight .rich-content-card-group .spotlight-actions,
+  .spotlight .rich-content-card-group .rich-content-music-tracks {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1200px) {
+  .spotlight-records,
+  .spotlight .rich-content-card-group {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .spotlight-progress {
+    margin-bottom: 1rem;
+  }
+
+  .spotlight-stage > * > * + * {
+    margin-top: 1rem;
+  }
+
+  .spotlight-moment > p {
+    max-width: 100ch;
+    font-size: 0.875rem;
+    line-height: 1.75;
+  }
+
+  .spotlight-controls {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 2rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+  }
+
+  .spotlight-back {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .spotlight-next {
+    grid-column: 2;
+    grid-row: 1;
+    justify-content: end;
+    text-align: right;
+  }
 }

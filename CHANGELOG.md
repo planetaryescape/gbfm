@@ -1,3 +1,12 @@
+## [2.135.1](https://github.com/planetaryescape/gbfm/compare/v2.135.0...v2.135.1) (2026-11-15)
+
+
+### Bug Fixes
+
+* **observability:** bound telemetry secret lookup latency ([7eaa169](https://github.com/planetaryescape/gbfm/commit/7eaa1698864c52e6df67a50747d33227b4b13982))
+* **observability:** resolve Worker DSN bindings ([#634](https://github.com/planetaryescape/gbfm/issues/634)) ([4457bb0](https://github.com/planetaryescape/gbfm/commit/4457bb085a9b68459529e9b5ae51ab1f7a291271))
+* **observability:** resolve Worker DSN bindings before SDK initialization ([dbb268b](https://github.com/planetaryescape/gbfm/commit/dbb268b5f01e20ec3c5238e4e94383016de2fb72))
+
 # [2.135.0](https://github.com/planetaryescape/gbfm/compare/v2.134.2...v2.135.0) (2026-11-15)
 
 

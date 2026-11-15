@@ -317,8 +317,6 @@ export const DraftArtworkServiceLayer = Layer.effect(
 
         if (banner && input.banner) {
           content = attachLeadingBanner(previous.content ?? '', banner.publicUrl, input.banner.alt)
-
-          if (content.length > 100_000) return yield* invalid()
         }
 
         const now = new Date(
@@ -349,7 +347,6 @@ export const DraftArtworkServiceLayer = Layer.effect(
             savedPatch.description === undefined ? next.description : savedPatch.description,
         }
 
-        if ((savedPost.content?.length ?? 0) > 100_000) return yield* invalid()
         yield* validatePostEditContent(savedPost.content)
         const result = { endpoint, post: yield* projectPost(savedPost, endpoint) }
 
@@ -472,7 +469,6 @@ export const DraftArtworkServiceLayer = Layer.effect(
         Effect.mapError(invalid),
       )
 
-      if ((next.content?.length ?? 0) > 100_000) return yield* invalid()
       yield* validatePostEditContent(next.content)
       const result = { endpoint, post: yield* projectPost(next, endpoint) }
       const current = yield* authorize

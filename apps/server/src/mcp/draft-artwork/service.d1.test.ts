@@ -582,6 +582,102 @@ const updatePost = (
   )
 
 describe('authored editorial edits including published posts', () => {
+  test.each(['title', 'cover', 'banner'])(
+    'preserves canonical 101k source when editing published %s',
+    async (field) => {
+      const content = 'x'.repeat(101_000)
+      await db.update(postsTable).set({ draft: false, content }).where(eq(postsTable.id, postId))
+      const prepared = await preparePost(await input())
+      await put(prepared)
+      const expectedVersion = await version()
+      const edit = { requestId: crypto.randomUUID(), postId, expectedVersion }
+
+      const artwork =
+        field === 'cover'
+          ? { coverUploadRequestId: prepared.upload.requestId }
+          : { banner: { uploadRequestId: prepared.upload.requestId, alt: 'Canonical banner' } }
+
+      const saved =
+        field === 'title'
+          ? await updatePost({ ...edit, title: 'Canonical existing source' })
+          : await attachPost({ ...edit, ...artwork })
+
+      expect(saved.post.content).toContain(content)
+      expect(saved.post.content === content).toBe(field !== 'banner')
+      expect(saved.post.draft).toBe(false)
+      expect(saved.post.creatorIds).toEqual([ownerId])
+      expect(saved.post.version).not.toBe(expectedVersion)
+      await expect(
+        updatePost({
+          requestId: crypto.randomUUID(),
+          postId,
+          expectedVersion: saved.post.version,
+          content,
+        }),
+      ).rejects.toMatchObject({ code: 'invalid_input' })
+      expect(await version()).toBe(saved.post.version)
+    },
+  )
+
+  test('rewrites an owned private inline image before the published prose commit and copies it afterwards', async () => {
+    await db.update(postsTable).set({ draft: false }).where(eq(postsTable.id, postId))
+    const prepared = await preparePost(await input())
+    await put(prepared)
+    const publicUrl = prepared.upload.publicUrl.replace('/private/', '/public/')
+    const publicKey = prepared.upload.key.replace(/^private\//, 'public/')
+    const atCopy: Array<{ draft: boolean; content: string | null }> = []
+
+    const observeCommittedCopy = Layer.effect(
+      ObjectStoreClient,
+      Effect.gen(function* () {
+        const actual = yield* ObjectStoreClient
+
+        return {
+          ...actual,
+          copyObject: async (bucketName: string, source: string, destination: string) => {
+            const [committed] = await db
+              .select({ draft: postsTable.draft, content: postsTable.content })
+              .from(postsTable)
+              .where(eq(postsTable.id, postId))
+
+            if (!committed) throw new Error('Expected committed inline-image post')
+            atCopy.push(committed)
+
+            return actual.copyObject(bucketName, source, destination)
+          },
+        }
+      }),
+    ).pipe(Layer.provide(store))
+
+    const request = {
+      requestId: crypto.randomUUID(),
+      postId,
+      expectedVersion: await version(),
+      content: `Intro.\n\n![Owned inline image](${prepared.upload.publicUrl})\n\nPreserved tail.`,
+    }
+
+    await expect(
+      updatePost(request, { actorId: otherId, storage: observeCommittedCopy }),
+    ).rejects.toMatchObject({ code: 'not_found' })
+    expect(copies).toHaveLength(0)
+    expect(await version()).toBe(request.expectedVersion)
+    const saved = await updatePost(request, { storage: observeCommittedCopy })
+    expect(saved.post.draft).toBe(false)
+    expect(saved.post.creatorIds).toEqual([ownerId])
+    expect(saved.post.content).toContain(publicUrl)
+    expect(saved.post.content).toContain('Preserved tail.')
+    expect(saved.post.content).not.toContain('/private/')
+    expect(atCopy).toEqual([{ draft: false, content: saved.post.content }])
+    const delivered = await bucket.get(publicKey)
+
+    if (!delivered) throw new Error('Expected public inline-image copy')
+    expect(new Uint8Array(await delivered.arrayBuffer())).toEqual(new Uint8Array(bytes))
+    expect(await bucket.head(prepared.upload.key)).not.toBeNull()
+    expect(await updatePost(request)).toEqual(saved)
+    expect(copies).toHaveLength(1)
+    expect(await version()).toBe(saved.post.version)
+  })
+
   test('rejects publication fields and noncanonical prose before changing any rows', async () => {
     await db.update(postsTable).set({ draft: false }).where(eq(postsTable.id, postId))
 

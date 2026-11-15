@@ -6,6 +6,7 @@ import type { ContentItem, Model } from '../../model'
 import * as Player from '../../player'
 import * as PublicActions from '../../public-actions'
 import * as SpotifyReading from '../../spotify/reading'
+import { spotlightDocument, spotlightProgress } from '../../spotlight-page'
 import { artwork } from '../../view/artwork'
 import { breadcrumbs, crumbCurrent, crumbLink } from '../../view/breadcrumbs'
 import { emailUpdatesInvite } from '../../view/email-updates'
@@ -227,17 +228,6 @@ const readingSpotify = (model: Model): SpotifyReading.ReadingSpotify<Message> =>
   interactive: model.interactive,
 })
 
-const spotlightProgress = ({ spotlight, flags }: Model) => {
-  const url = new URL(flags.url)
-
-  return spotlight !== null && spotlight.path === url.pathname
-    ? spotlight
-    : { at: url.searchParams.get('at'), seen: [] }
-}
-
-const spotlightPreview = (url: string) =>
-  import.meta.env.DEV && new URL(url).searchParams.get('layout') === 'spotlight'
-
 export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) => {
   const item = model.flags.items[0]
 
@@ -247,10 +237,7 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
       [h.p([h.Role('alert')], [model.flags.failure ?? 'Content not found.'])],
     )
 
-  const spotlight =
-    kind === 'editorial' &&
-    item.richContent !== null &&
-    (item.richContent.layout === 'spotlight' || spotlightPreview(model.flags.url))
+  const spotlight = kind === 'editorial' ? spotlightDocument(model) : null
 
   const at = spotlight ? spotlightProgress(model).at : null
   const walking = at !== null && at !== 'end'
@@ -275,7 +262,7 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
           item.richContent === null
             ? richContent(item.content)
             : spotlight
-              ? spotlightView(item.richContent, h, {
+              ? spotlightView(spotlight, h, {
                   ...spotlightProgress(model),
                   onStep: (at) =>
                     Message.SpotlightStepped({ path: new URL(model.flags.url).pathname, at }),

@@ -56,7 +56,7 @@ function InlineNode({ inline }: { readonly inline: Inline }) {
   })
 }
 
-function InlineText({ inlines }: { readonly inlines: ReadonlyArray<Inline> }) {
+export function InlineText({ inlines }: { readonly inlines: ReadonlyArray<Inline> }) {
   return keyedContent(inlines).map(({ item, key }) => <InlineNode key={key} inline={item} />)
 }
 

@@ -1,7 +1,7 @@
 import { inertHtml as h } from 'foldkit/html'
 import { describe, expect, it } from 'vitest'
 
-import { artworkUrl, imageSource, preloadArtwork } from './artwork'
+import { artwork, artworkUrl, imageSource, preloadArtwork } from './artwork'
 
 describe('private artwork delivery', () => {
   it('keeps the canonical path inert until the preview Mount authorizes it', async () => {
@@ -19,5 +19,26 @@ describe('private artwork delivery', () => {
     expect(artworkUrl('https://other.example/cover.jpg', 640)).toBe(
       'https://other.example/cover.jpg',
     )
+  })
+})
+
+describe('artwork geometry', () => {
+  it('preserves square dimensions for existing callers', () => {
+    const image = artwork('https://example.com/cover.jpg', 'Cover', '160px')
+    expect(image?.data?.attrs).toMatchObject({ width: '640', height: '640', loading: 'lazy' })
+  })
+
+  it('reserves the banner aspect ratio before the image loads', () => {
+    const image = artwork('https://example.com/banner.jpg', 'Banner', '750px', true, 'banner', {
+      width: 2400,
+      height: 800,
+    })
+
+    expect(image?.data?.attrs).toMatchObject({
+      width: '2400',
+      height: '800',
+      loading: 'eager',
+      fetchpriority: 'high',
+    })
   })
 })

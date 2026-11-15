@@ -113,9 +113,20 @@ test('only bounded reviewed dynamic sampling metadata crosses service boundaries
   )
 
   expect(headers.get('baggage')).toBe(
-    `sentry-trace_id=${traceId},sentry-sampled=true,sentry-environment=production,sentry-public_key=abc123`,
+    `sentry-sampled=true,sentry-environment=production,sentry-public_key=abc123,sentry-trace_id=${traceId}`,
   )
   expect(JSON.stringify([...headers])).not.toContain(secret)
+})
+
+test('normalization never invents incomplete dynamic sampling baggage', () => {
+  for (const baggage of ['', `sentry-trace_id=${traceId}`, 'unknown=' + 'x'.repeat(8192)]) {
+    const headers = propagatedHeaders(
+      new Headers({ traceparent: `00-${traceId}-${spanId}-01`, baggage }),
+    )
+
+    expect(headers.has('baggage')).toBe(false)
+    expect(headers.get('sentry-trace')).toBe(`${traceId}-${spanId}-1`)
+  }
 })
 
 test('malformed or zero trace identifiers cannot create a remote parent', () => {

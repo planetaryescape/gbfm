@@ -7,7 +7,7 @@ import { audioTable } from '@/db/audio.schema'
 import { Database, DatabaseLayer } from '@/db/layer'
 import { sanitizeDatabaseSpan } from '@/lib/database-telemetry'
 import { WorkerTracingLive } from '@/runtime/sentry-worker'
-import { requestWithinServerSpan } from '@/runtime/trace-context'
+import { normalizeWorkerTraceContext, requestWithinServerSpan } from '@/runtime/trace-context'
 import { ConfigService, createConfig } from '@/services/config.service'
 import { AppLoggerLive } from '@/services/logger.service'
 
@@ -25,60 +25,64 @@ const read = Effect.fn('Tracing.read')(function* () {
   return rows
 })
 
-export default Sentry.withSentry<Bindings>(
-  (env) => ({
-    dsn: 'https://abc123@o1.ingest.sentry.io/123',
-    environment: 'test',
-    tracesSampleRate: 1,
-    enableLogs: true,
-    sendDefaultPii: false,
-    beforeSendSpan: sanitizeDatabaseSpan,
-    transport: (options) =>
-      Sentry.createTransport(options, async (request) => {
-        await env.CAPTURE.fetch('https://capture.test/envelope', {
-          method: 'POST',
-          body: request.body,
-        })
+export default normalizeWorkerTraceContext(
+  Sentry.withSentry<Bindings>(
+    (env) => ({
+      dsn: 'https://abc123@o1.ingest.sentry.io/123',
+      environment: 'test',
+      tracesSampleRate: 1,
+      enableLogs: true,
+      sendDefaultPii: false,
+      beforeSendSpan: sanitizeDatabaseSpan,
+      transport: (options) =>
+        Sentry.createTransport(options, async (request) => {
+          await env.CAPTURE.fetch('https://capture.test/envelope', {
+            method: 'POST',
+            body: request.body,
+          })
 
-        return { statusCode: 200 }
-      }),
-  }),
-  {
-    async fetch(request: Request, env: Bindings) {
-      const spanId = Sentry.getActiveSpan()?.spanContext().spanId ?? ''
-
-      const route = HttpRouter.add(
-        'GET',
-        '/api/content/homepage-mixes',
-        Effect.gen(function* () {
-          const rows = yield* read()
-
-          return yield* HttpServerResponse.json({ rows })
+          return { statusCode: 200 }
         }),
-      ).pipe(
-        Layer.provideMerge(DatabaseLayer(env.DB)),
-        Layer.provideMerge(WorkerTracingLive),
-        Layer.provide(HttpRouter.disableLogger),
-        Layer.provideMerge(
-          AppLoggerLive.pipe(Layer.provide(Layer.succeed(ConfigService, createConfig()))),
-        ),
-        Layer.provideMerge(
-          Layer.mergeAll(FileSystem.layerNoop({}), Path.layer).pipe(
-            Layer.provideMerge(HttpServer.layerServices),
+    }),
+    {
+      async fetch(request: Request, env: Bindings) {
+        const spanId = Sentry.getActiveSpan()?.spanContext().spanId ?? ''
+
+        const route = HttpRouter.add(
+          'GET',
+          '/api/content/homepage-mixes',
+          Effect.gen(function* () {
+            const rows = yield* read()
+
+            return yield* HttpServerResponse.json({ rows })
+          }),
+        ).pipe(
+          Layer.provideMerge(DatabaseLayer(env.DB)),
+          Layer.provideMerge(WorkerTracingLive),
+          Layer.provide(HttpRouter.disableLogger),
+          Layer.provideMerge(
+            AppLoggerLive.pipe(Layer.provide(Layer.succeed(ConfigService, createConfig()))),
           ),
-        ),
-      )
+          Layer.provideMerge(
+            Layer.mergeAll(FileSystem.layerNoop({}), Path.layer).pipe(
+              Layer.provideMerge(HttpServer.layerServices),
+            ),
+          ),
+        )
 
-      const web = HttpRouter.toWebHandler(route, {})
+        const web = HttpRouter.toWebHandler(route, {})
 
-      try {
-        const response = await web.handler(requestWithinServerSpan(request))
-        response.headers.set('x-fixture-server-span', spanId)
+        try {
+          const response = await web.handler(requestWithinServerSpan(request))
+          response.headers.set('x-fixture-server-span', spanId)
+          response.headers.set('x-fixture-b3-removed', String(!request.headers.has('b3')))
+          response.headers.set('x-fixture-baggage', request.headers.get('baggage') ?? '')
 
-        return response
-      } finally {
-        await web.dispose()
-      }
+          return response
+        } finally {
+          await web.dispose()
+        }
+      },
     },
-  },
+  ),
 )

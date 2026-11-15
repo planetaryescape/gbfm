@@ -3,7 +3,6 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { propagatedHeaders } from '@gbfm/observability/propagation'
 import { Option, Schema } from 'effect'
 import { Miniflare } from 'miniflare'
 import { afterAll, beforeAll, expect, test } from 'vitest'
@@ -89,13 +88,11 @@ test('the real workerd API, Effect handler, D1 queries and warning log retain on
   const traceId = '33333333333333333333333333333333'
   const caller = '4444444444444444'
 
-  const headers = propagatedHeaders(
-    new Headers({
-      'sentry-trace': `${traceId}-${caller}-1`,
-      b3: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-1',
-      baggage: 'customer=synthetic-secret-do-not-export,sentry-sampled=true',
-    }),
-  )
+  const headers = new Headers({
+    'sentry-trace': `${traceId}-${caller}-1`,
+    b3: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-1',
+    baggage: 'customer=synthetic-secret-do-not-export,sentry-sampled=true',
+  })
 
   const response = await runtime.dispatchFetch(
     'https://api.goosebumps.fm/api/content/homepage-mixes',
@@ -103,6 +100,8 @@ test('the real workerd API, Effect handler, D1 queries and warning log retain on
   )
 
   expect(response.status).toBe(200)
+  expect(response.headers.get('x-fixture-b3-removed')).toBe('true')
+  expect(response.headers.get('x-fixture-baggage')).not.toContain('synthetic-secret-do-not-export')
   await response.arrayBuffer()
   await exported.promise
   const sdkSpanId = response.headers.get('x-fixture-server-span')

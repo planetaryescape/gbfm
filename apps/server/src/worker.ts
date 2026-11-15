@@ -3,7 +3,6 @@ import type {
   D1Database,
   DurableObjectNamespace,
   ExecutionContext,
-  IncomingRequestCfProperties,
   Fetcher,
   KVNamespace,
   MessageBatch,
@@ -15,7 +14,6 @@ import type {
 } from '@cloudflare/workers-types'
 import { resolveRequestId } from '@gbfm/core/observability/request-id'
 import { traceSampleRate } from '@gbfm/core/observability/trace-sampling'
-import { propagatedHeaders } from '@gbfm/observability/propagation'
 import * as Sentry from '@sentry/cloudflare'
 import type {
   ErrorEvent,
@@ -49,7 +47,7 @@ import {
   WorkerTracingLive,
 } from '@/runtime/sentry-worker'
 import { AppLayer } from '@/runtime/services'
-import { requestWithinServerSpan } from '@/runtime/trace-context'
+import { normalizeWorkerTraceContext, requestWithinServerSpan } from '@/runtime/trace-context'
 import { dispatchScheduledJob } from '@/scheduled'
 import {
   AdminTelemetryServiceLive,
@@ -374,7 +372,7 @@ const instrumentedWorker = Sentry.withSentry<ApiEnv, ApiQueueJob>(sentryOptions,
       const requestId = resolveRequestId(incomingRequestId)
       const headers = new Headers(request.headers)
       headers.set('x-request-id', requestId)
-      const correlatedRequest = requestWithinServerSpan(new Request(request, { headers }))
+      const correlatedRequest = requestWithinServerSpan(request, headers)
 
       span.setAttribute('http.request.method', correlatedRequest.method)
       span.setAttribute('gbfm.request_id', requestId)
@@ -451,16 +449,4 @@ const instrumentedWorker = Sentry.withSentry<ApiEnv, ApiQueueJob>(sentryOptions,
   },
 })
 
-export default {
-  ...instrumentedWorker,
-  fetch(request: Request, env: ApiEnv, context: ExecutionContext) {
-    const normalized = new Request<unknown, IncomingRequestCfProperties>(request, {
-      headers: propagatedHeaders(request.headers),
-    })
-
-    return (
-      instrumentedWorker.fetch?.(normalized, env, context) ??
-      Promise.resolve(new Response(null, { status: 500 }))
-    )
-  },
-}
+export default normalizeWorkerTraceContext(instrumentedWorker)

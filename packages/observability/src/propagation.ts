@@ -80,8 +80,12 @@ export const propagatedHeaders = (source: Headers) => {
       if (key && value && value.length <= 160 && pattern?.test(value)) reviewed.set(key, value)
     }
 
-    reviewed.set('sentry-trace_id', traceId)
-    headers.set('baggage', [...reviewed].map(([key, value]) => `${key}=${value}`).join(','))
+    reviewed.delete('sentry-trace_id')
+
+    if (reviewed.size > 0) {
+      reviewed.set('sentry-trace_id', traceId)
+      headers.set('baggage', [...reviewed].map(([key, value]) => `${key}=${value}`).join(','))
+    }
   }
 
   return headers

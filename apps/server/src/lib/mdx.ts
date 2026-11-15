@@ -52,6 +52,7 @@ const defaultFn = (_content: string): Promise<string> => Promise.resolve('')
 
 const unavailableMusicResolver: RichContentMusicResolverService = {
   resolve: () => Effect.succeed(null),
+  resolveMany: (references) => Effect.succeed(references.map(() => null)),
 }
 
 const directMediaResolver: ExternalMediaResolver = {
@@ -253,10 +254,49 @@ const resolveDocument = (
   document: UnresolvedDocument,
   resolvers: Resolvers,
 ): Effect.Effect<RichContentDocument> =>
-  Effect.all(
-    document.blocks.map((block) => resolveBlock(block, resolvers)),
-    { concurrency: 8 },
-  ).pipe(Effect.map((blocks) => ({ version: 1 as const, blocks })))
+  Effect.gen(function* () {
+    const references: Array<MusicReference> = []
+
+    const collect = (blocks: ReadonlyArray<UnresolvedBlock>): void => {
+      for (const block of blocks) {
+        if (block._tag === 'EmbedReference' && block.reference._tag !== 'ExternalMedia')
+          references.push(block.reference)
+
+        if (block._tag === 'Quote' || block._tag === 'CardGroup') collect(block.children)
+
+        if (block._tag === 'List') for (const item of block.items) collect(item.children)
+      }
+    }
+
+    collect(document.blocks)
+
+    const snapshots = yield* Effect.cached(
+      resolvers.music
+        .resolveMany(references)
+        .pipe(
+          Effect.map(
+            (values) =>
+              new Map(references.map((reference, index) => [reference, values[index] ?? null])),
+          ),
+        ),
+    )
+
+    const hydrated: Resolvers = {
+      ...resolvers,
+      music: {
+        ...resolvers.music,
+        resolve: (reference) =>
+          snapshots.pipe(Effect.map((values) => values.get(reference) ?? null)),
+      },
+    }
+
+    const blocks = yield* Effect.all(
+      document.blocks.map((block) => resolveBlock(block, hydrated)),
+      { concurrency: 8 },
+    )
+
+    return { version: 1 as const, blocks }
+  })
 
 export const renderRichContent = (source: string): RichContentDocument =>
   Effect.runSync(

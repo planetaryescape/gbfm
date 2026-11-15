@@ -127,3 +127,20 @@ const inlineText = (inline: Inline): string => {
 }
 
 export const headingText = (heading: Heading): string => heading.children.map(inlineText).join('')
+
+/** URL-friendly position: chapter openers are `2`, moments `2.3`, the end `end`, the intro absent. */
+export const stepPosition = (step: SpotlightStep): string | null => {
+  if (step.kind === 'intro') return null
+
+  if (step.kind === 'end') return 'end'
+
+  return step.kind === 'chapter'
+    ? `${step.chapter + 1}`
+    : `${step.chapter + 1}.${step.position + 1}`
+}
+
+export const stepAt = (steps: ReadonlyArray<SpotlightStep>, position: string | null): number => {
+  const index = steps.findIndex((step) => stepPosition(step) === position)
+
+  return index === -1 ? 0 : index
+}

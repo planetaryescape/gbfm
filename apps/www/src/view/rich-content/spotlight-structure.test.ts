@@ -3,7 +3,13 @@ import { parseRichContent } from '@gbfm/rich-content/source'
 import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 
-import { spotlightSteps, spotlightStructure, youtubeVideoId } from './spotlight-structure'
+import {
+  spotlightSteps,
+  spotlightStructure,
+  stepAt,
+  stepPosition,
+  youtubeVideoId,
+} from './spotlight-structure'
 
 const text = (block: RichContentBlock | undefined) =>
   block && 'children' in block && Array.isArray(block.children)
@@ -93,5 +99,24 @@ describe('spotlightSteps', () => {
         step.kind === 'moment' ? `${step.chapter}.${step.position}` : step.kind,
       ),
     ).toEqual(['intro', 'chapter', '0.0', '0.1', 'chapter', '1.0', 'end'])
+  })
+})
+
+describe('step positions', () => {
+  const { document } = parseRichContent(
+    ['Intro.', '## Zimbabwe', '### Tuku', 'Matope.'].join('\n\n'),
+  )
+
+  const steps = spotlightSteps(
+    spotlightStructure(Schema.decodeUnknownSync(RichContentDocument)(document).blocks),
+  )
+
+  it('round-trips every step through its URL position', () => {
+    expect(steps.map(stepPosition)).toEqual([null, '1', '1.1', 'end'])
+    expect(steps.map((step) => stepAt(steps, stepPosition(step)))).toEqual([0, 1, 2, 3])
+  })
+
+  it('falls back to the intro for positions the post no longer has', () => {
+    expect(stepAt(steps, '9.9')).toBe(0)
   })
 })

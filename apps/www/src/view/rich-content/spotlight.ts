@@ -253,33 +253,27 @@ const controlsView = <Message>(
   return h.nav(
     [h.Class('spotlight-controls not-prose'), h.AriaLabel('Move through the article')],
     [
-      next
-        ? h.button(
-            [
-              h.Type('button'),
-              h.Class('btn btn-quiet spotlight-next'),
-              h.OnClick(onStep(current + 1)),
-            ],
-            [
-              h.span(
-                [h.Class('spotlight-next-copy')],
-                [
-                  h.span([h.Class('spotlight-next-eyebrow')], ['Up next']),
-                  h.span([h.Class('spotlight-next-title')], [stepLabel(next, chapters)]),
-                ],
-              ),
-              pixelIcon(iconPaths.chevronRight, 'h-5 w-5'),
-            ],
-          )
-        : h.empty,
       h.button(
         [
           h.Type('button'),
-          h.Class('btn btn-quiet spotlight-back'),
+          h.Class('btn btn-quiet btn-icon spotlight-back'),
           h.Disabled(current === 0),
+          h.AriaLabel('Previous entry'),
+          h.Title('Previous (← / h)'),
           h.OnClick(onStep(Math.max(current - 1, 0))),
         ],
-        [pixelIcon(iconPaths.chevronLeft, 'h-4 w-4'), 'Previous'],
+        [pixelIcon(iconPaths.chevronLeft, 'h-5 w-5')],
+      ),
+      h.button(
+        [
+          h.Type('button'),
+          h.Class('btn btn-quiet btn-icon spotlight-next'),
+          h.Disabled(next === undefined),
+          h.AriaLabel('Next entry'),
+          h.Title(next ? `Next (→ / l): ${stepLabel(next, chapters)}` : 'End of article'),
+          h.OnClick(onStep(Math.min(current + 1, steps.length - 1))),
+        ],
+        [pixelIcon(iconPaths.chevronRight, 'h-5 w-5')],
       ),
     ],
   )
@@ -307,10 +301,22 @@ export const spotlightView = <Message>(
   return h.div(
     [h.Class('rich-content spotlight'), h.Id('spotlight')],
     [
-      progressView(steps, current, structure.chapters, h),
+      h.header(
+        [h.Class('spotlight-header')],
+        [
+          progressView(steps, current, structure.chapters, h),
+          controlsView(steps, current, structure.chapters, h, go),
+        ],
+      ),
       step
         ? h.div(
-            [h.Key(`spotlight-step-${current}`), h.Class('spotlight-stage')],
+            [
+              h.Key(`spotlight-step-${current}`),
+              h.Class('spotlight-stage'),
+              h.Role('region'),
+              h.AriaLabel('Current editorial entry'),
+              h.Tabindex(0),
+            ],
             [
               stepView(
                 step,
@@ -324,7 +330,6 @@ export const spotlightView = <Message>(
             ],
           )
         : h.empty,
-      current === 0 ? h.empty : controlsView(steps, current, structure.chapters, h, go),
     ],
   )
 }

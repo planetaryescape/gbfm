@@ -22,8 +22,22 @@ const ignored = (event: KeyboardEvent) => {
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
+const scrollContext = () => {
+  const stage = document.querySelector<HTMLElement>('.spotlight-stage')
+
+  if (stage !== null && getComputedStyle(stage).overflowY === 'auto') {
+    return { target: stage, height: stage.clientHeight, extent: stage.scrollHeight }
+  }
+
+  return {
+    target: window,
+    height: window.innerHeight,
+    extent: document.documentElement.scrollHeight,
+  }
+}
+
 const glide = (top: number) =>
-  window.scrollBy({ top, behavior: reducedMotion() ? 'auto' : 'smooth' })
+  scrollContext().target.scrollBy({ top, behavior: reducedMotion() ? 'auto' : 'smooth' })
 
 const holdScroller = () => {
   let direction = 0
@@ -45,7 +59,7 @@ const holdScroller = () => {
 
     const step = Math.min((HOLD_SPEED * elapsed) / 1000, held ? Infinity : TAP_DISTANCE - travelled)
 
-    window.scrollBy(0, direction * step)
+    scrollContext().target.scrollBy(0, direction * step)
     travelled += step
     frame = requestAnimationFrame(tick)
   }
@@ -55,7 +69,7 @@ const holdScroller = () => {
       if (held && direction === next) return
 
       if (reducedMotion()) {
-        window.scrollBy(0, next * TAP_DISTANCE)
+        scrollContext().target.scrollBy(0, next * TAP_DISTANCE)
 
         return
       }
@@ -114,14 +128,14 @@ export const spotlightKeys = <Message>(handlers: {
 
           if (event.key === 'd' || event.key === 'u') {
             event.preventDefault()
-            glide((event.key === 'd' ? 1 : -1) * (window.innerHeight / 2))
+            glide((event.key === 'd' ? 1 : -1) * (scrollContext().height / 2))
 
             return
           }
 
           if (event.key === 'G') {
             event.preventDefault()
-            glide(document.documentElement.scrollHeight)
+            glide(scrollContext().extent)
 
             return
           }
@@ -131,7 +145,7 @@ export const spotlightKeys = <Message>(handlers: {
 
             if (now - lastG < SEQUENCE_WINDOW_MS) {
               event.preventDefault()
-              glide(-document.documentElement.scrollHeight)
+              glide(-scrollContext().extent)
               lastG = 0
 
               return

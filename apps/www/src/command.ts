@@ -202,9 +202,13 @@ export const SyncSpotlight = Command.define('Editorial.SyncSpotlight', {
 
       writeProgress(progress)
 
-      yield* Dom.scrollIntoViewAfterPaint('#spotlight', { block: 'start' }).pipe(
-        Effect.catchTag('ElementNotFound', () => Effect.void),
-      )
+      const stage = document.querySelector('.spotlight-stage')
+
+      if (stage === null || getComputedStyle(stage).overflowY !== 'auto') {
+        yield* Dom.scrollIntoViewAfterPaint('.content-detail', { block: 'start' }).pipe(
+          Effect.catchTag('ElementNotFound', () => Effect.void),
+        )
+      }
 
       return Message.SpotlightSynced()
     }),

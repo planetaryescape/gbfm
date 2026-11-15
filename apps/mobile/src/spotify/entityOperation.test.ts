@@ -216,3 +216,39 @@ test('partial album queue failure keeps prior additions and reports the provider
     await f.dispose()
   }
 })
+
+test('save goes to the library without needing an active device', async () => {
+  const notices: Array<string> = []
+  const saved: Array<ReadonlyArray<string>> = []
+  let opened = 0
+
+  const f = await spotifyFixture((service) => ({
+    ...service,
+    player: { ...service.player, getMyDevices: () => Effect.succeed([]) },
+    library: {
+      ...service.library,
+      saveTracks: (ids) =>
+        Effect.sync(() => {
+          saved.push(ids)
+        }),
+    },
+  }))
+
+  try {
+    await f.run(
+      spotifyEntityOperation(
+        entity,
+        'save',
+        (message) => notices.push(message),
+        () => {
+          opened += 1
+        },
+      ),
+    )
+    expect(saved).toEqual([['fixture']])
+    expect(notices).toEqual(['Saved to your library'])
+    expect(opened).toBe(0)
+  } finally {
+    await f.dispose()
+  }
+})

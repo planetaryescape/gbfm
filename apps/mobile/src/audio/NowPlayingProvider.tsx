@@ -10,7 +10,7 @@ import {
   type PlaybackSnapshot,
   type QueueTrackType,
 } from '@gbfm/player'
-import { Effect, Layer, ManagedRuntime } from 'effect'
+import { Effect, Exit, Layer, ManagedRuntime } from 'effect'
 import { createAudioPlayer } from 'expo-audio'
 import {
   createContext,
@@ -25,6 +25,7 @@ import {
 import { Platform } from 'react-native'
 
 import { ExpoAudioEngineLayer } from '@/audio/expoAudioEngine'
+import { pauseExternalAudio } from '@/audio/pauseExternalAudio'
 import { PlayReporterLive } from '@/audio/playTracker'
 import { PlayerStorageLive } from '@/audio/queueStorage'
 import { useJourneys } from '@/observability/context'
@@ -56,6 +57,7 @@ type NowPlayingContextValue = {
   readonly skipNext: () => void
   readonly skipPrevious: () => void
   readonly togglePlayback: () => void
+  readonly pauseForExternalAudio: () => Promise<boolean>
   readonly seekTo: (seconds: number) => void
   readonly clearQueue: () => void
 }
@@ -218,6 +220,22 @@ export function NowPlayingProvider({ children }: PropsWithChildren) {
     runPlayback((playback) => playback.togglePlayPause)
   }, [runPlayback])
 
+  const pauseForExternalAudio = useCallback(
+    () =>
+      pauseExternalAudio(
+        () => playbackRef.current,
+        async (playback) => {
+          const runtime = runtimeRef.current
+
+          if (!runtime) return false
+          const result = await runtime.runPromiseExit(playback.pause)
+
+          return Exit.isSuccess(result)
+        },
+      ),
+    [],
+  )
+
   const seekTo = useCallback(
     (seconds: number) => {
       runPlayback((playback) => playback.seekTo(seconds))
@@ -249,6 +267,7 @@ export function NowPlayingProvider({ children }: PropsWithChildren) {
       skipNext,
       skipPrevious,
       togglePlayback,
+      pauseForExternalAudio,
       seekTo,
       clearQueue,
     }),
@@ -265,6 +284,7 @@ export function NowPlayingProvider({ children }: PropsWithChildren) {
       skipNext,
       skipPrevious,
       togglePlayback,
+      pauseForExternalAudio,
       seekTo,
       clearQueue,
     ],

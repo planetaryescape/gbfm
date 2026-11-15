@@ -27,9 +27,7 @@ test.each([false, true])('consent accurately describes draft-write permission: %
 
   expect(html.includes('Read and draft-write access')).toBe(writes)
   expect(html.includes('Create and edit your own unpublished editorial drafts')).toBe(writes)
-  expect(html.includes('Cannot publish, delete, upload files or edit published posts.')).toBe(
-    writes,
-  )
+  expect(html.includes('Cannot publish, delete or edit published posts.')).toBe(writes)
   expect(html.includes('Read-only access')).toBe(!writes)
   expect(html.includes('Cannot create, edit, publish or delete.')).toBe(!writes)
 })
@@ -44,6 +42,7 @@ test.each([
     scopes: ['content:publish', 'content:delete', 'assets:upload'],
     expected: 'Delete your authored content',
   },
+  { scopes: ['creator:write'], expected: 'including live published editorials' },
 ])(
   'expanded consent describes exact permissions, not implicit read-only or offline access: $scopes',
   ({ scopes, expected }) => {

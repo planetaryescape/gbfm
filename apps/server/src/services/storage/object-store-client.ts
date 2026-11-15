@@ -32,6 +32,11 @@ export interface ObjectStoreClient {
     readonly key: string
     readonly contentType: string
     readonly expiresInSeconds: number
+    readonly integrity?: {
+      readonly contentMd5: string
+      readonly fileSize: number
+      readonly receipt: string
+    }
   }) => Promise<string>
   readonly deleteObject: (bucketName: string, key: string) => Promise<void>
   /** Server-side copy; source bytes and metadata are preserved. */

@@ -114,13 +114,22 @@ export const R2ObjectStoreClientLayer = (
           const r2Body = body instanceof Blob ? new Uint8Array(await body.arrayBuffer()) : body
           await bucket(bucketName).put(key, r2Body, { httpMetadata: { contentType } })
         },
-        presignPutObject: ({ bucketName, key, expiresInSeconds }) =>
+        presignPutObject: ({ bucketName, key, contentType, expiresInSeconds, integrity }) =>
           presignedUrl({
             config: signingConfig(bucketName),
             method: 'PUT',
             key,
             query: [],
             expiresSeconds: expiresInSeconds,
+            headers: integrity
+              ? {
+                  'content-type': contentType,
+                  'content-length': String(integrity.fileSize),
+                  'content-md5': integrity.contentMd5,
+                  'if-none-match': '*',
+                  'x-amz-meta-artwork-receipt': integrity.receipt,
+                }
+              : {},
           }),
         deleteObject: (bucketName, key) => bucket(bucketName).delete(key),
         copyObject: async (bucketName, sourceKey, key) => {

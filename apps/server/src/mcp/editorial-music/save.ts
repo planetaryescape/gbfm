@@ -9,6 +9,7 @@ import { editorialOperations } from '@/db/editorial-operation.schema'
 import { buildGuardedPostUpdate } from '@/db/guarded-post-update'
 import type { DatabaseClient } from '@/db/layer'
 import { postsTable, type InsertPost } from '@/db/post.schema'
+import { uploadAssetsTable } from '@/db/upload-asset.schema'
 
 import { CommandAuthority } from '../command-authority'
 import { EditorialToolError } from '../contracts'
@@ -46,6 +47,8 @@ export const editorialConflict = () =>
 
 /** Authored fields only. Omitted musicReferences preserves the entire collection and managed marker. */
 export interface EditorialPatch {
+  readonly thumbnailUrl?: string | null
+  readonly bannerImageUrl?: string | null
   readonly title?: string | undefined
   readonly content?: string | undefined
   readonly description?: string | null | undefined
@@ -87,6 +90,15 @@ export const loadOwnedEditorialDraft = (db: DatabaseClient, postId: PostId, acto
     ),
   )
 
+export const loadOwnedEditorialPost = (db: DatabaseClient, postId: PostId, actorId: UserId) =>
+  loadEditorialSnapshot(db, postId).pipe(
+    Effect.flatMap((post) =>
+      post.type !== 'micro' && post.creators?.some((creator) => creator.id === actorId)
+        ? Effect.succeed(post)
+        : Effect.fail(notFound()),
+    ),
+  )
+
 /** Operation-specific receipt decoder; caller supplies live scope/role checks and a subtraction-only mask. */
 export const replayEditorialOperation = <A extends { readonly post: { readonly postId: PostId } }>(
   db: DatabaseClient,
@@ -95,6 +107,7 @@ export const replayEditorialOperation = <A extends { readonly post: { readonly p
   resultSchema: Schema.Codec<A, unknown>,
   authorize: Effect.Effect<unknown, EditorialToolError>,
   mask: (result: A) => Effect.Effect<A, EditorialToolError> = Effect.succeed,
+  access: 'draft' | 'authored' = 'draft',
 ) =>
   Effect.gen(function* () {
     yield* authorize
@@ -118,7 +131,8 @@ export const replayEditorialOperation = <A extends { readonly post: { readonly p
       Effect.mapError(unavailable),
     )
 
-    yield* loadOwnedEditorialDraft(db, postId, actorId)
+    const load = access === 'draft' ? loadOwnedEditorialDraft : loadOwnedEditorialPost
+    yield* load(db, postId, actorId)
 
     if (
       row.result === null ||
@@ -137,7 +151,7 @@ export const replayEditorialOperation = <A extends { readonly post: { readonly p
     if (result.post.postId !== postId) return yield* unavailable()
     const masked = yield* mask(result)
     yield* authorize
-    yield* loadOwnedEditorialDraft(db, postId, actorId)
+    yield* load(db, postId, actorId)
 
     return Option.some(yield* boundEditorialWireResult(masked))
   })
@@ -154,6 +168,13 @@ export const saveEditorialChange = (
   receipt: typeof editorialOperations.$inferInsert & { readonly result: string },
   targetGuard: SQL | undefined,
   liveGuard: SQL,
+  assets: ReadonlyArray<{
+    readonly id: string
+    readonly key: string
+    readonly bucket: string
+    readonly expectedSize: number
+  }> = [],
+  access: 'draft' | 'authored' = 'draft',
 ) =>
   Effect.gen(function* () {
     if (new TextEncoder().encode(receipt.result).byteLength > 256 * 1024)
@@ -196,10 +217,34 @@ export const saveEditorialChange = (
       now: receipt.createdAt,
       guard: and(
         editorialSnapshotGuard(previous),
-        eq(postsTable.draft, true),
-        eq(postsTable.type, 'post'),
+        access === 'draft' ? eq(postsTable.draft, true) : eq(postsTable.draft, previous.draft),
+        access === 'draft'
+          ? eq(postsTable.type, 'post')
+          : sql`${postsTable.type} IS ${previous.type}`,
         eligible,
         targetGuard,
+        ...assets.map((asset) =>
+          exists(
+            db
+              .select()
+              .from(uploadAssetsTable)
+              .where(
+                and(
+                  eq(uploadAssetsTable.id, asset.id),
+                  eq(uploadAssetsTable.userId, actorId),
+                  eq(uploadAssetsTable.key, asset.key),
+                  eq(uploadAssetsTable.bucket, asset.bucket),
+                  eq(uploadAssetsTable.assetType, 'image'),
+                  eq(uploadAssetsTable.expectedSize, asset.expectedSize),
+                  sql`${uploadAssetsTable.expiresAt} > CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)`,
+                  sql`((${uploadAssetsTable.status} = 'pending' AND ${uploadAssetsTable.attachedToId} IS NULL
+            AND ${uploadAssetsTable.attachedToTable} IS NULL) OR
+            (${uploadAssetsTable.status} = 'attached' AND ${uploadAssetsTable.attachedToId} = ${previous.id}
+            AND ${uploadAssetsTable.attachedToTable} = 'posts'))`,
+                ),
+              ),
+          ),
+        ),
         sql`NOT EXISTS (SELECT 1 FROM ${editorialOperations} WHERE ${editorialOperations.id} = ${receipt.id})`,
       ),
     })
@@ -223,6 +268,16 @@ export const saveEditorialChange = (
         db.batch([
           save.update,
           ...save.writes,
+          ...assets.map((asset) =>
+            db
+              .update(uploadAssetsTable)
+              .set({
+                status: 'attached',
+                attachedToTable: 'posts',
+                attachedToId: previous.id,
+              })
+              .where(and(eq(uploadAssetsTable.id, asset.id), save.authorized)),
+          ),
           receiptWrite,
           db
             .select({

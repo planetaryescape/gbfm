@@ -893,7 +893,14 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
     ['get_public_collection', { collectionId: 'r3-collection' }],
   ] as const
 
-  const legacyNames = ['create_draft', 'update_draft', 'list_drafts', 'get_post']
+  const legacyNames = [
+    'create_draft',
+    'update_draft',
+    'list_drafts',
+    'get_post',
+    'prepare_draft_image_upload',
+    'attach_draft_artwork',
+  ]
 
   try {
     const enabledMetadata = await handler.handler(new Request(metadataUrl))
@@ -1102,6 +1109,7 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
           'catalogue:import',
           'catalogue:write',
           'content:read',
+          'creator:write',
           'drafts:write',
           'favorites:read',
           'favorites:write',

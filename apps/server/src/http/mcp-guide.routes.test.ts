@@ -80,9 +80,7 @@ test.each([
 
     expect(text).toContain('reminder commands are not registered, even with write grants')
     expect(text).toContain('Existing connections remain read-only')
-    expect(text).toContain(
-      'never publish, delete, change creators, change media or edit published posts',
-    )
+    expect(text).toContain('never publish, delete, change creators or edit published posts')
     expect(text).toContain('/mcps')
     expect(text).toContain('personal API keys cannot replace MCP OAuth credentials')
 

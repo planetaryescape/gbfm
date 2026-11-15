@@ -8,6 +8,54 @@ import { withTestLayer } from '@/test/effect'
 import { makeAwsObjectStoreClientLayer } from './aws-object-store-client'
 import { ObjectStoreClient } from './object-store-client'
 
+test('AWS artwork presigning binds integrity, owner receipt and create-only headers', async () => {
+  const config = createConfig()
+
+  const layer = makeAwsObjectStoreClientLayer(
+    () =>
+      new S3Client({
+        region: 'us-east-1',
+        credentials: { accessKeyId: 'fixture-key', secretAccessKey: 'fixture-secret' },
+      }),
+  ).pipe(
+    Layer.provide(
+      Layer.succeed(ConfigService, {
+        ...config,
+        storage: { ...config.storage, provider: 'aws' },
+      }),
+    ),
+  )
+
+  const url = new URL(
+    await Effect.runPromise(
+      withTestLayer(
+        Effect.flatMap(ObjectStoreClient, (store) =>
+          Effect.promise(() =>
+            store.presignPutObject({
+              bucketName: 'fixture-bucket',
+              key: 'private/owner/image/id/fixture.png',
+              contentType: 'image/png',
+              expiresInSeconds: 300,
+              integrity: {
+                contentMd5: 'AAAAAAAAAAAAAAAAAAAAAA==',
+                fileSize: 68,
+                receipt: 'fixture-receipt',
+              },
+            }),
+          ),
+        ),
+        layer,
+      ),
+    ),
+  )
+
+  expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe(
+    'content-length;content-md5;content-type;host;if-none-match;x-amz-meta-artwork-receipt',
+  )
+  expect(url.searchParams.get('X-Amz-Expires')).toBe('300')
+  expect(url.searchParams.get('x-amz-meta-artwork-receipt')).toBeNull()
+})
+
 test('AWS adapter sends an authenticated server-side CopyObject request without streaming bytes', async () => {
   const requests: Array<{ method: string; path: string; headers: Record<string, string> }> = []
 

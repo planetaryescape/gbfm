@@ -1,0 +1,301 @@
+:root {
+  --os-ink: var(--foreground);
+  --os-face: var(--card);
+  --os-desk: var(--background);
+  --os-hi: color-mix(in srgb, #fff 70%, var(--card));
+  --os-lo: color-mix(in srgb, var(--foreground) 30%, var(--card));
+  --os-select: var(--highlight);
+  --os-label: 'Pixelify Sans', var(--font-jetbrains);
+  --os-stripes: repeating-linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--os-ink) 55%, transparent) 0 1px,
+    transparent 1px 3px
+  );
+  --os-raised: inset 1px 1px 0 var(--os-hi), inset -1px -1px 0 var(--os-lo);
+  --os-sunken: inset 1px 1px 0 var(--os-lo), inset -1px -1px 0 var(--os-hi);
+}
+
+.rich-content .rich-content-music-card {
+  position: relative;
+  gap: 0;
+  padding: 0;
+  border: 1px solid var(--os-ink);
+  border-radius: 0;
+  background: var(--os-face);
+  box-shadow: 1px 1px 0 var(--os-ink);
+}
+
+.rich-content .rich-content-music-card::before {
+  content: '';
+  display: block;
+  height: 13px;
+  margin: 3px 4px 0;
+  border-bottom: 1px solid var(--os-ink);
+  background: var(--os-stripes);
+}
+
+.rich-content .rich-content-music-head {
+  padding: 0.75rem;
+}
+
+.rich-content .rich-content-music-art {
+  border: 1px solid var(--os-ink);
+  box-shadow: none;
+}
+
+.rich-content .rich-content-music-type {
+  font-family: var(--os-label);
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.rich-content .rich-content-music-blurb {
+  margin: 0 0.75rem 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--os-ink);
+  border-left: 1px solid var(--os-ink);
+  background: var(--os-desk);
+  box-shadow: var(--os-sunken);
+  font-size: 0.9rem;
+}
+
+.rich-content .rich-content-music-links {
+  margin: 0;
+  padding: 0 0.75rem 0.75rem;
+  border-top: 0;
+}
+
+.rich-content .rich-content-music-links a,
+.os-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2rem;
+  padding: 0 0.75rem;
+  border: 1px solid var(--os-ink);
+  border-radius: 0;
+  background: var(--os-face);
+  box-shadow: var(--os-raised);
+  color: var(--os-ink);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: none;
+}
+
+.rich-content .rich-content-music-links a:hover {
+  background: var(--os-face);
+  color: var(--os-ink);
+}
+
+.rich-content .rich-content-music-links a:active,
+.os-button:active:not(:disabled) {
+  box-shadow: var(--os-sunken);
+  transform: translate(1px, 1px);
+}
+
+.rich-content .rich-content-card-group {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  padding: 0 2px 6px 0;
+  scroll-snap-type: x mandatory;
+}
+
+.rich-content .rich-content-card-group > * {
+  flex: 0 0 min(17rem, 85%);
+  scroll-snap-align: start;
+}
+
+.rich-content .rich-content-card-group .rich-content-music-head {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.content-detail .rich-content .rich-content-card-group {
+  width: min(62rem, calc(100vw - 2rem));
+}
+
+.spotlight-video {
+  margin: 0;
+}
+
+.spotlight-video-poster {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: 1px solid var(--os-ink);
+  border-radius: 0;
+  overflow: hidden;
+  cursor: pointer;
+  color: var(--os-ink);
+  text-align: left;
+  background-color: #000;
+  background-size: cover;
+  background-position: center;
+  box-shadow: 1px 1px 0 var(--os-ink);
+}
+
+.spotlight-video-play {
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  padding-left: 0.2rem;
+  border: 1px solid var(--os-ink);
+  background: var(--os-face);
+  box-shadow:
+    var(--os-raised),
+    1px 1px 0 var(--os-ink);
+}
+
+.spotlight-video-poster:hover .spotlight-video-play,
+.spotlight-video-poster:focus-visible .spotlight-video-play {
+  background: var(--os-select);
+}
+
+.spotlight-video-meta {
+  position: absolute;
+  z-index: 1;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.4rem 0.7rem;
+  border-top: 1px solid var(--os-ink);
+  background: var(--os-face);
+}
+
+.spotlight-video-source {
+  font-family: var(--os-label);
+  font-size: 0.75rem;
+}
+
+.spotlight-video-title {
+  overflow: hidden;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.video-dialog:not([open]) {
+  display: none;
+}
+
+.video-dialog {
+  margin: 0;
+  max-width: none;
+  max-height: none;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: clip;
+}
+
+.video-dialog::backdrop {
+  background: transparent;
+}
+
+.video-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--os-desk) 70%, transparent);
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--os-ink) 35%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 3px 3px;
+}
+
+.video-dialog-panel {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  display: flex;
+  flex-direction: column;
+  width: min(960px, calc(100vw - 2rem), calc((100dvh - 8rem) * 16 / 9));
+  border: 1px solid var(--os-ink);
+  background: var(--os-face);
+  color: var(--os-ink);
+  box-shadow: 2px 2px 0 var(--os-ink);
+}
+
+.video-dialog-foot {
+  order: -1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--os-ink);
+  background: var(--os-stripes);
+  background-origin: content-box;
+}
+
+.video-dialog-close {
+  order: -1;
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 1px solid var(--os-ink);
+  border-radius: 0;
+  background: var(--os-face);
+  color: var(--os-ink);
+  cursor: pointer;
+}
+
+.video-dialog-close svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.video-dialog-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0 auto;
+  overflow: hidden;
+  padding: 0 0.5rem;
+  background: var(--os-face);
+  font-family: var(--os-label);
+  font-size: 0.85rem;
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.video-dialog-link {
+  flex-shrink: 0;
+  padding: 0 0.5rem;
+  background: var(--os-face);
+  color: var(--os-ink);
+  font-size: 0.75rem;
+  text-underline-offset: 3px;
+}
+
+.video-dialog-frame {
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+
+.video-dialog-frame iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}

@@ -220,8 +220,13 @@ const metaStrip = (h: HtmlBuilder<Message>, item: ContentItem) => {
   )
 }
 
-const spotlightStep = ({ spotlight, flags }: Model) =>
-  spotlight !== null && spotlight.path === new URL(flags.url).pathname ? spotlight.step : 0
+const spotlightProgress = ({ spotlight, flags }: Model) => {
+  const url = new URL(flags.url)
+
+  return spotlight !== null && spotlight.path === url.pathname
+    ? spotlight
+    : { at: url.searchParams.get('at'), seen: [] }
+}
 
 const spotlightPreview = (url: string) =>
   import.meta.env.DEV && new URL(url).searchParams.get('layout') === 'spotlight'
@@ -257,9 +262,9 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
             : kind === 'editorial' &&
                 (item.richContent.layout === 'spotlight' || spotlightPreview(model.flags.url))
               ? spotlightView(item.richContent, h, {
-                  step: spotlightStep(model),
-                  onStep: (step) =>
-                    Message.SpotlightStepped({ path: new URL(model.flags.url).pathname, step }),
+                  ...spotlightProgress(model),
+                  onStep: (at) =>
+                    Message.SpotlightStepped({ path: new URL(model.flags.url).pathname, at }),
                   onVideo: (video) => Message.VideoOpened({ video }),
                 })
               : richContentView(item.richContent, h),

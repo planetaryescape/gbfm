@@ -12,6 +12,7 @@ import * as Creator from './page/creator'
 import { showImages } from './page/shows/document'
 import { tweetImages } from './page/tweet/card'
 import { StoreCheckpoint } from './page/tweet/reader'
+import { readProgress, SpotlightProgress, writeProgress } from './spotlight-progress'
 import { preloadArtwork } from './view/artwork'
 
 export const StartClient = Command.define('Application.Start', {
@@ -186,10 +187,36 @@ export const LoadPage = Command.define('Navigation.Load', {
     ),
 })
 
-export const RevealSpotlight = Command.define('Editorial.RevealSpotlight', {
-  messages: [Message.SpotlightRevealed],
-  execute: Dom.scrollIntoViewAfterPaint('#spotlight', { block: 'start' }).pipe(
-    Effect.catchTag('ElementNotFound', () => Effect.void),
-    Effect.as(Message.SpotlightRevealed()),
-  ),
+export const SyncSpotlight = Command.define('Editorial.SyncSpotlight', {
+  args: { progress: SpotlightProgress },
+  messages: [Message.SpotlightSynced],
+  execute: ({ progress }) =>
+    Effect.gen(function* () {
+      const url = new URL(location.href)
+
+      if (url.pathname === progress.path) {
+        if (progress.at === null) url.searchParams.delete('at')
+        else url.searchParams.set('at', progress.at)
+        history.replaceState(history.state, '', `${url.pathname}${url.search}`)
+      }
+
+      writeProgress(progress)
+
+      yield* Dom.scrollIntoViewAfterPaint('#spotlight', { block: 'start' }).pipe(
+        Effect.catchTag('ElementNotFound', () => Effect.void),
+      )
+
+      return Message.SpotlightSynced()
+    }),
+})
+
+export const RestoreSpotlight = Command.define('Editorial.RestoreSpotlight', {
+  args: { path: Schema.String },
+  messages: [Message.SpotlightRestored, Message.SpotlightSynced],
+  execute: ({ path }) =>
+    Effect.sync(() => {
+      const progress = readProgress(path)
+
+      return progress ? Message.SpotlightRestored({ progress }) : Message.SpotlightSynced()
+    }),
 })

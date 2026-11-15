@@ -14,7 +14,8 @@ import {
   PrefetchPage,
   Replace,
   ResetTweetEntry,
-  RevealSpotlight,
+  RestoreSpotlight,
+  SyncSpotlight,
   SaveReadMode,
   SetResolvedUrl,
 } from './command'
@@ -32,6 +33,7 @@ import { isServerPath, Route } from './route'
 import * as Search from './search'
 import { dragOffset, shouldDismiss, startDrag } from './sheet-drag'
 import * as SpotifyPlayback from './spotify/playback'
+import { withSeen } from './spotlight-progress'
 
 const mobileMenuFold = {
   read: (model: Model) => Option.some(model.mobileMenu),
@@ -89,6 +91,18 @@ const updateVideoDialog = Update.foldChild({ ...videoDialogFold, update: Dialog.
 const openVideoDialog = Update.foldChildStep({ ...videoDialogFold, update: Dialog.open })
 
 const closeVideoDialog = Update.foldChildStep({ ...videoDialogFold, update: Dialog.close })
+
+const isEditorialPath = (pathname: string) => /^\/editorial\/[^/]+$/.test(pathname)
+
+const withSpotlightRestore =
+  (url: string) =>
+  (result: Update.Return<Model, Message, Services>): Update.Return<Model, Message, Services> => {
+    const { pathname } = new URL(url)
+
+    return isEditorialPath(pathname)
+      ? { ...result, commands: [...(result.commands ?? []), RestoreSpotlight({ path: pathname })] }
+      : result
+  }
 
 const closeOverlays = Update.combine([
   closeMobileMenu,
@@ -239,21 +253,23 @@ const updateApplication = (
       if (model.interactive) return { model }
       const started = { ...model, interactive: true }
 
-      return TweetReader.isEntry(model.flags.url)
-        ? {
-            model: started,
-            commands: [
-              Command.mapMessage(
-                TweetReader.ResolveEntry({
-                  identity: model.tweetReader.identity,
-                  checkpoint: model.tweetReader.checkpoint,
-                  navigationId: model.navigationId,
-                }),
-                (message) => Message.GotTweetReaderMessage({ message }),
-              ),
-            ],
-          }
-        : acceptTweet(started, true)
+      return withSpotlightRestore(model.flags.url)(
+        TweetReader.isEntry(model.flags.url)
+          ? {
+              model: started,
+              commands: [
+                Command.mapMessage(
+                  TweetReader.ResolveEntry({
+                    identity: model.tweetReader.identity,
+                    checkpoint: model.tweetReader.checkpoint,
+                    navigationId: model.navigationId,
+                  }),
+                  (message) => Message.GotTweetReaderMessage({ message }),
+                ),
+              ],
+            }
+          : acceptTweet(started, true),
+      )
     },
     GotTweetReaderMessage: ({ message }) => {
       if (Predicate.isTagged(message, 'EntryResolved')) {
@@ -335,11 +351,22 @@ const updateApplication = (
     GotMobileMenuMessage: ({ message }) => updateMobileMenu(model, message),
     VideoOpened: ({ video }) => openVideoDialog({ ...model, video }),
     GotVideoDialogMessage: ({ message }) => updateVideoDialog(model, message),
-    SpotlightStepped: ({ path, step }) => ({
-      model: { ...model, spotlight: { path, step } },
-      commands: [RevealSpotlight()],
-    }),
-    SpotlightRevealed: () => ({ model }),
+    SpotlightStepped: ({ path, at }) => {
+      const progress = withSeen(model.spotlight, path, at)
+
+      return { model: { ...model, spotlight: progress }, commands: [SyncSpotlight({ progress })] }
+    },
+    SpotlightRestored: ({ progress }) => {
+      const linked = new URL(model.flags.url).searchParams.get('at')
+      const at = linked ?? progress.at
+      const restored = withSeen(progress, progress.path, at)
+
+      return {
+        model: { ...model, spotlight: restored },
+        commands: linked === null && at !== null ? [SyncSpotlight({ progress: restored })] : [],
+      }
+    },
+    SpotlightSynced: () => ({ model }),
     MenuDragStarted: ({ pointerId, clientY }) =>
       !model.mobileMenu.isOpen ||
       model.mobileMenu.animation.transitionState !== 'Idle' ||
@@ -661,10 +688,10 @@ const updateApplication = (
       const shown = showPage(model, flags, navigationId, key)
       const accepted = acceptTweet(shown.model)
 
-      return {
+      return withSpotlightRestore(flags.url)({
         model: { ...accepted.model, pageCache },
         commands: [...(shown.commands ?? []), ...(accepted.commands ?? [])],
-      }
+      })
     },
     FailedPage: ({ key, navigationId }) => {
       if (navigationId !== model.navigationId) return { model }

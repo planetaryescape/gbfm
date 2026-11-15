@@ -9,14 +9,17 @@ import {
   headingText,
   spotlightSteps,
   spotlightStructure,
+  stepAt,
+  stepPosition,
   youtubeVideoId,
   type SpotlightChapter,
   type SpotlightStep,
 } from './spotlight-structure'
 
 export interface SpotlightViewOptions<Message> {
-  readonly step: number
-  readonly onStep: (step: number) => Message
+  readonly at: string | null
+  readonly seen: ReadonlyArray<string>
+  readonly onStep: (at: string | null) => Message
   readonly onVideo: (video: Video) => Message
 }
 
@@ -157,6 +160,7 @@ const stepView = <Message>(
   h: HtmlBuilder<Message>,
   render: (block: RichContentBlock) => Html,
   start: Message,
+  seen: ReadonlyArray<string>,
 ): Html => {
   if (step.kind === 'intro')
     return h.div(
@@ -202,7 +206,17 @@ const stepView = <Message>(
           ? h.empty
           : h.ol(
               [h.Class('spotlight-chapter-moments not-prose'), h.AriaLabel('In this chapter')],
-              step.value.moments.map((moment) => h.li([], [headingText(moment.heading)])),
+              step.value.moments.map((moment, position) =>
+                h.li(
+                  seen.includes(`${step.chapter + 1}.${position + 1}`)
+                    ? [
+                        h.DataAttribute('seen', ''),
+                        h.AriaLabel(`${headingText(moment.heading)}, read`),
+                      ]
+                    : [],
+                  [headingText(moment.heading)],
+                ),
+              ),
             ),
       ],
     )
@@ -264,7 +278,14 @@ export const spotlightView = <Message>(
 ): Html => {
   const structure = spotlightStructure(document.blocks)
   const steps = spotlightSteps(structure)
-  const current = Math.min(Math.max(options.step, 0), steps.length - 1)
+  const current = stepAt(steps, options.at)
+
+  const go = (index: number) => {
+    const target = steps[index]
+
+    return options.onStep(target ? stepPosition(target) : null)
+  }
+
   const step = steps[current]
   const render = spotlightBlock(h, options)
 
@@ -281,12 +302,13 @@ export const spotlightView = <Message>(
                 structure.chapters,
                 h,
                 render,
-                options.onStep(current === steps.length - 1 ? 0 : 1),
+                go(current === steps.length - 1 ? 0 : 1),
+                options.seen,
               ),
             ],
           )
         : h.empty,
-      current === 0 ? h.empty : controlsView(steps, current, structure.chapters, h, options.onStep),
+      current === 0 ? h.empty : controlsView(steps, current, structure.chapters, h, go),
     ],
   )
 }

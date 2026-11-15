@@ -16,6 +16,7 @@ import * as PublicActions from './public-actions'
 import * as Search from './search'
 import { Status as ChallengeStatus } from './signup-challenge/model'
 import * as SpotifyPlayback from './spotify/playback'
+import { SpotlightProgress } from './spotlight-progress'
 import { Video } from './video'
 
 export const Message = defineMessageUnion({
@@ -40,8 +41,9 @@ export const Message = defineMessageUnion({
   GotMobileMenuMessage: { message: Dialog.Message },
   VideoOpened: { video: Video },
   GotVideoDialogMessage: { message: Dialog.Message },
-  SpotlightStepped: { path: Schema.String, step: Schema.Number },
-  SpotlightRevealed: {},
+  SpotlightStepped: { path: Schema.String, at: Schema.NullOr(Schema.String) },
+  SpotlightRestored: { progress: SpotlightProgress },
+  SpotlightSynced: {},
   MenuDragStarted: { pointerId: Schema.Number, clientY: Schema.Number },
   MenuDragMoved: { pointerId: Schema.Number, clientY: Schema.Number },
   MenuDragReleased: {

@@ -25,6 +25,7 @@ import * as Search from './search'
 import { SheetDrag } from './sheet-drag'
 import { Status as ChallengeStatus } from './signup-challenge/model'
 import * as SpotifyPlayback from './spotify/playback'
+import { SpotlightProgress } from './spotlight-progress'
 import { Video } from './video'
 
 export const Principal = Schema.Struct({
@@ -128,7 +129,7 @@ export const Model = Schema.Struct({
   listeningDraft: Schema.NullOr(SavedMix),
   videoDialog: Dialog.Model,
   video: Schema.NullOr(Video),
-  spotlight: Schema.NullOr(Schema.Struct({ path: Schema.String, step: Schema.Number })),
+  spotlight: Schema.NullOr(SpotlightProgress),
 })
 
 export type Model = typeof Model.Type

@@ -314,8 +314,8 @@ export const spotlightView = <Message>(
       h.header(
         [h.Class('spotlight-header')],
         [
-          progressView(steps, current, structure.chapters, h),
           controlsView(steps, current, structure.chapters, h, go),
+          progressView(steps, current, structure.chapters, h),
         ],
       ),
       step
@@ -333,8 +333,8 @@ export const spotlightView = <Message>(
                 structure.chapters,
                 h,
                 render,
-                 go(current === steps.length - 1 ? 0 : 1),
-                 options.onStep,
+                go(current === steps.length - 1 ? 0 : 1),
+                options.onStep,
                 options.seen,
                 options.onboarding ?? h.empty,
               ),

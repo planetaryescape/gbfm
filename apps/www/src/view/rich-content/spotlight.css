@@ -183,7 +183,7 @@
 
 .spotlight-controls {
   display: flex;
-  justify-self: end;
+  justify-self: start;
   align-items: center;
   gap: 0.5rem;
 }
@@ -253,7 +253,7 @@
 
 @media (min-width: 768px) {
   .spotlight-header {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr);
     align-items: start;
     gap: 2rem;
   }

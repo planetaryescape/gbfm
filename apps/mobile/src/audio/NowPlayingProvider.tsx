@@ -25,6 +25,7 @@ import {
 import { Platform } from 'react-native'
 
 import { ExpoAudioEngineLayer } from '@/audio/expoAudioEngine'
+import { pauseExternalAudio } from '@/audio/pauseExternalAudio'
 import { PlayReporterLive } from '@/audio/playTracker'
 import { PlayerStorageLive } from '@/audio/queueStorage'
 import { useJourneys } from '@/observability/context'
@@ -219,16 +220,21 @@ export function NowPlayingProvider({ children }: PropsWithChildren) {
     runPlayback((playback) => playback.togglePlayPause)
   }, [runPlayback])
 
-  const pauseForExternalAudio = useCallback(async () => {
-    const playback = playbackRef.current
-    const runtime = runtimeRef.current
+  const pauseForExternalAudio = useCallback(
+    () =>
+      pauseExternalAudio(
+        () => playbackRef.current,
+        async (playback) => {
+          const runtime = runtimeRef.current
 
-    if (!playback || !runtime) return false
+          if (!runtime) return false
+          const result = await runtime.runPromiseExit(playback.pause)
 
-    const result = await runtime.runPromiseExit(playback.pause)
-
-    return Exit.isSuccess(result) && playbackRef.current === playback
-  }, [])
+          return Exit.isSuccess(result)
+        },
+      ),
+    [],
+  )
 
   const seekTo = useCallback(
     (seconds: number) => {

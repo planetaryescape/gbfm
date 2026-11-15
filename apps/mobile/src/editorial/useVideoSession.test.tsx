@@ -2,6 +2,8 @@ import { act, createElement } from 'react'
 import { createRoot } from 'test-renderer'
 import { expect, test } from 'vitest'
 
+import { pauseExternalAudio } from '@/audio/pauseExternalAudio'
+
 import { useVideoSession } from './useVideoSession'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -91,5 +93,43 @@ test.each(['unavailable', 'rejected'])('does not autoplay when pause is %s', asy
   await act(async () => node.props.open())
   expect(node.props.visible).toBe(false)
   expect(node.props.failed).toBe(true)
+  await act(async () => root.unmount())
+})
+
+test('a cold-start poster opens with no audio controller while close still cancels a pending open', async () => {
+  const commands: Array<string> = []
+
+  function Video() {
+    const session = useVideoSession(() =>
+      pauseExternalAudio(
+        () => null,
+        async () => {
+          commands.push('pause')
+
+          return false
+        },
+      ),
+    )
+
+    return createElement('video', { ...session })
+  }
+
+  const root = createRoot()
+  await act(async () => root.render(<Video />))
+  const node = root.container.queryAll((node) => node.type === 'video')[0]
+
+  if (!node) throw new Error('Video not mounted')
+  await act(async () => node.props.open())
+  expect(node.props.visible).toBe(true)
+  expect(node.props.failed).toBe(false)
+  expect(commands).toEqual([])
+  await act(async () => node.props.close())
+  await act(async () => {
+    const pending = node.props.open()
+    node.props.close()
+    await pending
+  })
+  expect(node.props.visible).toBe(false)
+  expect(node.props.failed).toBe(false)
   await act(async () => root.unmount())
 })

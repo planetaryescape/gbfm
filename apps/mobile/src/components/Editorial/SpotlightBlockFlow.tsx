@@ -5,6 +5,7 @@ import { Fragment, type ReactNode } from 'react'
 import { keyedContent } from '@/tweets/tweetContent'
 
 type MusicEmbed = Extract<RichContentBlock, { readonly _tag: 'MusicEmbed' }>
+type FlowBlock = { readonly block: RichContentBlock; readonly cardGroup: number | null }
 
 export function SpotlightBlockFlow({
   blocks,
@@ -17,12 +18,12 @@ export function SpotlightBlockFlow({
   readonly renderBlock: (block: RichContentBlock) => ReactNode
   readonly renderRow: (children: ReactNode, count: number) => ReactNode
 }) {
-  const groups: Array<Array<{ readonly block: RichContentBlock; readonly inGroup: boolean }>> = []
+  const groups: Array<Array<FlowBlock>> = []
 
-  const flattened = blocks.flatMap((block) =>
+  const flattened = blocks.flatMap<FlowBlock>((block, index) =>
     Predicate.isTagged(block, 'CardGroup')
-      ? block.children.map((child) => ({ block: child, inGroup: true }))
-      : [{ block, inGroup: false }],
+      ? block.children.map((child) => ({ block: child, cardGroup: index }))
+      : [{ block, cardGroup: null }],
   )
 
   for (const item of flattened) {
@@ -31,6 +32,7 @@ export function SpotlightBlockFlow({
     if (
       Predicate.isTagged(item.block, 'MusicEmbed') &&
       previous?.[0] &&
+      previous[0].cardGroup === item.cardGroup &&
       Predicate.isTagged(previous[0].block, 'MusicEmbed')
     )
       previous.push(item)
@@ -45,7 +47,7 @@ export function SpotlightBlockFlow({
     if (!Predicate.isTagged(first.block, 'MusicEmbed'))
       return <Fragment key={key}>{renderBlock(first.block)}</Fragment>
 
-    if (group.length === 1 && !first.inGroup)
+    if (group.length === 1 && first.cardGroup === null)
       return <Fragment key={key}>{renderMusic(first.block, false)}</Fragment>
 
     const rows: Array<typeof group> = []

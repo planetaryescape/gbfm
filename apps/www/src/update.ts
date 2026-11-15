@@ -1,5 +1,11 @@
 import * as Dialog from '@foldkit/ui/dialog'
 import * as Popover from '@foldkit/ui/popover'
+import {
+  spotlightSteps,
+  spotlightStructure,
+  stepAt,
+  stepPosition,
+} from '@gbfm/rich-content/spotlight'
 import { HashMap, Match, Option, Predicate, Result } from 'effect'
 import { AsyncData, Command, Update } from 'foldkit'
 import { UrlRequest } from 'foldkit/navigation'
@@ -33,6 +39,7 @@ import { isServerPath, Route } from './route'
 import * as Search from './search'
 import { dragOffset, shouldDismiss, startDrag } from './sheet-drag'
 import * as SpotifyPlayback from './spotify/playback'
+import { spotlightDocument, spotlightProgress } from './spotlight-page'
 import { withSeen } from './spotlight-progress'
 
 const mobileMenuFold = {
@@ -91,6 +98,16 @@ const updateVideoDialog = Update.foldChild({ ...videoDialogFold, update: Dialog.
 const openVideoDialog = Update.foldChildStep({ ...videoDialogFold, update: Dialog.open })
 
 const closeVideoDialog = Update.foldChildStep({ ...videoDialogFold, update: Dialog.close })
+
+const stepSpotlight = (
+  model: Model,
+  path: string,
+  at: string | null,
+): Update.Return<Model, Message, Services> => {
+  const progress = withSeen(model.spotlight, path, at)
+
+  return { model: { ...model, spotlight: progress }, commands: [SyncSpotlight({ progress })] }
+}
 
 const isEditorialPath = (pathname: string) => /^\/editorial\/[^/]+$/.test(pathname)
 
@@ -361,10 +378,19 @@ const updateApplication = (
     GotMobileMenuMessage: ({ message }) => updateMobileMenu(model, message),
     VideoOpened: ({ video }) => openVideoDialog({ ...model, video }),
     GotVideoDialogMessage: ({ message }) => updateVideoDialog(model, message),
-    SpotlightStepped: ({ path, at }) => {
-      const progress = withSeen(model.spotlight, path, at)
+    SpotlightStepped: ({ path, at }) => stepSpotlight(model, path, at),
+    SpotlightKeyed: ({ offset }) => {
+      const document = spotlightDocument(model)
 
-      return { model: { ...model, spotlight: progress }, commands: [SyncSpotlight({ progress })] }
+      if (document === null) return { model }
+      const steps = spotlightSteps(spotlightStructure(document.blocks))
+      const { path, at } = spotlightProgress(model)
+      const current = stepAt(steps, at)
+      const target = steps[Math.min(Math.max(current + offset, 0), steps.length - 1)]
+
+      return target && stepPosition(target) !== at
+        ? stepSpotlight(model, path, stepPosition(target))
+        : { model }
     },
     SpotlightRestored: ({ progress }) => {
       const linked = new URL(model.flags.url).searchParams.get('at')

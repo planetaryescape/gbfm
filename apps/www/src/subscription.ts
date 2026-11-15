@@ -10,6 +10,8 @@ import { readerRefreshEvents } from './page/tweet/refresh'
 import * as Player from './player'
 import * as Search from './search'
 import { dragEvents } from './sheet-drag'
+import { spotlightKeys } from './spotlight-keys'
+import { spotlightDocument } from './spotlight-page'
 
 const menuSubscriptions = Subscription.make<Model, Message>()((entry) => ({
   menuDrag: entry(
@@ -62,6 +64,24 @@ const authSubscriptions = Subscription.make<Model, Message>()((entry) => ({
   ),
 }))
 
+const spotlightSubscriptions = Subscription.make<Model, Message>()((entry) => ({
+  spotlightKeys: entry(
+    { active: Schema.Boolean },
+    {
+      modelToDependencies: (model) => ({
+        active: model.interactive && spotlightDocument(model) !== null,
+      }),
+      dependenciesToStream: ({ active }) =>
+        active
+          ? spotlightKeys<Message>({
+              previous: () => Message.SpotlightKeyed({ offset: -1 }),
+              next: () => Message.SpotlightKeyed({ offset: 1 }),
+            })
+          : Stream.empty,
+    },
+  ),
+}))
+
 const readerSubscriptions = Subscription.make<Model, Message>()((entry) => ({
   readerRefresh: entry(
     { active: Schema.Boolean },
@@ -84,6 +104,7 @@ export const subscriptions = Subscription.aggregate(
   navSubscriptions,
   authSubscriptions,
   readerSubscriptions,
+  spotlightSubscriptions,
   Subscription.lift(Search.subscriptions)<Model, Message>({
     read: (model) => Option.some(model.search),
     toParentMessage: (message) => Message.GotSearchMessage({ message }),

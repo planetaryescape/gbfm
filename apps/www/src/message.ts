@@ -44,6 +44,7 @@ export const Message = defineMessageUnion({
   SpotlightStepped: { path: Schema.String, at: Schema.NullOr(Schema.String) },
   SpotlightRestored: { progress: SpotlightProgress },
   SpotlightSynced: {},
+  SpotlightKeyed: { offset: Schema.Number },
   MenuDragStarted: { pointerId: Schema.Number, clientY: Schema.Number },
   MenuDragMoved: { pointerId: Schema.Number, clientY: Schema.Number },
   MenuDragReleased: {

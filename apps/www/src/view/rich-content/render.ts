@@ -17,6 +17,13 @@ type RichContentInline = Extract<
   { readonly _tag: 'Paragraph' }
 >['children'][number]
 
+/** Lets a page add its own controls to music cards without changing how cards render elsewhere. */
+export interface BlockViewExtras {
+  readonly musicActions?: (music: MusicEmbedBlock['music']) => Html
+}
+
+type MusicEmbedBlock = Extract<RichContentBlock, { readonly _tag: 'MusicEmbed' }>
+
 /** Presentation options for a rendered rich-content document. */
 export interface RichContentViewOptions {
   readonly className?: string
@@ -96,7 +103,7 @@ const inlineView = <Message>(inline: RichContentInline, h: HtmlBuilder<Message>)
   }
 }
 
-const inlineChildren = <Message>(
+export const inlineChildren = <Message>(
   children: ReadonlyArray<RichContentInline>,
   h: HtmlBuilder<Message>,
 ): ReadonlyArray<Html | string> => children.map((child) => inlineView(child, h))
@@ -272,6 +279,7 @@ const musicTracksView = <Message>(
 const musicView = <Message>(
   block: Extract<RichContentBlock, { readonly _tag: 'MusicEmbed' }>,
   h: HtmlBuilder<Message>,
+  extras: BlockViewExtras = {},
 ): Html => {
   const music = block.music
 
@@ -338,6 +346,7 @@ const musicView = <Message>(
       ...(block.showTracks && music.tracks.length > 0
         ? [musicTracksView(music.title, music.tracks, h)]
         : []),
+      ...(extras.musicActions ? [extras.musicActions(music)] : []),
       ...(music.links.length === 0
         ? []
         : [
@@ -522,7 +531,11 @@ const unavailableMediaView = <Message>(
   )
 }
 
-const blockView = <Message>(block: RichContentBlock, h: HtmlBuilder<Message>): Html => {
+export const blockView = <Message>(
+  block: RichContentBlock,
+  h: HtmlBuilder<Message>,
+  extras: BlockViewExtras = {},
+): Html => {
   // oxlint-disable-next-line anti-slop-effect/no-manual-tag-comparison -- Schema-owned recursive unions have no generated matcher; this switch provides compile-time exhaustiveness.
   switch (block._tag) {
     case 'Paragraph':
@@ -551,7 +564,7 @@ const blockView = <Message>(block: RichContentBlock, h: HtmlBuilder<Message>): H
     case 'Table':
       return tableView(block, h)
     case 'MusicEmbed':
-      return musicView(block, h)
+      return musicView(block, h, extras)
     case 'ExternalMediaEmbed':
       return mediaView(block, h)
     case 'Tracklist':
@@ -577,7 +590,7 @@ const blockView = <Message>(block: RichContentBlock, h: HtmlBuilder<Message>): H
     case 'CardGroup':
       return h.div(
         [h.Class('rich-content-card-group'), h.Role('group'), h.AriaLabel('Related music')],
-        block.children.map((child) => blockView(child, h)),
+        block.children.map((child) => blockView(child, h, extras)),
       )
     case 'UnavailableEmbed':
       if (block.kind === 'media') return unavailableMediaView(block, h)

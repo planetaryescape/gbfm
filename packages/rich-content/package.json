@@ -9,7 +9,8 @@
     "./source": "./src/source.ts",
     "./media": "./src/media.ts",
     "./legacy-mdx": "./src/legacy-mdx.ts",
-    "./normalize": "./src/normalize.ts"
+    "./normalize": "./src/normalize.ts",
+    "./spotlight": "./src/spotlight.ts"
   },
   "scripts": {
     "test": "vitest run",

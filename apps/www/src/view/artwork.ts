@@ -50,13 +50,13 @@ export const preloadArtwork = (src: string | null | undefined, sizes: string) =>
   return image.decode().catch(() => undefined)
 }
 
-/** Responsive square artwork with an explicit rendered size and LCP priority only when requested. */
 export const artwork = (
   src: string | null | undefined,
   alt: string,
   sizes: string,
   eager = false,
   className = '',
+  dimensions: Readonly<{ width: number; height: number }> = { width: 640, height: 640 },
 ) => {
   const original = src || fallbackArtwork
   const candidates = srcset(original)
@@ -65,8 +65,8 @@ export const artwork = (
     imageSource(artworkUrl(original, 640)),
     h.Alt(alt),
     h.Class(`artwork ${className}`.trim()),
-    h.Width('640'),
-    h.Height('640'),
+    h.Width(String(dimensions.width)),
+    h.Height(String(dimensions.height)),
     h.Sizes(sizes),
     ...(candidates ? [h.Srcset(candidates)] : []),
     h.Loading(eager ? 'eager' : 'lazy'),

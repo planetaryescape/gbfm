@@ -11,13 +11,13 @@ registry, schema, legacy factory, inference, metadata refresh or artwork edits.
 
 ## Selected capability mapping
 
-| Selection | This slice |
-| --- | --- |
-| `attach_music_link` | Manual safe typed source attachment to an existing artist/album/track |
-| `reject_music_link` | Persist rejected evidence, never implicitly restore it |
-| `remove_music_link` | Explicit physical deletion of one link, not its catalogue entity |
-| `discover_music_links` | Still selected, unavailable/not registered: no admitted provider transport |
-| `refresh_music_links` | Still selected, unavailable/not registered: no admitted provider transport; receipt lookup alone does not authorize fetching |
+| Selection              | This slice                                                                                                                   |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `attach_music_link`    | Manual safe typed source attachment to an existing artist/album/track                                                        |
+| `reject_music_link`    | Persist rejected evidence, never implicitly restore it                                                                       |
+| `remove_music_link`    | Explicit physical deletion of one link, not its catalogue entity                                                             |
+| `discover_music_links` | Still selected, unavailable/not registered: no admitted provider transport                                                   |
+| `refresh_music_links`  | Still selected, unavailable/not registered: no admitted provider transport; receipt lookup alone does not authorize fetching |
 
 `LinkEditToolkit` and `LinkEditHandlersLayer` are exported for P1 composition,
 not centrally registered here. Each command independently calls the required

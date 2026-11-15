@@ -20,12 +20,12 @@ This covers the consolidated receipt, owner revision/CAS and client cutover
 recommendations. There is no repeated schema-approval checkpoint. Technical
 atomicity, privacy, all-client proof and independent exact-head review still apply.
 
-| Capability | State | Scope and effect |
-| --- | --- | --- |
-| `list_favorites` | Implemented; reviewed read leaf centrally composed in #568 | `favorites:read`; owner's public audio/show summaries and same-observation owner revision |
-| `set_favorite` | Real atomic implementation in this continuation; **NOT delivered end to end** until central integration, exact-head review and client verification close | `favorites:write`; show targets also require `subscriptions:write`, changing both memberships together |
-| `list_show_subscriptions` | Implemented; reviewed read leaf centrally composed in #568 | `subscriptions:read`; owner's public show summaries and same-observation owner revision |
-| `set_show_subscription` | Real atomic implementation in this continuation; **NOT delivered end to end** under the same remaining gates | `subscriptions:write`; true additionally requires `favorites:write` and adds a favorite; false retains the favorite |
+| Capability                | State                                                                                                                                                    | Scope and effect                                                                                                    |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `list_favorites`          | Implemented; reviewed read leaf centrally composed in #568                                                                                               | `favorites:read`; owner's public audio/show summaries and same-observation owner revision                           |
+| `set_favorite`            | Real atomic implementation in this continuation; **NOT delivered end to end** until central integration, exact-head review and client verification close | `favorites:write`; show targets also require `subscriptions:write`, changing both memberships together              |
+| `list_show_subscriptions` | Implemented; reviewed read leaf centrally composed in #568                                                                                               | `subscriptions:read`; owner's public show summaries and same-observation owner revision                             |
+| `set_show_subscription`   | Real atomic implementation in this continuation; **NOT delivered end to end** under the same remaining gates                                             | `subscriptions:write`; true additionally requires `favorites:write` and adds a favorite; false retains the favorite |
 
 `FavoritesToolkit` now contains four real handlers, not always-failing placeholders.
 Read-only grants discover only the reads. The isolated composed OAuth fixture
@@ -129,12 +129,12 @@ seam too; do not reach into Drizzle internals or construct a second database.
 
 The six service/API writers are:
 
-| Service methods | HTTP handler and contract |
-| --- | --- |
-| `addFavorite`, `addShowFavorite` | `http/favorites.handlers.ts`; `packages/api/src/favorites.ts`; POST `/api/favorites` |
-| `removeFavorite` | same; DELETE `/api/favorites/:audioId` |
-| `removeShowFavorite` | same; DELETE `/api/favorites/show/:showId` |
-| `subscribe`, `unsubscribe` | `http/shows.handlers.ts`; `packages/api/src/shows.ts`; POST `/api/shows/:id/subscribe`, DELETE `/api/shows/:id/unsubscribe` |
+| Service methods                  | HTTP handler and contract                                                                                                   |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `addFavorite`, `addShowFavorite` | `http/favorites.handlers.ts`; `packages/api/src/favorites.ts`; POST `/api/favorites`                                        |
+| `removeFavorite`                 | same; DELETE `/api/favorites/:audioId`                                                                                      |
+| `removeShowFavorite`             | same; DELETE `/api/favorites/show/:showId`                                                                                  |
+| `subscribe`, `unsubscribe`       | `http/shows.handlers.ts`; `packages/api/src/shows.ts`; POST `/api/shows/:id/subscribe`, DELETE `/api/shows/:id/unsubscribe` |
 
 P1-only root/dashboard integration (do not weaken required fields):
 

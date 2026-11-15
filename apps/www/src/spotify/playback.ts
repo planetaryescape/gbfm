@@ -6,7 +6,7 @@ import { defineMessageUnion } from 'foldkit/message'
 
 import { disconnected, SpotifyConnection, SpotifyStatus } from './connection'
 
-const Action = Schema.Literals(['connect', 'play', 'queue'])
+const Action = Schema.Literals(['connect', 'play', 'queue', 'save'])
 
 const Operation = Schema.TaggedUnion({
   Idle: { target: Schema.NullOr(Schema.String), notice: Schema.String },
@@ -116,6 +116,19 @@ export const update = (
             },
           },
   })
+
+/** Whether a Spotify action is running, which link it targets and the latest notice for it. */
+export const operationState = (model: Model) => ({
+  busy: Operation.guards.Running(model.operation),
+  target: Operation.match(model.operation, {
+    Idle: ({ target }) => target,
+    Running: ({ url }) => url,
+  }),
+  notice: Operation.match(model.operation, {
+    Idle: ({ notice }) => notice,
+    Running: () => 'Working…',
+  }),
+})
 
 export const view = <M>(
   model: Model,

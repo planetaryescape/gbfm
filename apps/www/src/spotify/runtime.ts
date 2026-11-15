@@ -2,10 +2,12 @@ import {
   exchangeSpotifyPkceCodeEffect,
   fetchSpotifyProfileEffect,
   getValidSpotifyAuthSessionEffect,
+  isSpotifyForbidden,
   logoutSpotifyEffect,
   playSpotifyEntityEffect,
   queueSpotifyEntityEffect,
   readAuthorizationCallback,
+  saveSpotifyEntityEffect,
   spotifyEntityFromUrl,
   spotifyErrorMessage,
   SpotifyBrowser,
@@ -94,8 +96,19 @@ const connectionLayer = Layer.effect(
 
           if (!session)
             return yield* Effect.fail(
-              new SpotifyConnectionError({ message: 'Connect Spotify to play or queue music.' }),
+              new SpotifyConnectionError({
+                message: 'Connect Spotify to play, queue or save music.',
+              }),
             )
+
+          if (action === 'save') {
+            const saved = yield* saveSpotifyEntityEffect(entity)
+
+            return saved
+              ? 'Saved to your Spotify library.'
+              : 'Playlists cannot be saved to your library from here.'
+          }
+
           const devices = yield* spotify.player.getMyDevices()
 
           if (!devices.some((device) => device.is_active && !device.is_restricted))
@@ -114,16 +127,21 @@ const connectionLayer = Layer.effect(
             : `Added ${count} ${count === 1 ? 'track' : 'tracks'} to your Spotify queue.`
         }).pipe(
           Effect.provideService(SpotifyBrowser, spotify),
-          Effect.mapError((error) =>
-            error instanceof SpotifyConnectionError
-              ? error
-              : new SpotifyConnectionError({
-                  message:
-                    spotifyErrorMessage(error) === 'No active Spotify device'
-                      ? 'No active Spotify device. Open Spotify, start playback on a device, then try again.'
-                      : 'Spotify could not complete this action. Check your Premium account and device, then try again. Queue actions may have partially completed.',
-                }),
-          ),
+          Effect.mapError((error) => {
+            if (error instanceof SpotifyConnectionError) return error
+
+            if (action === 'save' && isSpotifyForbidden(error))
+              return new SpotifyConnectionError({
+                message: 'Reconnect Spotify to allow saving to your library.',
+              })
+
+            return new SpotifyConnectionError({
+              message:
+                spotifyErrorMessage(error) === 'No active Spotify device'
+                  ? 'No active Spotify device. Open Spotify, start playback on a device, then try again.'
+                  : 'Spotify could not complete this action. Check your Premium account and device, then try again. Queue actions may have partially completed.',
+            })
+          }),
         ),
       connect: Effect.gen(function* () {
         const state = yield* boundary(() => crypto.randomUUID())

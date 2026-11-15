@@ -4,17 +4,17 @@ This module implements all nine selected handlers on P1's named cumulative base
 `b1b3345d92bb1455f1e942c21e9b361d7a394073`. It does not close #531: independent
 updated-head review and central registration/discovery remain integration gates.
 
-| Tool | Input | Observable result |
-| --- | --- | --- |
-| `get_music_coverage` | entityType/entityId, limit | Published editorial references to that exact eligible identity |
-| `find_related_editorials` | entityType/entityId, limit | Public structured references to the seed and its bounded same-kind catalogue relatives |
-| `explore_genre` | genreId, limit | Direct recorded genre membership; no inherited genres |
-| `explore_label` | labelId, limit | Published label plus recorded published artist/album affiliations |
-| `find_artist_collaborations` | artistId, limit | Shared recorded artist credits on sampled published releases, not a historical claim |
-| `find_undercovered_music` | 1..20 selected entities | Sampled public reference counts per selected identity, never catalogue-wide absence |
-| `get_music_research_sources` | entityType/entityId, limit | Verified safe stored links, never remote contents |
-| `get_draft_music_context` | postId, expectedVersion? | One owned unpublished editorial; coherent source version and recorded references |
-| `get_editorial_context` | postId, expectedVersion? | Explicit public editorial or caller-authored draft; no draft search |
+| Tool                         | Input                      | Observable result                                                                      |
+| ---------------------------- | -------------------------- | -------------------------------------------------------------------------------------- |
+| `get_music_coverage`         | entityType/entityId, limit | Published editorial references to that exact eligible identity                         |
+| `find_related_editorials`    | entityType/entityId, limit | Public structured references to the seed and its bounded same-kind catalogue relatives |
+| `explore_genre`              | genreId, limit             | Direct recorded genre membership; no inherited genres                                  |
+| `explore_label`              | labelId, limit             | Published label plus recorded published artist/album affiliations                      |
+| `find_artist_collaborations` | artistId, limit            | Shared recorded artist credits on sampled published releases, not a historical claim   |
+| `find_undercovered_music`    | 1..20 selected entities    | Sampled public reference counts per selected identity, never catalogue-wide absence    |
+| `get_music_research_sources` | entityType/entityId, limit | Verified safe stored links, never remote contents                                      |
+| `get_draft_music_context`    | postId, expectedVersion?   | One owned unpublished editorial; coherent source version and recorded references       |
+| `get_editorial_context`      | postId, expectedVersion?   | Explicit public editorial or caller-authored draft; no draft search                    |
 
 The seven public reads require live `catalogue:read` **and** `content:read`, including
 their discovery annotations. `posts:read` is not a substitute. No private drafts,

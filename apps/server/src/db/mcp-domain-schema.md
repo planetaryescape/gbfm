@@ -9,14 +9,14 @@ Remote artwork phases belong to the common operation owner, not these tables.
 
 ## Revisions and physical attempt fences
 
-| Export | Revision | Physical attempt marker |
-| --- | --- | --- |
-| musicArtistsTable / musicAlbumsTable / musicTracksTable / musicLabelsTable | revision, integer 0..9007199254740991, default 0 | lastOperationId / last_operation_id |
-| musicPlaylistsTable | Existing revision, integer 0..9007199254740991, default 0 | lastOperationId / last_operation_id |
-| savedMixesTable / listeningCollectionsTable | revision, integer 1..9007199254740991, default 1 | lastOperationId / last_operation_id |
-| listenerMembershipRevisions | revision, integer 0..9007199254740991, default 0 | lastTransitionId / last_transition_id |
-| musicReminder | commandRevision / command_revision, integer 1..9007199254740991, default 1 | lastOperationId / last_operation_id |
-| postsTable | Existing coherent PostVersion hash; no new numeric revision | lastOperationId / last_operation_id |
+| Export                                                                     | Revision                                                                   | Physical attempt marker               |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------- |
+| musicArtistsTable / musicAlbumsTable / musicTracksTable / musicLabelsTable | revision, integer 0..9007199254740991, default 0                           | lastOperationId / last_operation_id   |
+| musicPlaylistsTable                                                        | Existing revision, integer 0..9007199254740991, default 0                  | lastOperationId / last_operation_id   |
+| savedMixesTable / listeningCollectionsTable                                | revision, integer 1..9007199254740991, default 1                           | lastOperationId / last_operation_id   |
+| listenerMembershipRevisions                                                | revision, integer 0..9007199254740991, default 0                           | lastTransitionId / last_transition_id |
+| musicReminder                                                              | commandRevision / command_revision, integer 1..9007199254740991, default 1 | lastOperationId / last_operation_id   |
+| postsTable                                                                 | Existing coherent PostVersion hash; no new numeric revision                | lastOperationId / last_operation_id   |
 
 Markers are nullable text, with a length-36 check when present. The shared
 executor supplies a fresh UUIDv4 `ctx.attemptId` for each physical execution,

@@ -188,9 +188,14 @@ export const Block: Schema.Codec<RichContentBlock> = Schema.suspend(() =>
   }),
 )
 
+export const RichContentLayout = Schema.Literals(['spotlight'])
+
+export type RichContentLayout = typeof RichContentLayout.Type
+
 export const RichContentDocument = Schema.Struct({
   version: RichContentVersion,
   blocks: Schema.Array(Block),
+  layout: Schema.optional(RichContentLayout),
 })
 
 export type RichContentDocument = typeof RichContentDocument.Type

@@ -19,18 +19,18 @@ does not confer authority: the service enforces current persisted
 grants, admin role, target access and SQL-time authority, including on receipt
 replay. Curator attribution is not a role. No Spotify-account authority exists.
 
-| Selected wire name | Additional input | Scopes | Present preparation |
-| --- | --- | --- | --- |
-| `create_playlist` | Complete title/slug/description/cover metadata | `playlists:write` | Unpublished empty desired state, revision 0; no identity allocated |
-| `update_playlist` | Nonempty metadata patch | `playlists:write` | Omitted preserves; explicit null clears nullable fields |
-| `add_playlist_tracks` | 1–100 distinct existing GBFM track IDs | `playlists:write` | Append absent IDs in caller order, retain existing membership dates/positions |
-| `remove_playlist_tracks` | 1–100 distinct IDs | `playlists:write` | Remove named members; absent members no-op, surviving gaps retained |
-| `reorder_playlist_tracks` | Complete distinct ordered ID set, max 500 | `playlists:write` | Exact set required, positions become 0..n−1, dates retained |
-| `add_playlist_track_from_url` | HTTP(S) URL without credentials | `playlists:write catalogue:write catalogue:import providers:read` | Input/scope contract only; import/execution/preview unresolved |
-| `sync_playlist_links` | Target and revision | Same four import/provider scopes | Input/scope contract only; accepted/completed status unresolved |
-| `preview_playlist_changes` | A complete proposed mutation command | Same scopes as proposed mutation | Envelope contract; local planner returns exact before/after, no receipt/write |
-| `publish_playlist` | Target and revision, no timestamp payload | `playlists:write playlists:publish` | Immediate publication at trusted captured time; already public no-op |
-| `unpublish_playlist` | Target and revision | `playlists:write playlists:publish` | Explicit null publication; already unpublished no-op |
+| Selected wire name            | Additional input                               | Scopes                                                            | Present preparation                                                           |
+| ----------------------------- | ---------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `create_playlist`             | Complete title/slug/description/cover metadata | `playlists:write`                                                 | Unpublished empty desired state, revision 0; no identity allocated            |
+| `update_playlist`             | Nonempty metadata patch                        | `playlists:write`                                                 | Omitted preserves; explicit null clears nullable fields                       |
+| `add_playlist_tracks`         | 1–100 distinct existing GBFM track IDs         | `playlists:write`                                                 | Append absent IDs in caller order, retain existing membership dates/positions |
+| `remove_playlist_tracks`      | 1–100 distinct IDs                             | `playlists:write`                                                 | Remove named members; absent members no-op, surviving gaps retained           |
+| `reorder_playlist_tracks`     | Complete distinct ordered ID set, max 500      | `playlists:write`                                                 | Exact set required, positions become 0..n−1, dates retained                   |
+| `add_playlist_track_from_url` | HTTP(S) URL without credentials                | `playlists:write catalogue:write catalogue:import providers:read` | Input/scope contract only; import/execution/preview unresolved                |
+| `sync_playlist_links`         | Target and revision                            | Same four import/provider scopes                                  | Input/scope contract only; accepted/completed status unresolved               |
+| `preview_playlist_changes`    | A complete proposed mutation command           | Same scopes as proposed mutation                                  | Envelope contract; local planner returns exact before/after, no receipt/write |
+| `publish_playlist`            | Target and revision, no timestamp payload      | `playlists:write playlists:publish`                               | Immediate publication at trusted captured time; already public no-op          |
+| `unpublish_playlist`          | Target and revision                            | `playlists:write playlists:publish`                               | Explicit null publication; already unpublished no-op                          |
 
 Metadata cannot carry publication, creator or curator fields. Boundary decoding
 rejects excess fields rather than silently stripping an attempted publication

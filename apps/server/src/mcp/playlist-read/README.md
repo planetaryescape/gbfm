@@ -10,12 +10,12 @@ All four require `catalogue:read` and recheck the current account/grant. They re
 published **GBFM** playlists, even for an admin or playlist owner. They neither
 read a Spotify account nor import, enrich, publish, enqueue or call providers.
 
-| Tool | Input | Result and limit |
-| --- | --- | --- |
-| `get_playlist` | `playlistId` | Explicit public header, revision, verified HTTP(S) provider links |
-| `get_playlist_tracks` | `playlistId`, optional `limit`/`offset` | Default 50, max 100, offset 0–10000; ordered memberships and exact membership count |
-| `compare_playlists` | `leftPlaylistId`, `rightPlaylistId` | At most 500 memberships each; intersection/differences by existing GBFM track ID only |
-| `export_playlist` | `playlistId` | Complete inline JSON, at most 500 memberships and 65536 UTF-8 bytes |
+| Tool                  | Input                                   | Result and limit                                                                      |
+| --------------------- | --------------------------------------- | ------------------------------------------------------------------------------------- |
+| `get_playlist`        | `playlistId`                            | Explicit public header, revision, verified HTTP(S) provider links                     |
+| `get_playlist_tracks` | `playlistId`, optional `limit`/`offset` | Default 50, max 100, offset 0–10000; ordered memberships and exact membership count   |
+| `compare_playlists`   | `leftPlaylistId`, `rightPlaylistId`     | At most 500 memberships each; intersection/differences by existing GBFM track ID only |
+| `export_playlist`     | `playlistId`                            | Complete inline JSON, at most 500 memberships and 65536 UTF-8 bytes                   |
 
 The complete MCP response budget is 262144 bytes, including text/structured
 duplication and nested escaping. Oversize results fail with `invalid_input`, not

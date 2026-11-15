@@ -1,5 +1,11 @@
 import * as Dialog from '@foldkit/ui/dialog'
 import * as Popover from '@foldkit/ui/popover'
+import {
+  spotlightSteps,
+  spotlightStructure,
+  stepAt,
+  stepPosition,
+} from '@gbfm/rich-content/spotlight'
 import { HashMap, Match, Option, Predicate, Result } from 'effect'
 import { AsyncData, Command, Update } from 'foldkit'
 import { UrlRequest } from 'foldkit/navigation'
@@ -14,6 +20,8 @@ import {
   PrefetchPage,
   Replace,
   ResetTweetEntry,
+  RestoreSpotlight,
+  SyncSpotlight,
   SaveReadMode,
   SetResolvedUrl,
 } from './command'
@@ -31,6 +39,8 @@ import { isServerPath, Route } from './route'
 import * as Search from './search'
 import { dragOffset, shouldDismiss, startDrag } from './sheet-drag'
 import * as SpotifyPlayback from './spotify/playback'
+import { normalizeSpotlightProgress, spotlightDocument, spotlightProgress } from './spotlight-page'
+import { withSeen } from './spotlight-progress'
 
 const mobileMenuFold = {
   read: (model: Model) => Option.some(model.mobileMenu),
@@ -73,7 +83,73 @@ const closeSearch = (model: Model): Update.Return<Model, Message> => {
   }
 }
 
-const closeOverlays = Update.combine([closeMobileMenu, closeAccountMenu, closeSearch])
+const videoDialogFold = {
+  read: (model: Model) => Option.some(model.videoDialog),
+  write: (model: Model, videoDialog: Dialog.Model): Model => ({ ...model, videoDialog }),
+  toParentMessage: (message: Dialog.Message) => Message.GotVideoDialogMessage({ message }),
+  foldOutMessage: Dialog.OutMessage.match<Update.Step<Model, Message>>({
+    Opened: () => (model) => ({ model }),
+    Closed: () => (model) => ({ model: { ...model, video: null } }),
+  }),
+}
+
+const updateVideoDialog = Update.foldChild({ ...videoDialogFold, update: Dialog.update })
+
+const openVideoDialog = Update.foldChildStep({ ...videoDialogFold, update: Dialog.open })
+
+const closeVideoDialog = Update.foldChildStep({ ...videoDialogFold, update: Dialog.close })
+
+const stepSpotlight = (
+  model: Model,
+  path: string,
+  at: string | null,
+): Update.Return<Model, Message, Services> => {
+  const document = spotlightDocument(model)
+
+  if (document === null) return { model }
+  const progress = normalizeSpotlightProgress(document, withSeen(model.spotlight, path, at))
+  const steps = document ? spotlightSteps(spotlightStructure(document.blocks)) : []
+  const offset = stepAt(steps, at) - stepAt(steps, spotlightProgress(model).at)
+  let spotlightMotion: Model['spotlightMotion'] = 'none'
+
+  if (offset > 0) spotlightMotion = 'forward'
+
+  if (offset < 0) spotlightMotion = 'backward'
+
+  return {
+    model: { ...model, spotlight: progress, spotlightMotion },
+    commands: [SyncSpotlight({ progress })],
+  }
+}
+
+const isEditorialPath = (pathname: string) => /^\/editorial\/[^/]+$/.test(pathname)
+
+const withSpotlightRestore =
+  (url: string) =>
+  (result: Update.Return<Model, Message, Services>): Update.Return<Model, Message, Services> => {
+    const { pathname } = new URL(url)
+
+    return isEditorialPath(pathname)
+      ? {
+          ...result,
+          commands: [
+            ...(result.commands ?? []),
+            RestoreSpotlight({ path: pathname }),
+            Command.mapMessage(
+              SpotifyPlayback.Load({ requestId: result.model.spotifyPlayback.statusRequestId }),
+              (message) => Message.GotSpotifyPlaybackMessage({ message }),
+            ),
+          ],
+        }
+      : result
+  }
+
+const closeOverlays = Update.combine([
+  closeMobileMenu,
+  closeAccountMenu,
+  closeSearch,
+  closeVideoDialog,
+])
 
 const acceptTweet = (model: Model, initial = false): Update.Return<Model, Message> => {
   const slug = TweetReader.concreteSlug(model.flags.url)
@@ -217,21 +293,23 @@ const updateApplication = (
       if (model.interactive) return { model }
       const started = { ...model, interactive: true }
 
-      return TweetReader.isEntry(model.flags.url)
-        ? {
-            model: started,
-            commands: [
-              Command.mapMessage(
-                TweetReader.ResolveEntry({
-                  identity: model.tweetReader.identity,
-                  checkpoint: model.tweetReader.checkpoint,
-                  navigationId: model.navigationId,
-                }),
-                (message) => Message.GotTweetReaderMessage({ message }),
-              ),
-            ],
-          }
-        : acceptTweet(started, true)
+      return withSpotlightRestore(model.flags.url)(
+        TweetReader.isEntry(model.flags.url)
+          ? {
+              model: started,
+              commands: [
+                Command.mapMessage(
+                  TweetReader.ResolveEntry({
+                    identity: model.tweetReader.identity,
+                    checkpoint: model.tweetReader.checkpoint,
+                    navigationId: model.navigationId,
+                  }),
+                  (message) => Message.GotTweetReaderMessage({ message }),
+                ),
+              ],
+            }
+          : acceptTweet(started, true),
+      )
     },
     GotTweetReaderMessage: ({ message }) => {
       if (Predicate.isTagged(message, 'EntryResolved')) {
@@ -311,6 +389,36 @@ const updateApplication = (
     MenuToggled: () => (model.mobileMenu.isOpen ? closeMobileMenu(model) : openMobileMenu(model)),
     NavMinimizeChanged: ({ minimized }) => ({ model: { ...model, navMinimized: minimized } }),
     GotMobileMenuMessage: ({ message }) => updateMobileMenu(model, message),
+    VideoOpened: ({ video }) => openVideoDialog({ ...model, video }),
+    GotVideoDialogMessage: ({ message }) => updateVideoDialog(model, message),
+    SpotlightStepped: ({ path, at }) => stepSpotlight(model, path, at),
+    SpotlightKeyed: ({ offset }) => {
+      const document = spotlightDocument(model)
+
+      if (document === null) return { model }
+      const steps = spotlightSteps(spotlightStructure(document.blocks))
+      const { path, at } = spotlightProgress(model)
+      const current = stepAt(steps, at)
+      const target = steps[Math.min(Math.max(current + offset, 0), steps.length - 1)]
+
+      return target && stepPosition(target) !== at
+        ? stepSpotlight(model, path, stepPosition(target))
+        : { model }
+    },
+    SpotlightRestored: ({ progress }) => {
+      const document = spotlightDocument(model)
+
+      if (document === null || progress.path !== new URL(model.flags.url).pathname) return { model }
+      const linked = new URL(model.flags.url).searchParams.get('at')
+      const at = linked ?? progress.at
+      const restored = normalizeSpotlightProgress(document, withSeen(progress, progress.path, at))
+
+      return {
+        model: { ...model, spotlight: restored, spotlightMotion: 'none' },
+        commands: [SyncSpotlight({ progress: restored })],
+      }
+    },
+    SpotlightSynced: () => ({ model }),
     MenuDragStarted: ({ pointerId, clientY }) =>
       !model.mobileMenu.isOpen ||
       model.mobileMenu.animation.transitionState !== 'Idle' ||
@@ -632,10 +740,10 @@ const updateApplication = (
       const shown = showPage(model, flags, navigationId, key)
       const accepted = acceptTweet(shown.model)
 
-      return {
+      return withSpotlightRestore(flags.url)({
         model: { ...accepted.model, pageCache },
         commands: [...(shown.commands ?? []), ...(accepted.commands ?? [])],
-      }
+      })
     },
     FailedPage: ({ key, navigationId }) => {
       if (navigationId !== model.navigationId) return { model }

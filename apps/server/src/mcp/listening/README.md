@@ -8,16 +8,16 @@ production registry, change OAuth/consent, or activate production scopes.
 
 ## Capability mapping
 
-| Selected capability         | Input → output                                           | Permission        | Delivery                             |
-| --------------------------- | -------------------------------------------------------- | ----------------- | ------------------------------------ |
-| `list_saved_mixes`          | `ListeningPageInput` → `SavedMixPage`                    | `listening:read`  | Implemented, no side effects         |
-| `list_collections`          | `ListeningPageInput` → `CollectionPage`                  | `listening:read`  | Implemented, no side effects         |
-| `save_mix`                  | `SaveMixInput` → original command result                 | read + write | Private create, duplicate preserves state |
-| `update_listening_notes`    | `UpdateListeningNotesInput` → original command result    | read + write | Private-only revision CAS |
-| `set_listening_status`      | `SetListeningStatusInput` → original command result      | read + write | Private-only revision CAS |
-| `create_collection`         | `CreateCollectionInput` → original command result        | read + write | Private create |
-| `update_collection`         | `UpdateCollectionInput` → original command result        | read + write | Private-only revision CAS |
-| `set_collection_membership` | `SetCollectionMembershipInput` → original command result | read + write | Both targets private and owned; collection CAS |
+| Selected capability         | Input → output                                           | Permission       | Delivery                                       |
+| --------------------------- | -------------------------------------------------------- | ---------------- | ---------------------------------------------- |
+| `list_saved_mixes`          | `ListeningPageInput` → `SavedMixPage`                    | `listening:read` | Implemented, no side effects                   |
+| `list_collections`          | `ListeningPageInput` → `CollectionPage`                  | `listening:read` | Implemented, no side effects                   |
+| `save_mix`                  | `SaveMixInput` → original command result                 | read + write     | Private create, duplicate preserves state      |
+| `update_listening_notes`    | `UpdateListeningNotesInput` → original command result    | read + write     | Private-only revision CAS                      |
+| `set_listening_status`      | `SetListeningStatusInput` → original command result      | read + write     | Private-only revision CAS                      |
+| `create_collection`         | `CreateCollectionInput` → original command result        | read + write     | Private create                                 |
+| `update_collection`         | `UpdateCollectionInput` → original command result        | read + write     | Private-only revision CAS                      |
+| `set_collection_membership` | `SetCollectionMembershipInput` → original command result | read + write     | Both targets private and owned; collection CAS |
 
 Command results are minimal `SavedMixCommandResult` / `CollectionCommandResult`
 identity and version objects; they never store notes, titles or descriptions.

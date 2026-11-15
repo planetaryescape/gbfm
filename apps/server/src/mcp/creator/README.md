@@ -18,15 +18,15 @@ auto-merge is authorized.
 
 ## Capability mapping
 
-| Issue | Selected tool | Input and authority |
-| --- | --- | --- |
-| C1 #539 | `list_creator_drafts` | Bounded owned mix/show draft metadata; `creator:read`; no admin-wide listing, bodies or media URLs |
-| C1 #539 | `update_creator_metadata` | UUID request identity, canonical target and expected persisted revision; `creator:write`; title/description only |
-| C2 #540 | `create_micro_post` | UUID request identity and bounded canonical content; separately consented `micros:publish`; public side effect |
-| C2 #540 | `reply_to_micro_post` | Above plus canonical parent ID; public focus/root/full ancestor path checked at apply; server derives thread fields |
-| C4 #542 | `publish_editorial` | Canonical post ID, expected shared post version and UUID request identity; target write authority plus `content:publish` |
-| C4 #542 | `unpublish_content` | Explicit post/micro/mix/show target and corresponding post version or creator revision; target write authority plus `content:publish` |
-| C4 #542 | `delete_content` | Same version-bound target; target write authority plus separate `content:delete`; no implicit cascade |
+| Issue   | Selected tool             | Input and authority                                                                                                                   |
+| ------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| C1 #539 | `list_creator_drafts`     | Bounded owned mix/show draft metadata; `creator:read`; no admin-wide listing, bodies or media URLs                                    |
+| C1 #539 | `update_creator_metadata` | UUID request identity, canonical target and expected persisted revision; `creator:write`; title/description only                      |
+| C2 #540 | `create_micro_post`       | UUID request identity and bounded canonical content; separately consented `micros:publish`; public side effect                        |
+| C2 #540 | `reply_to_micro_post`     | Above plus canonical parent ID; public focus/root/full ancestor path checked at apply; server derives thread fields                   |
+| C4 #542 | `publish_editorial`       | Canonical post ID, expected shared post version and UUID request identity; target write authority plus `content:publish`              |
+| C4 #542 | `unpublish_content`       | Explicit post/micro/mix/show target and corresponding post version or creator revision; target write authority plus `content:publish` |
+| C4 #542 | `delete_content`          | Same version-bound target; target write authority plus separate `content:delete`; no implicit cascade                                 |
 
 All require a live creator-class account and current ownership; admin role alone
 does not bypass ownership. Target-specific scope combinations, enabled discovery

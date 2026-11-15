@@ -1,0 +1,468 @@
+.spotlight {
+  scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 1rem);
+}
+
+.spotlight-detail {
+  max-width: 80rem;
+}
+
+.spotlight-masthead {
+  display: grid;
+  gap: 1.5rem;
+  padding-top: 0.5rem;
+}
+
+.spotlight-masthead .spotlight-banner {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 1;
+  object-fit: cover;
+}
+
+.spotlight-masthead h1 {
+  font-size: clamp(2rem, 4vw, 3.25rem);
+  line-height: 1.1;
+}
+
+@media (min-width: 1024px) {
+  .spotlight-masthead {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 2rem;
+  }
+}
+
+.spotlight-body {
+  width: 100%;
+  margin-top: 0;
+}
+
+.spotlight-body:has(.spotlight-intro, .spotlight-end) {
+  margin-top: 2rem;
+}
+
+.spotlight-intro,
+.spotlight-chapter,
+.spotlight-end,
+.spotlight-moment > p {
+  max-width: 75ch;
+}
+
+.spotlight-moment > .rich-content-music-card,
+.spotlight-moment > .spotlight-reference-card,
+.spotlight-moment > .spotlight-video {
+  max-width: 75ch;
+}
+
+.spotlight-reference-card {
+  display: grid;
+  min-width: 0;
+}
+
+.spotlight-mention {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--muted-foreground);
+  text-underline-offset: 3px;
+}
+
+.spotlight-mention:hover,
+.spotlight-mention:focus-within {
+  color: var(--highlight);
+  text-decoration-color: var(--highlight);
+}
+
+.spotlight-mention:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.spotlight-records {
+  display: grid;
+  gap: 1rem;
+}
+
+.spotlight-records > * {
+  margin: 0;
+}
+
+.spotlight-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 1.25rem;
+}
+
+.spotlight-progress {
+  min-width: 0;
+  margin: 0;
+}
+
+.spotlight .spotlight-progress-label {
+  height: 1.5rem;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spotlight-step > * > * + *,
+.spotlight-intro > * + * {
+  margin-top: 1.5rem;
+}
+
+.spotlight-begin {
+  margin-top: 1.75rem;
+}
+
+.spotlight-chapter-head {
+  padding-block: 0.5rem;
+}
+
+.spotlight-chapter-eyebrow {
+  margin: 0 0 0.75rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.spotlight .spotlight-chapter-head h2,
+.spotlight .spotlight-end h2 {
+  margin: 0;
+  font-size: clamp(1.75rem, 6vw, 2.5rem);
+  font-weight: 600;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.spotlight .spotlight-chapter-moments {
+  display: grid;
+  margin: 1.75rem 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: moment;
+}
+
+.spotlight-chapter-moments li {
+  margin: 0;
+  counter-increment: moment;
+}
+
+.spotlight-chapter-link {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 0.875rem 0.5rem;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.spotlight-chapter-link:hover {
+  background: color-mix(in srgb, var(--highlight) 6%, transparent);
+  color: var(--highlight);
+}
+
+.spotlight-chapter-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.spotlight-chapter-moments li + li {
+  border-top: 1px solid var(--border);
+}
+
+.spotlight-chapter-link::before {
+  content: counter(moment, decimal-leading-zero);
+  flex-shrink: 0;
+  min-width: 2ch;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.spotlight-moment > h3 {
+  margin: 0 0 1.25rem;
+  font-size: clamp(1.25rem, 4.5vw, 1.625rem);
+  font-weight: 600;
+  line-height: 1.4;
+  text-wrap: balance;
+}
+
+.spotlight-end {
+  padding-block: 1rem;
+}
+
+.spotlight-end:has(> .spotlight-end-artwork) {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  align-items: start;
+  gap: 2rem;
+}
+
+.spotlight-end-artwork {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.spotlight-end-copy {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.spotlight .spotlight-end-copy h2 {
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+}
+
+.spotlight-end-copy p {
+  margin: 0;
+  line-height: 1.8;
+}
+
+.spotlight-restart {
+  justify-self: start;
+  padding-inline: 0;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 639px) {
+  .spotlight-end:has(> .spotlight-end-artwork) {
+    grid-template-columns: 5rem minmax(0, 1fr);
+    gap: 1rem;
+  }
+}
+
+.spotlight-controls {
+  display: flex;
+  justify-self: start;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.spotlight-controls .btn {
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+}
+
+.spotlight-back {
+  color: var(--muted-foreground);
+}
+
+.spotlight-controls svg {
+  flex-shrink: 0;
+}
+
+.spotlight-stage:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.spotlight-stage {
+  overflow-x: clip;
+}
+
+.spotlight-stage[data-direction='forward'] > * {
+  animation: spotlight-forward 180ms ease-out;
+}
+
+.spotlight-stage[data-direction='backward'] > * {
+  animation: spotlight-backward 180ms ease-out;
+}
+
+@keyframes spotlight-forward {
+  from {
+    opacity: 0;
+    transform: translateX(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes spotlight-backward {
+  from {
+    opacity: 0;
+    transform: translateX(-0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.spotlight-actions {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.spotlight-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.spotlight-action-notice {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+
+.spotlight-onboarding {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 2rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--card);
+}
+
+.spotlight-onboarding p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+
+.spotlight-onboarding .spotlight-action {
+  justify-self: start;
+}
+
+.spotlight-onboarding .spotlight-onboarding-title {
+  color: var(--foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+@media (min-width: 768px) {
+  .spotlight-records,
+  .spotlight .rich-content-card-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .spotlight-records .rich-content-music-card,
+  .spotlight .rich-content-card-group .rich-content-music-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-content: start;
+    gap: 0.5rem;
+    padding: 0.875rem;
+    content-visibility: visible;
+  }
+
+  .spotlight-records .rich-content-music-head,
+  .spotlight .rich-content-card-group .rich-content-music-head {
+    grid-column: 1;
+    grid-row: 1;
+    grid-template-columns: 3.5rem minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+
+  .spotlight-records .rich-content-music-head:not(:has(> img)),
+  .spotlight .rich-content-card-group .rich-content-music-head:not(:has(> img)) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .spotlight-records .rich-content-music-title,
+  .spotlight .rich-content-card-group .rich-content-music-title {
+    font-size: 0.9375rem;
+  }
+
+  .spotlight-records .rich-content-music-artists,
+  .spotlight-records .rich-content-music-blurb,
+  .spotlight .rich-content-card-group .rich-content-music-artists,
+  .spotlight .rich-content-card-group .rich-content-music-blurb {
+    font-size: 0.75rem;
+  }
+
+  .spotlight-records .rich-content-music-links,
+  .spotlight .rich-content-card-group .rich-content-music-links {
+    grid-column: 2;
+    grid-row: 1;
+    flex-direction: column;
+    align-items: end;
+    gap: 0;
+  }
+
+  .spotlight-records .rich-content-music-blurb,
+  .spotlight-records .spotlight-actions,
+  .spotlight-records .rich-content-music-tracks,
+  .spotlight .rich-content-card-group .rich-content-music-blurb,
+  .spotlight .rich-content-card-group .spotlight-actions,
+  .spotlight .rich-content-card-group .rich-content-music-tracks {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 1200px) {
+  .spotlight {
+    display: grid;
+    grid-template-rows: 3.25rem minmax(0, 1fr);
+    height: calc(100dvh - 6rem);
+    min-height: 24rem;
+  }
+
+  .spotlight-stage {
+    min-height: 0;
+    margin: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable;
+    scroll-behavior: auto;
+    overflow-anchor: none;
+  }
+
+  .spotlight:has(.spotlight-intro, .spotlight-end) {
+    display: block;
+    height: auto;
+    min-height: 0;
+  }
+
+  .spotlight:has(.spotlight-intro, .spotlight-end) .spotlight-header {
+    margin-bottom: 1.5rem;
+  }
+
+  .spotlight:has(.spotlight-intro, .spotlight-end) .spotlight-stage {
+    overflow: visible;
+  }
+
+  .spotlight-records,
+  .spotlight .rich-content-card-group {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .spotlight-header {
+    margin: 0;
+  }
+
+  .spotlight-step > * > * + * {
+    margin-top: 1rem;
+  }
+
+  .spotlight-moment > p {
+    max-width: 100ch;
+    font-size: 0.875rem;
+    line-height: 1.75;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-stage[data-direction] > * {
+    animation: none;
+  }
+}

@@ -134,3 +134,18 @@ describe('MdxService', () => {
     })
   })
 })
+
+describe('rich content layout', () => {
+  test('keeps a spotlight layout through embed resolution', async () => {
+    const document = renderRichContent(
+      '::layout{name="spotlight"}\n\n## London\n\nhttps://www.youtube.com/watch?v=1g826StJhLk',
+    )
+
+    expect(document.layout).toBe('spotlight')
+    expect(document.blocks.map((block) => block._tag)).toEqual(['Heading', 'ExternalMediaEmbed'])
+    expect(renderRichContent('## London')).not.toHaveProperty('layout')
+    await expect(
+      Effect.runPromise(validateCanonicalContent('::layout{name="spotlight"}')),
+    ).resolves.toBeUndefined()
+  })
+})

@@ -32,7 +32,7 @@ const mobileTabs = [
 
 const focusRing = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
-const desktopLinkClass = `inline-flex h-11 shrink-0 items-center rounded-sm px-2.5 text-xs font-semibold tracking-wide no-underline transition-colors text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-[current=page]:text-foreground aria-[current=page]:shadow-[inset_0_-2px_0_var(--highlight)] ${focusRing}`
+const desktopLinkClass = `inline-flex h-11 shrink-0 items-center rounded-sm px-2.5 text-xs font-semibold tracking-wide no-underline transition-colors text-muted-foreground hover:bg-muted/60 hover:text-foreground aria-[current=page]:text-foreground ${focusRing}`
 
 const desktopIconButtonClass = `btn btn-quiet btn-icon shrink-0 ${focusRing}`
 

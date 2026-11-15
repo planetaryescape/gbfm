@@ -201,7 +201,7 @@ const musicEmbed = (
     _tag: 'MusicEmbed',
     music,
     genres: reference._tag === 'MusicUrl' ? reference.genres : [],
-    blurb: reference._tag === 'MusicUrl' ? reference.blurb : null,
+    blurb: reference.blurb,
     showTracks: reference.showTracks,
   }
 }
@@ -299,7 +299,9 @@ const resolveDocument = (
       { concurrency: 8 },
     )
 
-    return { version: 1 as const, blocks }
+    const resolved: RichContentDocument = { version: 1, blocks }
+
+    return document.layout === undefined ? resolved : { ...resolved, layout: document.layout }
   })
 
 export const renderRichContent = (source: string): RichContentDocument =>

@@ -3,6 +3,8 @@
 @import './scrollbar.css';
 @import '@gbfm/theme/styles.css';
 @import '../page/dashboard/dashboard.css';
+@import '../view/rich-content/classic.css';
+@import '../view/rich-content/spotlight.css';
 
 @plugin "@tailwindcss/typography";
 @plugin "tailwindcss-animate";

@@ -29,16 +29,16 @@ There is no default provider, captured-principal shortcut or duplicated grant SQ
 Composition requires `Database` and `McpOperationStore` using the same D1 binding.
 P1's actual production provider is still a prerequisite.
 
-| Operation | Domain contract |
-| --- | --- |
-| `update_music_metadata` | Artist name/bio; album title/canonical UTC releaseDate; track title/trackNumber; label name/description |
-| `set_music_genres` | Ordered distinct trimmed names, at most 30; empty clears genres without deleting tags |
-| `set_album_type` | LP, EP, single, compilation or explicit null |
-| `set_track_album` | Existing observed album or explicit null |
-| `set_artist_credit` | Album/track existing primary/featured/producer/null role; displayOrder then SQLite BINARY artistId |
-| `remove_artist_credit` | Exact parent/artist pair; ordered artistNames recomputed in the same batch |
-| `set_label_affiliation` | Artist/album to existing observed label; both endpoint revisions advance |
-| `remove_label_affiliation` | Exact pair and both endpoint revisions |
+| Operation                  | Domain contract                                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `update_music_metadata`    | Artist name/bio; album title/canonical UTC releaseDate; track title/trackNumber; label name/description |
+| `set_music_genres`         | Ordered distinct trimmed names, at most 30; empty clears genres without deleting tags                   |
+| `set_album_type`           | LP, EP, single, compilation or explicit null                                                            |
+| `set_track_album`          | Existing observed album or explicit null                                                                |
+| `set_artist_credit`        | Album/track existing primary/featured/producer/null role; displayOrder then SQLite BINARY artistId      |
+| `remove_artist_credit`     | Exact parent/artist pair; ordered artistNames recomputed in the same batch                              |
+| `set_label_affiliation`    | Artist/album to existing observed label; both endpoint revisions advance                                |
+| `remove_label_affiliation` | Exact pair and both endpoint revisions                                                                  |
 
 Wire command: `{requestId: UUIDv4, expectedRevision, references, change}`. References
 are the exact zero-or-one artist/album/label observation required by the change.

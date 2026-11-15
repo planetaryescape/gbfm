@@ -5,13 +5,19 @@ import { Message } from '../../message'
 import type { ContentItem, Model } from '../../model'
 import * as Player from '../../player'
 import * as PublicActions from '../../public-actions'
+import * as SpotifyReading from '../../spotify/reading'
+import { spotlightDocument, spotlightProgress } from '../../spotlight-page'
 import { artwork } from '../../view/artwork'
-import { breadcrumbs, crumbCurrent, crumbLink } from '../../view/breadcrumbs'
 import { emailUpdatesInvite } from '../../view/email-updates'
 import { formatDate } from '../../view/format-date'
 import { iconPaths, lucide } from '../../view/icons'
 import { richContent } from '../../view/rich-content/fallback'
 import { richContentView } from '../../view/rich-content/render'
+import { spotlightView } from '../../view/rich-content/spotlight'
+import {
+  spotlightPresentation,
+  type SpotlightBanner,
+} from '../../view/rich-content/spotlight-presentation'
 import { draftNotice } from './draft-notice'
 
 const kindLabel = (kind: string) =>
@@ -39,27 +45,6 @@ const track = (item: ContentItem, url: string) => ({
   type: item.audioType ?? 'mix',
   creators: item.creators,
 })
-
-const sectionCrumb = (kind: string) =>
-  Match.value(kind).pipe(
-    Match.when('mixes', () => ({ label: 'Radio shows', href: '/shows' })),
-    Match.when('editorial', () => ({ label: 'Editorial', href: '/editorial' })),
-    Match.when('labels', () => ({ label: 'Record labels', href: '/labels' })),
-    Match.when('releases', () => ({ label: 'Releases', href: '/releases' })),
-    Match.when('tracks', () => ({ label: 'Tracks', href: '/tracks' })),
-    Match.when('djs', () => ({ label: 'DJs', href: '/djs' })),
-    Match.orElse(() => null),
-  )
-
-const ancestors = (item: ContentItem, kind: string) => {
-  const section = sectionCrumb(kind)
-
-  if (!section) return []
-
-  return item.show
-    ? [section, { label: item.show.title, href: `/shows/${encodeURIComponent(item.show.slug)}` }]
-    : [section]
-}
 
 const creatorLinks = (h: HtmlBuilder<Message>, item: ContentItem) =>
   (item.creators ?? []).flatMap((creator, index) => [
@@ -91,19 +76,39 @@ const byline = (h: HtmlBuilder<Message>, item: ContentItem) => {
   )
 }
 
-const masthead = (h: HtmlBuilder<Message>, item: ContentItem, kind: string) => {
+const masthead = (
+  h: HtmlBuilder<Message>,
+  item: ContentItem,
+  kind: string,
+  banner: SpotlightBanner | null = null,
+) => {
   const label = kindLabel(kind)
 
   return h.header(
-    [h.Class('flex flex-col gap-6 pt-6 sm:flex-row sm:items-end sm:gap-8 sm:pt-8')],
     [
-      artwork(
-        item.imageUrl,
-        item.title,
-        '(min-width: 1024px) 256px, (min-width: 640px) 208px, 192px',
-        true,
-        'w-48 shrink-0 rounded-sm shadow-2xl sm:w-52 lg:w-64',
+      h.Class(
+        banner
+          ? 'spotlight-masthead'
+          : 'flex flex-col gap-6 pt-6 sm:flex-row sm:items-end sm:gap-8 sm:pt-8',
       ),
+    ],
+    [
+      banner
+        ? artwork(
+            banner.src,
+            banner.alt,
+            '(min-width: 1280px) 750px, (min-width: 1024px) calc((100vw - 64px) * 0.6153846), calc(100vw - 32px)',
+            true,
+            'spotlight-banner',
+            { width: 2400, height: 800 },
+          )
+        : artwork(
+            item.imageUrl,
+            item.title,
+            '(min-width: 1024px) 256px, (min-width: 640px) 208px, 192px',
+            true,
+            'w-48 shrink-0 rounded-sm shadow-2xl sm:w-52 lg:w-64',
+          ),
       h.div(
         [h.Class('min-w-0 pb-1')],
         [
@@ -127,6 +132,16 @@ const controls = (model: Model, h: HtmlBuilder<Message>, item: ContentItem) => {
   const current = model.player.snapshot.queue.current?.id === item.id
   const playing = current && model.player.snapshot.transport.isPlaying
   const playLabel = playing ? 'Pause' : 'Play'
+
+  const publicControls = PublicActions.view(
+    model.publicAction,
+    h,
+    (message) => Message.GotPublicActionMessage({ message }),
+    model.interactive,
+    true,
+  )
+
+  if (!item.audioUrl && publicControls === h.empty) return h.empty
 
   return h.div(
     [h.Class('mt-8 flex items-center gap-2')],
@@ -167,13 +182,7 @@ const controls = (model: Model, h: HtmlBuilder<Message>, item: ContentItem) => {
             ),
           ]
         : []),
-      PublicActions.view(
-        model.publicAction,
-        h,
-        (message) => Message.GotPublicActionMessage({ message }),
-        model.interactive,
-        true,
-      ),
+      publicControls,
     ],
   )
 }
@@ -219,6 +228,12 @@ const metaStrip = (h: HtmlBuilder<Message>, item: ContentItem) => {
   )
 }
 
+const readingSpotify = (model: Model): SpotifyReading.ReadingSpotify<Message> => ({
+  model: model.spotifyPlayback,
+  toMessage: (message) => Message.GotSpotifyPlaybackMessage({ message }),
+  interactive: model.interactive,
+})
+
 export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) => {
   const item = model.flags.items[0]
 
@@ -228,29 +243,65 @@ export const detailView = (model: Model, h: HtmlBuilder<Message>, kind: string) 
       [h.p([h.Role('alert')], [model.flags.failure ?? 'Content not found.'])],
     )
 
+  const spotlight = kind === 'editorial' ? spotlightDocument(model) : null
+
+  const at = spotlight ? spotlightProgress(model).at : null
+  const showMasthead = spotlight === null || at === null
+  const presentation = spotlight ? spotlightPresentation(spotlight.blocks) : null
+
   return h.article(
-    [h.Class('content-detail mx-auto max-w-5xl px-4 pb-32 pt-6')],
     [
-      breadcrumbs([...ancestors(item, kind).map(crumbLink), crumbCurrent(item.slug)]),
+      h.Class(
+        spotlight
+          ? 'content-detail spotlight-detail mx-auto px-4 pb-32 pt-6'
+          : 'content-detail mx-auto max-w-5xl px-4 pb-32 pt-6',
+      ),
+    ],
+    [
       kind === 'editorial' && item.draft ? draftNotice(h, item.slug) : h.empty,
-      masthead(h, item, kind),
-      controls(model, h, item),
-      item.description
+      showMasthead ? masthead(h, item, kind, presentation?.banner) : h.empty,
+      showMasthead ? controls(model, h, item) : h.empty,
+      showMasthead && item.description
         ? h.p(
             [h.Class('mt-6 max-w-prose text-base leading-relaxed text-foreground/80')],
             [item.description],
           )
         : h.empty,
-      metaStrip(h, item),
+      showMasthead ? metaStrip(h, item) : h.empty,
       h.div(
-        [h.Class('mt-10 max-w-prose')],
+        [h.Class(spotlight ? 'spotlight-body mt-4' : 'mt-10 max-w-prose')],
         [
           item.richContent === null
             ? richContent(item.content)
-            : richContentView(item.richContent, h),
+            : spotlight
+              ? spotlightView(spotlight, h, {
+                  ...spotlightProgress(model),
+                  direction:
+                    model.spotlight?.path === new URL(model.flags.url).pathname
+                      ? model.spotlightMotion
+                      : 'none',
+                  onStep: (at) =>
+                    Message.SpotlightStepped({ path: new URL(model.flags.url).pathname, at }),
+                  onVideo: (video) => Message.VideoOpened({ video }),
+                  musicActions: (music) =>
+                    SpotifyReading.cardActions(h, readingSpotify(model), music.links),
+                  onboarding: SpotifyReading.onboarding(h, readingSpotify(model)),
+                  endArtwork: item.imageUrl
+                    ? artwork(
+                        item.imageUrl,
+                        `Record mosaic for ${item.title}`,
+                        '160px',
+                        false,
+                        'spotlight-end-artwork',
+                      )
+                    : undefined,
+                })
+              : richContentView(item.richContent, h),
         ],
       ),
-      kind === 'mixes' || kind === 'editorial' ? emailUpdatesInvite(h) : h.empty,
+      (showMasthead || at === 'end') && (kind === 'mixes' || kind === 'editorial')
+        ? emailUpdatesInvite(h)
+        : h.empty,
     ],
   )
 }

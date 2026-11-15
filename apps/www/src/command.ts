@@ -2,7 +2,7 @@ import { MicroPostScreenRepliesResponse } from '@gbfm/api/post'
 import { observeJourney } from '@gbfm/observability'
 import { SiteMetadata } from '@gbfm/site-metadata'
 import { Effect, Schema } from 'effect'
-import { Command, Dom, Navigation } from 'foldkit'
+import { Command, Dom, Navigation, Render } from 'foldkit'
 
 import { updateDocumentHead } from './document-head'
 import { Message } from './message'
@@ -12,6 +12,7 @@ import * as Creator from './page/creator'
 import { showImages } from './page/shows/document'
 import { tweetImages } from './page/tweet/card'
 import { StoreCheckpoint } from './page/tweet/reader'
+import { readProgress, SpotlightProgress, writeProgress } from './spotlight-progress'
 import { preloadArtwork } from './view/artwork'
 
 export const StartClient = Command.define('Application.Start', {
@@ -184,4 +185,56 @@ export const LoadPage = Command.define('Navigation.Load', {
       Effect.map((flags) => Message.LoadedPage({ flags, key: pageKey(href), navigationId })),
       Effect.catch(() => Effect.succeed(Message.FailedPage({ key: pageKey(href), navigationId }))),
     ),
+})
+
+export const SyncSpotlight = Command.define('Editorial.SyncSpotlight', {
+  args: { progress: SpotlightProgress },
+  messages: [Message.SpotlightSynced],
+  execute: ({ progress }) =>
+    Effect.gen(function* () {
+      const focused = document.activeElement
+
+      const ownedFocus =
+        focused !== null && document.querySelector('.spotlight-stage')?.contains(focused)
+
+      const url = new URL(location.href)
+
+      if (url.pathname === progress.path) {
+        if (progress.at === null) url.searchParams.delete('at')
+        else url.searchParams.set('at', progress.at)
+        history.replaceState(history.state, '', `${url.pathname}${url.search}`)
+      }
+
+      writeProgress(progress)
+
+      yield* Render.afterCommit
+      const stage = document.querySelector<HTMLElement>('.spotlight-stage')
+
+      if (
+        ownedFocus &&
+        !focused?.isConnected &&
+        (document.activeElement === null || document.activeElement === document.body) &&
+        location.pathname === progress.path
+      )
+        stage?.focus({ preventScroll: true })
+
+      if (stage === null || getComputedStyle(stage).overflowY !== 'auto') {
+        yield* Dom.scrollIntoViewAfterPaint('.content-detail', { block: 'start' }).pipe(
+          Effect.catchTag('ElementNotFound', () => Effect.void),
+        )
+      }
+
+      return Message.SpotlightSynced()
+    }),
+})
+
+export const RestoreSpotlight = Command.define('Editorial.RestoreSpotlight', {
+  args: { path: Schema.String },
+  messages: [Message.SpotlightRestored, Message.SpotlightSynced],
+  execute: ({ path }) =>
+    Effect.sync(() => {
+      const progress = readProgress(path)
+
+      return Message.SpotlightRestored({ progress: progress ?? { path, at: null, seen: [] } })
+    }),
 })

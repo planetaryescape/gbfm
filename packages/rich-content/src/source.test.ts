@@ -2,7 +2,7 @@
 import { Effect, Exit, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 
-import { SafeUrl } from './schema'
+import { RichContentDocument, SafeUrl } from './schema'
 import { parseRichContent, safeUrl, validateForWrite } from './source'
 
 describe('canonical rich content source', () => {
@@ -139,5 +139,47 @@ describe('canonical rich content source', () => {
     expect(parseRichContent(source).document.blocks).toEqual([
       { _tag: 'Unsupported', source, reason: 'unknown-directive' },
     ])
+  })
+
+  test('keeps commentary on catalog music cards', () => {
+    const [card] = parseRichContent(
+      '::track{id="dcfae01d" blurb="Matope has such a nice tempo to it."}',
+    ).document.blocks
+
+    expect(card).toEqual({
+      _tag: 'EmbedReference',
+      reference: {
+        _tag: 'MusicCatalog',
+        entityType: 'track',
+        entityId: 'dcfae01d',
+        blurb: 'Matope has such a nice tempo to it.',
+        showTracks: true,
+      },
+    })
+  })
+
+  test('reads a top-level layout directive as document presentation, not a block', () => {
+    const result = parseRichContent('::layout{name="spotlight"}\n\n## Zimbabwe')
+
+    expect(result.diagnostics).toEqual([])
+    expect(result.document.layout).toBe('spotlight')
+    expect(result.document.blocks.map((block) => block._tag)).toEqual(['Heading'])
+  })
+
+  test('omits layout when absent and rejects unknown layouts without rendering them', () => {
+    expect(parseRichContent('Plain prose.').document).not.toHaveProperty('layout')
+
+    const result = parseRichContent('::layout{name="carousel"}\n\nProse.')
+
+    expect(result.document).not.toHaveProperty('layout')
+    expect(result.document.blocks.map((block) => block._tag)).toEqual(['Paragraph'])
+    expect(result.diagnostics.map((item) => item.code)).toEqual(['invalid-directive-attribute'])
+  })
+
+  test('keeps documents without a layout decodable by the published schema', () => {
+    const decode = Schema.decodeUnknownSync(RichContentDocument)
+
+    expect(decode({ version: 1, blocks: [] })).toEqual({ version: 1, blocks: [] })
+    expect(decode({ version: 1, blocks: [], layout: 'spotlight' }).layout).toBe('spotlight')
   })
 })

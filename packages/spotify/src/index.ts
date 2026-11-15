@@ -24,6 +24,7 @@ export const SPOTIFY_WEB_SCOPES = [
   'user-modify-playback-state',
   'user-read-currently-playing',
   'user-library-read',
+  'user-library-modify',
   'streaming',
   'playlist-read-private',
   'playlist-modify-public',
@@ -186,6 +187,27 @@ export const saveTrackEffect = Effect.fn('saveTrack')(function* (spotifyTrackId:
   yield* spotify.library.saveTracks([spotifyTrackId])
 })
 
+/** Saves a track or album to the listener's library; playlists cannot be saved this way. */
+export const saveSpotifyEntityEffect = Effect.fn('saveSpotifyEntity')(function* (
+  entity: SpotifyEntityRef,
+) {
+  const spotify = yield* Effect.service(SpotifyBrowser)
+
+  if (entity.kind === SPOTIFY_ENTITY_KIND.TRACK) {
+    yield* spotify.library.saveTracks([entity.id])
+
+    return true
+  }
+
+  if (entity.kind === SPOTIFY_ENTITY_KIND.ALBUM) {
+    yield* spotify.library.saveAlbums([entity.id])
+
+    return true
+  }
+
+  return false
+})
+
 export const checkSavedTracksEffect = Effect.fn('checkSavedTracks')(function* (
   spotifyTrackIds: Array<string>,
 ) {
@@ -217,6 +239,9 @@ export const checkSavedTrackEffect = Effect.fn('checkSavedTrack')(function* (
 
   return results.get(spotifyTrackId) ?? false
 })
+
+export const isSpotifyForbidden = (error: SpotifyRequestError): boolean =>
+  error instanceof SpotifyHttpError && error.status === 403
 
 export const spotifyErrorMessage = (error: SpotifyRequestError): string => {
   if (error instanceof SpotifyHttpError && error.status === 404) return 'No active Spotify device'

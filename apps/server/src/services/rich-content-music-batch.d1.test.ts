@@ -43,7 +43,13 @@ const catalog = (
   entityType: 'album' | 'track',
   entityId: string,
   showTracks = true,
-): MusicReference => ({ _tag: 'MusicCatalog', entityType, entityId, showTracks })
+): MusicReference => ({
+  _tag: 'MusicCatalog',
+  entityType,
+  entityId,
+  showTracks,
+  blurb: null,
+})
 
 const albumUrl = (url: string, showTracks = true): MusicReference => ({
   _tag: 'MusicUrl',
@@ -295,6 +301,7 @@ test('mixed documents retain playlist publication rules, member ordering and par
     entityType: 'playlist',
     entityId,
     showTracks: true,
+    blurb: null,
   })
 
   const references = [
@@ -328,7 +335,7 @@ test('nested quotes, card groups and lists share the document batch without reor
     ),
   )
 
-  const source = `> ::album{url="${trackedUrl}" blurb="Quoted."}\n\n:::cards\n::track{id="first"}\n\n::album{id="empty"}\n:::\n\n- ${url}`
+  const source = `::layout{name="spotlight"}\n\n> ::album{url="${trackedUrl}" blurb="Quoted."}\n\n:::cards\n::track{id="first"}\n\n::album{id="empty"}\n:::\n\n- ${url}`
 
   const result = await Effect.runPromise(
     withTestLayer(
@@ -356,6 +363,7 @@ test('nested quotes, card groups and lists share the document batch without reor
   )
 
   expect(result).toEqual(control)
+  expect(result.layout).toBe('spotlight')
 
   const serialized = JSON.stringify(result)
   expect(serialized).toContain('Quoted.')

@@ -9,13 +9,13 @@ Keep this PR open and unmerged; no auto-merge or production activation is author
 Every service call checks a live account and `catalogue:read`, not just transport annotations.
 All five outputs have an object root for MCP SDK discovery.
 
-| Tool | Input | Result/evidence |
-| --- | --- | --- |
-| `get_music_links` | kind/ID, optional limit and afterPlatform | Verified safe links, stable link IDs, observed dates, scanned count and next platform cursor |
-| `find_platform_equivalent` | kind/ID/platform | Verified stored link of this catalogue entry, otherwise insufficient evidence |
-| `check_music_link_health` | kind/ID/platform | Availability-only observation; also requires `providers:read` |
-| `find_missing_platform_links` | kind/platform, optional limit and afterId | Missing-link references in one scanned ID window, not a catalogue-wide count |
-| `compare_music_sources` | two HTTPS URLs | Same/different stored catalogue target or insufficient evidence, never musical equality/mismatch |
+| Tool                          | Input                                     | Result/evidence                                                                                  |
+| ----------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `get_music_links`             | kind/ID, optional limit and afterPlatform | Verified safe links, stable link IDs, observed dates, scanned count and next platform cursor     |
+| `find_platform_equivalent`    | kind/ID/platform                          | Verified stored link of this catalogue entry, otherwise insufficient evidence                    |
+| `check_music_link_health`     | kind/ID/platform                          | Availability-only observation; also requires `providers:read`                                    |
+| `find_missing_platform_links` | kind/platform, optional limit and afterId | Missing-link references in one scanned ID window, not a catalogue-wide count                     |
+| `compare_music_sources`       | two HTTPS URLs                            | Same/different stored catalogue target or insufficient evidence, never musical equality/mismatch |
 
 Four kinds only: artist, album, track, label. R1's D3 visibility applies, including null/future
 publication timestamps. No playlists or private editorial bodies. Stored link metadata,
@@ -82,11 +82,11 @@ cover redirect SSRF destinations, HTTP uncertainty and TestClock deadline/AbortS
 A disposable query experiment seeded16 target platform rows and100 artist IDs, then grew both
 unrelated links and artists by10000 rows. Actual `EXPLAIN QUERY PLAN` and D1 `meta.rows_read`:
 
-| Query (limit51 unless noted) | Plan | Before → after rows_read |
-| --- | --- | --- |
-| target links `platform > '' order by platform` | SEARCH `music_entity_links_identity_uq` on entity_type/entityId/platform> | 16 →17 |
-| target platform equality, limit1 | SEARCH same index on all three equalities | 1 →1 |
-| artist `id > '' order by id` | SEARCH covering PK index | 51 →51 |
+| Query (limit51 unless noted)                   | Plan                                                                      | Before → after rows_read |
+| ---------------------------------------------- | ------------------------------------------------------------------------- | ------------------------ |
+| target links `platform > '' order by platform` | SEARCH `music_entity_links_identity_uq` on entity_type/entityId/platform> | 16 →17                   |
+| target platform equality, limit1               | SEARCH same index on all three equalities                                 | 1 →1                     |
+| artist `id > '' order by id`                   | SEARCH covering PK index                                                  | 51 →51                   |
 
 No temporary B-tree. Every measured statement wrote0 rows. The extra sentinel visit explains
 the link-page difference; these are local counters, not production cost/latency guarantees.

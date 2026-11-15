@@ -18,6 +18,7 @@ import { link } from './view/link'
 import { mobileMenu } from './view/mobile-menu'
 import { pageSkeleton } from './view/skeletons'
 import { stationNav } from './view/station-nav'
+import { videoDialog } from './view/video-dialog'
 
 const nav = [
   ['/shows', 'Radio Shows'],
@@ -249,6 +250,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
           toggleMenu: Message.MenuToggled(),
         }),
         mobileMenu(h, model, visibleNav),
+        videoDialog(h, model),
         h.submodel({
           slotId: 'search',
           model: model.search,

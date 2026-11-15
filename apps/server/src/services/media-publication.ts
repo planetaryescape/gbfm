@@ -121,6 +121,7 @@ export const makeMediaPublication = (
     actor: MediaActor | undefined,
     /** Supply only AFTER checking the actor's existing resource authority. */
     existing?: MediaFields,
+    beforeCopy?: (source: string, destination: string) => Effect.Effect<void, S3Error>,
   ) {
     const next = { ...existing, ...data }
     const attached = new Set(existing ? attachedMediaUrls(existing) : [])
@@ -211,16 +212,17 @@ export const makeMediaPublication = (
       publish: Effect.forEach(
         [...copies],
         ([key, source]) =>
-          Effect.tryPromise({
-            try: async () => {
-              if (await store.headObject(config.buckets.userContent, key)) return
+          Effect.gen(function* () {
+            if (yield* head(key)) return
 
-              await store.copyObject(config.buckets.userContent, source, key)
+            if (beforeCopy) yield* beforeCopy(`${prefix}${source}`, `${prefix}${key}`)
 
-              if (!(await store.headObject(config.buckets.userContent, key)))
-                throw new Error('Public media copy was not created')
-            },
-            catch: storageFailure,
+            yield* Effect.tryPromise({
+              try: () => store.copyObject(config.buckets.userContent, source, key),
+              catch: storageFailure,
+            })
+
+            if (!(yield* head(key))) yield* storageFailure()
           }),
         { concurrency: 4, discard: true },
       ),

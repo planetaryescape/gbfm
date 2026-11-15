@@ -10,13 +10,13 @@ calls. It does not impersonate a catalogue reader or require an undeclared `cata
 scope. Four catalogue kinds only; playlist conflict targets are skipped, not exposed.
 The admin diagnostic surface includes null/future catalogue publication timestamps.
 
-| Tool | Inputs | Evidence |
-| --- | --- | --- |
-| `find_duplicate_candidates` | seed kind/ID, optional afterId/limit | Other same-kind exact SQLite casefolded-name matches; hypothesis only |
-| `compare_music_entries` | two explicit kind/ID references | Safe displayed names/missing fields, same reference/kind/name flags; never musical equality or merge authorization |
-| `find_incomplete_entries` | kind, optional afterId/limit | Missing-field reasons in an examined ID window, cursor advances through complete rows too |
-| `list_music_identity_conflicts` | optional detectedAt/ID tuple cursor and limit | Open conflict IDs, two target references and detected timestamp; cursor advances through excluded kinds too |
-| `get_catalogue_quality_summary` | kind, optional afterId/afterSourceKey/limit | Incomplete count in one entity window and active/expired counts in one existing resolving-identity audit window |
+| Tool                            | Inputs                                        | Evidence                                                                                                           |
+| ------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `find_duplicate_candidates`     | seed kind/ID, optional afterId/limit          | Other same-kind exact SQLite casefolded-name matches; hypothesis only                                              |
+| `compare_music_entries`         | two explicit kind/ID references               | Safe displayed names/missing fields, same reference/kind/name flags; never musical equality or merge authorization |
+| `find_incomplete_entries`       | kind, optional afterId/limit                  | Missing-field reasons in an examined ID window, cursor advances through complete rows too                          |
+| `list_music_identity_conflicts` | optional detectedAt/ID tuple cursor and limit | Open conflict IDs, two target references and detected timestamp; cursor advances through excluded kinds too        |
+| `get_catalogue_quality_summary` | kind, optional afterId/afterSourceKey/limit   | Incomplete count in one entity window and active/expired counts in one existing resolving-identity audit window    |
 
 ## Evidence rules
 
@@ -78,11 +78,11 @@ Disposable plan experiment started with2 artists,2 resolving identities and1 ope
 added10000 earlier same-name artist IDs,10000 earlier resolving source keys and10000 earlier
 open conflict tuples. Queries below returned1 row each before/after; `meta.rows_written=0`:
 
-| Predicate | Actual index SEARCH | rows_read before → after |
-| --- | --- | --- |
-| `lower(name)=(select lower(name) where id='seed') and id>'seed' and id<>'seed' order by id limit51` | `music_artists_name_id_idx` plus seed PK lookup | 2 →2 |
-| `status='open' and (detected_at,id)>(100,'seed') order by detected_at,id limit51` | `music_source_identity_conflicts_audit_page_idx` | 1 →1 |
-| `state='resolving' and source_key>'seed' order by source_key limit50` | `music_source_identities_resolving_audit_page_idx` | 1 →1 |
+| Predicate                                                                                           | Actual index SEARCH                                | rows_read before → after |
+| --------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------ |
+| `lower(name)=(select lower(name) where id='seed') and id>'seed' and id<>'seed' order by id limit51` | `music_artists_name_id_idx` plus seed PK lookup    | 2 →2                     |
+| `status='open' and (detected_at,id)>(100,'seed') order by detected_at,id limit51`                   | `music_source_identity_conflicts_audit_page_idx`   | 1 →1                     |
+| `state='resolving' and source_key>'seed' order by source_key limit50`                               | `music_source_identities_resolving_audit_page_idx` | 1 →1                     |
 
 No temp B-tree. Reproduce on fresh disposable D1 using synthetic rows strictly before those
 cursors, inspect `EXPLAIN QUERY PLAN` and `.all().meta` before/after. These are Miniflare counters,

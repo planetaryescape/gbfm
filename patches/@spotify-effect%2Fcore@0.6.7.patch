@@ -1,5 +1,5 @@
 diff --git a/dist/index.d.mts b/dist/index.d.mts
-index b9189a02f2f851e099e7c22655b73fb0a078f86b..0797744882f398927b418ed30c01055a6e114fed 100644
+index b9189a02f2f851e099e7c22655b73fb0a078f86b..a0c709841548ff36e8660b311ee79b4e926b6010 100644
 --- a/dist/index.d.mts
 +++ b/dist/index.d.mts
 @@ -1,9 +1,9 @@
@@ -14,8 +14,17 @@ index b9189a02f2f851e099e7c22655b73fb0a078f86b..0797744882f398927b418ed30c01055a
  import * as effect_Cause from 'effect/Cause';
  import * as effect_Types from 'effect/Types';
  import * as Schema from 'effect/Schema';
+@@ -225,7 +225,7 @@ type PrivateUser = {
+     email?: string;
+     explicit_content?: ExplicitContent;
+     external_urls: ExternalURL;
+-    followers: Followers;
++    followers?: Followers;
+     href: string;
+     id: string;
+     images: SpotifyImage[];
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index b9189a02f2f851e099e7c22655b73fb0a078f86b..0797744882f398927b418ed30c01055a6e114fed 100644
+index b9189a02f2f851e099e7c22655b73fb0a078f86b..a0c709841548ff36e8660b311ee79b4e926b6010 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -1,9 +1,9 @@
@@ -30,8 +39,17 @@ index b9189a02f2f851e099e7c22655b73fb0a078f86b..0797744882f398927b418ed30c01055a
  import * as effect_Cause from 'effect/Cause';
  import * as effect_Types from 'effect/Types';
  import * as Schema from 'effect/Schema';
+@@ -225,7 +225,7 @@ type PrivateUser = {
+     email?: string;
+     explicit_content?: ExplicitContent;
+     external_urls: ExternalURL;
+-    followers: Followers;
++    followers?: Followers;
+     href: string;
+     id: string;
+     images: SpotifyImage[];
 diff --git a/dist/index.js b/dist/index.js
-index 0a4828fc84fcc2d1d588c7aa2f65b50a8b7cf8cd..29999774bbc9c8ac01b27fac3046e46b7ff2a8b2 100644
+index 0a4828fc84fcc2d1d588c7aa2f65b50a8b7cf8cd..af00738c1e7e3395a0255eb0eace66bbd9e9b4c8 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -109,7 +109,7 @@ var cursorPaginateAll = (fetch, pageSize = 20) => Stream.runCollect(cursorPagina
@@ -43,6 +61,15 @@ index 0a4828fc84fcc2d1d588c7aa2f65b50a8b7cf8cd..29999774bbc9c8ac01b27fac3046e46b
  
  // src/api/Albums.ts
  var Effect4 = __toESM(require("effect/Effect"));
+@@ -248,7 +248,7 @@ var PrivateUserSchema = Schema.Struct({
+   email: Schema.optionalKey(Schema.String),
+   explicit_content: Schema.optionalKey(ExplicitContentSchema),
+   external_urls: ExternalURLSchema,
+-  followers: FollowersSchema,
++  followers: Schema.optionalKey(FollowersSchema),
+   href: Schema.String,
+   id: Schema.String,
+   images: Schema.mutable(Schema.Array(SpotifyImageSchema)),
 @@ -611,7 +611,7 @@ var GetAlbumTracksResponseSchema = makePagingSchema(
      id: Schema2.String,
      is_playable: Schema2.optionalKey(Schema2.Boolean),
@@ -71,7 +98,7 @@ index 0a4828fc84fcc2d1d588c7aa2f65b50a8b7cf8cd..29999774bbc9c8ac01b27fac3046e46b
  // src/constants.ts
  var BASE_API_URL = "https://api.spotify.com/v1";
 diff --git a/dist/index.mjs b/dist/index.mjs
-index 4a8d6d4b833611d06ceda363c17864c1ad371442..d276e520a2bdf65ed1734e3ad67924d490a17117 100644
+index 4a8d6d4b833611d06ceda363c17864c1ad371442..86660f76580137bc3b72dc21c151d53c00502b55 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
 @@ -29,7 +29,7 @@ var cursorPaginateAll = (fetch, pageSize = 20) => Stream.runCollect(cursorPagina
@@ -83,6 +110,15 @@ index 4a8d6d4b833611d06ceda363c17864c1ad371442..d276e520a2bdf65ed1734e3ad67924d4
  
  // src/api/Albums.ts
  import * as Effect4 from "effect/Effect";
+@@ -168,7 +168,7 @@ var PrivateUserSchema = Schema.Struct({
+   email: Schema.optionalKey(Schema.String),
+   explicit_content: Schema.optionalKey(ExplicitContentSchema),
+   external_urls: ExternalURLSchema,
+-  followers: FollowersSchema,
++  followers: Schema.optionalKey(FollowersSchema),
+   href: Schema.String,
+   id: Schema.String,
+   images: Schema.mutable(Schema.Array(SpotifyImageSchema)),
 @@ -531,7 +531,7 @@ var GetAlbumTracksResponseSchema = makePagingSchema(
      id: Schema2.String,
      is_playable: Schema2.optionalKey(Schema2.Boolean),
@@ -110,6 +146,32 @@ index 4a8d6d4b833611d06ceda363c17864c1ad371442..d276e520a2bdf65ed1734e3ad67924d4
  
  // src/constants.ts
  var BASE_API_URL = "https://api.spotify.com/v1";
+diff --git a/src/model/SpotifyObjectSchemas.ts b/src/model/SpotifyObjectSchemas.ts
+index e0da47717dbc07dd4ddee9c7f83250b7bb219352..362b4f3fdd1070baee395c10d5ae0c32b33afe59 100644
+--- a/src/model/SpotifyObjectSchemas.ts
++++ b/src/model/SpotifyObjectSchemas.ts
+@@ -144,7 +144,7 @@ export const PrivateUserSchema = Schema.Struct({
+   email: Schema.optionalKey(Schema.String),
+   explicit_content: Schema.optionalKey(ExplicitContentSchema),
+   external_urls: ExternalURLSchema,
+-  followers: FollowersSchema,
++  followers: Schema.optionalKey(FollowersSchema),
+   href: Schema.String,
+   id: Schema.String,
+   images: Schema.mutable(Schema.Array(SpotifyImageSchema)),
+diff --git a/src/model/SpotifyObjects.ts b/src/model/SpotifyObjects.ts
+index 7d79b2c33b4a8a2376f1044809afda0574f54479..5b145759eaf10d27cd36944299ecf51d2035a4e3 100644
+--- a/src/model/SpotifyObjects.ts
++++ b/src/model/SpotifyObjects.ts
+@@ -270,7 +270,7 @@ export type PrivateUser = {
+   email?: string;
+   explicit_content?: ExplicitContent;
+   external_urls: ExternalURL;
+-  followers: Followers;
++  followers?: Followers;
+   href: string;
+   id: string;
+   images: SpotifyImage[];
 diff --git a/src/model/SpotifyResponseSchemas.ts b/src/model/SpotifyResponseSchemas.ts
 index ac96b59085cbd97e2294d2008072156098b89779..28a594095c4f39612bc59f1bcb303770f34cbb69 100644
 --- a/src/model/SpotifyResponseSchemas.ts

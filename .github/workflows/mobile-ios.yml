@@ -18,13 +18,7 @@ on:
     branches: [prod]
     paths:
       - 'apps/mobile/**'
-      - 'packages/api/**'
-      - 'packages/core/**'
-      - 'packages/observability/**'
-      - 'packages/player/**'
-      - 'packages/rich-content/**'
-      - 'packages/spotify/**'
-      - 'packages/theme/**'
+      - 'packages/**'
       - 'bun.lock'
       - 'package.json'
       - 'patches/**'

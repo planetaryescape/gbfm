@@ -7,7 +7,8 @@ import { nativeSentryConfig } from '../plugins/with-sentry-native-privacy.js'
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const requireExpo = createRequire(import.meta.resolve('expo/package.json'))
-const { loadProjectEnv } = requireExpo('@expo/env')
+const requireCli = createRequire(requireExpo.resolve('@expo/cli/package.json'))
+const { loadProjectEnv } = requireCli('@expo/env')
 loadProjectEnv(projectRoot, {
   mode: process.env.CONFIGURATION?.toLowerCase().includes('debug') ? 'development' : 'production',
   silent: true,

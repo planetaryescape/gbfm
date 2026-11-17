@@ -35,7 +35,7 @@ test('Hermes composition retains the original Metro debug ID without an authenti
       }),
     )
     execFileSync(process.execPath, [
-      resolve('scripts/compose-hermes-map.cjs'),
+      resolve(import.meta.dirname, '../../scripts/compose-hermes-map.cjs'),
       packager,
       compiler,
       '-o',

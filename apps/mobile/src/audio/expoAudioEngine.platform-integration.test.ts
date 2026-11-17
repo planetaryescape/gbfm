@@ -82,8 +82,13 @@ class PlatformPlayer implements ExpoAudioEnginePlayer {
     this.emit({ isLoaded: true, duration })
   }
 
-  finish() {
-    this.emit({ playing: false, didJustFinish: true, currentTime: this.currentStatus.duration })
+  finish(isLoaded = this.currentStatus.isLoaded) {
+    this.emit({
+      playing: false,
+      didJustFinish: true,
+      isLoaded,
+      currentTime: this.currentStatus.duration,
+    })
   }
 
   addListener(
@@ -763,6 +768,52 @@ describe('Expo native adapter with shared playback orchestration', () => {
               .toEqual({ keys: [f.checkpointKey('one'), f.checkpointKey('one')], completions: 2 })
           })
           expect(f.cleared.filter((key) => key === f.checkpointKey('one'))).toHaveLength(2)
+        }).pipe(Effect.scoped),
+      )
+    } finally {
+      await f.runtime.dispose()
+    }
+  })
+
+  it('plays a show in order from an empty queue when completion arrives after unload', async () => {
+    const f = fixture()
+    const episodes = [track('one'), track('two'), track('three')]
+    const completed: Array<string | null> = []
+
+    try {
+      await f.runtime.runPromise(
+        Effect.gen(function* () {
+          const playback = yield* makeAudioPlayback(f.runtime, {
+            onTrackCompleted: ({ trackId }) =>
+              Effect.sync(() => {
+                completed.push(trackId)
+              }),
+          })
+
+          yield* Effect.yieldNow
+          expect(playback.getSnapshot().queue.tracks).toEqual([])
+          yield* playback.playAll(episodes)
+          expect(playback.getSnapshot().queue.tracks).toEqual(episodes)
+
+          const played: Array<string> = []
+
+          for (const episode of episodes) {
+            yield* Effect.promise(async () => {
+              await expect.poll(() => f.audio.src).toBe(episode.url)
+            })
+            f.audio.ready()
+            played.push(episode.id)
+            yield* Effect.promise(async () => {
+              await expect.poll(() => f.reported).toEqual(played)
+            })
+            f.audio.finish(false)
+            yield* Effect.promise(async () => {
+              await expect.poll(() => completed).toEqual(played)
+            })
+          }
+
+          expect(playback.getSnapshot().queue.current?.id).toBe('three')
+          expect(playback.getSnapshot().transport.isPlaying).toBe(false)
         }).pipe(Effect.scoped),
       )
     } finally {

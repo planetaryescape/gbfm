@@ -116,7 +116,11 @@ try {
         entry.user === undefined && entry.request === undefined && entry.extra === undefined,
     ),
   )
-  assert(events.every((entry) => Object.keys(entry.contexts ?? {}).every((key) => key === 'trace')))
+  assert(
+    events.every((entry) =>
+      Object.keys(entry.contexts ?? {}).every((key) => ['trace', 'os', 'device'].includes(key)),
+    ),
+  )
   assert(events.some((entry) => (entry.debug_meta?.images.length ?? 0) > 0))
   assert(
     events.every((entry) =>

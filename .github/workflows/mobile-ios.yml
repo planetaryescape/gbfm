@@ -1,0 +1,106 @@
+name: Mobile iOS artifacts
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/**'
+      - 'bun.lock'
+      - '.github/workflows/mobile-ios.yml'
+      - '.github/actions/setup-bun-workspace/**'
+  push:
+    branches: [prod]
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/api/**'
+      - 'packages/core/**'
+      - 'packages/observability/**'
+      - 'packages/player/**'
+      - 'packages/rich-content/**'
+      - 'packages/spotify/**'
+      - 'packages/theme/**'
+      - 'bun.lock'
+      - '.github/workflows/mobile-ios.yml'
+      - '.github/actions/setup-bun-workspace/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-ios-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      CI: 'true'
+      EXPO_PUBLIC_API_URL: https://api.goosebumps.fm
+      EXPO_PUBLIC_SENTRY_DSN: ${{ vars.SENTRY_MOBILE_DSN }}
+      EXPO_PUBLIC_SENTRY_ENABLED: 'true'
+      EXPO_PUBLIC_SENTRY_ENVIRONMENT: development
+      EXPO_PUBLIC_SENTRY_RELEASE: gbfm-mobile@${{ github.sha }}
+      SENTRY_RELEASE: gbfm-mobile@${{ github.sha }}
+      SENTRY_ORG: goosebumps-collective
+      SENTRY_PROJECT: gbfm-mobile
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-bun-workspace
+
+      - name: Validate mobile configuration
+        run: |
+          test -n "$EXPO_PUBLIC_SENTRY_DSN"
+          echo "SOURCEMAP_FILE=$RUNNER_TEMP/gbfm-main.jsbundle.map" >> "$GITHUB_ENV"
+          xcodebuild -version
+          bun run --cwd apps/mobile typecheck
+          bun run --cwd apps/mobile test
+
+      - name: Generate native project and dependencies
+        working-directory: apps/mobile
+        env:
+          SENTRY_DISABLE_AUTO_UPLOAD: 'true'
+        run: |
+          bunx expo prebuild --platform ios --no-install
+          cd ios
+          pod install
+
+      - name: Verify native payload privacy through Cocoa transport
+        run: bun run --cwd apps/mobile test:native-privacy
+
+      - name: Build unsigned device archive and upload matching symbols and source maps
+        working-directory: apps/mobile
+        env:
+          SENTRY_AUTH_TOKEN: ${{ github.event_name != 'pull_request' && secrets.SENTRY_AUTH_TOKEN || '' }}
+          SENTRY_DISABLE_AUTO_UPLOAD: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
+          GBFM_SENTRY_UPLOAD: ${{ github.event_name != 'pull_request' && 'true' || 'false' }}
+          SENTRY_ALLOW_FAILURE: 'false'
+          SENTRY_INCLUDE_NATIVE_SOURCES: 'false'
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != 'pull_request' ]; then
+            test -n "$SENTRY_AUTH_TOKEN"
+          fi
+          xcodebuild archive \
+            -workspace ios/gbfm.xcworkspace \
+            -scheme gbfm \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/gbfm.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            DEBUG_INFORMATION_FORMAT=dwarf-with-dsym
+          bun scripts/verify-ios-artifacts.ts "$RUNNER_TEMP/gbfm.xcarchive" "$SOURCEMAP_FILE"
+
+      - name: Preserve the exact archive and provenance for local signing
+        uses: actions/upload-artifact@v6
+        with:
+          name: gbfm-ios-${{ github.sha }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/gbfm.xcarchive
+            ${{ runner.temp }}/gbfm-main.jsbundle.map
+            ${{ runner.temp }}/gbfm-ios-provenance.json

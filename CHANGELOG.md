@@ -1,3 +1,10 @@
+## [2.135.2](https://github.com/planetaryescape/gbfm/compare/v2.135.1...v2.135.2) (2026-11-17)
+
+
+### Bug Fixes
+
+* **observability:** close iOS privacy and build-artifact gaps ([#636](https://github.com/planetaryescape/gbfm/issues/636)) ([130faa5](https://github.com/planetaryescape/gbfm/commit/130faa5ed725a540b239205389d2a5fa4c21b6e1))
+
 ## [2.135.1](https://github.com/planetaryescape/gbfm/compare/v2.135.0...v2.135.1) (2026-11-15)
 
 

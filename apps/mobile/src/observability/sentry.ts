@@ -11,7 +11,9 @@ import { tracePropagationTargets } from '@gbfm/observability/propagation'
 import { sentryExporterLayer } from '@gbfm/observability/sentry'
 import * as Sentry from '@sentry/react-native'
 import { Effect, Layer } from 'effect'
-import { AppState, Platform } from 'react-native'
+import { AppState, NativeModules, Platform } from 'react-native'
+
+import { decodeNativeTelemetry, nativeTelemetryMatches } from './native-readiness'
 
 const config = telemetryConfig({
   application: 'mobile',
@@ -22,7 +24,19 @@ const config = telemetryConfig({
   development: __DEV__,
 })
 
-if (config.enabled) {
+const enabled =
+  config.enabled &&
+  (Platform.OS !== 'ios' ||
+    nativeTelemetryMatches(config, decodeNativeTelemetry(NativeModules.GBFMSentryConfiguration)))
+
+if (__DEV__ && config.enabled && !enabled)
+  Effect.runSync(
+    Effect.logWarning(
+      'iOS telemetry disabled: rebuild the native app with the current Sentry configuration.',
+    ),
+  )
+
+if (enabled) {
   Sentry.init({
     ...config,
     autoInitializeNativeSdk: Platform.OS !== 'ios',
@@ -75,7 +89,7 @@ const lifecycle = Layer.effectDiscard(
   }),
 )
 
-export const mobileObservabilityLayer = config.enabled
+export const mobileObservabilityLayer = enabled
   ? observabilityLayer.pipe(
       Layer.provide(
         sentryExporterLayer({

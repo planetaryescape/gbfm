@@ -27,6 +27,11 @@ enum GBFMSentryPrivacy {
     clean.dist = event.dist
     clean.environment = event.environment
     clean.sdk = event.sdk
+    if event.tags?["event.origin"] == "ios",
+      event.tags?["event.environment"] == "native"
+    {
+      clean.tags = ["event.origin": "ios", "event.environment": "native"]
+    }
     if let trace = event.context?["trace"],
       let traceId = trace["trace_id"] as? String,
       let spanId = trace["span_id"] as? String,
@@ -89,10 +94,8 @@ enum GBFMSentryPrivacy {
       if let arch = source["arch"] as? String,
         ["arm64", "arm64e", "x86_64", "armv7", "armv7s", "i386"].contains(arch)
       { device["arch"] = arch }
-      for key in ["model", "model_id"] {
-        if let model = bounded(source[key], pattern: "^(?:iPhone|iPad|iPod|Mac|MacBookPro|MacBookAir|Macmini|MacPro|iMac|AppleTV|Watch|RealityDevice)(?:[0-9]+,[0-9]+)?$") {
-          device[key] = model
-        }
+      if let model = bounded(source["model"], pattern: "^(?:iPhone|iPad|iPod|Mac|MacBookPro|MacBookAir|Macmini|MacPro|iMac|AppleTV|Watch|RealityDevice)(?:[0-9]+,[0-9]+)?$") {
+        device["model"] = model
       }
       if !device.isEmpty { contexts["device"] = device }
     }

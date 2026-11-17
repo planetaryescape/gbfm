@@ -42,7 +42,11 @@ export default (config) => {
     if (!bundleScript.includes(compose))
       bundle.shellScript = JSON.stringify(`${compose}\n${bundleScript}`)
     const projectName = IOSConfig.XcodeUtils.getProjectName(native.modRequest.projectRoot)
-    for (const name of ['GBFMSentryPrivacy.swift', 'GBFMSentryBootstrap.swift']) {
+    for (const name of [
+      'GBFMSentryPrivacy.swift',
+      'GBFMSentryBootstrap.swift',
+      'GBFMSentryConfiguration.m',
+    ]) {
       const relative = path.join(projectName, name)
       fs.copyFileSync(
         path.join(native.modRequest.projectRoot, 'native', name),

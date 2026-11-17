@@ -44,7 +44,7 @@ enum NativePrivacyVerification {
     event.message = SentryMessage(formatted: secret)
     event.user = User(userId: secret)
     event.extra = ["token": secret]
-    event.tags = ["private": secret]
+    event.tags = ["private": secret, "event.origin": "ios", "event.environment": "native"]
     event.context = [
       "private": ["token": secret],
       "trace": ["trace_id": String(repeating: "1", count: 32), "span_id": String(repeating: "2", count: 16), "private": secret],
@@ -66,6 +66,7 @@ enum NativePrivacyVerification {
     precondition(clean.threads?.first?.crashed == true)
     precondition(clean.context?["trace"]?["span_id"] as? String == String(repeating: "2", count: 16))
     precondition(clean.eventId == event.eventId)
+    precondition(clean.tags == ["event.origin": "ios", "event.environment": "native"])
     precondition(clean.exceptions?.first?.type == "NSInvalidArgumentException")
     precondition(clean.exceptions?.last?.type == "EXC_BREAKPOINT")
     precondition(clean.exceptions?.last?.mechanism?.type == "mach")

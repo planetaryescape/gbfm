@@ -17,6 +17,7 @@
           "url": "https://sentry.io/"
         }
       ],
+      "./plugins/with-sentry-native-privacy",
       "expo-router",
       "expo-splash-screen",
       "expo-secure-store",

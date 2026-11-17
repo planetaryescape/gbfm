@@ -11,7 +11,7 @@ import { tracePropagationTargets } from '@gbfm/observability/propagation'
 import { sentryExporterLayer } from '@gbfm/observability/sentry'
 import * as Sentry from '@sentry/react-native'
 import { Effect, Layer } from 'effect'
-import { AppState } from 'react-native'
+import { AppState, Platform } from 'react-native'
 
 const config = telemetryConfig({
   application: 'mobile',
@@ -25,6 +25,7 @@ const config = telemetryConfig({
 if (config.enabled) {
   Sentry.init({
     ...config,
+    autoInitializeNativeSdk: Platform.OS !== 'ios',
     sendDefaultPii: false,
     sampleRate: 1,
     enableAutoSessionTracking: true,

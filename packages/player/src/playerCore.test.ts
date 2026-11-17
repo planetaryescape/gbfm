@@ -307,7 +307,6 @@ describe('makePlayerCore', () => {
       )
 
       yield* core.requestPlayOnReady(track.id)
-      // Unloaded statuses are ignored; the refused-playback test covers the started gate.
       yield* recording.setStatus({ isLoaded: false, duration: 0, didJustFinish: true })
       yield* core.setSource(track)
       yield* Effect.yieldNow
@@ -319,28 +318,30 @@ describe('makePlayerCore', () => {
       expect(finished).toBe(0)
       expect(recording.calls.filter((call) => call === 'play')).toHaveLength(1)
 
-      yield* recording.emit({ didJustFinish: true, playing: false })
+      yield* recording.emit({ isLoaded: false, didJustFinish: true, playing: false })
       yield* Effect.yieldNow
       expect(finished).toBe(1)
       expect(storage.cleared).toEqual([track.id])
       expect(yield* core.isDesiredPlaying).toBe(false)
+
+      yield* recording.emit({ didJustFinish: false, playing: true })
       yield* recording.emit({ didJustFinish: true, playing: false })
       yield* Effect.yieldNow
       expect(finished).toBe(1)
       expect(storage.cleared).toEqual([track.id])
 
       // A platform-originated replay re-arms completion without a UI play command.
-      yield* recording.emit({ didJustFinish: false, playing: true })
+      yield* recording.emit({ isLoaded: true, didJustFinish: false, playing: true })
       yield* Effect.yieldNow
-      yield* recording.emit({ didJustFinish: true, playing: false })
+      yield* recording.emit({ isLoaded: false, didJustFinish: true, playing: false })
       yield* Effect.yieldNow
       expect(finished).toBe(2)
       expect(storage.cleared).toEqual([track.id, track.id])
 
       yield* core.play(track.id)
-      yield* recording.emit({ didJustFinish: false, playing: true })
+      yield* recording.emit({ isLoaded: true, didJustFinish: false, playing: true })
       yield* Effect.yieldNow
-      yield* recording.emit({ didJustFinish: true, playing: false })
+      yield* recording.emit({ isLoaded: false, didJustFinish: true, playing: false })
       yield* recording.emit({ didJustFinish: true, playing: false })
       yield* Effect.yieldNow
       expect(recording.calls).toContain('seek:0')

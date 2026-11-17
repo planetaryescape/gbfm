@@ -1,5 +1,6 @@
 import { traceSampleRate } from '@gbfm/core/observability/trace-sampling'
 import type { CloudflareOptions } from '@sentry/cloudflare'
+import { Option, Schema } from 'effect'
 
 import { sanitizeDatabaseSpan } from '@/lib/database-telemetry'
 import {
@@ -10,9 +11,14 @@ import {
 import { omitUndefined } from '@/lib/omit-undefined'
 import { hasLocalSentryContext, shouldEnableSentry } from '@/lib/sentry'
 
+const releaseSha = Schema.decodeUnknownOption(
+  Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/)),
+)
+
 export const workerSentryOptions = (env: {
   readonly SENTRY_DSN?: string
   readonly SENTRY_ENVIRONMENT?: string
+  readonly APP_RELEASE?: string
 }): CloudflareOptions => {
   const dsn = env.SENTRY_DSN ?? ''
   const environment = env.SENTRY_ENVIRONMENT ?? 'development'
@@ -22,6 +28,16 @@ export const workerSentryOptions = (env: {
   return {
     dsn,
     environment,
+    release: Option.match(releaseSha(env.APP_RELEASE), {
+      onNone: () => undefined,
+      onSome: (sha) => `gbfm-api@${sha}`,
+    }),
+    ignoreSpans: [
+      {
+        name: /^McpServer\/Notifications\.notifications\/(?:tools|resources|prompts)\/list_changed$/,
+        op: 'http.client',
+      },
+    ],
     tracesSampler: ({ inheritOrSampleWith, name, normalizedRequest }) =>
       inheritOrSampleWith(traceSampleRate(omitUndefined({ name, url: normalizedRequest?.url }))),
     sendDefaultPii: false,

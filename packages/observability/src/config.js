@@ -1,12 +1,5 @@
-export const telemetryConfig = (input: {
-  readonly application: 'mobile' | 'www'
-  readonly dsn: string | undefined
-  readonly enabled: string | undefined
-  readonly environment: string | undefined
-  readonly release: string | undefined
-  readonly development: boolean
-}) => {
-  let dsn: string | undefined
+export const telemetryConfig = (input) => {
+  let dsn
 
   try {
     const parsed = new URL(input.dsn ?? '')
@@ -24,12 +17,12 @@ export const telemetryConfig = (input: {
     dsn = undefined
   }
 
-  const environment =
-    input.environment === 'production' || input.environment === 'preview'
-      ? input.environment
-      : input.environment === 'development' || input.development
-        ? 'development'
-        : 'production'
+  let environment = 'production'
+
+  if (input.environment === 'development' || input.development) environment = 'development'
+
+  if (input.environment === 'production' || input.environment === 'preview')
+    environment = input.environment
 
   const release = new RegExp(`^gbfm-${input.application}@[a-f0-9]{40}$`).test(input.release ?? '')
     ? input.release

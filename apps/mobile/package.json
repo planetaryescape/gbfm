@@ -10,6 +10,7 @@
     "web": "expo start --web --port 8091",
     "typecheck": "tsgo --noEmit",
     "test": "vitest run src",
+    "test:native-privacy": "bun scripts/test-native-privacy.ts",
     "device:build": "eas build --profile development --platform ios",
     "device:install": "eas build:run --platform ios --latest",
     "device": "bun run device:build && bun run device:install",

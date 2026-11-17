@@ -1,34 +1,28 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { telemetryConfig } from '@gbfm/observability/config'
 import { IOSConfig, withAppDelegate, withInfoPlist, withXcodeProject } from 'expo/config-plugins'
 
 export const nativeSentryConfig = (env) => {
-  let dsn = ''
-  try {
-    const value = new URL(env.EXPO_PUBLIC_SENTRY_DSN ?? '')
-    if (
-      value.protocol === 'https:' &&
-      /^[a-f0-9]+$/i.test(value.username) &&
-      !value.password &&
-      /^\/[0-9]+$/.test(value.pathname) &&
-      !value.search &&
-      !value.hash
-    )
-      dsn = value.href
-  } catch {
-    dsn = ''
-  }
-  const release = env.EXPO_PUBLIC_SENTRY_RELEASE ?? ''
-  const enabled =
-    env.EXPO_PUBLIC_SENTRY_ENABLED === 'true' &&
-    dsn !== '' &&
-    /^gbfm-mobile@[a-f0-9]{40}$/.test(release)
+  const settings = telemetryConfig({
+    application: 'mobile',
+    dsn: env.EXPO_PUBLIC_SENTRY_DSN,
+    enabled: env.EXPO_PUBLIC_SENTRY_ENABLED,
+    release: env.EXPO_PUBLIC_SENTRY_RELEASE,
+    environment: env.EXPO_PUBLIC_SENTRY_ENVIRONMENT,
+    development: false,
+  })
+  const environment = ['development', 'preview', 'production'].includes(
+    env.EXPO_PUBLIC_SENTRY_ENVIRONMENT,
+  )
+    ? settings.environment
+    : ''
   return {
-    GBFMSentryEnabled: enabled,
-    GBFMSentryDsn: enabled ? dsn : '',
-    GBFMSentryRelease: enabled ? release : '',
-    GBFMSentryEnvironment: env.EXPO_PUBLIC_SENTRY_ENVIRONMENT ?? '',
+    GBFMSentryEnabled: settings.enabled,
+    GBFMSentryDsn: settings.enabled ? settings.dsn : '',
+    GBFMSentryRelease: settings.enabled ? settings.release : '',
+    GBFMSentryEnvironment: environment,
   }
 }
 
@@ -38,6 +32,15 @@ export default (config) => {
     return native
   })
   next = withXcodeProject(next, (native) => {
+    const bundle = native.modResults.pbxItemByComment(
+      'Bundle React Native code and images',
+      'PBXShellScriptBuildPhase',
+    )
+    if (!bundle) throw new Error('The React Native bundle build phase is required.')
+    const compose = 'export COMPOSE_SOURCEMAP_PATH="$SRCROOT/../scripts/compose-hermes-map.cjs"'
+    const bundleScript = JSON.parse(bundle.shellScript)
+    if (!bundleScript.includes(compose))
+      bundle.shellScript = JSON.stringify(`${compose}\n${bundleScript}`)
     const projectName = IOSConfig.XcodeUtils.getProjectName(native.modRequest.projectRoot)
     for (const name of ['GBFMSentryPrivacy.swift', 'GBFMSentryBootstrap.swift']) {
       const relative = path.join(projectName, name)
@@ -51,6 +54,26 @@ export default (config) => {
           groupName: projectName,
           project: native.modResults,
         })
+    }
+    const phaseName = 'Refresh native Sentry configuration'
+    if (!native.modResults.pbxItemByComment(phaseName, 'PBXShellScriptBuildPhase')) {
+      const phase = native.modResults.addBuildPhase(
+        [],
+        'PBXShellScriptBuildPhase',
+        phaseName,
+        native.modResults.getFirstTarget().uuid,
+        {
+          shellPath: '/bin/sh',
+          shellScript: [
+            'set -eu',
+            'if [ -f "$SRCROOT/.xcode.env" ]; then . "$SRCROOT/.xcode.env"; fi',
+            'if [ -f "$SRCROOT/.xcode.env.local" ]; then . "$SRCROOT/.xcode.env.local"; fi',
+            '"${NODE_BINARY:-node}" "$SRCROOT/../scripts/write-native-sentry-config.js" "$TARGET_BUILD_DIR/$INFOPLIST_PATH"',
+          ].join('\n'),
+          inputPaths: [JSON.stringify('$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)')],
+        },
+      )
+      phase.buildPhase.alwaysOutOfDate = 1
     }
     return native
   })

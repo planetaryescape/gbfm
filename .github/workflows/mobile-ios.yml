@@ -10,6 +10,8 @@ on:
       - 'apps/mobile/**'
       - 'packages/**'
       - 'bun.lock'
+      - 'package.json'
+      - 'patches/**'
       - '.github/workflows/mobile-ios.yml'
       - '.github/actions/setup-bun-workspace/**'
   push:
@@ -24,6 +26,8 @@ on:
       - 'packages/spotify/**'
       - 'packages/theme/**'
       - 'bun.lock'
+      - 'package.json'
+      - 'patches/**'
       - '.github/workflows/mobile-ios.yml'
       - '.github/actions/setup-bun-workspace/**'
 
@@ -40,16 +44,19 @@ jobs:
     timeout-minutes: 60
     env:
       CI: 'true'
+      GBFM_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       EXPO_PUBLIC_API_URL: https://api.goosebumps.fm
       EXPO_PUBLIC_SENTRY_DSN: ${{ vars.SENTRY_MOBILE_DSN }}
       EXPO_PUBLIC_SENTRY_ENABLED: 'true'
       EXPO_PUBLIC_SENTRY_ENVIRONMENT: development
-      EXPO_PUBLIC_SENTRY_RELEASE: gbfm-mobile@${{ github.sha }}
-      SENTRY_RELEASE: gbfm-mobile@${{ github.sha }}
+      EXPO_PUBLIC_SENTRY_RELEASE: gbfm-mobile@${{ github.event.pull_request.head.sha || github.sha }}
+      SENTRY_RELEASE: gbfm-mobile@${{ github.event.pull_request.head.sha || github.sha }}
       SENTRY_ORG: goosebumps-collective
       SENTRY_PROJECT: gbfm-mobile
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: ./.github/actions/setup-bun-workspace
 
       - name: Validate mobile configuration
@@ -60,10 +67,12 @@ jobs:
           bun run --cwd apps/mobile typecheck
           bun run --cwd apps/mobile test
 
-      - name: Generate native project and dependencies
+      - name: Generate native project with disabled prebuild configuration
         working-directory: apps/mobile
         env:
           SENTRY_DISABLE_AUTO_UPLOAD: 'true'
+          EXPO_PUBLIC_SENTRY_ENABLED: 'false'
+          EXPO_PUBLIC_SENTRY_DSN: ''
         run: |
           bunx expo prebuild --platform ios --no-install
           cd ios
@@ -80,6 +89,7 @@ jobs:
           GBFM_SENTRY_UPLOAD: ${{ github.event_name != 'pull_request' && 'true' || 'false' }}
           SENTRY_ALLOW_FAILURE: 'false'
           SENTRY_INCLUDE_NATIVE_SOURCES: 'false'
+          SENTRY_DISABLE_XCODE_DEBUG_UPLOAD: 'true'
         run: |
           if [ "$GITHUB_EVENT_NAME" != 'pull_request' ]; then
             test -n "$SENTRY_AUTH_TOKEN"
@@ -97,7 +107,7 @@ jobs:
       - name: Preserve the exact archive and provenance for local signing
         uses: actions/upload-artifact@v6
         with:
-          name: gbfm-ios-${{ github.sha }}
+          name: gbfm-ios-${{ env.GBFM_BUILD_SHA }}
           retention-days: 7
           if-no-files-found: error
           path: |

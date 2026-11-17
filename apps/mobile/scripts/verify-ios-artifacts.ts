@@ -12,8 +12,9 @@ const execute = promisify(execFile)
 const archive = Schema.decodeUnknownSync(Schema.NonEmptyString)(process.argv[2])
 const sourceMapPath = Schema.decodeUnknownSync(Schema.NonEmptyString)(process.argv[3])
 const sha = Schema.decodeUnknownSync(Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/)))(
-  process.env.GITHUB_SHA,
+  process.env.GBFM_BUILD_SHA,
 )
+assert((await execute('git', ['rev-parse', 'HEAD'])).stdout.trim() === sha)
 const release = `gbfm-mobile@${sha}`
 const app = join(resolve(archive), 'Products/Applications/gbfm.app')
 const plist = async (name: string) =>
@@ -23,6 +24,7 @@ const plist = async (name: string) =>
 const executable = await plist('CFBundleExecutable')
 assert(executable === 'gbfm')
 assert((await plist('GBFMSentryRelease')) === release)
+assert((await plist('GBFMSentryEnabled')) === 'true')
 const binary = join(app, executable)
 const dsym = join(resolve(archive), 'dSYMs/gbfm.app.dSYM/Contents/Resources/DWARF', executable)
 const identifiers = async (path: string) => {
@@ -53,6 +55,10 @@ const debugId = Schema.decodeUnknownSync(
   ),
 )(sourceMap.debug_id ?? sourceMap.debugId)
 const bundle = await readFile(join(app, 'main.jsbundle'))
+assert(
+  bundle.includes(Buffer.from(release)),
+  'JavaScript and native configuration must carry the same release',
+)
 assert(
   bundle.includes(Buffer.from(debugId)),
   'Hermes bundle and source map must carry the same debug ID',

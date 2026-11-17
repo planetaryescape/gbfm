@@ -11,7 +11,7 @@
     "./propagation": "./src/propagation.ts",
     "./sentry": "./src/sentry.ts",
     "./privacy": "./src/privacy.ts",
-    "./config": "./src/config.ts"
+    "./config": "./src/config.js"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

@@ -1,3 +1,11 @@
+## [2.135.3](https://github.com/planetaryescape/gbfm/compare/v2.135.2...v2.135.3) (2026-11-19)
+
+
+### Bug Fixes
+
+* **mobile:** keep radio show playback moving through the queue ([6ca3faf](https://github.com/planetaryescape/gbfm/commit/6ca3faf4f846eb69295515c80d6f8bc8dea40407))
+* **mobile:** play the full radio show queue ([#637](https://github.com/planetaryescape/gbfm/issues/637)) ([ccc9da4](https://github.com/planetaryescape/gbfm/commit/ccc9da43eb935b9ee35b7734053b9731813d5994))
+
 ## [2.135.2](https://github.com/planetaryescape/gbfm/compare/v2.135.1...v2.135.2) (2026-11-17)
 
 

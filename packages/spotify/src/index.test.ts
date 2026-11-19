@@ -1,6 +1,12 @@
-import { expect, test } from 'vitest'
+import type { Device } from '@spotify-effect/core'
+import { describe, expect, test } from 'vitest'
 
-import { spotifyEntityFromUrl, spotifyIdFromUrl, spotifyUriFromUrl } from './index'
+import {
+  pickSpotifyPlaybackTarget,
+  spotifyEntityFromUrl,
+  spotifyIdFromUrl,
+  spotifyUriFromUrl,
+} from './index'
 
 test('turns supported Spotify web links and URIs into playable track, album, and playlist refs', () => {
   expect([
@@ -72,4 +78,48 @@ test('rejects invalid entities and keeps the legacy URI and ID helpers track-onl
     expect(spotifyUriFromUrl(nonTrack)).toBeNull()
     expect(spotifyIdFromUrl(nonTrack)).toBeNull()
   }
+})
+
+describe('pickSpotifyPlaybackTarget', () => {
+  const base: Device = {
+    id: 'computer',
+    is_active: false,
+    is_private_session: false,
+    is_restricted: false,
+    name: 'Mac',
+    type: 'Computer',
+    volume_percent: 50,
+  }
+
+  test('prefers the active device', () => {
+    expect(
+      pickSpotifyPlaybackTarget([
+        { ...base, id: 'phone', type: 'Smartphone', name: 'iPhone' },
+        { ...base, is_active: true },
+      ]),
+    ).toEqual({ id: 'computer', name: 'Mac', active: true })
+  })
+
+  test('falls back to a phone, then any usable device', () => {
+    expect(
+      pickSpotifyPlaybackTarget([
+        base,
+        { ...base, id: 'phone', type: 'Smartphone', name: 'iPhone' },
+      ]),
+    ).toEqual({ id: 'phone', name: 'iPhone', active: false })
+    expect(pickSpotifyPlaybackTarget([base])).toEqual({
+      id: 'computer',
+      name: 'Mac',
+      active: false,
+    })
+  })
+
+  test('ignores restricted and id-less devices', () => {
+    expect(
+      pickSpotifyPlaybackTarget([
+        { ...base, is_restricted: true, is_active: true },
+        { ...base, id: null },
+      ]),
+    ).toBeNull()
+  })
 })

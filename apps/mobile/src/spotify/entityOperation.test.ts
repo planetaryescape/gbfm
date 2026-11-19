@@ -1,9 +1,15 @@
 import { spotifyEntityFromUrl } from '@gbfm/spotify'
-import { SpotifyConfigurationError, type Device, type SimplifiedTrack } from '@spotify-effect/core'
+import {
+  SpotifyConfigurationError,
+  SpotifyHttpError,
+  type Device,
+  type PlayOptions,
+  type SimplifiedTrack,
+} from '@spotify-effect/core'
 import { Deferred, Effect } from 'effect'
 import { expect, test } from 'vitest'
 
-import { spotifyEntityOperation } from './entityOperation'
+import { SPOTIFY_NOTICES, spotifyEntityOperation } from './entityOperation'
 import { spotifyFixture } from './operationFixture'
 
 const entity = spotifyEntityFromUrl('spotify:track:fixture')
@@ -20,37 +26,37 @@ const device: Device = {
   volume_percent: 50,
 }
 
-test.each(['play', 'queue'] as const)(
-  '%s falls back when no device is available',
-  async (action) => {
-    const notices: Array<string> = []
-    let opened = 0
+test.each([
+  ['play', SPOTIFY_NOTICES.opening, 1],
+  ['queue', SPOTIFY_NOTICES.nothingPlaying, 0],
+] as const)('%s without any Spotify device', async (action, expected, expectedOpens) => {
+  const notices: Array<string> = []
+  let opened = 0
 
-    const f = await spotifyFixture((service) => ({
-      ...service,
-      player: { ...service.player, getMyDevices: () => Effect.succeed([]) },
-    }))
+  const f = await spotifyFixture((service) => ({
+    ...service,
+    player: { ...service.player, getMyDevices: () => Effect.succeed([]) },
+  }))
 
-    try {
-      await f.run(
-        spotifyEntityOperation(
-          entity,
-          action,
-          (message) => notices.push(message),
-          () => {
-            opened += 1
-          },
-        ),
-      )
-      expect(notices).toEqual(['No active Spotify device, opening in Spotify instead'])
-      expect(opened).toBe(1)
-    } finally {
-      await f.dispose()
-    }
-  },
-)
+  try {
+    await f.run(
+      spotifyEntityOperation(
+        entity,
+        action,
+        (message) => notices.push(message),
+        () => {
+          opened += 1
+        },
+      ),
+    )
+    expect(notices).toEqual([expected])
+    expect(opened).toBe(expectedOpens)
+  } finally {
+    await f.dispose()
+  }
+})
 
-test('provider errors retain fallback behavior', async () => {
+test('provider errors are reported without leaving the app', async () => {
   const notices: Array<string> = []
   let opened = 0
 
@@ -75,7 +81,7 @@ test('provider errors retain fallback behavior', async () => {
       ),
     )
     expect(notices).toEqual(['device check failed'])
-    expect(opened).toBe(1)
+    expect(opened).toBe(0)
   } finally {
     await f.dispose()
   }
@@ -145,7 +151,7 @@ test('characterizes repeated operations: provider work is not coalesced or cance
   }
 })
 
-test('partial album queue failure keeps prior additions and reports the provider error with fallback', async () => {
+test('partial album queue failure keeps prior additions and reports the provider error', async () => {
   const album = spotifyEntityFromUrl('spotify:album:fixture')
 
   if (!album) throw new Error('expected an album')
@@ -211,7 +217,7 @@ test('partial album queue failure keeps prior additions and reports the provider
     )
     expect(added).toEqual(['spotify:track:first'])
     expect(notices).toEqual(['queue failed'])
-    expect(opened).toBe(1)
+    expect(opened).toBe(0)
   } finally {
     await f.dispose()
   }
@@ -247,6 +253,120 @@ test('save goes to the library without needing an active device', async () => {
     )
     expect(saved).toEqual([['fixture']])
     expect(notices).toEqual(['Saved to your library'])
+    expect(opened).toBe(0)
+  } finally {
+    await f.dispose()
+  }
+})
+
+const idle: Device = {
+  ...device,
+  id: 'phone',
+  is_active: false,
+  name: 'iPhone',
+  type: 'Smartphone',
+}
+
+test('play targets an idle device instead of leaving the app', async () => {
+  const notices: Array<string> = []
+  const played: Array<PlayOptions | undefined> = []
+  let opened = 0
+
+  const f = await spotifyFixture((service) => ({
+    ...service,
+    player: {
+      ...service.player,
+      getMyDevices: () => Effect.succeed([idle]),
+      play: (options) =>
+        Effect.sync(() => {
+          played.push(options)
+        }),
+    },
+  }))
+
+  try {
+    await f.run(
+      spotifyEntityOperation(
+        entity,
+        'play',
+        (message) => notices.push(message),
+        () => {
+          opened += 1
+        },
+      ),
+    )
+    expect(played).toEqual([{ device_id: 'phone', uris: ['spotify:track:fixture'] }])
+    expect(notices).toEqual(['Playing track on iPhone'])
+    expect(opened).toBe(0)
+  } finally {
+    await f.dispose()
+  }
+})
+
+test('queue asks for playback first when nothing is active', async () => {
+  const notices: Array<string> = []
+  let queued = 0
+
+  const f = await spotifyFixture((service) => ({
+    ...service,
+    player: {
+      ...service.player,
+      getMyDevices: () => Effect.succeed([idle]),
+      addToQueue: () =>
+        Effect.sync(() => {
+          queued += 1
+        }),
+    },
+  }))
+
+  try {
+    await f.run(
+      spotifyEntityOperation(
+        entity,
+        'queue',
+        (message) => notices.push(message),
+        () => {},
+      ),
+    )
+    expect(queued).toBe(0)
+    expect(notices).toEqual([SPOTIFY_NOTICES.nothingPlaying])
+  } finally {
+    await f.dispose()
+  }
+})
+
+test('play explains that Premium is required when Spotify refuses control', async () => {
+  const notices: Array<string> = []
+  let opened = 0
+
+  const f = await spotifyFixture((service) => ({
+    ...service,
+    player: {
+      ...service.player,
+      getMyDevices: () => Effect.succeed([device]),
+      play: () =>
+        Effect.fail(
+          new SpotifyHttpError({
+            status: 403,
+            method: 'PUT',
+            url: 'https://api.spotify.com/v1/me/player/play',
+          }),
+        ),
+    },
+  }))
+
+  try {
+    await f.run(
+      spotifyEntityOperation(
+        entity,
+        'play',
+        (message) => notices.push(message),
+        () => {
+          opened += 1
+        },
+      ),
+    )
+    expect(notices).toEqual([SPOTIFY_NOTICES.premium])
     expect(opened).toBe(0)
   } finally {
     await f.dispose()

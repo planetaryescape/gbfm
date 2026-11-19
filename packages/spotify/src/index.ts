@@ -3,7 +3,7 @@ import {
   readAuthorizationCallback,
   SpotifyBrowser,
 } from '@spotify-effect/browser'
-import type { PrivateUser, SpotifyRequestError } from '@spotify-effect/core'
+import type { Device, PrivateUser, SpotifyRequestError } from '@spotify-effect/core'
 import { SpotifyHttpError, SpotifyRateLimitError } from '@spotify-effect/core'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
@@ -113,6 +113,33 @@ export const hasActiveSpotifyDeviceEffect = Effect.fn('hasActiveSpotifyDevice')(
   return devices.length > 0
 })
 
+export type SpotifyPlaybackTarget = {
+  readonly id: string
+  readonly name: string
+  readonly active: boolean
+}
+
+export const pickSpotifyPlaybackTarget = (
+  devices: ReadonlyArray<Device>,
+): SpotifyPlaybackTarget | null => {
+  const usable = devices.flatMap((device) =>
+    device.id && !device.is_restricted ? [{ ...device, id: device.id }] : [],
+  )
+
+  const device =
+    usable.find((candidate) => candidate.is_active) ??
+    usable.find((candidate) => candidate.type === 'Smartphone') ??
+    usable[0]
+
+  return device ? { id: device.id, name: device.name, active: device.is_active } : null
+}
+
+export const spotifyPlaybackTargetEffect = Effect.fn('spotifyPlaybackTarget')(function* () {
+  const spotify = yield* Effect.service(SpotifyBrowser)
+
+  return pickSpotifyPlaybackTarget(yield* spotify.player.getMyDevices())
+})
+
 const QUEUE_PAGE_SIZE = 50
 
 export const collectEntityTrackUrisEffect = Effect.fn('collectEntityTrackUris')(function* (
@@ -157,26 +184,29 @@ export const collectEntityTrackUrisEffect = Effect.fn('collectEntityTrackUris')(
  */
 export const playSpotifyEntityEffect = Effect.fn('playSpotifyEntity')(function* (
   entity: SpotifyEntityRef,
+  deviceId?: string,
 ) {
   const spotify = yield* Effect.service(SpotifyBrowser)
+  const device = deviceId ? { device_id: deviceId } : {}
 
   if (entity.kind === SPOTIFY_ENTITY_KIND.TRACK) {
-    yield* spotify.player.play({ uris: [entity.uri] })
+    yield* spotify.player.play({ ...device, uris: [entity.uri] })
 
     return
   }
 
-  yield* spotify.player.play({ context_uri: entity.uri })
+  yield* spotify.player.play({ ...device, context_uri: entity.uri })
 })
 
 export const queueSpotifyEntityEffect = Effect.fn('queueSpotifyEntity')(function* (
   entity: SpotifyEntityRef,
+  deviceId?: string,
 ) {
   const spotify = yield* Effect.service(SpotifyBrowser)
   const uris = yield* collectEntityTrackUrisEffect(entity)
 
   for (const uri of uris) {
-    yield* spotify.player.addToQueue(uri)
+    yield* spotify.player.addToQueue(uri, deviceId ? { device_id: deviceId } : undefined)
   }
 
   return uris.length

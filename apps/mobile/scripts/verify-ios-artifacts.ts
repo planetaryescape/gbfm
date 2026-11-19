@@ -55,6 +55,13 @@ const debugId = Schema.decodeUnknownSync(
   ),
 )(sourceMap.debug_id ?? sourceMap.debugId)
 const bundle = await readFile(join(app, 'main.jsbundle'))
+const spotifyClientId = process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID
+if (spotifyClientId) {
+  assert(
+    bundle.includes(Buffer.from(spotifyClientId)),
+    'The iOS JavaScript bundle must include the Spotify client ID',
+  )
+}
 assert(
   bundle.includes(Buffer.from(release)),
   'JavaScript and native configuration must carry the same release',

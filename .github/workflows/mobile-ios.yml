@@ -78,6 +78,7 @@ jobs:
       - name: Build unsigned device archive and upload matching symbols and source maps
         working-directory: apps/mobile
         env:
+          EXPO_PUBLIC_SPOTIFY_CLIENT_ID: ${{ github.event_name == 'workflow_dispatch' && secrets.SPOTIFY_CLIENT_ID || '' }}
           SENTRY_AUTH_TOKEN: ${{ github.event_name != 'pull_request' && secrets.SENTRY_AUTH_TOKEN || '' }}
           SENTRY_DISABLE_AUTO_UPLOAD: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
           GBFM_SENTRY_UPLOAD: ${{ github.event_name != 'pull_request' && 'true' || 'false' }}
@@ -87,6 +88,10 @@ jobs:
         run: |
           if [ "$GITHUB_EVENT_NAME" != 'pull_request' ]; then
             test -n "$SENTRY_AUTH_TOKEN"
+          fi
+          if [ "$GITHUB_EVENT_NAME" = 'workflow_dispatch' ] && [ -z "$EXPO_PUBLIC_SPOTIFY_CLIENT_ID" ]; then
+            echo "::error::The Spotify client ID is required for manual iOS device archives."
+            exit 1
           fi
           xcodebuild archive \
             -workspace ios/gbfm.xcworkspace \

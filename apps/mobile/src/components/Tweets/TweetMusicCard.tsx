@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Image, Text, View } from 'react-native'
 
 import type { TweetMusic } from '@/api/tweets'
+import { SpotifyEntityActions } from '@/spotify/SpotifyEntityActions'
 import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 
@@ -36,6 +37,8 @@ export function TweetMusicCard({ music }: { music: TweetMusic }) {
   const colors = useThemeColors()
   const { entity, links } = music
   const [failed, setFailed] = useState(false)
+  const [notice, setNotice] = useState('')
+  const spotify = links.find((link) => link.platform === 'spotify')
 
   return (
     <View
@@ -88,6 +91,16 @@ export function TweetMusicCard({ music }: { music: TweetMusic }) {
           ) : null}
         </View>
       </View>
+      {spotify ? (
+        <View style={{ gap: 6, paddingHorizontal: 12, paddingBottom: 12 }}>
+          <SpotifyEntityActions url={spotify.url} onNotice={setNotice} />
+          {notice ? (
+            <Text style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 12 }}>
+              {notice}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
       {links.length > 0 ? (
         <View
           style={{

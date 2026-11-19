@@ -1,3 +1,19 @@
+# [2.136.0](https://github.com/planetaryescape/gbfm/compare/v2.135.3...v2.136.0) (2026-11-19)
+
+
+### Bug Fixes
+
+* **mobile:** control Spotify on idle devices instead of opening the app ([5796f58](https://github.com/planetaryescape/gbfm/commit/5796f5842b874e68fe772d86158ceea35066b950))
+* **mobile:** load stored Spotify tokens before building the client ([1b07b65](https://github.com/planetaryescape/gbfm/commit/1b07b658d519797e35c5d06ce637ba06f5dcfc35))
+
+
+### Features
+
+* **mobile:** add Spotify controls to tweet music cards ([f6dfcb1](https://github.com/planetaryescape/gbfm/commit/f6dfcb16e6c4f8be44fa3653bac4eb56cbbd807f))
+* **mobile:** move new tweets link into the header ([665cf3a](https://github.com/planetaryescape/gbfm/commit/665cf3af7ad621415741d9973ae83263672bbd08))
+* **mobile:** render tweet Spotify controls as inline chips ([1fed2a1](https://github.com/planetaryescape/gbfm/commit/1fed2a1e064d4a979d316b5a5d14ae686f52b84b))
+* **mobile:** twitter-style compose button and new tweets pill ([73b2914](https://github.com/planetaryescape/gbfm/commit/73b2914ac0e0b43ce13216a621c1a5b9450c530c))
+
 ## [2.135.3](https://github.com/planetaryescape/gbfm/compare/v2.135.2...v2.135.3) (2026-11-19)
 
 

@@ -3,11 +3,11 @@ import { useState } from 'react'
 import { Image, Text, View } from 'react-native'
 
 import type { TweetMusic } from '@/api/tweets'
-import { SpotifyEntityActions } from '@/spotify/SpotifyEntityActions'
 import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 
 import { TweetLink } from './TweetLink'
+import { TweetSpotifyActions } from './TweetSpotifyActions'
 
 const COVER_SIZE = 88
 
@@ -91,28 +91,21 @@ export function TweetMusicCard({ music }: { music: TweetMusic }) {
           ) : null}
         </View>
       </View>
-      {spotify ? (
-        <View style={{ gap: 6, paddingHorizontal: 12, paddingBottom: 12 }}>
-          <SpotifyEntityActions url={spotify.url} onNotice={setNotice} />
+      {links.length > 0 ? (
+        <View style={{ gap: 8, paddingHorizontal: 12, paddingBottom: 12 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {spotify ? <TweetSpotifyActions url={spotify.url} onNotice={setNotice} /> : null}
+            {links.map((link) => (
+              <StreamLink key={link.platform} platform={link.platform} url={link.url} />
+            ))}
+          </View>
           {notice ? (
-            <Text style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 12 }}>
+            <Text
+              accessibilityLiveRegion='polite'
+              style={{ color: colors.muted, fontFamily: fonts.mono, fontSize: 12 }}>
               {notice}
             </Text>
           ) : null}
-        </View>
-      ) : null}
-      {links.length > 0 ? (
-        <View
-          style={{
-            flexDirection: 'row',
-            flexWrap: 'wrap',
-            gap: 8,
-            paddingHorizontal: 12,
-            paddingBottom: 12,
-          }}>
-          {links.map((link) => (
-            <StreamLink key={link.platform} platform={link.platform} url={link.url} />
-          ))}
         </View>
       ) : null}
     </View>

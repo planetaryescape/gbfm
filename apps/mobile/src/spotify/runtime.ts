@@ -27,21 +27,27 @@ const buildSpotifyContext = () => {
     return Promise.reject(new SpotifyConfigurationError({ message: SPOTIFY_CONFIGURATION_MESSAGE }))
   }
 
-  const spotifyLayer = SpotifyBrowser.layer({
-    clientId,
-    redirectUri: SPOTIFY_REDIRECT_URI,
-    session: {
-      sessionStorage: spotifySessionStorage,
-      localStorage: spotifyLocalStorage,
-      history: spotifyHistoryStub,
-    },
-  })
-
-  const scope = Scope.makeUnsafe()
-
-  return hydrateSpotifyTokensFromSecureStore().then(() =>
-    Effect.runPromise(Layer.buildWithScope(spotifyLayer, scope)),
+  return buildAfterHydration(hydrateSpotifyTokensFromSecureStore, () =>
+    SpotifyBrowser.layer({
+      clientId,
+      redirectUri: SPOTIFY_REDIRECT_URI,
+      session: {
+        sessionStorage: spotifySessionStorage,
+        localStorage: spotifyLocalStorage,
+        history: spotifyHistoryStub,
+      },
+    }),
   )
+}
+
+/** SpotifyBrowser.layer snapshots stored tokens when called, so it must run after hydration. */
+export const buildAfterHydration = async <ROut, E>(
+  hydrate: () => Promise<void>,
+  makeLayer: () => Layer.Layer<ROut, E>,
+) => {
+  await hydrate()
+
+  return Effect.runPromise(Layer.buildWithScope(makeLayer(), Scope.makeUnsafe()))
 }
 
 export const makeSpotifyEffectRunner = <Requirements>(

@@ -1,8 +1,9 @@
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
 import { expect, test } from 'vitest'
 
-import { makeSpotifyEffectRunner } from './runtime'
+import { buildAfterHydration, makeSpotifyEffectRunner } from './runtime'
 
 test('builds its context lazily and reuses it for later effects', async () => {
   let builds = 0
@@ -52,4 +53,22 @@ test('concurrent callers share optional SDK acquisition without coalescing their
   context.resolve(Context.empty())
   await Promise.all([first, second])
   expect(delivered.toSorted()).toEqual(['first', 'second'])
+})
+
+test('creates the Spotify layer only after stored tokens are hydrated', async () => {
+  const events: Array<string> = []
+
+  await buildAfterHydration(
+    async () => {
+      await Promise.resolve()
+      events.push('hydrated')
+    },
+    () => {
+      events.push('layer')
+
+      return Layer.empty
+    },
+  )
+
+  expect(events).toEqual(['hydrated', 'layer'])
 })

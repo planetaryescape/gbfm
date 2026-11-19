@@ -5,47 +5,31 @@ import type { GlyphName } from '@/icons/glyphs'
 import { useThemeColors } from '@/theme/colors'
 import { fonts } from '@/theme/fonts'
 
-function FloatingPill({
+function HeaderLink({
   label,
   glyph,
-  primary,
+  color,
   onPress,
 }: {
   readonly label: string
   readonly glyph: GlyphName
-  readonly primary: boolean
+  readonly color: string
   readonly onPress: () => void
 }) {
-  const colors = useThemeColors()
-  const foreground = primary ? colors.controls.primaryForeground : colors.controls.foreground
-
   return (
     <Pressable
       accessibilityRole='button'
       accessibilityLabel={label}
-      accessibilityLiveRegion='polite'
-      hitSlop={8}
+      hitSlop={10}
       onPress={onPress}
       style={({ pressed }) => ({
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 999,
-        backgroundColor: primary ? colors.controls.primary : colors.controls.card,
-        borderWidth: primary ? 0 : 1,
-        borderColor: colors.controls.border,
-        shadowColor: colors.shadow,
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        shadowOffset: { width: 0, height: 3 },
-        opacity: pressed ? 0.8 : 1,
+        gap: 4,
+        opacity: pressed ? 0.6 : 1,
       })}>
-      <Glyph name={glyph} size={14} color={foreground} />
-      <Text style={{ color: foreground, fontFamily: fonts.monoSemiBold, fontSize: 13 }}>
-        {label}
-      </Text>
+      <Glyph name={glyph} size={12} color={color} />
+      <Text style={{ color, fontFamily: fonts.monoSemiBold, fontSize: 12 }}>{label}</Text>
     </Pressable>
   )
 }
@@ -61,30 +45,19 @@ export function ReadingProgress({
   readonly onLatest: () => void
   readonly onReturn: () => void
 }) {
+  const colors = useThemeColors()
+
   if (!newerUnread && !canReturn) return null
 
   return (
     <View
-      pointerEvents='box-none'
-      style={{
-        position: 'absolute',
-        top: 8,
-        left: 0,
-        right: 0,
-        flexDirection: 'row',
-        justifyContent: 'center',
-        gap: 8,
-      }}>
-      {newerUnread ? (
-        <FloatingPill label='New tweets' glyph='arrowUp' primary onPress={onLatest} />
-      ) : null}
+      accessibilityLiveRegion='polite'
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
       {canReturn ? (
-        <FloatingPill
-          label='Back to where you were'
-          glyph='arrowDown'
-          primary={false}
-          onPress={onReturn}
-        />
+        <HeaderLink label='Back' glyph='arrowDown' color={colors.muted} onPress={onReturn} />
+      ) : null}
+      {newerUnread ? (
+        <HeaderLink label='New tweets' glyph='arrowUp' color={colors.accent} onPress={onLatest} />
       ) : null}
     </View>
   )

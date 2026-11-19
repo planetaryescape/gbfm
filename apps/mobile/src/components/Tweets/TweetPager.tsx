@@ -15,6 +15,7 @@ import { checkpoints } from '@/tweets/useTweetReader'
 import { CaughtUp } from './CaughtUp'
 import { ReadingProgress } from './ReadingProgress'
 import { TweetPage } from './TweetPage'
+import { TweetsHeader } from './TweetsHeader'
 import { TweetsStatus } from './TweetsStatus'
 import { useTweetActions } from './useTweetActions'
 
@@ -113,7 +114,13 @@ function Pages({
 export function TweetPager() {
   const identity = useAuthIdentity()
 
-  if (identity === null) return <TweetsStatus kind='loading' />
+  if (identity === null)
+    return (
+      <>
+        <TweetsHeader />
+        <TweetsStatus kind='loading' />
+      </>
+    )
 
   return <ReadingSession key={identity} identity={identity} />
 }
@@ -152,6 +159,16 @@ function ReadingSession({ identity }: { readonly identity: string }) {
 
   return (
     <View style={{ flex: 1 }}>
+      <TweetsHeader>
+        <ReadingProgress
+          newerUnread={newerUnread}
+          canReturn={Boolean(returnSlug)}
+          onLatest={latest}
+          onReturn={() => {
+            if (returnSlug) go(returnSlug)
+          }}
+        />
+      </TweetsHeader>
       <Feed
         key={target.revision}
         sessionToken={sessionToken}
@@ -163,14 +180,6 @@ function ReadingSession({ identity }: { readonly identity: string }) {
           currentSlug.current = tweet.slug
           setReturnSlug((previous) => (previous === tweet.slug ? null : previous))
           visit(tweet.slug)
-        }}
-      />
-      <ReadingProgress
-        newerUnread={newerUnread}
-        canReturn={Boolean(returnSlug)}
-        onLatest={latest}
-        onReturn={() => {
-          if (returnSlug) go(returnSlug)
         }}
       />
     </View>

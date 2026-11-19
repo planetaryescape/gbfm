@@ -152,14 +152,6 @@ function ReadingSession({ identity }: { readonly identity: string }) {
 
   return (
     <View style={{ flex: 1 }}>
-      <ReadingProgress
-        newerUnread={newerUnread}
-        canReturn={Boolean(returnSlug)}
-        onLatest={latest}
-        onReturn={() => {
-          if (returnSlug) go(returnSlug)
-        }}
-      />
       <Feed
         key={target.revision}
         sessionToken={sessionToken}
@@ -171,6 +163,14 @@ function ReadingSession({ identity }: { readonly identity: string }) {
           currentSlug.current = tweet.slug
           setReturnSlug((previous) => (previous === tweet.slug ? null : previous))
           visit(tweet.slug)
+        }}
+      />
+      <ReadingProgress
+        newerUnread={newerUnread}
+        canReturn={Boolean(returnSlug)}
+        onLatest={latest}
+        onReturn={() => {
+          if (returnSlug) go(returnSlug)
         }}
       />
     </View>

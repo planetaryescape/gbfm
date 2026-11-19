@@ -22,6 +22,9 @@ export const glyphs = {
   check: { stroke: 'M4 12L9 17L20 6' },
   more: { fill: 'M4 10H8V14H4Z M10 10H14V14H10Z M16 10H20V14H16Z' },
   reply: { stroke: 'M3 4H21V16H11L6 20V16H3Z' },
+  compose: { stroke: 'M12 4V20 M4 12H20' },
+  arrowUp: { stroke: 'M12 20V5 M6 11L12 5L18 11' },
+  arrowDown: { stroke: 'M12 4V19 M6 13L12 19L18 13' },
 } as const satisfies Record<string, GlyphPaths>
 
 export type GlyphName = keyof typeof glyphs

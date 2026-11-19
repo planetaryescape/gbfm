@@ -332,12 +332,10 @@ export const playerCore = (
           }),
         )
 
-        if (!status.isLoaded) return
-
         const completion = transitionSourceCompletion(active.completion, {
           generation: active.generation,
           didJustFinish: status.didJustFinish,
-          playing: status.playing,
+          playing: status.isLoaded && status.playing,
         })
 
         active.completion = completion.state
@@ -352,6 +350,8 @@ export const playerCore = (
 
           return
         }
+
+        if (!status.isLoaded) return
 
         if (active.started) {
           active.intent = transitionPlaybackIntent(

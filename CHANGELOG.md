@@ -1,3 +1,10 @@
+## [2.136.1](https://github.com/planetaryescape/gbfm/compare/v2.136.0...v2.136.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* report Worker scheduled failures and restore sitemap check-ins ([5bc2a76](https://github.com/planetaryescape/gbfm/commit/5bc2a76276d38640485bdd77ef9361964a9da51a))
+
 # [2.136.0](https://github.com/planetaryescape/gbfm/compare/v2.135.3...v2.136.0) (2026-11-19)
 
 

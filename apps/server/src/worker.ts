@@ -26,6 +26,7 @@ import { createWebHandler } from '@/http/routes'
 import { localTracer, traceLocalRequest } from '@/lib/local-request-tracing'
 import { McpOperationStoreLayer } from '@/mcp/operations/store'
 import { regenerateSitemap } from '@/routes/redirect/seo/sitemap.service'
+import { reportScheduledFailure, withSitemapCheckIn } from '@/runtime/scheduled-monitor'
 import { withResolvedWorkerSentryBindings } from '@/runtime/sentry-bindings'
 import { workerSentryOptions } from '@/runtime/sentry-options'
 import {
@@ -243,6 +244,7 @@ const enqueueDueReminders = Effect.gen(function* () {
     { concurrency: 5 },
   )
 }).pipe(
+  Effect.tapError((error) => reportScheduledFailure('reminder-sweep', error)),
   Effect.catch((error) => Effect.logError('[worker.scheduled] reminder sweep failed', { error })),
 )
 
@@ -252,6 +254,8 @@ const runReminderSweep = (env: ApiEnv) =>
 
 const runSitemapRegeneration = (env: ApiEnv) =>
   regenerateSitemap.pipe(
+    withSitemapCheckIn,
+    Effect.tapError((error) => reportScheduledFailure('sitemap-regeneration', error)),
     Effect.asVoid,
     // oxlint-disable-next-line effecttsgo/strict-effect-provide -- Scheduled dispatch is an Effect application entry point.
     Effect.provide(appServicesLive(env)),
@@ -266,6 +270,7 @@ const runMaintenanceSweep = (env: ApiEnv) =>
     const report = yield* retention.sweepExpiredAnonymousSessions(new Date())
     yield* Effect.logInfo('[worker.scheduled] navigation retention sweep finished', report)
   }).pipe(
+    Effect.tapError((error) => reportScheduledFailure('navigation-retention', error)),
     Effect.catch((error) =>
       Effect.logError('[worker.scheduled] navigation retention sweep failed', { error }),
     ),
@@ -273,6 +278,7 @@ const runMaintenanceSweep = (env: ApiEnv) =>
     // lifecycle rules cannot target a prefix, so the sweep does it instead.
     Effect.andThen(
       expireEditorialReceipts().pipe(
+        Effect.tapError((error) => reportScheduledFailure('editorial-receipt-cleanup', error)),
         Effect.tap((report) =>
           Effect.logInfo('[worker.scheduled] editorial receipt cleanup finished', report),
         ),
@@ -284,6 +290,7 @@ const runMaintenanceSweep = (env: ApiEnv) =>
     ),
     Effect.andThen(
       cleanupExpiredQrPdfs.pipe(
+        Effect.tapError((error) => reportScheduledFailure('qr-pdf-cleanup', error)),
         Effect.tap((report) =>
           Effect.logInfo('[worker.scheduled] qr pdf cleanup finished', report),
         ),

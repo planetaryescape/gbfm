@@ -1,3 +1,10 @@
+## [2.136.4](https://github.com/planetaryescape/gbfm/compare/v2.136.3...v2.136.4) (2026-11-22)
+
+
+### Bug Fixes
+
+* **spotify:** consume OpenSound from JSR ([a03c08a](https://github.com/planetaryescape/gbfm/commit/a03c08a5e08d591ad3fb71666e8c6725cf7cfda0))
+
 ## [2.136.3](https://github.com/planetaryescape/gbfm/compare/v2.136.2...v2.136.3) (2026-11-22)
 
 

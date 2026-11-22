@@ -59,7 +59,7 @@ test('JS errors retain authored stack locations but discard request, identity, n
 test('automatic span and transaction metadata cannot export raw paths, SQL, or arbitrary context', () => {
   const span = safeSpan({
     description: `/tweets/${secret}`,
-    data: { 'db.query.text': secret, 'http.url': secret },
+    data: { 'db.query.text': secret, 'http.url': secret, 'http.response.status_code': 500 },
   })
 
   const transaction = sanitizeTransaction({
@@ -68,13 +68,22 @@ test('automatic span and transaction metadata cannot export raw paths, SQL, or a
     request: { url: secret },
     extra: { value: secret },
     contexts: {
-      trace: { trace_id: 'trace-one', span_id: 'span-one', data: { token: secret } },
+      trace: {
+        trace_id: 'trace-one',
+        span_id: 'span-one',
+        data: { token: secret, 'http.response.status_code': 302 },
+      },
       custom: { value: secret },
     },
   })
 
   expect(JSON.stringify({ span, transaction })).not.toContain(secret)
   expect(transaction.contexts?.trace?.trace_id).toBe('trace-one')
+  expect(transaction.contexts?.trace?.data?.['http.response.status_code']).toBe(302)
+  expect(span.data['http.response.status_code']).toBe(500)
+  expect(safeSpan({ data: { 'http.response.status_code': 600 } }).data).not.toHaveProperty(
+    'http.response.status_code',
+  )
   expect(safeBreadcrumb({ category: 'navigation', data: { to: secret } })).toBeNull()
   expect(
     safeBreadcrumb({ category: 'gbfm.journey', message: secret, data: { outcome: secret } }),

@@ -32,6 +32,17 @@ const safeOperation = flow(
   Option.getOrElse(() => 'application.operation'),
 )
 
+const safeHttpStatus = flow(
+  Schema.decodeUnknownOption(
+    Schema.Struct({
+      'http.response.status_code': Schema.Int.check(
+        Schema.isBetween({ minimum: 100, maximum: 599 }),
+      ),
+    }),
+  ),
+  Option.getOrElse(() => ({})),
+)
+
 const errorTypes = new Set([
   'Error',
   'TypeError',
@@ -229,6 +240,7 @@ const identity = (event: ErrorEvent | TransactionEvent): ErrorEvent => {
       data: {
         'gbfm.operation': safeJourneyName(event.transaction),
         'gbfm.outcome': safeOutcome(trace.data?.['gbfm.outcome']),
+        ...(event.type === 'transaction' && safeHttpStatus(trace.data)),
       },
     }
 
@@ -275,6 +287,7 @@ export const safeSpan = <T extends { description?: string; data: Record<string, 
   data: {
     'gbfm.operation': safeJourneyName(span.data['gbfm.operation']),
     'gbfm.outcome': safeOutcome(span.data['gbfm.outcome']),
+    ...safeHttpStatus(span.data),
   },
 })
 

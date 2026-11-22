@@ -2,7 +2,7 @@ import { Effect, Schema } from 'effect'
 import { Command, Dom } from 'foldkit'
 
 import { Message } from './message'
-import { Kind, SaveOwner } from './model'
+import { Attachment, Kind, SaveOwner } from './model'
 import type { CreatorDraft, CreatorError } from './services'
 import { CreatorDraftSchema as Draft, CreatorService } from './services'
 import { CreatorUpload } from './upload/runtime'
@@ -159,6 +159,26 @@ export const RenderPreview = Command.define('Creator.RenderPreview', {
 })
 
 export const BODY_SOURCE_ID = 'creator-body-source'
+
+export const FocusAttachment = Command.define('Creator.FocusAttachment', {
+  args: { attachment: Attachment },
+  messages: [Message.AttachmentFocused],
+  execute: ({ attachment }) =>
+    Dom.focus(`#creator-${attachment}-input`).pipe(
+      Effect.catchTag('ElementNotFound', () => Effect.void),
+      Effect.as(Message.AttachmentFocused()),
+    ),
+})
+
+export const FocusAttachmentTool = Command.define('Creator.FocusAttachmentTool', {
+  args: { attachment: Attachment },
+  messages: [Message.AttachmentFocused],
+  execute: ({ attachment }) =>
+    Dom.focus(`#creator-${attachment}-tool`).pipe(
+      Effect.catchTag('ElementNotFound', () => Effect.void),
+      Effect.as(Message.AttachmentFocused()),
+    ),
+})
 
 export const FocusBodyEditor = Command.define('Creator.FocusBodyEditor', {
   args: {},

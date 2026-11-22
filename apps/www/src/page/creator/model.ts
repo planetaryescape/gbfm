@@ -7,6 +7,8 @@ import { CreatorDraftSchema as Draft, CreatorIdentity, MusicReference } from './
 
 export const Kind = Schema.Literals(['micro', 'post', 'mix'])
 
+export const Attachment = Schema.Literals(['music', 'quote', 'media'])
+
 export const SaveOwner = Schema.Struct({ editorId: Schema.String, requestId: Schema.Number })
 
 export const MosaicState = Schema.TaggedUnion({
@@ -50,6 +52,7 @@ export const Model = Schema.Struct({
   episodeInput: Schema.String,
   editorMode: Schema.Literals(['source', 'preview']),
   bodyEditorOpen: Schema.Boolean,
+  attachment: Schema.NullOr(Attachment),
   diagnostics: Schema.Array(RichContentDiagnostic),
   externalMediaUrl: Schema.String,
   externalMediaError: Schema.NullOr(Schema.String),
@@ -82,6 +85,14 @@ export const TWEET_MAX_LENGTH = 255
 /** Tweets keep their Markdown body collapsed until the author opens it or the draft already has one. */
 export const showsBodyEditor = (model: Model): boolean =>
   model.draft.kind !== 'micro' || model.bodyEditorOpen || model.draft.content.trim() !== ''
+
+export const restoredAttachment = (draft: CreatorDraft | null): typeof Attachment.Type | null => {
+  if (draft?.musicUrl && !draft.musicEntityId) return 'music'
+
+  if (draft?.quoteUrl && !draft.quotedPostId) return 'quote'
+
+  return null
+}
 
 export const draftValidationError = (draft: CreatorDraft): string | null => {
   if (!draft.title.trim() && !draft.content.trim()) return 'Add a title or some content.'

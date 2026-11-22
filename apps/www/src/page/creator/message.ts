@@ -4,7 +4,7 @@ import { RichContentDiagnostic, RichContentDocument } from '@gbfm/rich-content/s
 import { Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 
-import { Kind, SaveOwner } from './model'
+import { Attachment, Kind, SaveOwner } from './model'
 import { CreatorDraftSchema as Draft, CreatorIdentity, MusicReference } from './services'
 
 export const Message = defineMessageUnion({
@@ -81,6 +81,8 @@ export const Message = defineMessageUnion({
   EditorModeChanged: { mode: Schema.Literals(['source', 'preview']) },
   BodyEditorOpened: {},
   BodyEditorFocused: {},
+  AttachmentToggled: { attachment: Attachment },
+  AttachmentFocused: {},
   DiagnosticsLoaded: { content: Schema.String, diagnostics: Schema.Array(RichContentDiagnostic) },
   DiagnosticsFailed: { content: Schema.String },
   FormatInserted: { before: Schema.String, after: Schema.String, sample: Schema.String },

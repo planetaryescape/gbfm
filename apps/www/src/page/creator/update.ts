@@ -7,6 +7,8 @@ import {
   CancelUpload,
   Diagnose,
   FindMusicReferences,
+  FocusAttachment,
+  FocusAttachmentTool,
   FocusBodyEditor,
   GenerateMosaic,
   PauseUpload,
@@ -23,7 +25,14 @@ import {
 } from './command'
 import { initialModel } from './init'
 import { Message } from './message'
-import { draftValidationError, keyOf, MosaicState, type Model } from './model'
+import {
+  draftValidationError,
+  keyOf,
+  MosaicState,
+  restoredAttachment,
+  type Attachment,
+  type Model,
+} from './model'
 import { mosaicSource } from './mosaic'
 import type { CreatorDraft, CreatorService } from './services'
 import type { CreatorUpload } from './upload/runtime'
@@ -106,6 +115,23 @@ const changed = (
       ...(contentChanged ? [Diagnose({ content: draft.content })] : []),
       ...(preview.commands ?? []),
       ...(musicChanged ? (references.commands ?? []) : []),
+    ],
+  }
+}
+
+const attachmentCompleted = (
+  model: Model,
+  draft: CreatorDraft,
+  attachment: typeof Attachment.Type,
+): Update.Return<Model, Message, CreatorService> => {
+  const closing = model.draft.kind === 'micro' && model.attachment === attachment
+  const result = changed({ ...model, attachment: closing ? null : model.attachment }, draft)
+
+  return {
+    ...result,
+    commands: [
+      ...(result.commands ?? []),
+      ...(closing ? [FocusAttachmentTool({ attachment })] : []),
     ],
   }
 }
@@ -311,9 +337,13 @@ export const update = (
     QuoteResolved: ({ id, slug, title, content }) =>
       tweetSlug(model.draft.quoteUrl) !== slug
         ? { model }
-        : changed(
-            { ...model, quotePreview: title ?? content ?? slug },
+        : attachmentCompleted(
+            {
+              ...model,
+              quotePreview: title ?? content ?? slug,
+            },
             { ...model.draft, quotedPostId: id },
+            'quote',
           ),
     ShowChanged: ({ value }) => changed(model, { ...model.draft, showId: value.trim() || null }),
     EpisodeChanged: ({ value }) => {
@@ -339,6 +369,7 @@ export const update = (
           musicPreviewTitle: null,
           musicPreviewMeta: null,
           musicPreviewImage: null,
+          attachment: model.draft.kind === 'micro' ? 'music' : model.attachment,
         },
         { ...model.draft, musicUrl: '', musicEntityType: null, musicEntityId: null },
       ),
@@ -432,7 +463,7 @@ export const update = (
     }) =>
       !ownsMusic(model, owner, postId, requestedUrl)
         ? { model }
-        : changed(
+        : attachmentCompleted(
             {
               ...model,
               resolvingPostMusic: false,
@@ -448,6 +479,7 @@ export const update = (
               musicUrl: url,
               expectedUpdatedAt: updatedAt ?? model.draft.expectedUpdatedAt,
             },
+            'music',
           ),
     PostMusicFailed: ({ postId, owner, requestedUrl, message }) => ({
       model: ownsMusic(model, owner, postId, requestedUrl)
@@ -470,7 +502,7 @@ export const update = (
     MusicResolved: ({ entityType, entityId, url, title, artistNames, coverImageUrl }) =>
       model.draft.musicUrl.trim() !== url
         ? { model }
-        : changed(
+        : attachmentCompleted(
             {
               ...model,
               musicPreviewTitle: title,
@@ -478,6 +510,7 @@ export const update = (
               musicPreviewImage: coverImageUrl,
             },
             { ...model.draft, musicEntityType: entityType, musicEntityId: entityId },
+            'music',
           ),
     EditorModeChanged: ({ mode }) =>
       mode === 'preview'
@@ -488,6 +521,16 @@ export const update = (
       commands: [FocusBodyEditor({})],
     }),
     BodyEditorFocused: () => ({ model }),
+    AttachmentToggled: ({ attachment }) => {
+      if (model.draft.kind !== 'micro') return { model }
+      const next = model.attachment === attachment ? null : attachment
+
+      return {
+        model: { ...model, attachment: next },
+        commands: next ? [FocusAttachment({ attachment: next })] : [],
+      }
+    },
+    AttachmentFocused: () => ({ model }),
     PreviewRequested: () => requestPreview({ ...model, previewContent: null }),
     PreviewLoaded: ({ content, document }) => ({
       model:
@@ -519,12 +562,13 @@ export const update = (
       const url = mediaUrl(model.externalMediaUrl)
 
       return url
-        ? changed(
+        ? attachmentCompleted(
             { ...model, externalMediaUrl: '', externalMediaError: null },
             {
               ...model.draft,
               content: appendBlock(model.draft.content, `::media{url="${url}"}`),
             },
+            'media',
           )
         : {
             model: {
@@ -655,6 +699,7 @@ export const update = (
           model: {
             ...model,
             draft: draft ?? model.draft,
+            attachment: restoredAttachment(draft),
             creators,
             tagsInput: (draft ?? model.draft).tags.join(', '),
             episodeInput: (draft ?? model.draft).episodeNumber?.toString() ?? '',

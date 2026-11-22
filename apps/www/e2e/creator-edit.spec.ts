@@ -29,6 +29,81 @@ const signIn = async (page: Page, email = 'admin@gbfm.local') => {
   }
 }
 
+test('tweet attachments are intentional, focused, retained and restored without a wall of inputs', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.goto('/new/tweet')
+  const title = page.getByRole('textbox', { name: 'Title', exact: true })
+  await expect(title).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Music URL', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('textbox', { name: 'Quote a tweet', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('textbox', { name: 'Embed media', exact: true })).toHaveCount(0)
+  await title.fill('One thought, not a form.')
+  const music = page.getByRole('button', { name: 'Music', exact: true })
+  const media = page.getByRole('button', { name: 'Media', exact: true })
+  await music.click()
+  const musicUrl = page.getByRole('textbox', { name: 'Music URL', exact: true })
+  await expect(musicUrl).toBeFocused()
+  await musicUrl.fill('https://open.spotify.com/track/E2ERootTrack')
+  await media.click()
+  await expect(musicUrl).toHaveCount(0)
+  const mediaUrl = page.getByRole('textbox', { name: 'Embed media', exact: true })
+  await expect(mediaUrl).toBeFocused()
+  await mediaUrl.fill('https://bandcamp.com')
+  await mediaUrl.press('Enter')
+  await expect(mediaUrl).toHaveAttribute('aria-invalid', 'true')
+  await media.click()
+  await expect(page.getByRole('alert')).toContainText('no embeddable player')
+  await music.click()
+  await expect(musicUrl).toHaveValue('https://open.spotify.com/track/E2ERootTrack')
+  await expect(page.getByRole('status').filter({ hasText: 'Draft saved locally' })).toBeVisible()
+  await page.reload()
+  await expect(musicUrl).toHaveValue('https://open.spotify.com/track/E2ERootTrack')
+  await expect(title).toHaveValue('One thought, not a form.')
+  await page.getByRole('button', { name: 'Attach music', exact: true }).click()
+  await expect(page.getByRole('article', { name: 'Attached music' })).toContainText(
+    'Root Frequency',
+  )
+  await expect(musicUrl).toHaveCount(0)
+  await expect(music).toHaveAttribute('aria-expanded', 'false')
+  await expect(music).toBeFocused()
+  await page.getByRole('button', { name: 'Remove music', exact: true }).click()
+  await expect(musicUrl).toBeVisible()
+  await expect(title).toHaveValue('One thought, not a form.')
+  await page.getByRole('button', { name: 'Discard', exact: true }).click()
+  await expect(title).toHaveValue('')
+  await expect(musicUrl).toHaveCount(0)
+})
+
+test('tweet composition stays cohesive at phone, tablet and desktop sizes', async ({
+  page,
+}, testInfo) => {
+  await signIn(page)
+  await page.goto('/new/tweet')
+  await page
+    .getByRole('textbox', { name: 'Title', exact: true })
+    .fill('Where jazz and ambient meet. On repeat tonight.')
+  for (const viewport of [
+    { name: 'phone', width: 390, height: 844 },
+    { name: 'tablet', width: 768, height: 1024 },
+    { name: 'desktop', width: 1280, height: 800 },
+  ]) {
+    await page.setViewportSize(viewport)
+    const next = page.getByRole('button', { name: 'Continue', exact: true })
+    await expect(next).toBeInViewport()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await testInfo.attach(`tweet-${viewport.name}-${viewport.width}x${viewport.height}`, {
+      body: await page.screenshot(),
+      contentType: 'image/png',
+    })
+    await page.getByRole('button', { name: 'Music', exact: true }).click()
+    await expect(page.getByRole('textbox', { name: 'Music URL', exact: true })).toBeFocused()
+    await expect(next).toBeInViewport()
+    await page.getByRole('button', { name: 'Music', exact: true }).click()
+  }
+})
+
 test('source diagnostics update after editing and restoring a local draft', async ({ page }) => {
   await signIn(page)
   await page.goto('/new/editorial')
@@ -139,6 +214,7 @@ test('a creator resolves a saved draft from the dashboard without saving other e
   const post = Schema.decodeUnknownSync(PostResponse)(await created.json())
   await page.goto('/dashboard/content/tweets')
   await page.locator(`a[href="/new/tweet?edit=${slug}"]`).click()
+  await page.getByRole('button', { name: 'Music', exact: true }).click()
   await expect(
     page.getByRole('button', { name: 'Resolve saved post music', exact: true }),
   ).toBeVisible()
@@ -188,6 +264,7 @@ test('a creator resolves a saved draft from the dashboard without saving other e
   await page.reload()
   await expect(page.locator('.creator-music-card')).toContainText('Attached music')
   await expect(canvas).toHaveValue(content)
+  await page.getByRole('button', { name: 'Music', exact: true }).click()
   await page.getByRole('button', { name: 'Re-resolve saved post music', exact: true }).click()
   await expect(
     page.getByRole('status').filter({ hasText: 'Music attachment saved.' }),
@@ -197,6 +274,7 @@ test('a creator resolves a saved draft from the dashboard without saving other e
   await page.getByRole('button', { name: 'Update', exact: true }).click()
   await expect(page.locator('.creator-published')).toContainText('Published.')
 
+  await page.getByRole('button', { name: 'Music', exact: true }).click()
   const resolvedAfterPublication = page.waitForResponse(
     (response) =>
       response.url().endsWith(`/posts/${post.id}/resolve-music-entity`) &&
@@ -245,9 +323,12 @@ test('saved-post resolution explains missing links and provider retry delays, th
     }),
   )
   await page.getByRole('button', { name: 'Attach & save music', exact: true }).click()
-  await expect(page.getByRole('alert')).toHaveText(
+  await expect(page.getByRole('alert')).toContainText(
     'Music providers are busy or temporarily unavailable. Try again in 30 seconds.',
   )
+  await expect(
+    page.getByRole('link', { name: 'Open latest saved version (new tab)' }),
+  ).toBeVisible()
   await expect(resolve).toBeEnabled()
   await expect(page.getByRole('textbox', { name: 'Music URL', exact: true })).toHaveValue(url)
   await testInfo.attach('post-music-provider-busy', {
@@ -503,6 +584,10 @@ test('composer restores metadata, reviews type changes and publishes a quoted tw
     .getByRole('textbox', { name: 'Writing canvas', exact: true })
     .fill('Listening to **independent radio**.')
   await page
+    .getByRole('group', { name: 'Add to your tweet' })
+    .getByRole('button', { name: 'Quote', exact: true })
+    .click()
+  await page
     .getByRole('textbox', { name: 'Quote a tweet', exact: true })
     .fill('https://goosebumps.fm/tweet/e2e-music-thread')
   await page.getByRole('button', { name: 'Attach quote', exact: true }).click()
@@ -519,6 +604,10 @@ test('composer restores metadata, reviews type changes and publishes a quoted tw
   await expect(tags).toHaveValue('radio, community')
   await page.getByRole('button', { name: 'Keep editing', exact: true }).click()
   await page.reload()
+  await page
+    .getByRole('group', { name: 'Add to your tweet' })
+    .getByRole('button', { name: 'Quote', exact: true })
+    .click()
   await expect(page.getByRole('textbox', { name: 'Quote a tweet', exact: true })).toHaveValue(
     'https://goosebumps.fm/tweet/e2e-music-thread',
   )
@@ -597,6 +686,7 @@ test('music references show published tweets without losing the draft and recove
   await page.goto('/new/tweet')
   const title = page.getByRole('textbox', { name: 'Title', exact: true })
   await title.fill('A fresh thought about this song')
+  await page.getByRole('button', { name: 'Music', exact: true }).click()
   await page
     .getByRole('textbox', { name: 'Music URL', exact: true })
     .fill('https://open.spotify.com/track/E2ERootTrack')
@@ -683,6 +773,7 @@ test('an attached track and an embedded Bandcamp page preview and publish as pla
 
   await page.goto('/new/tweet')
   await page.getByRole('textbox', { name: 'Title', exact: true }).fill('I really fw this cypher')
+  await page.getByRole('button', { name: 'Music', exact: true }).click()
   await page
     .getByRole('textbox', { name: 'Music URL', exact: true })
     .fill('https://open.spotify.com/track/E2ERootTrack')
@@ -691,6 +782,7 @@ test('an attached track and an embedded Bandcamp page preview and publish as pla
     'Root Frequency',
   )
 
+  await page.getByRole('button', { name: 'Media', exact: true }).click()
   const media = page.getByRole('textbox', { name: 'Embed media', exact: true })
   await media.fill('https://bandcamp.com')
   await media.press('Enter')

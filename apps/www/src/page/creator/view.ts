@@ -8,11 +8,13 @@ import type { Principal } from '../../model'
 import { imageSource } from '../../view/artwork'
 import { richContentView } from '../../view/rich-content/render'
 import { BODY_SOURCE_ID } from './command'
+import { composerActions } from './composer-actions'
 import { Message } from './message'
 import { draftValidationError, showsBodyEditor, TWEET_MAX_LENGTH, type Model } from './model'
 import { mosaicView } from './mosaic-view'
 import { review } from './review-view'
 import { bodyEditorToggle, titleField } from './title-view'
+import { tweetComposer } from './tweet-composer'
 
 export interface ViewInputs {
   readonly role: string | null
@@ -354,7 +356,9 @@ const musicSlot = (model: Model, h: Builder, busy: boolean): Html =>
             [
               h.strong([], [model.musicPreviewTitle ?? 'Attached music']),
               h.small([], [model.musicPreviewMeta ?? model.draft.musicEntityType ?? 'music']),
-              model.draft.musicUrl ? h.small([], [model.draft.musicUrl]) : h.empty,
+              model.draft.musicUrl && model.draft.kind !== 'micro'
+                ? h.small([], [model.draft.musicUrl])
+                : h.empty,
             ],
           ),
           h.div(
@@ -557,6 +561,62 @@ const metadata = (model: Model, h: Builder, busy: boolean, principal: Principal 
     ],
   )
 
+const quoteInput = (model: Model, h: Builder): Html =>
+  attachRow(h, {
+    id: 'creator-quote',
+    label: 'Quote a tweet',
+    hint: 'Paste a goosebumps.fm tweet link.',
+    value: model.draft.quoteUrl,
+    placeholder: 'https://goosebumps.fm/tweet/…',
+    action: 'Attach quote',
+    onInput: (value) => Message.QuoteUrlChanged({ value }),
+    onSubmit: Message.ResolveQuoteRequested(),
+  })
+
+const mediaInput = (model: Model, h: Builder): Html =>
+  attachRow(h, {
+    id: 'creator-media',
+    label: 'Embed media',
+    hint: 'Adds a YouTube, SoundCloud, Bandcamp or Spotify player inside the post.',
+    value: model.externalMediaUrl,
+    placeholder: 'https://…',
+    action: 'Embed',
+    error: model.externalMediaError,
+    onInput: (value) => Message.ExternalMediaChanged({ value }),
+    onSubmit: Message.ExternalMediaInserted(),
+  })
+
+const savedMusic = (model: Model, h: Builder, busy: boolean): Html =>
+  model.draft.kind !== 'mix' && model.draft.postId
+    ? h.section(
+        [h.AriaLabel('Saved post music')],
+        [
+          h.button(
+            [
+              h.Type('button'),
+              h.Class('btn btn-quiet btn-sm'),
+              h.Disabled(busy),
+              h.OnClick(Message.ResolvePostMusicRequested()),
+            ],
+            [
+              model.resolvingPostMusic
+                ? 'Resolving music…'
+                : model.draft.musicEntityId
+                  ? 'Re-resolve saved post music'
+                  : 'Resolve saved post music',
+            ],
+          ),
+          h.p(
+            [],
+            [
+              'Uses Music URL, or finds a link in saved content. Saves only the music attachment; it does not publish or save other edits.',
+            ],
+          ),
+          model.postMusicNotice ? h.p([h.Role('status')], [model.postMusicNotice]) : h.empty,
+        ],
+      )
+    : h.empty
+
 const composerExtras = (model: Model, h: Builder): Html =>
   h.div(
     [h.Class('creator-extras')],
@@ -565,33 +625,14 @@ const composerExtras = (model: Model, h: Builder): Html =>
         ? h.div(
             [h.Class('creator-quote')],
             [
-              attachRow(h, {
-                id: 'creator-quote',
-                label: 'Quote a tweet',
-                hint: 'Paste a goosebumps.fm tweet link.',
-                value: model.draft.quoteUrl,
-                placeholder: 'https://goosebumps.fm/tweet/…',
-                action: 'Attach quote',
-                onInput: (value) => Message.QuoteUrlChanged({ value }),
-                onSubmit: Message.ResolveQuoteRequested(),
-              }),
+              quoteInput(model, h),
               model.quotePreview
                 ? h.blockquote([], [h.small([], ['Quoted tweet']), h.p([], [model.quotePreview])])
                 : h.empty,
             ],
           )
         : h.empty,
-      attachRow(h, {
-        id: 'creator-media',
-        label: 'Embed media',
-        hint: 'Adds a YouTube, SoundCloud, Bandcamp or Spotify player inside the post.',
-        value: model.externalMediaUrl,
-        placeholder: 'https://…',
-        action: 'Embed',
-        error: model.externalMediaError,
-        onInput: (value) => Message.ExternalMediaChanged({ value }),
-        onSubmit: Message.ExternalMediaInserted(),
-      }),
+      mediaInput(model, h),
     ],
   )
 
@@ -727,97 +768,22 @@ export const view = defineView<Model, typeof Message.Type, ViewInputs>((model, i
   )
 
   return h.section(
-    [h.Class('page creator-page')],
+    [h.Class(model.draft.kind === 'micro' ? 'page creator-page is-tweet' : 'page creator-page')],
     [
-      h.header(
-        [h.Class('creator-header')],
-        [
-          h.div(
-            [h.Class('creator-status')],
+      model.draft.kind === 'micro'
+        ? h.div(
+            [h.Class('tweet-heading')],
             [
-              model.draft.editSlug
-                ? h.a(
-                    [
-                      h.Href(`/${publicPath}/${model.draft.editSlug}`),
-                      h.Class('btn btn-quiet btn-sm'),
-                    ],
-                    ['← Back to post'],
-                  )
+              h.h1([], [model.draft.editSlug ? 'Edit tweet' : 'New tweet']),
+              !model.draft.editSlug
+                ? h.a([h.Href('/new/editorial')], ['Write an editorial ↗'])
                 : h.empty,
-              h.span(
-                [
-                  h.Role('status'),
-                  h.AriaLive('polite'),
-                  h.DataAttribute('save-state', model.saveState),
-                ],
-                [
-                  model.remoteSave !== null
-                    ? 'Saving…'
-                    : Match.value(model.saveState).pipe(
-                        Match.when('saved-locally', () => 'Draft saved locally'),
-                        Match.when('saved', () => 'All changes saved'),
-                        Match.when('unsaved', () => 'Unsaved changes'),
-                        Match.when('failed', () => 'Not saved'),
-                        Match.exhaustive,
-                      ),
-                ],
-              ),
             ],
-          ),
-          h.div(
-            [h.Class('creator-actions')],
-            [
-              validationError && !busy
-                ? h.small(
-                    [h.Id('creator-continue-hint'), h.Class('creator-actions-hint')],
-                    [validationError],
-                  )
-                : h.empty,
-              Button.view(
-                {
-                  onClick: Message.DiscardRequested(),
-                  isDisabled: busy,
-                  toView: ({ button }) =>
-                    h.button([...button, h.Class('btn btn-quiet')], ['Discard']),
-                },
-                h,
-              ),
-              Button.view(
-                {
-                  onClick: Message.DraftSaveRequested(),
-                  isDisabled: busy || !canContinue,
-                  toView: ({ button }) =>
-                    h.button(
-                      [
-                        ...button,
-                        h.Class('btn'),
-                        ...(validationError ? [h.AriaDescribedBy('creator-continue-hint')] : []),
-                      ],
-                      ['Save draft'],
-                    ),
-                },
-                h,
-              ),
-              Button.view(
-                {
-                  onClick: Message.ReviewRequested(),
-                  isDisabled: busy || !canContinue,
-                  toView: ({ button }) =>
-                    h.button(
-                      [
-                        ...button,
-                        h.Class('btn btn-primary'),
-                        ...(validationError ? [h.AriaDescribedBy('creator-continue-hint')] : []),
-                      ],
-                      ['Continue'],
-                    ),
-                },
-                h,
-              ),
-            ],
-          ),
-        ],
-      ),
+          )
+        : h.empty,
+      model.draft.kind !== 'micro'
+        ? composerActions(model, h, busy, canContinue, publicPath)
+        : h.empty,
       model.error
         ? h.div(
             [h.Class('form-error'), h.Role('alert')],
@@ -869,50 +835,45 @@ export const view = defineView<Model, typeof Message.Type, ViewInputs>((model, i
         : h.div(
             [h.Class('creator-workspace')],
             [
-              h.main(
-                [h.Class('creator-canvas')],
-                [
-                  titleField(model, h),
-                  model.draft.kind !== 'mix' ? musicSlot(model, h, busy) : h.empty,
-                  musicReferences(model, h),
-                  model.draft.kind !== 'mix' && model.draft.postId
-                    ? h.section(
-                        [h.AriaLabel('Saved post music')],
-                        [
-                          h.button(
-                            [
-                              h.Type('button'),
-                              h.Class('secondary'),
-                              h.Disabled(busy),
-                              h.OnClick(Message.ResolvePostMusicRequested()),
-                            ],
-                            [
-                              model.resolvingPostMusic
-                                ? 'Resolving music…'
-                                : model.draft.musicEntityId
-                                  ? 'Re-resolve saved post music'
-                                  : 'Resolve saved post music',
-                            ],
-                          ),
-                          h.p(
-                            [],
-                            [
-                              'Uses Music URL, or finds a link in saved content. Saves only the music attachment; it does not publish or save other edits.',
-                            ],
-                          ),
-                          model.postMusicNotice
-                            ? h.p([h.Role('status')], [model.postMusicNotice])
-                            : h.empty,
-                        ],
-                      )
-                    : h.empty,
-                  showsBodyEditor(model) ? editor(model, h) : bodyEditorToggle(h),
-                  composerExtras(model, h),
-                  model.draft.kind === 'mix' ? mixFields(model, h, busy) : h.empty,
-                ],
-              ),
+              model.draft.kind === 'micro'
+                ? tweetComposer(model, h, busy, {
+                    music: musicSlot(model, h, busy),
+                    quote: quoteInput(model, h),
+                    media: mediaInput(model, h),
+                    editor: editor(model, h),
+                    savedMusic: savedMusic(model, h, busy),
+                  })
+                : h.main(
+                    [h.Class('creator-canvas')],
+                    [
+                      titleField(model, h),
+                      model.draft.kind !== 'mix' ? musicSlot(model, h, busy) : h.empty,
+                      musicReferences(model, h),
+                      savedMusic(model, h, busy),
+                      showsBodyEditor(model) ? editor(model, h) : bodyEditorToggle(h),
+                      composerExtras(model, h),
+                      model.draft.kind === 'mix' ? mixFields(model, h, busy) : h.empty,
+                    ],
+                  ),
             ],
           ),
+      model.draft.kind === 'micro'
+        ? composerActions(model, h, busy, canContinue, publicPath)
+        : h.empty,
+      model.draft.kind === 'micro' && model.phase !== 'reviewing'
+        ? h.div(
+            [h.Class('tweet-notices')],
+            [
+              musicReferences(model, h),
+              model.postMusicNotice && model.attachment !== 'music'
+                ? h.p([h.Role('status')], [model.postMusicNotice])
+                : h.empty,
+              model.externalMediaError && model.attachment !== 'media'
+                ? h.p([h.Class('creator-field-error'), h.Role('alert')], [model.externalMediaError])
+                : h.empty,
+            ],
+          )
+        : h.empty,
     ],
   )
 })

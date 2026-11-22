@@ -2365,6 +2365,152 @@
   padding: 1rem;
   border: 1px solid var(--pastel-green-2);
 }
+.creator-page.is-tweet {
+  display: flex;
+  flex-direction: column;
+  max-width: 720px;
+  padding-top: clamp(1.5rem, 5vh, 3rem);
+}
+.tweet-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.tweet-heading h1 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.tweet-heading a {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  text-underline-offset: 0.25rem;
+}
+.is-tweet .creator-workspace {
+  order: 1;
+}
+.is-tweet .creator-header {
+  position: static;
+  order: 2;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--card);
+  backdrop-filter: none;
+}
+.is-tweet .creator-actions {
+  display: flex;
+  flex: initial;
+  width: auto;
+}
+.is-tweet .creator-actions .btn {
+  padding-inline: 0.625rem;
+  font-size: 0.75rem;
+}
+.is-tweet .creator-actions-hint {
+  display: none;
+}
+.is-tweet .creator-status {
+  flex: initial;
+  width: auto;
+  font-size: 0.6875rem;
+}
+.creator-canvas.tweet-compose {
+  gap: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--card);
+}
+.tweet-compose .creator-tweet {
+  padding: 1.25rem 1.25rem 0.75rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+}
+.tweet-compose .creator-tweet:focus-within {
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}
+.tweet-compose .creator-tweet:has([aria-invalid='true']) {
+  outline: 1px solid var(--destructive);
+  outline-offset: -1px;
+}
+.tweet-compose .creator-tweet textarea {
+  min-height: 7rem;
+  font-weight: 400;
+}
+.tweet-compose .creator-tweet-count {
+  font-size: 0.6875rem;
+}
+.tweet-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.125rem;
+  padding: 0.25rem 0.625rem;
+  border-top: 1px solid var(--border);
+}
+.tweet-tool.btn {
+  min-height: 2.75rem;
+  gap: 0.375rem;
+  padding-inline: 0.625rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+.tweet-tool[aria-expanded='true'] {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.tweet-attachment-panel:not([hidden]) {
+  display: grid;
+  padding: 1rem;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--muted) 35%, var(--card));
+}
+.tweet-attachment-panel > div {
+  display: grid;
+  gap: 0.75rem;
+}
+.tweet-attachment-panel section {
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+.tweet-compose > .creator-music-card,
+.tweet-quoted {
+  margin: 0 1rem 1rem;
+}
+.tweet-quoted {
+  padding: 0.75rem 1rem;
+  border-left: 2px solid var(--border);
+  background: var(--muted);
+}
+.tweet-quoted small {
+  color: var(--muted-foreground);
+}
+.tweet-quoted p {
+  margin-block: 0.5rem 0;
+  overflow-wrap: anywhere;
+}
+.tweet-compose .creator-editor {
+  padding: 0 1rem 1rem;
+}
+.tweet-compose .creator-editor-bar {
+  background: var(--card);
+}
+.tweet-notices {
+  order: 3;
+}
+.tweet-notices > * {
+  margin-top: 0.75rem;
+  font-size: 0.75rem;
+}
 @media (max-width: 640px) {
   .creator-page {
     padding-inline: 0.75rem;

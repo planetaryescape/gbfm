@@ -1,3 +1,10 @@
+## [2.136.5](https://github.com/planetaryescape/gbfm/compare/v2.136.4...v2.136.5) (2026-11-22)
+
+
+### Bug Fixes
+
+* **creator:** make tweets a focused composition instead of a form ([8215d59](https://github.com/planetaryescape/gbfm/commit/8215d59dcb8d39eb9ea7d3ebbb85562f987a90e1))
+
 ## [2.136.4](https://github.com/planetaryescape/gbfm/compare/v2.136.3...v2.136.4) (2026-11-22)
 
 

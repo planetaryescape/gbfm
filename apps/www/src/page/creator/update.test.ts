@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { init, initialModel } from './init'
 import { Message } from './message'
-import { draftValidationError, MosaicState } from './model'
+import { draftValidationError, MosaicState, showsBodyEditor } from './model'
 import { update } from './update'
 
 describe('creator model', () => {
@@ -544,5 +544,50 @@ describe('creator model', () => {
     expect(
       update(loaded.model, Message.EditorModeChanged({ mode: 'preview' })).commands,
     ).toBeUndefined()
+  })
+
+  it('keeps the tweet body optional until the author opens it, and focuses it in source mode', () => {
+    const tweet = { ...initialModel(input), phase: 'writing' as const }
+    expect(showsBodyEditor(tweet)).toBe(false)
+
+    const editorial = initialModel({ ...input, kind: 'post' })
+    expect(showsBodyEditor(editorial)).toBe(true)
+    expect(showsBodyEditor(initialModel({ ...input, kind: 'mix' }))).toBe(true)
+
+    const opened = update({ ...tweet, editorMode: 'preview' }, Message.BodyEditorOpened())
+    expect(opened.model).toMatchObject({ bodyEditorOpen: true, editorMode: 'source' })
+    expect(showsBodyEditor(opened.model)).toBe(true)
+    expect(opened.commands?.map((command) => command.name)).toEqual(['Creator.FocusBodyEditor'])
+  })
+
+  it('reveals restored or embedded tweet bodies and never collapses one while it is edited', () => {
+    const tweet = { ...initialModel(input), phase: 'writing' as const }
+
+    const restored = update(
+      { ...tweet, phase: 'loading' },
+      Message.Hydrated({
+        draft: { ...tweet.draft, title: 'Restored', content: 'Restored body' },
+        creators: [],
+        source: 'local',
+      }),
+    ).model
+
+    expect(showsBodyEditor(restored)).toBe(true)
+    const cleared = update(restored, Message.Changed({ field: 'content', value: '' })).model
+    expect(showsBodyEditor(cleared)).toBe(true)
+    expect(showsBodyEditor(update(cleared, Message.DiscardRequested()).model)).toBe(false)
+
+    const embedded = update(
+      update(
+        tweet,
+        Message.ExternalMediaChanged({ value: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }),
+      ).model,
+      Message.ExternalMediaInserted(),
+    ).model
+
+    expect(showsBodyEditor(embedded)).toBe(true)
+    expect(
+      showsBodyEditor(update(tweet, Message.Changed({ field: 'title', value: 'Hi' })).model),
+    ).toBe(false)
   })
 })

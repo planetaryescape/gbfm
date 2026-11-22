@@ -497,6 +497,8 @@ test('composer restores metadata, reviews type changes and publishes a quoted tw
   const slug = `e2e-quote-${Date.now()}`
   await page.goto('/new/tweet')
   await page.getByRole('textbox', { name: 'Title', exact: true }).fill('A quoted signal')
+  await page.getByRole('button', { name: '+ Add a longer note', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'Writing canvas', exact: true })).toBeFocused()
   await page
     .getByRole('textbox', { name: 'Writing canvas', exact: true })
     .fill('Listening to **independent radio**.')
@@ -738,6 +740,8 @@ test('a failed preview hides the previous revision and retries the current sourc
   await page.goto('/new/tweet')
   const canvas = page.getByRole('textbox', { name: 'Writing canvas', exact: true })
   const preview = page.locator('.creator-preview')
+  await expect(canvas).toHaveCount(0)
+  await page.getByRole('button', { name: '+ Add a longer note', exact: true }).click()
   await canvas.fill('Previous revision')
   await page.getByRole('button', { name: 'Preview', exact: true }).click()
   await expect(preview).toContainText('Previous revision')
@@ -754,4 +758,24 @@ test('a failed preview hides the previous revision and retries the current sourc
   await expect(preview).toContainText('Current revision')
   await expect(preview.locator('strong')).toHaveText('revision')
   await expect(preview.getByRole('alert')).toHaveCount(0)
+})
+
+test('tweet text over the limit is marked invalid and blocks continuing until trimmed', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.goto('/new/tweet')
+  const text = page.getByRole('textbox', { name: 'Title', exact: true })
+  const proceed = page.getByRole('button', { name: 'Continue', exact: true })
+
+  await text.fill('a'.repeat(256))
+  await expect(text).toHaveAttribute('aria-invalid', 'true')
+  await expect(page.locator('#creator-tweet-count')).toHaveText('256/255')
+  await expect(page.getByRole('alert')).toContainText('Tweets are capped at 255 characters (256).')
+  await expect(proceed).toBeDisabled()
+
+  await text.fill('a'.repeat(255))
+  await expect(text).not.toHaveAttribute('aria-invalid', 'true')
+  await expect(page.locator('#creator-tweet-count')).toHaveText('255/255')
+  await expect(proceed).toBeEnabled()
 })

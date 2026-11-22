@@ -49,6 +49,7 @@ export const Model = Schema.Struct({
   authorResults: Schema.Array(CreatorIdentity),
   episodeInput: Schema.String,
   editorMode: Schema.Literals(['source', 'preview']),
+  bodyEditorOpen: Schema.Boolean,
   diagnostics: Schema.Array(RichContentDiagnostic),
   externalMediaUrl: Schema.String,
   externalMediaError: Schema.NullOr(Schema.String),
@@ -77,6 +78,10 @@ export type Model = typeof Model.Type
 export const keyOf = (draft: CreatorDraft) => `${draft.kind}:${draft.editSlug ?? 'new'}`
 
 export const TWEET_MAX_LENGTH = 255
+
+/** Tweets keep their Markdown body collapsed until the author opens it or the draft already has one. */
+export const showsBodyEditor = (model: Model): boolean =>
+  model.draft.kind !== 'micro' || model.bodyEditorOpen || model.draft.content.trim() !== ''
 
 export const draftValidationError = (draft: CreatorDraft): string | null => {
   if (!draft.title.trim() && !draft.content.trim()) return 'Add a title or some content.'

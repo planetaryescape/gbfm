@@ -61,6 +61,7 @@ export const initialModel = ({
   authorResults: [],
   episodeInput: '',
   editorMode: 'source',
+  bodyEditorOpen: false,
   diagnostics: [],
   externalMediaUrl: '',
   externalMediaError: null,

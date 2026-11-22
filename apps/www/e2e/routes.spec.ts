@@ -189,6 +189,7 @@ test('creator restores an autosaved draft, publishes it, and reads its public SS
   await expect(page).toHaveURL(/\/dashboard$/)
   await page.goto('/new/tweet')
   const slug = `e2e-published-${Date.now()}`
+  await page.getByRole('button', { name: '+ Add a longer note', exact: true }).click()
   await page
     .getByRole('textbox', { name: 'Writing canvas' })
     .fill('An independent signal from the Foldkit composer.')

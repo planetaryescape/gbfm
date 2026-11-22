@@ -21,7 +21,7 @@ test('Spotify callback rejects unsolicited codes without exposing them in SSR or
   expect(tokenExchanges).toBe(0)
 })
 
-test('Spotify PKCE connects, displays the profile, and disconnects using the real browser adapter', async ({
+test('Spotify PKCE connects with the current profile response and disconnects using the real browser adapter', async ({
   page,
 }) => {
   await page.route('https://accounts.spotify.com/authorize?**', async (route) => {
@@ -62,11 +62,6 @@ test('Spotify PKCE connects, displays the profile, and disconnects using the rea
         href: 'https://api.spotify.com/v1/users/fixture-listener',
         external_urls: { spotify: 'https://open.spotify.com/user/fixture-listener' },
         images: [],
-        followers: { total: 0, href: null },
-        product: 'premium',
-        country: 'ZA',
-        email: 'listener@gbfm.local',
-        explicit_content: { filter_enabled: false, filter_locked: false },
       },
     }),
   )

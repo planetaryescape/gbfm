@@ -192,7 +192,6 @@ for (const action of ['Play', 'Queue', 'Save']) {
             href: 'https://api.spotify.com/v1/users/fixture',
             external_urls: { spotify: 'https://open.spotify.com/user/fixture' },
             images: [],
-            followers: { total: 0, href: null },
           },
         })
       if (url.pathname === '/v1/me/player/devices')

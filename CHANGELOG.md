@@ -1,3 +1,12 @@
+## [2.136.3](https://github.com/planetaryescape/gbfm/compare/v2.136.2...v2.136.3) (2026-11-22)
+
+
+### Bug Fixes
+
+* **creator:** make the tweet composer compact and tweet-first ([bfbc1cc](https://github.com/planetaryescape/gbfm/commit/bfbc1cce4bfc6e012606b65afe2ba78caab61409))
+* **creator:** mark over-limit tweet text invalid and stop clipping it ([308b2e7](https://github.com/planetaryescape/gbfm/commit/308b2e761882785a4b5ce9ce6af052427f6b0f5a))
+* **spotify:** accept profiles without deprecated follower data ([d13b64e](https://github.com/planetaryescape/gbfm/commit/d13b64ef28d738bb9e1105fe1ca7ca1ec0238212))
+
 ## [2.136.2](https://github.com/planetaryescape/gbfm/compare/v2.136.1...v2.136.2) (2026-11-22)
 
 

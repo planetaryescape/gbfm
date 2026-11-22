@@ -7,6 +7,7 @@ import {
   CancelUpload,
   Diagnose,
   FindMusicReferences,
+  FocusBodyEditor,
   GenerateMosaic,
   PauseUpload,
   PersistDraft,
@@ -78,6 +79,7 @@ const changed = (
     resolvingPostMusic: draft.musicUrl === model.draft.musicUrl ? model.resolvingPostMusic : false,
     saveState: 'unsaved',
     error: null,
+    bodyEditorOpen: model.bodyEditorOpen || contentChanged,
     diagnostics: contentChanged ? [] : model.diagnostics,
     musicReferences: musicChanged ? [] : model.musicReferences,
     musicReferenceState: musicChanged ? 'idle' : model.musicReferenceState,
@@ -481,6 +483,11 @@ export const update = (
       mode === 'preview'
         ? requestPreview({ ...model, editorMode: mode })
         : { model: { ...model, editorMode: mode } },
+    BodyEditorOpened: () => ({
+      model: { ...model, bodyEditorOpen: true, editorMode: 'source' },
+      commands: [FocusBodyEditor({})],
+    }),
+    BodyEditorFocused: () => ({ model }),
     PreviewRequested: () => requestPreview({ ...model, previewContent: null }),
     PreviewLoaded: ({ content, document }) => ({
       model:

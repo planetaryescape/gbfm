@@ -1811,11 +1811,55 @@
   line-height: 1.2;
   letter-spacing: -0.025em;
 }
-.creator-title small {
-  position: absolute;
-  right: 0;
-  bottom: -1.4rem;
+.creator-canvas .creator-tweet {
+  gap: 0.25rem;
+  padding: 0.75rem 0.875rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--card);
+  transition: border-color 150ms ease-out;
+}
+.creator-tweet:focus-within {
+  border-color: var(--ring);
+}
+.creator-tweet textarea {
+  field-sizing: content;
+  min-height: 4.5rem;
+  overflow: hidden;
+  resize: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 1.0625rem;
+  line-height: 1.5;
+}
+.creator-tweet textarea:focus-visible {
+  outline: none;
+}
+.creator-tweet-count {
+  justify-self: end;
   color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.creator-tweet-count.is-over {
+  color: var(--destructive);
+  font-weight: 600;
+}
+:is(.dark, [data-theme='dark']) .creator-tweet-count.is-over {
+  color: var(--error);
+}
+.creator-canvas > .creator-body-toggle {
+  justify-self: start;
+  margin-left: -0.75rem;
+}
+.creator-editor.is-compact .creator-editor-bar {
+  position: static;
+  min-height: 0;
+}
+.creator-editor.is-compact .creator-source textarea {
+  min-height: 9rem;
+  padding-block: 1rem;
 }
 .creator-attach {
   display: grid;
@@ -1825,7 +1869,8 @@
 }
 .creator-canvas .creator-attach-label {
   display: block;
-  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
   font-weight: 600;
 }
 .creator-attach-row {
@@ -1850,11 +1895,25 @@
   color: var(--foreground);
   padding: 0 0.75rem;
 }
+.creator-attach-row input:not([type='checkbox']):not([type='range']) {
+  font-size: 0.875rem;
+}
+.creator-attach-row .btn-sm {
+  min-height: 2rem;
+}
+@media (pointer: coarse) {
+  .creator-attach-row input:not([type='checkbox']):not([type='range']) {
+    font-size: 1rem;
+  }
+  .creator-attach-row .btn-sm {
+    min-height: var(--control-height);
+  }
+}
 .creator-attach-row input:focus-visible {
   outline: none;
 }
 .creator-attach-row .btn {
-  margin: 0.25rem;
+  margin: 0.1875rem;
 }
 .creator-attach-hint {
   color: var(--muted-foreground);

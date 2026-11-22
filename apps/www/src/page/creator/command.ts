@@ -1,5 +1,5 @@
 import { Effect, Schema } from 'effect'
-import { Command } from 'foldkit'
+import { Command, Dom } from 'foldkit'
 
 import { Message } from './message'
 import { Kind, SaveOwner } from './model'
@@ -155,6 +155,18 @@ export const RenderPreview = Command.define('Creator.RenderPreview', {
     Effect.flatMap(CreatorService, (service) => service.renderPreview(content)).pipe(
       Effect.map((document) => Message.PreviewLoaded({ content, document })),
       Effect.catch(() => Effect.succeed(Message.PreviewFailed({ content }))),
+    ),
+})
+
+export const BODY_SOURCE_ID = 'creator-body-source'
+
+export const FocusBodyEditor = Command.define('Creator.FocusBodyEditor', {
+  args: {},
+  messages: [Message.BodyEditorFocused],
+  execute: () =>
+    Dom.focus(`#${BODY_SOURCE_ID}`).pipe(
+      Effect.catchTag('ElementNotFound', () => Effect.void),
+      Effect.as(Message.BodyEditorFocused()),
     ),
 })
 

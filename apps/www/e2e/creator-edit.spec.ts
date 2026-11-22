@@ -497,6 +497,8 @@ test('composer restores metadata, reviews type changes and publishes a quoted tw
   const slug = `e2e-quote-${Date.now()}`
   await page.goto('/new/tweet')
   await page.getByRole('textbox', { name: 'Title', exact: true }).fill('A quoted signal')
+  await page.getByRole('button', { name: '+ Add a longer note', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'Writing canvas', exact: true })).toBeFocused()
   await page
     .getByRole('textbox', { name: 'Writing canvas', exact: true })
     .fill('Listening to **independent radio**.')
@@ -738,6 +740,8 @@ test('a failed preview hides the previous revision and retries the current sourc
   await page.goto('/new/tweet')
   const canvas = page.getByRole('textbox', { name: 'Writing canvas', exact: true })
   const preview = page.locator('.creator-preview')
+  await expect(canvas).toHaveCount(0)
+  await page.getByRole('button', { name: '+ Add a longer note', exact: true }).click()
   await canvas.fill('Previous revision')
   await page.getByRole('button', { name: 'Preview', exact: true }).click()
   await expect(preview).toContainText('Previous revision')

@@ -7,10 +7,12 @@ import { defineView } from 'foldkit/submodel'
 import type { Principal } from '../../model'
 import { imageSource } from '../../view/artwork'
 import { richContentView } from '../../view/rich-content/render'
+import { BODY_SOURCE_ID } from './command'
 import { Message } from './message'
-import { draftValidationError, TWEET_MAX_LENGTH, type Model } from './model'
+import { draftValidationError, showsBodyEditor, TWEET_MAX_LENGTH, type Model } from './model'
 import { mosaicView } from './mosaic-view'
 import { review } from './review-view'
+import { bodyEditorToggle, titleField } from './title-view'
 
 export interface ViewInputs {
   readonly role: string | null
@@ -108,16 +110,19 @@ const preview = (model: Model, h: Builder): Html => {
   )
 }
 
-const editor = (model: Model, h: Builder): Html => {
-  const controls = [
-    ['Heading', '## ', '', 'Heading'],
-    ['Bold', '**', '**', 'bold text'],
-    ['Italic', '_', '_', 'italic text'],
-    ['Link', '[', '](https://)', 'link text'],
-    ['Quote', '> ', '', 'Quoted text'],
-    ['List', '- ', '', 'List item'],
-  ] as const
+const inlineControls = [
+  ['Bold', '**', '**', 'bold text'],
+  ['Italic', '_', '_', 'italic text'],
+  ['Link', '[', '](https://)', 'link text'],
+  ['Quote', '> ', '', 'Quoted text'],
+  ['List', '- ', '', 'List item'],
+] as const
 
+const articleControls = [['Heading', '## ', '', 'Heading'], ...inlineControls] as const
+
+const editor = (model: Model, h: Builder): Html => {
+  const compact = model.draft.kind === 'micro'
+  const controls = compact ? inlineControls : articleControls
   const previewing = model.editorMode === 'preview'
 
   const tool = (label: string, title: string, message: Message) =>
@@ -139,7 +144,10 @@ const editor = (model: Model, h: Builder): Html => {
     )
 
   return h.section(
-    [h.Class('creator-editor'), h.AriaLabel('Rich text editor')],
+    [
+      h.Class(compact ? 'creator-editor is-compact' : 'creator-editor'),
+      h.AriaLabel('Rich text editor'),
+    ],
     [
       h.div(
         [h.Class('creator-editor-bar')],
@@ -189,10 +197,11 @@ const editor = (model: Model, h: Builder): Html => {
             [
               h.span([h.Class('sr-only')], ['Writing canvas']),
               h.textarea([
+                h.Id(BODY_SOURCE_ID),
                 h.Value(model.draft.content),
                 h.OnInput((value) => Message.Changed({ field: 'content', value })),
-                h.Rows(18),
-                h.Placeholder('Start writing…'),
+                h.Rows(compact ? 6 : 18),
+                h.Placeholder(compact ? 'Add more context. Markdown works.' : 'Start writing…'),
               ]),
             ],
           ),
@@ -247,7 +256,7 @@ const attachRow = (
               isDisabled: !input.value.trim() || Boolean(input.busy),
               toView: ({ button }) =>
                 h.button(
-                  [...button, h.Class('btn'), h.AriaBusy(Boolean(input.busy))],
+                  [...button, h.Class('btn btn-sm'), h.AriaBusy(Boolean(input.busy))],
                   [input.action],
                 ),
             },
@@ -863,25 +872,7 @@ export const view = defineView<Model, typeof Message.Type, ViewInputs>((model, i
               h.main(
                 [h.Class('creator-canvas')],
                 [
-                  h.label(
-                    [h.Class('creator-title')],
-                    [
-                      h.span([h.Class('sr-only')], ['Title']),
-                      h.textarea([
-                        h.Value(model.draft.title),
-                        h.AriaLabel('Title'),
-                        h.Rows(1),
-                        h.Maxlength(model.draft.kind === 'micro' ? TWEET_MAX_LENGTH + 100 : 500),
-                        h.Placeholder(
-                          model.draft.kind === 'micro' ? 'What’s playing?' : 'Story title',
-                        ),
-                        h.OnInput((value) => Message.Changed({ field: 'title', value })),
-                      ]),
-                      model.draft.kind === 'micro'
-                        ? h.small([], [`${model.draft.title.length}/${TWEET_MAX_LENGTH}`])
-                        : h.empty,
-                    ],
-                  ),
+                  titleField(model, h),
                   model.draft.kind !== 'mix' ? musicSlot(model, h, busy) : h.empty,
                   musicReferences(model, h),
                   model.draft.kind !== 'mix' && model.draft.postId
@@ -915,7 +906,7 @@ export const view = defineView<Model, typeof Message.Type, ViewInputs>((model, i
                         ],
                       )
                     : h.empty,
-                  editor(model, h),
+                  showsBodyEditor(model) ? editor(model, h) : bodyEditorToggle(h),
                   composerExtras(model, h),
                   model.draft.kind === 'mix' ? mixFields(model, h, busy) : h.empty,
                 ],

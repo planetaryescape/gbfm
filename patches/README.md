@@ -1,13 +1,5 @@
-# Spotify Effect 0.6.7 on Effect 4.0.0
+# Dependency patches
 
-The published `@spotify-effect/core` and `@spotify-effect/browser` 0.6.7 packages
-still import `effect/unstable/http` and declare an Effect `4.0.0-rc.111` peer.
-Effect 4.0.0 moved that module to `effect/http`.
+The Spotify SDK comes from JSR as `@planetaryescape/opensound`, with browser helpers at `/browser`. The SDK contains the stable `effect/http` imports and nullable album-track preview fix that previously required local patches for npm 0.6.7.
 
-These Bun patches change only HTTP import paths in ESM, CommonJS, and TypeScript
-declarations. They do not change Spotify behavior or suppress the peer mismatch.
-Remove them when an upstream release supports Effect 4.0.0.
-
-Verify with the Spotify service tests, the `@gbfm/spotify` tests, and WWW's
-`e2e/spotify.spec.ts`, which exercises PKCE, profile loading, and disconnect
-through the real browser adapter with disposable HTTP fixtures.
+The remaining patches are declared in the root `package.json`. Validate dependency changes with `bun precommit`, the Spotify service and shared-package tests, mobile Spotify tests, and WWW's `e2e/spotify.spec.ts`. The browser test exercises PKCE, profile loading and disconnect through the real adapter using disposable fixtures.

@@ -1,5 +1,5 @@
 import type { SpotifyAuthSession } from '@gbfm/spotify'
-import { SpotifyConfigurationError } from '@spotify-effect/core'
+import { SpotifyConfigurationError } from '@planetaryescape/opensound'
 import { Deferred, Effect } from 'effect'
 import { expect, test } from 'vitest'
 

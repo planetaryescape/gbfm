@@ -5,7 +5,7 @@ import {
   type Device,
   type PlayOptions,
   type SimplifiedTrack,
-} from '@spotify-effect/core'
+} from '@planetaryescape/opensound'
 import { Deferred, Effect } from 'effect'
 import { expect, test } from 'vitest'
 

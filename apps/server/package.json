@@ -38,7 +38,7 @@
     "@sentry/cloudflare": "10.76.2",
     "@sentry/core": "10.76.2",
     "@sentry/opentelemetry": "10.76.2",
-    "@spotify-effect/core": "0.6.7",
+    "@planetaryescape/opensound": "npm:@jsr/planetaryescape__opensound@0.7.2",
     "better-auth": "1.7.12",
     "dotenv": "18.0.9",
     "drizzle-orm": "0.45.4",

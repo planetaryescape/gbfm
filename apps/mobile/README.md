@@ -16,7 +16,24 @@ This builds and installs the native development client, starts Metro, and opens 
 
 The API comes from `EXPO_PUBLIC_API_URL` in the mobile environment. The simulator can reach the host through `127.0.0.1`.
 
-## Disposable local smoke tests
+## Android emulator
+
+Use an Android SDK and JDK 21, with the emulator already running. The Android application ID is `fm.goosebumps.gbfm`, matching iOS.
+
+```sh
+bun run android
+```
+
+For disposable fixture testing, start `bun run dev:e2e` from `apps/server`, then:
+
+```sh
+adb reverse tcp:3003 tcp:3003
+EXPO_PUBLIC_API_URL=http://127.0.0.1:3003 EXPO_PUBLIC_SPOTIFY_CLIENT_ID=gbfm-local-e2e EXPO_NO_DEV_MENU=1 bun run android
+```
+
+The fixture client ID is not a real Spotify application. This can qualify native startup and the app's local flows, not a real Spotify sign-in.
+
+## Disposable iOS smoke tests
 
 Start the fixture API from `apps/server`:
 

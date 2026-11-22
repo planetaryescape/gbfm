@@ -1,4 +1,4 @@
-import type { Device } from '@spotify-effect/core'
+import type { Device } from '@planetaryescape/opensound'
 import { describe, expect, test } from 'vitest'
 
 import {

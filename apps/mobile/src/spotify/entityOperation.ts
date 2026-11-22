@@ -8,7 +8,7 @@ import {
   type SpotifyEntityRef,
   type SpotifyRequestError,
 } from '@gbfm/spotify'
-import { SpotifyHttpError } from '@spotify-effect/core'
+import { SpotifyHttpError } from '@planetaryescape/opensound'
 import { Effect } from 'effect'
 
 export type SpotifyEntityAction = 'play' | 'queue' | 'save'

@@ -7,7 +7,7 @@ import {
   Tracks,
   type PlaylistItem,
   type Track as SpotifyTrack,
-} from '@spotify-effect/core'
+} from '@planetaryescape/opensound'
 import { Context, Effect, Layer, Match } from 'effect'
 
 import {

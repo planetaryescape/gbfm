@@ -1,5 +1,5 @@
-import { SpotifyBrowser } from '@spotify-effect/browser'
-import { SpotifyConfigurationError } from '@spotify-effect/core'
+import { SpotifyConfigurationError } from '@planetaryescape/opensound'
+import { SpotifyBrowser } from '@planetaryescape/opensound/browser'
 import { type Context, Effect, Layer, Scope } from 'effect'
 
 import { env } from '@/env'

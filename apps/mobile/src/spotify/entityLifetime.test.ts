@@ -1,5 +1,5 @@
 import { spotifyEntityFromUrl } from '@gbfm/spotify'
-import { SpotifyConfigurationError, type Device } from '@spotify-effect/core'
+import { SpotifyConfigurationError, type Device } from '@planetaryescape/opensound'
 import { Deferred, Effect } from 'effect'
 import { expect, test } from 'vitest'
 

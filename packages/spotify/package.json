@@ -12,8 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@spotify-effect/browser": "0.6.7",
-    "@spotify-effect/core": "0.6.7",
+    "@planetaryescape/opensound": "npm:@jsr/planetaryescape__opensound@0.7.2",
     "effect": "4.0.6"
   },
   "devDependencies": {

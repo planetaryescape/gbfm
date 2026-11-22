@@ -63,6 +63,9 @@
         "ITSAppUsesNonExemptEncryption": false
       }
     },
+    "android": {
+      "package": "fm.goosebumps.gbfm"
+    },
     "experiments": {
       "typedRoutes": true
     },

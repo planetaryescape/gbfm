@@ -1,10 +1,10 @@
+import type { Device, PrivateUser, SpotifyRequestError } from '@planetaryescape/opensound'
+import { SpotifyHttpError, SpotifyRateLimitError } from '@planetaryescape/opensound'
 import {
   type BrowserRefreshableTokens,
   readAuthorizationCallback,
   SpotifyBrowser,
-} from '@spotify-effect/browser'
-import type { Device, PrivateUser, SpotifyRequestError } from '@spotify-effect/core'
-import { SpotifyHttpError, SpotifyRateLimitError } from '@spotify-effect/core'
+} from '@planetaryescape/opensound/browser'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 

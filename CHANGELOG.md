@@ -1,3 +1,10 @@
+## [2.136.2](https://github.com/planetaryescape/gbfm/compare/v2.136.1...v2.136.2) (2026-11-22)
+
+
+### Bug Fixes
+
+* **telemetry:** retain safe HTTP response status in Sentry ([7e9246f](https://github.com/planetaryescape/gbfm/commit/7e9246fc837b76888386c7ba6183185bf00b27a6))
+
 ## [2.136.1](https://github.com/planetaryescape/gbfm/compare/v2.136.0...v2.136.1) (2026-11-21)
 
 

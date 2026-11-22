@@ -11,6 +11,7 @@ const onTitleInput = (value: string) => Message.Changed({ field: 'title', value 
 
 const tweetText = (model: Model, h: Builder): Html => {
   const length = model.draft.title.length
+  const overLimit = length > TWEET_MAX_LENGTH
 
   return h.label(
     [h.Class('creator-tweet')],
@@ -20,6 +21,7 @@ const tweetText = (model: Model, h: Builder): Html => {
         h.Value(model.draft.title),
         h.AriaLabel('Title'),
         h.AriaDescribedBy(TWEET_COUNT_ID),
+        h.AriaInvalid(overLimit),
         h.Rows(3),
         h.Maxlength(TWEET_MAX_LENGTH + 100),
         h.Placeholder('What’s playing?'),
@@ -28,9 +30,7 @@ const tweetText = (model: Model, h: Builder): Html => {
       h.small(
         [
           h.Id(TWEET_COUNT_ID),
-          h.Class(
-            length > TWEET_MAX_LENGTH ? 'creator-tweet-count is-over' : 'creator-tweet-count',
-          ),
+          h.Class(overLimit ? 'creator-tweet-count is-over' : 'creator-tweet-count'),
         ],
         [`${length}/${TWEET_MAX_LENGTH}`],
       ),

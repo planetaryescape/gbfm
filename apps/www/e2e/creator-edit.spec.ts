@@ -759,3 +759,23 @@ test('a failed preview hides the previous revision and retries the current sourc
   await expect(preview.locator('strong')).toHaveText('revision')
   await expect(preview.getByRole('alert')).toHaveCount(0)
 })
+
+test('tweet text over the limit is marked invalid and blocks continuing until trimmed', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.goto('/new/tweet')
+  const text = page.getByRole('textbox', { name: 'Title', exact: true })
+  const proceed = page.getByRole('button', { name: 'Continue', exact: true })
+
+  await text.fill('a'.repeat(256))
+  await expect(text).toHaveAttribute('aria-invalid', 'true')
+  await expect(page.locator('#creator-tweet-count')).toHaveText('256/255')
+  await expect(page.getByRole('alert')).toContainText('Tweets are capped at 255 characters (256).')
+  await expect(proceed).toBeDisabled()
+
+  await text.fill('a'.repeat(255))
+  await expect(text).not.toHaveAttribute('aria-invalid', 'true')
+  await expect(page.locator('#creator-tweet-count')).toHaveText('255/255')
+  await expect(proceed).toBeEnabled()
+})

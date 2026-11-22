@@ -1822,10 +1822,13 @@
 .creator-tweet:focus-within {
   border-color: var(--ring);
 }
+.creator-tweet:has([aria-invalid='true']) {
+  border-color: var(--destructive);
+}
 .creator-tweet textarea {
   field-sizing: content;
   min-height: 4.5rem;
-  overflow: hidden;
+  overflow-y: auto;
   resize: none;
   border: 0;
   background: transparent;
@@ -1894,8 +1897,6 @@
   background: transparent;
   color: var(--foreground);
   padding: 0 0.75rem;
-}
-.creator-attach-row input:not([type='checkbox']):not([type='range']) {
   font-size: 0.875rem;
 }
 .creator-attach-row .btn-sm {

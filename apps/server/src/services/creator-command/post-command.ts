@@ -10,7 +10,7 @@ import { postCreators, postsTable } from '@/db/post.schema'
 import { showsTable } from '@/db/show.schema'
 import { McpAuthorization } from '@/mcp/authorization'
 import { CommandAuthority, type CommandCheckpoint } from '@/mcp/command-authority'
-import { EndpointIdentity, McpToolError } from '@/mcp/contracts'
+import { EditorialToolError, EndpointIdentity, McpToolError } from '@/mcp/contracts'
 import {
   CreateMicroPostInput,
   CreatorCommandResult,
@@ -19,8 +19,10 @@ import {
   UnpublishContentInput,
 } from '@/mcp/creator/contracts'
 import { checkCreatorResponse, creatorResultFits, requireCreatorWire } from '@/mcp/creator/wire'
+import { PostEditPublication, PostEditPublicationLayer } from '@/mcp/draft-artwork/publication'
 import { EditorialMcpConfig } from '@/mcp/editorial'
 import { editorialSnapshotGuard } from '@/mcp/editorial-music/snapshot'
+import { projectPost } from '@/mcp/model'
 import {
   McpOperationStore,
   type OperationPreparation,
@@ -51,6 +53,7 @@ const make = Effect.gen(function* () {
   const authorization = yield* McpAuthorization
   const store = yield* McpOperationStore
   const config = yield* EditorialMcpConfig
+  const publication = yield* PostEditPublication
 
   const endpoint = yield* Schema.decodeUnknownEffect(EndpointIdentity)(config).pipe(
     Effect.mapError(unavailable),
@@ -416,7 +419,32 @@ const make = Effect.gen(function* () {
               }
             }
 
-            const { snapshot, patch, version } = prepared.success
+            const { snapshot, patch: transitionPatch } = prepared.success
+
+            const mediaResult = await run(
+              Effect.result(
+                transition === 'publish'
+                  ? publication.preparePublish(snapshot, actor.userId)
+                  : Effect.succeed({
+                      patch: {
+                        content: snapshot.content,
+                        thumbnailUrl: snapshot.thumbnailUrl,
+                        bannerImageUrl: snapshot.bannerImageUrl,
+                      },
+                      assetKeys: [],
+                    }),
+              ),
+            )
+
+            if (Result.isFailure(mediaResult))
+              return {
+                status:
+                  mediaResult.failure.code === 'invalid_input' ? 'invalid_input' : 'unavailable',
+              }
+
+            const media = mediaResult.success
+            const patch = { ...transitionPatch, ...media.patch }
+            const { version } = await run(projectPost({ ...snapshot, ...patch }, config))
 
             if (
               target &&
@@ -445,7 +473,7 @@ const make = Effect.gen(function* () {
                   actor.userId,
                   patch,
                   undefined,
-                  [],
+                  media.assetKeys,
                   {
                     guard: and(ctx.fence, editorialSnapshotGuard(snapshot)),
                     liveGuard: checkpoint.liveGuard,
@@ -487,12 +515,31 @@ const make = Effect.gen(function* () {
         message: 'Post command did not return an applied outcome.',
       })
 
-    return yield* Schema.decodeUnknownEffect(CreatorCommandResult)({
+    const response = yield* Schema.decodeUnknownEffect(CreatorCommandResult)({
       endpoint,
       status: 'applied',
       replayed: result.status === 'replayed',
       target: result.outcome.result,
     }).pipe(Effect.mapError(unavailable), Effect.flatMap(checkCreatorResponse))
+
+    if (options.operation === 'publish_editorial' && 'postId' in options.input)
+      yield* publication
+        .complete(
+          options.input.postId,
+          actor.userId,
+          authority.checkpoint(options.scopes).pipe(
+            Effect.mapError(
+              (error) =>
+                new EditorialToolError({
+                  code: error.code === 'unavailable' ? 'unavailable' : 'access_denied',
+                  message: 'Publication authority unavailable.',
+                }),
+            ),
+          ),
+        )
+        .pipe(Effect.mapError(unavailable))
+
+    return response
   })
 
   return {
@@ -543,4 +590,6 @@ export class CreatorPostCommands extends Context.Service<
   Effect.Success<typeof make>
 >()('gbfm/CreatorPostCommands') {}
 
-export const CreatorPostCommandsLayer = Layer.effect(CreatorPostCommands, make)
+export const CreatorPostCommandsLayer = Layer.effect(CreatorPostCommands, make).pipe(
+  Layer.provide(PostEditPublicationLayer),
+)

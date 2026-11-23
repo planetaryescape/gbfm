@@ -6,6 +6,7 @@ import { S3Error, UnauthorizedError } from '@/errors'
 import { ConfigService } from '@/services/config.service'
 import { attachedMediaUrls, makeMediaPublication } from '@/services/media-publication'
 import { ObjectStoreClient } from '@/services/storage/object-store-client'
+import { keyFromAssetUrl } from '@/services/upload-asset.service'
 
 import { EditorialToolError } from '../contracts'
 import { loadOwnedEditorialPost, type EditorialPatch } from '../editorial-music/save'
@@ -32,6 +33,20 @@ export class PostEditPublication extends Context.Service<
       patch: EditorialPatch,
       actorId: UserId,
     ) => Effect.Effect<EditorialPatch, EditorialToolError>
+    readonly preparePublish: (
+      previous: EditorialSnapshot,
+      actorId: UserId,
+    ) => Effect.Effect<
+      {
+        readonly patch: {
+          readonly content: string | null
+          readonly thumbnailUrl: string | null
+          readonly bannerImageUrl: string | null
+        }
+        readonly assetKeys: ReadonlyArray<string>
+      },
+      EditorialToolError
+    >
     readonly complete: (
       postId: EditorialSnapshot['id'],
       actorId: UserId,
@@ -120,6 +135,32 @@ export const PostEditPublicationLayer = Layer.effect(
         return yield* Effect.void
       })
 
-    return PostEditPublication.of({ prepare, complete })
+    const preparePublish = (previous: EditorialSnapshot, actorId: UserId) =>
+      Effect.gen(function* () {
+        const publication = yield* media(
+          {
+            content: previous.content,
+            thumbnailUrl: previous.thumbnailUrl,
+            bannerImageUrl: previous.bannerImageUrl,
+            draft: false,
+          },
+          { userId: actorId, userRole: 'creator', credential: undefined },
+          previous,
+        ).pipe(Effect.mapError(failure))
+
+        const { content, thumbnailUrl, bannerImageUrl } = publication.data
+
+        const assetKeys = attachedMediaUrls(publication.data).flatMap((url) => {
+          const key = keyFromAssetUrl(url, config.urls.bucketRouter)
+
+          if (key === null) return []
+
+          return [key.startsWith('public/') ? `private/${key.slice('public/'.length)}` : key]
+        })
+
+        return { patch: { content, thumbnailUrl, bannerImageUrl }, assetKeys }
+      })
+
+    return PostEditPublication.of({ prepare, preparePublish, complete })
   }),
 )

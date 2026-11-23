@@ -195,9 +195,6 @@ export const prepareCreatorPostTransition = Effect.fn('CreatorCommand.preparePos
         content: snapshot.content,
       }).pipe(Effect.mapError(invalid))
       yield* validateCanonicalContent(snapshot.content).pipe(Effect.mapError(invalid))
-
-      if (attachedMediaUrls(snapshot).some((url) => url.includes('/user-content/private/')))
-        return yield* invalid()
     }
 
     const updatedAt = new Date(Math.max(options.now.getTime(), snapshot.updatedAt.getTime() + 1))

@@ -1,3 +1,4 @@
+import type { D1Database } from '@cloudflare/workers-types'
 import { sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import { getTableConfig } from 'drizzle-orm/sqlite-core'
@@ -435,6 +436,39 @@ describe('shared durable atomic operations', () => {
 
     for (const result of results)
       expect(result).toMatchObject({ outcome: { revision: 1, result: { value: 'first' } } })
+    expect(await target()).toMatchObject({ revision: 1, value: 'first' })
+    expect(await database.prepare('SELECT count(*) AS count FROM mcp_operations').first()).toEqual({
+      count: 1,
+    })
+  })
+
+  test('a committed batch with lost acknowledgement and failed reconciliation replays after reconnecting', async () => {
+    let disconnected = false
+
+    const connection: D1Database = {
+      prepare: (query) => {
+        if (disconnected) throw new Error('Test connection lost')
+
+        return database.prepare(query)
+      },
+      batch: async (statements) => {
+        await database.batch(statements)
+        disconnected = true
+        throw new Error('Test acknowledgement lost after commit')
+      },
+      exec: (query) => database.exec(query),
+      withSession: (constraint) => database.withSession(constraint),
+      dump: () => database.dump(),
+    }
+
+    expect(await createMcpOperationStore(connection, () => {}).execute(command())).toEqual({
+      status: 'unavailable',
+    })
+    const recovered = await createMcpOperationStore(database).execute(command())
+    expect(recovered).toMatchObject({
+      status: 'replayed',
+      outcome: { revision: 1, result: { value: 'first' } },
+    })
     expect(await target()).toMatchObject({ revision: 1, value: 'first' })
     expect(await database.prepare('SELECT count(*) AS count FROM mcp_operations').first()).toEqual({
       count: 1,

@@ -48,7 +48,7 @@ export interface AtomicOperationPlan {
   readonly outcome: OperationOutcome
 }
 
-/** Read-only domain preparation runs only after an authorized receipt miss. No mutation/network effects. */
+/** Read-only preparation runs after an authorized receipt miss, before the atomic batch. */
 export type OperationPreparation =
   | { readonly status: 'ready'; readonly build: (context: OperationContext) => AtomicOperationPlan }
   | { readonly status: 'conflict' | 'not_found' | 'invalid_input' | 'unavailable' }

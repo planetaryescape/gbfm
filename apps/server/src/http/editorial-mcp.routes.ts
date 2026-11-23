@@ -23,6 +23,7 @@ import {
 import { ContentReadServiceLayer } from '@/mcp/content-read/service'
 import { ContentReadHandlersLayer, ContentReadToolkit } from '@/mcp/content-read/toolkit'
 import { EditorialToolError, McpToolError } from '@/mcp/contracts'
+import { PublishingToolkit, PublishingToolHandlersLayer } from '@/mcp/creator/toolkit'
 import { DraftArtworkHandlersLive, DraftArtworkToolkit } from '@/mcp/draft-artwork/toolkit'
 import { EditorialDraftServiceLayer } from '@/mcp/drafts'
 import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from '@/mcp/editorial'
@@ -44,6 +45,7 @@ import {
 } from '@/mcp/server'
 import { makeMcpWireResponse, MAX_MCP_RESPONSE_BYTES, McpWireResponse } from '@/mcp/wire-response'
 import { ConfigService } from '@/services/config.service'
+import { CreatorPostCommandsLayer } from '@/services/creator-command/post-command'
 import { EditorialOAuth, EditorialOAuthUnavailable } from '@/services/editorial-oauth.service'
 
 const BearerHeader = Schema.String.check(
@@ -504,6 +506,7 @@ export const makeMcpRoutes = <Tools extends Record<string, Tool.Any>, ROut, E, R
 export const EditorialMcpRoutesLive = makeMcpRoutes(
   composeMcpToolkits(
     EditorialToolkit,
+    PublishingToolkit,
     DraftArtworkToolkit,
     ContentReadToolkit,
     PublicResearchToolkit,
@@ -515,6 +518,10 @@ export const EditorialMcpRoutesLive = makeMcpRoutes(
   ),
   Layer.mergeAll(
     DraftArtworkHandlersLive,
+    PublishingToolHandlersLayer.pipe(
+      Layer.provide(CreatorPostCommandsLayer),
+      Layer.provide(McpAuthorizationLive),
+    ),
     ContentReadHandlersLayer.pipe(Layer.provide(ContentReadServiceLayer)),
     PublicResearchHandlersLayer.pipe(Layer.provide(PublicResearchServiceLayer)),
     ListeningToolHandlersLayer.pipe(Layer.provide(ListeningReadServiceLive)),

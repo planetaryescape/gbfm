@@ -108,6 +108,8 @@ const harness = async () => {
       ),
     ),
     Layer.provide(database),
+    Layer.provide(Layer.succeed(ConfigService, fixture.config)),
+    Layer.provide(UnavailableObjectStoreClientLayer),
   )
 
   const run = <A, E>(effect: Effect.Effect<A, E, CreatorCommandService | CommandAuthority>) =>

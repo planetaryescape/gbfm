@@ -1,6 +1,7 @@
 import { Effect } from 'effect'
 import { Tool, Toolkit } from 'effect/ai'
 
+import { CreatorPostCommands } from '@/services/creator-command/post-command'
 import { CreatorCommandService } from '@/services/creator-command/service'
 
 import { McpPermission } from '../authorization'
@@ -17,7 +18,6 @@ import {
   UpdateCreatorMetadataInput,
 } from './contracts'
 
-/** Candidate toolkit only; P1 owns registration. */
 export const CreatorToolkit = Toolkit.make(
   Tool.make('list_creator_drafts', {
     description:
@@ -77,7 +77,7 @@ export const CreatorToolkit = Toolkit.make(
     .annotate(Tool.Strict, true),
   Tool.make('publish_editorial', {
     description:
-      'Publish your unpublished editorial using its observed shared PostVersion and UUIDv4 requestId. Requires posts:read,drafts:write and separately consented content:publish. Private-media copy recovery is not yet supported and such commands fail closed. No announcement or media-byte revocation. Retries acknowledge only the original transition.',
+      'Publish your unpublished editorial using its observed shared PostVersion and UUIDv4 requestId. Requires posts:read,drafts:write and separately consented content:publish. Generate requestId once; reuse identical arguments after a timeout. Within 24 hours retries replay the original transition and repair unfinished deterministic artwork copies without publishing again. Expired keys never publish again. No announcement; public media copies are permanent.',
     parameters: PublishEditorialInput,
     success: CreatorCommandResult,
     failure: McpToolError,
@@ -131,6 +131,24 @@ export const CreatorToolHandlersLayer = CreatorToolkit.toLayer(
       publish_editorial: service.publishEditorial,
       unpublish_content: service.unpublishContent,
       delete_content: service.deleteContent,
+    }
+  }),
+)
+
+export const PublishingToolkit = Toolkit.make(
+  CreatorToolkit.tools.create_micro_post,
+  CreatorToolkit.tools.reply_to_micro_post,
+  CreatorToolkit.tools.publish_editorial,
+)
+
+export const PublishingToolHandlersLayer = PublishingToolkit.toLayer(
+  Effect.gen(function* () {
+    const service = yield* CreatorPostCommands
+
+    return {
+      create_micro_post: service.createMicroPost,
+      reply_to_micro_post: service.replyToMicroPost,
+      publish_editorial: service.publishEditorial,
     }
   }),
 )

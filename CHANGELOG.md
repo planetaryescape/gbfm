@@ -1,3 +1,10 @@
+# [2.137.0](https://github.com/planetaryescape/gbfm/compare/v2.136.5...v2.137.0) (2026-11-23)
+
+
+### Features
+
+* **mcp:** expose retry-safe publishing with artwork recovery ([#639](https://github.com/planetaryescape/gbfm/issues/639)) ([cc817bc](https://github.com/planetaryescape/gbfm/commit/cc817bc439b5c93ceb0310fa61da31398a949a40))
+
 ## [2.136.5](https://github.com/planetaryescape/gbfm/compare/v2.136.4...v2.136.5) (2026-11-22)
 
 

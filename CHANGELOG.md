@@ -1,3 +1,10 @@
+# [2.139.0](https://github.com/planetaryescape/gbfm/compare/v2.138.0...v2.139.0) (2026-11-24)
+
+
+### Features
+
+* **editorial:** embed public micro notes as native cards ([548b0b2](https://github.com/planetaryescape/gbfm/commit/548b0b29b188e077b73c2852ae7dc2da37cd2c9c))
+
 # [2.138.0](https://github.com/planetaryescape/gbfm/compare/v2.137.0...v2.138.0) (2026-11-24)
 
 

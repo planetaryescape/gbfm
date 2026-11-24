@@ -90,6 +90,16 @@ export const MusicSnapshot = Schema.Struct({
   ),
 })
 
+export const MicroEmbedMetadata = Schema.Struct({
+  postId: Schema.NonEmptyString,
+  slug: Schema.NonEmptyString,
+  title: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  authors: Schema.Array(
+    Schema.Struct({ name: Schema.String, username: Schema.NullOr(Schema.String) }),
+  ),
+})
+
 export type RichContentBlock =
   | { readonly _tag: 'Paragraph'; readonly children: ReadonlyArray<RichContentInline> }
   | {
@@ -106,7 +116,11 @@ export type RichContentBlock =
         readonly children: ReadonlyArray<RichContentBlock>
       }>
     }
-  | { readonly _tag: 'Quote'; readonly children: ReadonlyArray<RichContentBlock> }
+  | {
+      readonly _tag: 'Quote'
+      readonly children: ReadonlyArray<RichContentBlock>
+      readonly micro?: typeof MicroEmbedMetadata.Type
+    }
   | { readonly _tag: 'Code'; readonly language: string | null; readonly value: string }
   | { readonly _tag: 'ThematicBreak' }
   | {
@@ -154,7 +168,7 @@ export const Block: Schema.Codec<RichContentBlock> = Schema.suspend(() =>
         Schema.Struct({ checked: Schema.NullOr(Schema.Boolean), children: Schema.Array(Block) }),
       ),
     },
-    Quote: { children: Schema.Array(Block) },
+    Quote: { children: Schema.Array(Block), micro: Schema.optionalKey(MicroEmbedMetadata) },
     Code: { language: Schema.NullOr(Schema.String), value: Schema.String },
     ThematicBreak: {},
     Table: {

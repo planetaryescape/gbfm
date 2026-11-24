@@ -11,6 +11,7 @@ import type { Html, HtmlBuilder } from 'foldkit/html'
 import { artwork, imageSource } from '../artwork'
 import { iconPaths, lucide, spotifyIcon } from '../icons'
 import { musicEntityLabels, musicPlatformLabel } from '../music-platform'
+import { microView } from './micro'
 
 type RichContentInline = Extract<
   RichContentBlock,
@@ -545,6 +546,13 @@ export const blockView = <Message>(
     case 'List':
       return listView(block, h)
     case 'Quote':
+      if (block.micro)
+        return microView(
+          block.micro,
+          block.children.map((child) => blockView(child, h)),
+          h,
+        )
+
       return h.blockquote(
         [],
         block.children.map((child) => blockView(child, h)),

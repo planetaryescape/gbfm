@@ -7,10 +7,11 @@ import {
   type UnresolvedBlock,
   type UnresolvedDocument,
 } from '@gbfm/rich-content/source'
-import { Cache, Context, Data, Duration, Effect, Exit, Layer, Match } from 'effect'
+import { Cache, Context, Data, Duration, Effect, Exit, Layer, Match, Option } from 'effect'
 
 import { ValidationError } from '@/errors'
 import { makeExternalMediaResolver, type ExternalMediaResolver } from '@/lib/external-media'
+import { RichContentMicroResolver } from '@/services/rich-content-micro.service'
 import {
   RichContentMusicResolver,
   type RichContentMusicResolver as RichContentMusicResolverService,
@@ -59,9 +60,14 @@ const directMediaResolver: ExternalMediaResolver = {
   resolve: (url) => Effect.succeed(directMediaEmbed(url)),
 }
 
+const unavailableMicroResolver: RichContentMicroResolver = {
+  resolveMany: () => Effect.succeed(new Map()),
+}
+
 interface Resolvers {
   readonly music: RichContentMusicResolverService
   readonly media: ExternalMediaResolver
+  readonly micro: RichContentMicroResolver
 }
 
 const hasUnavailableMedia = (blocks: ReadonlyArray<RichContentBlock>): boolean =>
@@ -105,8 +111,16 @@ const makeService = (
             attributes: { 'mdx.contentLength': content.length },
           }),
         ),
-      render: (content) =>
-        Cache.get(renderCache, content).pipe(Effect.withSpan('richContent.render')),
+      render: (content) => {
+        const document = parseRichContent(content).document
+
+        const render =
+          collectMicroIds(document.blocks).length > 0
+            ? resolveDocument(document, resolvers)
+            : Cache.get(renderCache, content)
+
+        return render.pipe(Effect.withSpan('richContent.render'))
+      },
       invalidateAll: Cache.invalidateAll(compiledCache).pipe(
         Effect.andThen(Cache.invalidateAll(renderCache)),
       ),
@@ -119,7 +133,11 @@ export const MdxService = Context.Service<MdxService>('MdxService')
 
 export const MdxServiceLayer: Layer.Layer<MdxService> = Layer.effect(
   MdxService,
-  makeService(defaultFn, { music: unavailableMusicResolver, media: directMediaResolver }),
+  makeService(defaultFn, {
+    music: unavailableMusicResolver,
+    media: directMediaResolver,
+    micro: unavailableMicroResolver,
+  }),
 )
 
 export const MdxServiceCatalogLayer: Layer.Layer<MdxService, never, RichContentMusicResolver> =
@@ -128,8 +146,13 @@ export const MdxServiceCatalogLayer: Layer.Layer<MdxService, never, RichContentM
     Effect.gen(function* () {
       const music = yield* RichContentMusicResolver
       const media = yield* makeExternalMediaResolver
+      const micro = yield* Effect.serviceOption(RichContentMicroResolver)
 
-      return yield* makeService(defaultFn, { music, media })
+      return yield* makeService(defaultFn, {
+        music,
+        media,
+        micro: Option.getOrElse(micro, () => unavailableMicroResolver),
+      })
     }),
   )
 
@@ -139,7 +162,10 @@ export const makeMdxServiceTest = (
   fn: (content: string) => Promise<string>,
   media: ExternalMediaResolver = directMediaResolver,
 ): Layer.Layer<MdxService> =>
-  Layer.effect(MdxService, makeService(fn, { music: unavailableMusicResolver, media }))
+  Layer.effect(
+    MdxService,
+    makeService(fn, { music: unavailableMusicResolver, media, micro: unavailableMicroResolver }),
+  )
 
 // ── Backward-compat shim (for show, label, release, resolve services) ─────────
 
@@ -211,6 +237,19 @@ const resolveBlock = (
   resolvers: Resolvers,
 ): Effect.Effect<RichContentBlock> => {
   if (block._tag === 'EmbedReference') {
+    if (block.reference._tag === 'MicroPost') {
+      const postId = block.reference.postId
+
+      return resolvers.micro
+        .resolveMany([postId])
+        .pipe(
+          Effect.map(
+            (snapshots) =>
+              snapshots.get(postId) ?? unavailable('cards', 'This note is unavailable.', null),
+          ),
+        )
+    }
+
     if (block.reference._tag === 'ExternalMedia') {
       const url = block.reference.url
 
@@ -255,7 +294,7 @@ const collectMusicReferences = (blocks: ReadonlyArray<UnresolvedBlock>): Array<M
     Match.value(block).pipe(
       Match.tag('EmbedReference', ({ reference }) =>
         Match.value(reference).pipe(
-          Match.tag('ExternalMedia', () => []),
+          Match.tag('ExternalMedia', 'MicroPost', () => []),
           Match.orElse((music) => [music]),
         ),
       ),
@@ -267,12 +306,28 @@ const collectMusicReferences = (blocks: ReadonlyArray<UnresolvedBlock>): Array<M
     ),
   )
 
+const collectMicroIds = (blocks: ReadonlyArray<UnresolvedBlock>): Array<string> =>
+  blocks.flatMap((block) => {
+    if (block._tag === 'EmbedReference')
+      return block.reference._tag === 'MicroPost' ? [block.reference.postId] : []
+
+    if (block._tag === 'Quote' || block._tag === 'CardGroup') return collectMicroIds(block.children)
+
+    if (block._tag === 'List') return block.items.flatMap((item) => collectMicroIds(item.children))
+
+    return []
+  })
+
 const resolveDocument = (
   document: UnresolvedDocument,
   resolvers: Resolvers,
 ): Effect.Effect<RichContentDocument> =>
   Effect.gen(function* () {
     const references = collectMusicReferences(document.blocks)
+
+    const microSnapshots = yield* Effect.cached(
+      resolvers.micro.resolveMany(collectMicroIds(document.blocks)),
+    )
 
     const snapshots = yield* Effect.cached(
       resolvers.music
@@ -292,6 +347,9 @@ const resolveDocument = (
         resolve: (reference) =>
           snapshots.pipe(Effect.map((values) => values.get(reference) ?? null)),
       },
+      micro: {
+        resolveMany: () => microSnapshots,
+      },
     }
 
     const blocks = yield* Effect.all(
@@ -309,6 +367,7 @@ export const renderRichContent = (source: string): RichContentDocument =>
     resolveDocument(parseRichContent(source).document, {
       music: unavailableMusicResolver,
       media: directMediaResolver,
+      micro: unavailableMicroResolver,
     }),
   )
 

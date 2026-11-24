@@ -8,6 +8,7 @@
     "./schema": "./src/schema.ts",
     "./source": "./src/source.ts",
     "./media": "./src/media.ts",
+    "./limits": "./src/limits.ts",
     "./legacy-mdx": "./src/legacy-mdx.ts",
     "./normalize": "./src/normalize.ts",
     "./spotlight": "./src/spotlight.ts"

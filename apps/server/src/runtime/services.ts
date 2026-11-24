@@ -12,6 +12,7 @@ import {
 } from '@/services/editorial-list-cache'
 import { EditorialOAuthLive } from '@/services/editorial-oauth.service'
 import { PersonalAccessKeysLive } from '@/services/personal-access-keys'
+import { RichContentMicroResolverLayer } from '@/services/rich-content-micro.service'
 import type { SentryService } from '@/services/sentry.service'
 import type { SitemapCache } from '@/services/sitemap-cache'
 
@@ -126,6 +127,7 @@ export const AppLayer = ({
 
   const MdxLive = MdxServiceCatalogLayer.pipe(
     Layer.provide(RichContentMusicResolverLayer),
+    Layer.provide(RichContentMicroResolverLayer),
     Layer.provide(databaseLive),
     Layer.provide(externalMediaFetcherLive),
   )

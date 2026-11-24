@@ -1,5 +1,5 @@
 /* oxlint-disable anti-slop-effect/no-manual-tagged-construction, anti-slop-effect/no-manual-tag-comparison, anti-slop-effect/prefer-effect-match -- This projector also constructs an unresolved parser-only union that has no Schema constructors. */
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
 import type { Root } from 'mdast'
 import remarkDirective from 'remark-directive'
 import remarkGfm from 'remark-gfm'
@@ -55,6 +55,7 @@ export const parseSafeUrl = (value: string, purpose: UrlPurpose) => {
 }
 
 export type EmbedReference =
+  | { readonly _tag: 'MicroPost'; readonly postId: string }
   | {
       readonly _tag: 'MusicUrl'
       readonly entityType: 'track' | 'album' | 'playlist'
@@ -119,6 +120,7 @@ export interface ParseRichContentOptions {
 interface DocumentTotals {
   readonly blocks: number
   readonly externalMediaEmbeds: number
+  readonly microEmbeds: number
 }
 
 type Node = {
@@ -217,6 +219,19 @@ const inlines = (
 
     if (node.type === 'inlineCode') return [{ _tag: 'InlineCode', value: node.value ?? '' }]
 
+    if (node.type === 'textDirective' && node.name === 'micro') {
+      diagnostics.push(
+        diagnostic(
+          node,
+          'warning',
+          'invalid-directive-attribute',
+          'Micro embeds must be standalone block directives',
+        ),
+      )
+
+      return [{ _tag: 'Text', value: '[Invalid micro embed]' }]
+    }
+
     if (node.type === 'break') return [{ _tag: 'Break' }]
 
     if (node.type === 'emphasis' || node.type === 'strong' || node.type === 'delete')
@@ -313,6 +328,20 @@ const directive = (
     diagnostics.push(diagnostic(node, 'warning', 'invalid-directive-attribute', message))
 
     return { _tag: 'Unsupported', source: sourceOf(node, source), reason: 'invalid-directive' }
+  }
+
+  if (name === 'micro') {
+    if (
+      node.type !== 'leafDirective' ||
+      !attrsValid(attrs, ['id']) ||
+      !Schema.is(Schema.String.check(Schema.isUUID()))(attrs.id)
+    )
+      return invalid('Micro embeds require a valid post ID and no other attributes')
+
+    return {
+      _tag: 'EmbedReference',
+      reference: { _tag: 'MicroPost', postId: attrs.id.toLowerCase() },
+    }
   }
 
   if (name === 'track' || name === 'album' || name === 'playlist') {
@@ -574,6 +603,9 @@ export const parseRichContent = (
         externalMediaEmbeds:
           total.externalMediaEmbeds +
           (block._tag === 'EmbedReference' && block.reference._tag === 'ExternalMedia' ? 1 : 0),
+        microEmbeds:
+          total.microEmbeds +
+          (block._tag === 'EmbedReference' && block.reference._tag === 'MicroPost' ? 1 : 0),
       }
 
       if (block._tag === 'Quote' || block._tag === 'CardGroup')
@@ -587,7 +619,7 @@ export const parseRichContent = (
 
       return current
     },
-    { blocks: 0, externalMediaEmbeds: 0 },
+    { blocks: 0, externalMediaEmbeds: 0, microEmbeds: 0 },
   )
 
   if (totals.blocks > blockLimit)
@@ -604,6 +636,15 @@ export const parseRichContent = (
       severity: 'error',
       code: 'document-limit-exceeded',
       message: 'External media embed limit exceeded',
+      line: null,
+      column: null,
+    })
+
+  if (totals.microEmbeds > RICH_CONTENT_LIMITS.microEmbeds)
+    diagnostics.push({
+      severity: 'error',
+      code: 'document-limit-exceeded',
+      message: 'Micro embed limit exceeded',
       line: null,
       column: null,
     })

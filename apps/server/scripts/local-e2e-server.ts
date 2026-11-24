@@ -277,6 +277,31 @@ await database.insert(musicSourceIdentitiesTable).values({
   resolvedAt: new Date(),
 })
 
+const embeddedMicroId = crypto.randomUUID()
+const microEditorialId = crypto.randomUUID()
+
+await database.insert(postsTable).values([
+  {
+    id: embeddedMicroId,
+    slug: 'e2e-native-micro',
+    content: 'Some records stay with you. This is a **local note** about those records.',
+    type: 'micro',
+    draft: false,
+  },
+  {
+    id: microEditorialId,
+    slug: 'e2e-micro-editorial',
+    title: 'Local embedded notes',
+    content: `Before the note.\n\n::micro{id="${embeddedMicroId}"}\n\nAfter the note.`,
+    type: 'post',
+    draft: false,
+  },
+])
+await database.insert(postCreators).values([
+  { postId: embeddedMicroId, creatorId: creator.id },
+  { postId: microEditorialId, creatorId: creator.id },
+])
+
 const [editorial] = await database
   .insert(postsTable)
   .values({

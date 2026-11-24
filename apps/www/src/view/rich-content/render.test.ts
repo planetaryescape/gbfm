@@ -191,6 +191,51 @@ const textContent = (node: VNode): string =>
     .join('')
 
 describe('richContentView', () => {
+  /* oxlint-disable anti-slop-effect/no-manual-tagged-construction -- This decoded fixture exercises recursive rich-content wire values. */
+  it('renders an attributed micro card with a permalink, without an iframe', () => {
+    const source = Schema.decodeUnknownSync(RichContentDocument)({
+      version: 1,
+      blocks: [
+        {
+          _tag: 'Quote',
+          micro: {
+            postId: 'b19847c2-fe58-4fd8-878a-b2faf138dfd7',
+            slug: 'canon',
+            title: null,
+            createdAt: '2026-11-24T08:25:34.463Z',
+            authors: [{ name: 'Guide Fari', username: 'guidefari' }],
+          },
+          children: [
+            {
+              _tag: 'Paragraph',
+              children: [
+                { _tag: 'Text', value: 'music i know will stay with me forever.' },
+                {
+                  _tag: 'Link',
+                  href: '/tweet/canon',
+                  title: null,
+                  children: [{ _tag: 'Text', value: 'View original note on GBFM' }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+
+    const rendered = richContentView(source, h)
+    const view = first(rendered === null ? [] : [rendered])
+    const card = first(findAll(view, '.rich-content-micro'))
+    expect(attribute(card, 'aria-label')).toBe('Embedded note by Guide Fari')
+    expect(textContent(card)).toContain('music i know will stay with me forever.')
+    expect(textContent(card)).toContain('2026-11-24')
+    expect(findAll(card, 'a').every((node) => attribute(node, 'href') === '/tweet/canon')).toBe(
+      true,
+    )
+    expect(findAll(card, 'iframe')).toHaveLength(0)
+  })
+  /* oxlint-enable anti-slop-effect/no-manual-tagged-construction */
+
   it('renders every rich-content variant as semantic inert HTML', () => {
     const rendered = render()
     const view = first(rendered === null ? [] : [rendered])

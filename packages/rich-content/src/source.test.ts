@@ -6,6 +6,64 @@ import { RichContentDocument, SafeUrl } from './schema'
 import { parseRichContent, safeUrl, validateForWrite } from './source'
 
 describe('canonical rich content source', () => {
+  test('parses native micro references, normalizes IDs and preserves surrounding prose', () => {
+    const id = 'B19847C2-FE58-4FD8-878A-B2FAF138DFD7'
+    const parsed = parseRichContent(`before\n\n::micro{id="${id}"}\n\nafter`)
+    expect(parsed.diagnostics).toEqual([])
+    expect(parsed.document.blocks[1]).toEqual({
+      _tag: 'EmbedReference',
+      reference: { _tag: 'MicroPost', postId: id.toLowerCase() },
+    })
+    expect(parsed.document.blocks).toHaveLength(3)
+  })
+
+  test('rejects invalid, remote, inline and container micro references and excess embeds', async () => {
+    for (const source of [
+      '::micro{id="not-an-id"}',
+      '::micro{url="https://example.com/tweet"}',
+      '::micro{id="b19847c2-fe58-4fd8-878a-b2faf138dfd7" owner="someone"}',
+      ':micro{id="b19847c2-fe58-4fd8-878a-b2faf138dfd7"}',
+      ':::micro{id="b19847c2-fe58-4fd8-878a-b2faf138dfd7"}\ntext\n:::',
+      Array.from({ length: 17 }, () => '::micro{id="b19847c2-fe58-4fd8-878a-b2faf138dfd7"}').join(
+        '\n\n',
+      ),
+    ])
+      expect(Exit.isFailure(await Effect.runPromiseExit(validateForWrite(source)))).toBe(true)
+  })
+
+  test('micro cards round-trip as attributed quotes with a readable legacy body', () => {
+    const value = {
+      version: 1,
+      blocks: [
+        {
+          _tag: 'Quote',
+          micro: {
+            postId: 'b19847c2-fe58-4fd8-878a-b2faf138dfd7',
+            slug: 'canon',
+            title: null,
+            createdAt: '2026-11-24T08:25:34.463Z',
+            authors: [{ name: 'Guide Fari', username: 'guidefari' }],
+          },
+          children: [
+            {
+              _tag: 'Paragraph',
+              children: [
+                {
+                  _tag: 'Link',
+                  href: '/tweet/canon',
+                  title: null,
+                  children: [{ _tag: 'Text', value: 'View original note on GBFM' }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+
+    expect(Schema.decodeUnknownSync(RichContentDocument)(value)).toEqual(value)
+  })
+
   test('accepts more than fifty native music cards including nested card groups', async () => {
     const source = `:::cards\n${Array.from(
       { length: 120 },

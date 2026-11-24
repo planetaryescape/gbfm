@@ -3134,6 +3134,31 @@
     grid-column: 2;
     text-align: left;
   }
+  .rich-content-micro {
+    margin-block: 1.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: clamp(1rem, 3vw, 1.5rem);
+    background: var(--card);
+    overflow-wrap: anywhere;
+  }
+  .rich-content-micro-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    font-size: 0.875rem;
+  }
+  .rich-content-micro-author {
+    font-weight: 700;
+  }
+  .rich-content .rich-content-micro-date {
+    color: var(--muted-foreground);
+    font-weight: 400;
+  }
+  .rich-content-micro-body > :last-child {
+    margin-bottom: 0;
+  }
   .rich-content-unavailable,
   .rich-content-unsupported {
     border-left: 3px solid var(--muted-foreground);

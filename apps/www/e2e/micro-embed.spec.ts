@@ -9,10 +9,23 @@ test('native micro card is readable, responsive and links to the original note',
   await expect(card).toContainText('Some records stay with you.')
   await expect(card.locator('strong')).toHaveText('local note')
   await expect(card.locator('.rich-content-micro-author')).not.toBeEmpty()
-  await expect(card.locator('.rich-content-micro-handle')).toContainText('@local-creator')
-  await expect(card.getByRole('link', { name: 'View original note on GBFM' })).toHaveText(
-    'View note',
+  await expect(card.getByRole('link', { name: 'View original note on GBFM' })).toContainText(
+    /\w+ \d+, \d{4}/,
   )
+  const avatar = card.getByRole('img', { name: "Local Creator's avatar" })
+  await expect(avatar).toBeVisible()
+  await expect(avatar).toHaveAttribute('sizes', /^(36|40)px$/)
+  await expect
+    .poll(() =>
+      avatar.evaluate((element) => element instanceof HTMLImageElement && element.naturalWidth > 0),
+    )
+    .toBe(true)
+  await expect(card.getByRole('link', { name: 'Local Creator', exact: true })).toHaveAttribute(
+    'href',
+    '/profile/local-creator',
+  )
+  await expect(card.locator('footer')).toHaveCount(0)
+  await expect(card).not.toContainText('GBFM note')
   await expect(card.locator('iframe')).toHaveCount(0)
   await expect(page.getByText('Before the note.')).toBeVisible()
   await expect(page.getByText('After the note.')).toBeVisible()
@@ -27,7 +40,7 @@ test('native micro card is readable, responsive and links to the original note',
   await expect(page.getByText('Some records stay with you.', { exact: false })).toBeVisible()
 })
 
-test('micro card keeps readable typography and a compact footer across narrow and wide layouts', async ({
+test('micro card keeps its photo, text and date readable across narrow and wide layouts', async ({
   page,
 }) => {
   await page.goto('/editorial/e2e-micro-editorial')
@@ -38,8 +51,9 @@ test('micro card keeps readable typography and a compact footer across narrow an
     await page.setViewportSize({ width, height: 900 })
     const layout = await card.evaluate((element) => {
       const body = element.querySelector('.rich-content-micro-body p')
-      const link = element.querySelector('.rich-content-micro-footer a')
-      if (!body || !link) throw new Error('Expected note body and footer link')
+      const link = element.querySelector('a[aria-label="View original note on GBFM"]')
+      const avatar = element.querySelector('img')
+      if (!body || !link || !avatar) throw new Error('Expected note body, photo and permalink')
       const bounds = element.getBoundingClientRect()
       const linkBounds = link.getBoundingClientRect()
 
@@ -49,14 +63,17 @@ test('micro card keeps readable typography and a compact footer across narrow an
         noHorizontalOverflow: element.scrollWidth <= element.clientWidth,
         linkFits: linkBounds.left >= bounds.left && linkBounds.right <= bounds.right,
         bodyFontSize: Number.parseFloat(getComputedStyle(body).fontSize),
-        footerFontSize: Number.parseFloat(getComputedStyle(link).fontSize),
+        dateFontSize: Number.parseFloat(getComputedStyle(link).fontSize),
+        avatarWidth: avatar.getBoundingClientRect().width,
       }
     })
     expect(layout.fits).toBe(true)
     expect(layout.noHorizontalOverflow).toBe(true)
     expect(layout.linkFits).toBe(true)
     expect(layout.bodyFontSize).toBeGreaterThanOrEqual(14)
-    expect(layout.footerFontSize).toBeLessThan(layout.bodyFontSize)
+    expect(layout.dateFontSize).toBeLessThan(layout.bodyFontSize)
+    expect(layout.avatarWidth).toBeGreaterThanOrEqual(32)
+    expect(layout.avatarWidth).toBeLessThanOrEqual(40)
     if (width === 1280) expect(layout.width).toBeLessThanOrEqual(600)
   }
 })

@@ -66,6 +66,8 @@ const [creator] = await database
 
 if (!creator) throw new Error('Local E2E creator was not seeded')
 
+await database.update(user).set({ image: '/fav.png' }).where(eq(user.id, creator.id))
+
 const [show] = await database
   .insert(showsTable)
   .values({

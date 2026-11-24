@@ -132,6 +132,77 @@ test('micro resolution exposes only public micro bodies and their public author 
   )
 })
 
+test('author photos come from the joined user rows in the same query; unsafe photo URLs only drop the photo', async () => {
+  const photographed = randomUUID()
+  const unsafe = randomUUID()
+  const photographedPost = randomUUID()
+  const unsafePost = randomUUID()
+  await db.insert(user).values([
+    {
+      id: photographed,
+      name: 'Photographed author',
+      email: `${photographed}@example.test`,
+      username: 'photographed',
+      image: 'https://cdn.goosebumps.fm/avatars/photographed.webp',
+    },
+    {
+      id: unsafe,
+      name: 'Unsafe photo author',
+      email: `${unsafe}@example.test`,
+      username: 'unsafe-photo',
+      image: 'javascript:alert(1)',
+    },
+  ])
+  await db.insert(postsTable).values([
+    {
+      id: photographedPost,
+      slug: `photographed-${photographedPost}`,
+      type: 'micro',
+      draft: false,
+      content: 'photographed body',
+    },
+    {
+      id: unsafePost,
+      slug: `unsafe-${unsafePost}`,
+      type: 'micro',
+      draft: false,
+      content: 'unsafe photo body',
+    },
+  ])
+  await db.insert(postCreators).values([
+    { postId: photographedPost, creatorId: photographed },
+    { postId: unsafePost, creatorId: unsafe },
+  ])
+  const observed = observedD1(d1)
+
+  const resolver = await Effect.runPromise(
+    withTestLayer(
+      RichContentMicroResolver,
+      RichContentMicroResolverLayer.pipe(Layer.provide(DatabaseLayer(observed.database))),
+    ),
+  )
+
+  const values = await Effect.runPromise(resolver.resolveMany([photographedPost, unsafePost]))
+
+  expect(observed.queries).toHaveLength(1)
+  expect(values.get(photographedPost)).toMatchObject({
+    micro: {
+      authors: [
+        {
+          name: 'Photographed author',
+          username: 'photographed',
+          image: 'https://cdn.goosebumps.fm/avatars/photographed.webp',
+        },
+      ],
+    },
+  })
+  expect(values.get(unsafePost)).toMatchObject({
+    micro: { authors: [{ name: 'Unsafe photo author', username: 'unsafe-photo', image: null }] },
+  })
+  expect(JSON.stringify(values.get(unsafePost))).toContain('unsafe photo body')
+  expect(JSON.stringify([...values.values()])).not.toContain('javascript:')
+})
+
 test('one batch resolves repeated and nested directives; micro bodies never expand recursive references or raw HTML', async () => {
   const observed = observedD1(d1)
   const mdx = await makeMdx(DatabaseLayer(observed.database))

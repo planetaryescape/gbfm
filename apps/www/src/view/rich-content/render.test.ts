@@ -190,9 +190,15 @@ const textContent = (node: VNode): string =>
     .map((child) => (typeof child === 'string' ? child : textContent(child)))
     .join('')
 
+const renderMicroCard = (source: RichContentDocument): VNode => {
+  const rendered = richContentView(source, h)
+
+  return first(findAll(first(rendered === null ? [] : [rendered]), '.rich-content-micro'))
+}
+
 describe('richContentView', () => {
   /* oxlint-disable anti-slop-effect/no-manual-tagged-construction -- This decoded fixture exercises recursive rich-content wire values. */
-  it('renders an attributed micro card with a permalink, without an iframe', () => {
+  it('renders legacy micro metadata with a profile link, date permalink and inline prose links', () => {
     const source = Schema.decodeUnknownSync(RichContentDocument)({
       version: 1,
       blocks: [
@@ -223,23 +229,29 @@ describe('richContentView', () => {
       ],
     })
 
-    const rendered = richContentView(source, h)
-    const view = first(rendered === null ? [] : [rendered])
-    const card = first(findAll(view, '.rich-content-micro'))
+    const card = renderMicroCard(source)
     expect(attribute(card, 'aria-label')).toBe('Embedded note by Guide Fari')
+    expect(hasClass(card, 'not-prose')).toBe(true)
     expect(textContent(card)).toContain('music i know will stay with me forever.')
-    expect(textContent(first(findAll(card, '.rich-content-micro-handle')))).toBe('@guidefari')
-    const date = first(findAll(card, 'time'))
+    expect(findAll(card, 'img')).toHaveLength(0)
+    expect(findAll(card, 'footer')).toHaveLength(0)
+    expect(textContent(card)).not.toMatch(/GBFM note|View note/)
+    const profile = first(findAll(first(findAll(card, '.rich-content-micro-author')), 'a'))
+    expect(textContent(profile)).toBe('Guide Fari')
+    expect(attribute(profile, 'href')).toBe('/profile/guidefari')
+    const permalink = first(findAll(card, '.rich-content-micro-date'))
+    expect(permalink.sel).toBe('a')
+    expect(attribute(permalink, 'href')).toBe('/tweet/canon')
+    expect(attribute(permalink, 'aria-label')).toBe('View original note on GBFM')
+    const date = first(findAll(permalink, 'time'))
     expect(textContent(date)).toBe('Nov 24, 2026')
     expect(attribute(date, 'dateTime')).toBe('2026-11-24T08:25:34.463Z')
-    expect(findAll(card, 'a').length).toBeGreaterThan(0)
-    expect(findAll(card, 'a').every((node) => attribute(node, 'href') === '/tweet/canon')).toBe(
-      true,
-    )
+    const body = first(findAll(card, '.rich-content-micro-body'))
+    expect(findAll(body, 'a').map((node) => attribute(node, 'href'))).toEqual(['/tweet/canon'])
     expect(findAll(card, 'iframe')).toHaveLength(0)
   })
 
-  it('moves the serialized permalink paragraph into the micro card footer', () => {
+  it('renders the author photo and omits only the generated terminal permalink', () => {
     const source = Schema.decodeUnknownSync(RichContentDocument)({
       version: 1,
       blocks: [
@@ -250,12 +262,26 @@ describe('richContentView', () => {
             slug: 'canon',
             title: null,
             createdAt: '2026-11-24T08:25:34.463Z',
-            authors: [{ name: 'Guide Fari', username: 'guidefari' }],
+            authors: [
+              {
+                name: 'Guide Fari',
+                username: 'guidefari',
+                image: 'https://images.example.com/guide.jpg',
+              },
+            ],
           },
           children: [
             {
               _tag: 'Paragraph',
-              children: [{ _tag: 'Text', value: 'music i know will stay with me forever.' }],
+              children: [
+                { _tag: 'Text', value: 'music i know will stay with me forever. ' },
+                {
+                  _tag: 'Link',
+                  href: 'https://example.com/canon',
+                  title: null,
+                  children: [{ _tag: 'Text', value: 'more' }],
+                },
+              ],
             },
             {
               _tag: 'Paragraph',
@@ -273,19 +299,95 @@ describe('richContentView', () => {
       ],
     })
 
-    const rendered = richContentView(source, h)
-    const view = first(rendered === null ? [] : [rendered])
-    const card = first(findAll(view, '.rich-content-micro'))
+    const card = renderMicroCard(source)
+    const avatar = first(findAll(card, 'img'))
+    expect(attribute(avatar, 'src')).toBe('https://images.example.com/guide.jpg')
+    expect(attribute(avatar, 'alt')).toBe("Guide Fari's avatar")
+    expect(attribute(avatar, 'sizes')).toBe('36px')
+    expect(String(attribute(avatar, 'width'))).toBe('36')
+    expect(String(attribute(avatar, 'height'))).toBe('36')
+    expect(attribute(avatar, 'loading')).toBe('lazy')
+    expect(hasClass(avatar, 'artwork')).toBe(true)
     const body = first(findAll(card, '.rich-content-micro-body'))
-    const footer = first(findAll(card, '.rich-content-micro-footer'))
-    expect(textContent(body)).toBe('music i know will stay with me forever.')
-    expect(findAll(body, 'a')).toHaveLength(0)
-    const links = findAll(footer, 'a')
-    expect(links).toHaveLength(1)
-    expect(textContent(first(links))).toBe('View note')
-    expect(attribute(first(links), 'aria-label')).toBe('View original note on GBFM')
-    expect(attribute(first(links), 'href')).toBe('/tweet/canon')
-    expect(hasClass(card, 'not-prose')).toBe(true)
+    expect(textContent(body)).toBe('music i know will stay with me forever. more')
+    expect(findAll(body, 'a').map((node) => attribute(node, 'href'))).toEqual([
+      'https://example.com/canon',
+    ])
+
+    const permalinks = findAll(card, 'a').filter(
+      (node) => attribute(node, 'href') === '/tweet/canon',
+    )
+
+    expect(permalinks).toHaveLength(1)
+    expect(attribute(first(permalinks), 'aria-label')).toBe('View original note on GBFM')
+    expect(findAll(card, 'footer')).toHaveLength(0)
+    expect(source.blocks[0]).toMatchObject({
+      children: [{}, { children: [{ _tag: 'Link', href: '/tweet/canon' }] }],
+    })
+  })
+
+  it('keeps every co-author attributed and shows only the first photo', () => {
+    const source = Schema.decodeUnknownSync(RichContentDocument)({
+      version: 1,
+      blocks: [
+        {
+          _tag: 'Quote',
+          micro: {
+            postId: 'b19847c2-fe58-4fd8-878a-b2faf138dfd7',
+            slug: 'canon',
+            title: null,
+            createdAt: '2026-11-24T08:25:34.463Z',
+            authors: [
+              { name: 'Guide Fari', username: 'guidefari', image: '/first.png' },
+              { name: 'Second Writer', username: null, image: '/second.png' },
+              { name: 'Third Writer', username: 'third', image: null },
+            ],
+          },
+          children: [{ _tag: 'Paragraph', children: [{ _tag: 'Text', value: 'shared note' }] }],
+        },
+      ],
+    })
+
+    const card = renderMicroCard(source)
+    expect(attribute(card, 'aria-label')).toBe(
+      'Embedded note by Guide Fari, Second Writer, Third Writer',
+    )
+    const byline = first(findAll(card, '.rich-content-micro-author'))
+    expect(textContent(byline)).toBe('Guide Fari, Second Writer, Third Writer')
+    expect(findAll(byline, 'a').map((node) => attribute(node, 'href'))).toEqual([
+      '/profile/guidefari',
+      '/profile/third',
+    ])
+    const images = findAll(card, 'img')
+    expect(images).toHaveLength(1)
+    expect(attribute(first(images), 'alt')).toBe("Guide Fari's avatar")
+  })
+
+  it('omits the photo for a null image and rejects unsafe image URLs at the wire boundary', () => {
+    const note = (image: string | null) => ({
+      version: 1,
+      blocks: [
+        {
+          _tag: 'Quote',
+          micro: {
+            postId: 'b19847c2-fe58-4fd8-878a-b2faf138dfd7',
+            slug: 'canon',
+            title: null,
+            createdAt: '2026-11-24T08:25:34.463Z',
+            authors: [{ name: 'Guide Fari', username: 'guidefari', image }],
+          },
+          children: [{ _tag: 'Paragraph', children: [{ _tag: 'Text', value: 'body' }] }],
+        },
+      ],
+    })
+
+    const card = renderMicroCard(Schema.decodeUnknownSync(RichContentDocument)(note(null)))
+    expect(findAll(card, 'img')).toHaveLength(0)
+    expect(findAll(card, '.rich-content-micro-avatar')).toHaveLength(0)
+    expect(textContent(card)).toContain('body')
+    expect(() =>
+      Schema.decodeUnknownSync(RichContentDocument)(note('javascript:alert(1)')),
+    ).toThrow()
   })
   /* oxlint-enable anti-slop-effect/no-manual-tagged-construction */
 

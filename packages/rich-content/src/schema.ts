@@ -96,7 +96,11 @@ export const MicroEmbedMetadata = Schema.Struct({
   title: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   authors: Schema.Array(
-    Schema.Struct({ name: Schema.String, username: Schema.NullOr(Schema.String) }),
+    Schema.Struct({
+      name: Schema.String,
+      username: Schema.NullOr(Schema.String),
+      image: Schema.optionalKey(Schema.NullOr(SafeUrl)),
+    }),
   ),
 })
 

@@ -1,6 +1,6 @@
 import { RICH_CONTENT_LIMITS } from '@gbfm/rich-content/limits'
 /* oxlint-disable anti-slop-effect/no-manual-tagged-construction, anti-slop-effect/no-manual-tag-comparison -- Recursive rich-content wire unions have no generated constructors or matchers. */
-import { type RichContentBlock, MicroEmbedMetadata } from '@gbfm/rich-content/schema'
+import { type RichContentBlock, MicroEmbedMetadata, SafeUrl } from '@gbfm/rich-content/schema'
 import { parseRichContent, type UnresolvedBlock } from '@gbfm/rich-content/source'
 import { and, asc, eq, inArray, sql } from 'drizzle-orm'
 import { Context, Data, Effect, Layer, Schema } from 'effect'
@@ -33,8 +33,13 @@ const MicroRows = Schema.Array(
     createdAt: Schema.Date,
     name: Schema.NullOr(Schema.String),
     username: Schema.NullOr(Schema.String),
+    image: Schema.NullOr(Schema.String),
   }),
 )
+
+const isSafeUrl = Schema.is(SafeUrl)
+
+const avatarUrl = (image: string | null) => (image !== null && isSafeUrl(image) ? image : null)
 
 const omitted = (): RichContentBlock => ({
   _tag: 'UnavailableEmbed',
@@ -91,6 +96,7 @@ export const RichContentMicroResolverLayer = Layer.effect(
               createdAt: postsTable.createdAt,
               name: user.name,
               username: user.username,
+              image: user.image,
             })
             .from(postsTable)
             .leftJoin(postCreators, eq(postCreators.postId, postsTable.id))
@@ -135,7 +141,9 @@ export const RichContentMicroResolverLayer = Layer.effect(
           title: row.title,
           createdAt: row.createdAt.toISOString(),
           authors: records.flatMap((author) =>
-            author.name === null ? [] : [{ name: author.name, username: author.username }],
+            author.name === null
+              ? []
+              : [{ name: author.name, username: author.username, image: avatarUrl(author.image) }],
           ),
         })
 

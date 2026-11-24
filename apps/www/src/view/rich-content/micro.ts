@@ -2,13 +2,18 @@ import type { MicroEmbedMetadata, RichContentBlock } from '@gbfm/rich-content/sc
 import { Predicate } from 'effect'
 import type { Html, HtmlBuilder } from 'foldkit/html'
 
+import { artwork } from '../artwork'
 import { formatDate } from '../format-date'
 
 type Micro = typeof MicroEmbedMetadata.Type
 
-const permalinkLabel = 'View original note on GBFM'
+type Author = Micro['authors'][number]
+
+const avatarSize = 36
 
 const permalinkOf = (micro: Micro) => `/tweet/${encodeURIComponent(micro.slug)}`
+
+const profileHref = (username: string) => `/profile/${encodeURIComponent(username)}`
 
 const isPermalinkParagraph = (block: RichContentBlock, permalink: string): boolean =>
   Predicate.isTagged(block, 'Paragraph') &&
@@ -18,6 +23,21 @@ const isPermalinkParagraph = (block: RichContentBlock, permalink: string): boole
 const displayDate = (createdAt: string) =>
   Number.isNaN(Date.parse(createdAt)) ? createdAt.slice(0, 10) : formatDate(createdAt)
 
+const avatarView = <Message>(author: Author | undefined, h: HtmlBuilder<Message>) =>
+  author?.image
+    ? [
+        h.span(
+          [h.Class('rich-content-micro-avatar')],
+          [
+            artwork(author.image, `${author.name}'s avatar`, `${avatarSize}px`, false, '', {
+              width: avatarSize,
+              height: avatarSize,
+            }),
+          ],
+        ),
+      ]
+    : []
+
 export const microView = <Message>(
   micro: Micro,
   blocks: ReadonlyArray<RichContentBlock>,
@@ -25,71 +45,52 @@ export const microView = <Message>(
   h: HtmlBuilder<Message>,
 ): Html => {
   const authors = micro.authors.map((author) => author.name).join(', ') || 'GBFM'
-
-  const handles = micro.authors.flatMap((author) =>
-    author.username ? [`@${author.username}`] : [],
-  )
-
   const permalink = permalinkOf(micro)
   const last = blocks.at(-1)
 
-  const permalinkBlock =
-    last !== undefined && isPermalinkParagraph(last, permalink) ? last : undefined
+  const bodyBlocks =
+    last !== undefined && isPermalinkParagraph(last, permalink) ? blocks.slice(0, -1) : blocks
 
-  const bodyBlocks = permalinkBlock === undefined ? blocks : blocks.slice(0, -1)
-
-  const date = h.time(
-    [h.Class('rich-content-micro-date'), h.Datetime(micro.createdAt)],
-    [displayDate(micro.createdAt)],
-  )
+  const names =
+    micro.authors.length === 0
+      ? ['GBFM']
+      : micro.authors.flatMap((author, index) => [
+          ...(index === 0 ? [] : [', ']),
+          author.username
+            ? h.a([h.Href(profileHref(author.username))], [author.name])
+            : h.span([], [author.name]),
+        ])
 
   return h.article(
     [h.Class('rich-content-micro not-prose'), h.AriaLabel(`Embedded note by ${authors}`)],
     [
-      h.header(
-        [h.Class('rich-content-micro-header')],
-        [
-          h.span([h.Class('rich-content-micro-author')], [authors]),
-          ...(handles.length === 0
-            ? []
-            : [h.span([h.Class('rich-content-micro-handle')], [handles.join(' ')])]),
-        ],
-      ),
+      ...avatarView(micro.authors[0], h),
       h.div(
-        [h.Class('rich-content-micro-body')],
+        [h.Class('rich-content-micro-main')],
         [
-          ...(micro.title === null
-            ? []
-            : [h.h3([h.Class('rich-content-micro-title')], [micro.title])]),
-          ...bodyBlocks.map(renderBlock),
-        ],
-      ),
-      h.footer(
-        [h.Class('rich-content-micro-footer')],
-        [
-          h.span(
-            [h.Class('rich-content-micro-meta')],
+          h.header(
+            [h.Class('rich-content-micro-header')],
             [
-              h.span([h.Class('rich-content-micro-dot'), h.AriaHidden(true)], []),
-              h.span([h.Class('rich-content-micro-kind')], ['GBFM note']),
-              h.span([h.AriaHidden(true)], ['·']),
-              permalinkBlock === undefined
-                ? h.a([h.Href(permalink), h.Class('rich-content-micro-date-link')], [date])
-                : date,
+              h.span([h.Class('rich-content-micro-author')], names),
+              h.a(
+                [
+                  h.Href(permalink),
+                  h.Class('rich-content-micro-date'),
+                  h.AriaLabel('View original note on GBFM'),
+                ],
+                [h.time([h.Datetime(micro.createdAt)], [displayDate(micro.createdAt)])],
+              ),
             ],
           ),
-          ...(permalinkBlock === undefined
-            ? []
-            : [
-                h.a(
-                  [
-                    h.Href(permalink),
-                    h.Class('rich-content-micro-permalink'),
-                    h.AriaLabel(permalinkLabel),
-                  ],
-                  ['View note'],
-                ),
-              ]),
+          h.div(
+            [h.Class('rich-content-micro-body')],
+            [
+              ...(micro.title === null
+                ? []
+                : [h.h3([h.Class('rich-content-micro-title')], [micro.title])]),
+              ...bodyBlocks.map(renderBlock),
+            ],
+          ),
         ],
       ),
     ],

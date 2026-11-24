@@ -1,3 +1,10 @@
+## [2.139.1](https://github.com/planetaryescape/gbfm/compare/v2.139.0...v2.139.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **www:** give embedded notes a focused native card layout ([cc469cf](https://github.com/planetaryescape/gbfm/commit/cc469cf72f6c2ad4103f3dc0463da24f0eea8a4b))
+
 # [2.139.0](https://github.com/planetaryescape/gbfm/compare/v2.138.0...v2.139.0) (2026-11-24)
 
 

@@ -1,3 +1,10 @@
+## [2.139.2](https://github.com/planetaryescape/gbfm/compare/v2.139.1...v2.139.2) (2026-11-24)
+
+
+### Bug Fixes
+
+* **editorial:** lead embedded notes with author photos and remove footer clutter ([d24cbd9](https://github.com/planetaryescape/gbfm/commit/d24cbd964e9d7b43161116d00080933276bfa5c0))
+
 ## [2.139.1](https://github.com/planetaryescape/gbfm/compare/v2.139.0...v2.139.1) (2026-11-24)
 
 

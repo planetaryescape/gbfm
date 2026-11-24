@@ -1,3 +1,10 @@
+# [2.138.0](https://github.com/planetaryescape/gbfm/compare/v2.137.0...v2.138.0) (2026-11-24)
+
+
+### Features
+
+* **mcp:** expose retry-safe private music reminder commands ([f17f91c](https://github.com/planetaryescape/gbfm/commit/f17f91ca1f70bce20f223d6317a2e45a5ab80316))
+
 # [2.137.0](https://github.com/planetaryescape/gbfm/compare/v2.136.5...v2.137.0) (2026-11-23)
 
 

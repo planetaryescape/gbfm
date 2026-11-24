@@ -284,7 +284,8 @@ await database.insert(postsTable).values([
   {
     id: embeddedMicroId,
     slug: 'e2e-native-micro',
-    content: 'Some records stay with you. This is a **local note** about those records.',
+    content:
+      'Some records stay with you. This is a **local note** about those records: the ones that arrive at the right moment, open a door to a sound you never knew you needed, and quietly keep revealing something new even years after the first listen.',
     type: 'micro',
     draft: false,
   },

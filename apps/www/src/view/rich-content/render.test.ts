@@ -228,11 +228,64 @@ describe('richContentView', () => {
     const card = first(findAll(view, '.rich-content-micro'))
     expect(attribute(card, 'aria-label')).toBe('Embedded note by Guide Fari')
     expect(textContent(card)).toContain('music i know will stay with me forever.')
-    expect(textContent(card)).toContain('2026-11-24')
+    expect(textContent(first(findAll(card, '.rich-content-micro-handle')))).toBe('@guidefari')
+    const date = first(findAll(card, 'time'))
+    expect(textContent(date)).toBe('Nov 24, 2026')
+    expect(attribute(date, 'dateTime')).toBe('2026-11-24T08:25:34.463Z')
+    expect(findAll(card, 'a').length).toBeGreaterThan(0)
     expect(findAll(card, 'a').every((node) => attribute(node, 'href') === '/tweet/canon')).toBe(
       true,
     )
     expect(findAll(card, 'iframe')).toHaveLength(0)
+  })
+
+  it('moves the serialized permalink paragraph into the micro card footer', () => {
+    const source = Schema.decodeUnknownSync(RichContentDocument)({
+      version: 1,
+      blocks: [
+        {
+          _tag: 'Quote',
+          micro: {
+            postId: 'b19847c2-fe58-4fd8-878a-b2faf138dfd7',
+            slug: 'canon',
+            title: null,
+            createdAt: '2026-11-24T08:25:34.463Z',
+            authors: [{ name: 'Guide Fari', username: 'guidefari' }],
+          },
+          children: [
+            {
+              _tag: 'Paragraph',
+              children: [{ _tag: 'Text', value: 'music i know will stay with me forever.' }],
+            },
+            {
+              _tag: 'Paragraph',
+              children: [
+                {
+                  _tag: 'Link',
+                  href: '/tweet/canon',
+                  title: null,
+                  children: [{ _tag: 'Text', value: 'View original note on GBFM' }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+
+    const rendered = richContentView(source, h)
+    const view = first(rendered === null ? [] : [rendered])
+    const card = first(findAll(view, '.rich-content-micro'))
+    const body = first(findAll(card, '.rich-content-micro-body'))
+    const footer = first(findAll(card, '.rich-content-micro-footer'))
+    expect(textContent(body)).toBe('music i know will stay with me forever.')
+    expect(findAll(body, 'a')).toHaveLength(0)
+    const links = findAll(footer, 'a')
+    expect(links).toHaveLength(1)
+    expect(textContent(first(links))).toBe('View note')
+    expect(attribute(first(links), 'aria-label')).toBe('View original note on GBFM')
+    expect(attribute(first(links), 'href')).toBe('/tweet/canon')
+    expect(hasClass(card, 'not-prose')).toBe(true)
   })
   /* oxlint-enable anti-slop-effect/no-manual-tagged-construction */
 

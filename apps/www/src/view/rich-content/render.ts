@@ -547,11 +547,7 @@ export const blockView = <Message>(
       return listView(block, h)
     case 'Quote':
       if (block.micro)
-        return microView(
-          block.micro,
-          block.children.map((child) => blockView(child, h)),
-          h,
-        )
+        return microView(block.micro, block.children, (child) => blockView(child, h), h)
 
       return h.blockquote(
         [],

@@ -35,6 +35,10 @@ import { EditorialMcpSettings } from '@/mcp/model'
 import { MusicImportLiveGrant } from '@/mcp/music-import/execution-authority'
 import { MusicImportHandlersLive, MusicImportToolkit } from '@/mcp/music-import/toolkit'
 import { McpArtworkStoreLayer } from '@/mcp/operations/staged-store'
+import {
+  ReminderCommandToolkit,
+  ReminderCommandToolHandlersLayer,
+} from '@/mcp/reminders/command-toolkit'
 import { ReminderReadServiceLayer } from '@/mcp/reminders/reads'
 import { ReminderToolkit, ReminderToolHandlersLayer } from '@/mcp/reminders/toolkit'
 import {
@@ -513,6 +517,7 @@ export const EditorialMcpRoutesLive = makeMcpRoutes(
     ListeningToolkit,
     FavoritesToolkit,
     ReminderToolkit,
+    ReminderCommandToolkit,
     AdminReadToolkit,
     MusicImportToolkit,
   ),
@@ -530,6 +535,7 @@ export const EditorialMcpRoutesLive = makeMcpRoutes(
       Layer.provide(McpAuthorizationLive),
     ),
     ReminderToolHandlersLayer.pipe(Layer.provide(ReminderReadServiceLayer)),
+    ReminderCommandToolHandlersLayer,
     AdminReadToolHandlersLayer.pipe(Layer.provide(AdminReadServiceLayer)),
     MusicImportHandlersLive.pipe(
       Layer.provide(Layer.unwrap(Effect.map(Database, (db) => McpArtworkStoreLayer(db.$client)))),

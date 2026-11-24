@@ -169,10 +169,38 @@ enabled resource policy; production allowedScopes remains unchanged:
 - list_show_subscriptions: your subscriptions to currently public shows; requires subscriptions:read.
 - list_music_reminders: your reminder summaries, without notes or source URLs; requires reminders:read.
 - get_admin_overview: fixed draft/published publishing counts; requires admin:read and a current admin role.
-These reads do not change library state or send notifications. Listening, favorite,
-subscription and reminder commands are not registered, even with write grants.
+These reads do not change library state or send notifications. Listening, favorite
+and subscription commands are not registered, even with write grants.
 Existing grants do not gain these permissions automatically. Admin access is checked
 live; demotion, bans and connection revocation do not wait for token expiry.
+
+## Private music reminders
+
+Reminder commands require separately granted reminders:write:
+- create_music_reminder: schedule a private reminder email to your own account.
+- reschedule_music_reminder: change an unsent reminder's scheduled time.
+- cancel_music_reminder: cancel before delivery may have started.
+
+Ask the user for a date, time and timezone if they have not supplied them. Convert
+the agreed time to a calendar-valid UTC reminderDate ending in Z. Never infer a
+schedule from a listening intention alone. Owner and recipient come from the
+authenticated account, not caller-supplied fields.
+
+Save a UUIDv4 requestId and the exact input before each command. Identical retries
+within 24 hours return the original receipt, even after a later edit or cancellation.
+Changed input with the same key conflicts; expired keys never execute again.
+Success acknowledges a durable schedule or cancellation, not email delivery.
+Existing queue/sweep recovery remains at-least-once, so duplicate email is possible
+after provider acceptance followed by a failed terminal write.
+
+Reschedule and cancel require expectedRevision from the commandRevision observed
+when reading the reminder. Stale intent conflicts; do not silently reread a revision
+and retry the old command. A delivery_may_have_started conflict means cancellation
+cannot promise recall. Cancellation retains a private tombstone.
+
+Read and write permissions are independent. reminders:write does not grant
+list_music_reminders. Registration does not change production resource policy or
+existing grants; enable approved permissions explicitly, then obtain fresh consent.
 
 ## Other clients, including Claude Code
 

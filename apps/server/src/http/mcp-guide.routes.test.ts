@@ -78,7 +78,15 @@ test.each([
       expect(text).toContain(`- ${name}:`)
     }
 
-    expect(text).toContain('reminder commands are not registered, even with write grants')
+    for (const name of [
+      'create_music_reminder',
+      'reschedule_music_reminder',
+      'cancel_music_reminder',
+    ])
+      expect(text).toContain(`- ${name}:`)
+    expect(text).toContain('Reminder commands require separately granted reminders:write')
+    expect(text).toContain('Never infer a')
+    expect(text).toContain('delivery_may_have_started')
     expect(text).toContain('Existing connections remain read-only')
     expect(text).toContain('never publish, delete, change creators or edit published posts')
     expect(text).toContain('/mcps')

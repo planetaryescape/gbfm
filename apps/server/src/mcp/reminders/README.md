@@ -1,5 +1,32 @@
 # Reminder MCP lane (#538)
 
+## MCP command exposure, 2026-11-24
+
+The production registry now composes `ReminderCommandToolkit` and its handlers
+from `command-toolkit.ts`. Create, reschedule and cancel delegate to the existing
+`ReminderCommandService` and its atomic operation receipts. The runtime already
+provides that service with the same D1 binding and operation store used by HTTP
+commands. No schema, scheduler, resource-policy or existing-grant change is made
+by registering these tools.
+
+Commands require `reminders:write`, independently of `reminders:read`. The
+resource policy must explicitly allow those scopes and the user must grant them.
+Recipient and owner remain actor-derived. Callers must agree a time with the user,
+send explicit UTC and save the exact request identity before calling.
+Reschedule and cancellation retain observed-revision and dispatch-fence semantics.
+Success is a durable command receipt, not proof of email delivery. Existing
+at-least-once delivery and its provider-acceptance crash window remain unchanged.
+
+`http/mcp-reminders.d1.test.ts` verifies the actual production registry and runtime
+through persisted OAuth and migrated local D1: independent consent, listener
+eligibility, concurrent create/restart replay, changed-input conflicts, stale and
+missing revisions, foreign ownership, cancellation tombstones, post-dispatch
+non-recall and policy revocation. Existing reminder service and processor tests
+cover both sides of dispatch arbitration and operation expiry.
+
+The earlier implementation checkpoints below are historical. Their statements
+that command tools are withheld are superseded by this section.
+
 Partial delivery on P1 #548, exact prerequisite
 `2d1b5592826e66e3a198dc117c153e062264fc5c`. No production registration,
 OAuth policy, schema or scheduler changes are included. #538 stays open.

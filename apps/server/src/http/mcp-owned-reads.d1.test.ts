@@ -193,6 +193,12 @@ test('central owned reads and membership commands isolate grants and owners unde
 
   const membershipCommands = ['set_favorite', 'set_show_subscription']
 
+  const reminderCommands = [
+    'create_music_reminder',
+    'reschedule_music_reminder',
+    'cancel_music_reminder',
+  ]
+
   const listed = async (token: typeof reader.access_token) =>
     Schema.decodeUnknownSync(ToolList)(await (await rpc(token)).json()).result.tools.map(
       ({ name }) => name,
@@ -200,14 +206,16 @@ test('central owned reads and membership commands isolate grants and owners unde
 
   try {
     expect(await listed(reader.access_token)).toEqual(privateNames)
-    expect(await listed(writer.access_token)).toEqual(membershipCommands)
-    // Both read AND write grants expose the two implemented setters, not other pending commands.
+    expect((await listed(writer.access_token)).toSorted()).toEqual(
+      [...membershipCommands, ...reminderCommands].toSorted(),
+    )
     expect((await listed(admin.access_token)).toSorted()).toEqual(
       [
         'list_drafts',
         'get_post',
         ...privateNames,
         ...membershipCommands,
+        ...reminderCommands,
         'get_admin_overview',
       ].toSorted(),
     )
@@ -221,7 +229,7 @@ test('central owned reads and membership commands isolate grants and owners unde
       })
     }
 
-    for (const name of membershipCommands) {
+    for (const name of [...membershipCommands, ...reminderCommands]) {
       expect(await (await rpc(reader.access_token, name)).json()).toMatchObject({
         result: { isError: true, content: [{ text: expect.stringContaining('access_denied') }] },
       })

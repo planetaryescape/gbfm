@@ -1119,6 +1119,7 @@ test('R3 public reads compose with persisted listener OAuth and legacy drafts wi
           'posts:read',
           'providers:read',
           'reminders:read',
+          'reminders:write',
           'subscriptions:read',
           'subscriptions:write',
         ],

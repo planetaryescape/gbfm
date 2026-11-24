@@ -7,7 +7,6 @@ import { McpToolError } from '@/mcp/contracts'
 import { ListMusicRemindersInput, ListMusicRemindersResult } from './contracts'
 import { ReminderReadService } from './reads'
 
-/** Only the safe read is exposed. Scheduling awaits durable command guards. */
 export const ReminderToolkit = Toolkit.make(
   Tool.make('list_music_reminders', {
     description:
@@ -25,7 +24,6 @@ export const ReminderToolkit = Toolkit.make(
     .annotate(Tool.Strict, true),
 )
 
-/** P1 composes this layer and toolkit; production registration is not changed here. */
 export const ReminderToolHandlersLayer = ReminderToolkit.toLayer(
   Effect.gen(function* () {
     const reminders = yield* ReminderReadService

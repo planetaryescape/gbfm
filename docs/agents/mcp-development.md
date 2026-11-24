@@ -27,6 +27,11 @@ Own that handoff instead of asking the user to diagnose missing tools.
    `/mcps` sign-in flow. Do not run interactive `opencode mcp auth` in an agent shell.
    The user may run `opencode mcp auth gbfm` themselves in their terminal.
    Do not delete the server configuration or log out as the first step.
+   Before handing off a consent link, verify its `scope` parameter includes the
+   approved additions. A loaded integration can still request old scopes after
+   its configuration file changes. If they differ, refresh only that server's
+   runtime configuration through the supported MCP management API, preserving
+   credentials. Do not send the user through another flow requesting the old grant.
 6. Have the user approve additional permissions through the secure consent UI.
    Reuse an existing browser session where possible; new consent need not mean
    entering a password again. Never approve on their behalf or surface credentials

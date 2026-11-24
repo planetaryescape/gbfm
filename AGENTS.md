@@ -28,3 +28,7 @@ Single-context. See `docs/agents/domain.md`.
 ### Drizzle queries
 
 Relational-query rules and the generated-SQL test strategy. See `docs/agents/drizzle-queries.md`.
+
+### MCP development
+
+Own post-deploy policy, consent and tool-discovery verification without deleting working connections. See `docs/agents/mcp-development.md`.

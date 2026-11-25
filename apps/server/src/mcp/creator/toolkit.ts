@@ -13,6 +13,7 @@ import {
   ListCreatorDraftsInput,
   ListCreatorDraftsResult,
   PublishEditorialInput,
+  QuoteMicroPostInput,
   ReplyToMicroPostInput,
   UnpublishContentInput,
   UpdateCreatorMetadataInput,
@@ -65,6 +66,20 @@ export const CreatorToolkit = Toolkit.make(
     description:
       'Publish a canonical reply as yourself to a public micro. Requires separately consented micros:publish, canonical parentPostId and UUIDv4 requestId. The complete public, unbanned ancestor chain is checked inside the INSERT; server derives root and depth, capped at8. No private-media copy or notification. Identical retries return one original reply and its shared PostVersion.',
     parameters: ReplyToMicroPostInput,
+    success: CreatorCommandResult,
+    failure: McpToolError,
+    failureMode: 'return',
+  })
+    .annotate(McpPermission, { scopes: ['micros:publish'] })
+    .annotate(Tool.Readonly, false)
+    .annotate(Tool.Destructive, true)
+    .annotate(Tool.Idempotent, true)
+    .annotate(Tool.OpenWorld, false)
+    .annotate(Tool.Strict, true),
+  Tool.make('quote_micro_post', {
+    description:
+      'Publish a native top-level quote-tweet as yourself with exact content and quotedPostId, never a reply or source edit. Requires micros:publish and UUIDv4 requestId. The quoted micro and its complete ancestor chain must be public and unbanned, checked again inside the INSERT. No provider calls, media copying or notifications. Identical retries within 24 hours return one original quote and its shared PostVersion; changed input conflicts and expired keys never publish again.',
+    parameters: QuoteMicroPostInput,
     success: CreatorCommandResult,
     failure: McpToolError,
     failureMode: 'return',
@@ -128,6 +143,7 @@ export const CreatorToolHandlersLayer = CreatorToolkit.toLayer(
       update_creator_metadata: service.updateCreatorMetadata,
       create_micro_post: service.createMicroPost,
       reply_to_micro_post: service.replyToMicroPost,
+      quote_micro_post: service.quoteMicroPost,
       publish_editorial: service.publishEditorial,
       unpublish_content: service.unpublishContent,
       delete_content: service.deleteContent,
@@ -138,6 +154,7 @@ export const CreatorToolHandlersLayer = CreatorToolkit.toLayer(
 export const PublishingToolkit = Toolkit.make(
   CreatorToolkit.tools.create_micro_post,
   CreatorToolkit.tools.reply_to_micro_post,
+  CreatorToolkit.tools.quote_micro_post,
   CreatorToolkit.tools.publish_editorial,
 )
 
@@ -148,6 +165,7 @@ export const PublishingToolHandlersLayer = PublishingToolkit.toLayer(
     return {
       create_micro_post: service.createMicroPost,
       reply_to_micro_post: service.replyToMicroPost,
+      quote_micro_post: service.quoteMicroPost,
       publish_editorial: service.publishEditorial,
     }
   }),

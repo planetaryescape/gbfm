@@ -5,7 +5,11 @@ import { Effect, Schema } from 'effect'
 import { Database } from '@/db/layer'
 import { validateCanonicalContent } from '@/lib/mdx'
 import { McpToolError, PostSlug } from '@/mcp/contracts'
-import { CreateMicroPostInput, ReplyToMicroPostInput } from '@/mcp/creator/contracts'
+import {
+  CreateMicroPostInput,
+  QuoteMicroPostInput,
+  ReplyToMicroPostInput,
+} from '@/mcp/creator/contracts'
 import { EditorialMcpConfig } from '@/mcp/editorial'
 import { loadEditorialSnapshot } from '@/mcp/editorial-music/snapshot'
 import { projectPost } from '@/mcp/model'
@@ -22,18 +26,35 @@ const invalid = () =>
 
 /** No writes, provider calls, rendering, notifications or media publication during preparation. */
 export const prepareCreatorMicro = Effect.fn('CreatorCommand.prepareMicro')(function* (options: {
-  readonly input: typeof CreateMicroPostInput.Type | typeof ReplyToMicroPostInput.Type
+  readonly input:
+    | typeof CreateMicroPostInput.Type
+    | typeof ReplyToMicroPostInput.Type
+    | typeof QuoteMicroPostInput.Type
   readonly actorId: string
   readonly now: Date
 }) {
   const config = yield* EditorialMcpConfig
 
   const input = yield* Schema.decodeUnknownEffect(
-    Schema.Union([ReplyToMicroPostInput, CreateMicroPostInput]),
+    Schema.Union([ReplyToMicroPostInput, QuoteMicroPostInput, CreateMicroPostInput]),
     {
       onExcessProperty: 'error',
     },
   )(options.input).pipe(Effect.mapError(invalid))
+
+  const quotedPostId = 'quotedPostId' in input ? input.quotedPostId : null
+
+  if (quotedPostId) {
+    const db = yield* Database
+
+    const quoted = yield* Effect.tryPromise({
+      try: () => db.get(publicMicroAncestorQuery(quotedPostId)),
+      catch: () => new McpToolError({ code: 'unavailable', message: 'Quote unavailable.' }),
+    })
+
+    if (!quoted)
+      return yield* new McpToolError({ code: 'not_found', message: 'Quoted micro unavailable.' })
+  }
 
   const thread = yield* Effect.gen(function* () {
     if (!('parentPostId' in input)) return { parentPostId: null, rootPostId: null, depth: 0 }
@@ -101,7 +122,7 @@ export const prepareCreatorMicro = Effect.fn('CreatorCommand.prepareMicro')(func
       createdAt: options.now,
       updatedAt: options.now,
       ...thread,
-      quotedPostId: null,
+      quotedPostId,
       musicEntityType: null,
       musicEntityId: null,
       musicReferencesManaged: false,
@@ -137,7 +158,7 @@ export const prepareCreatorMicro = Effect.fn('CreatorCommand.prepareMicro')(func
       musicReferencesManaged: false,
       musicReferences: { references: [], primary: null },
       ...thread,
-      quotedPostId: null,
+      quotedPostId,
     },
     config,
   ).pipe(Effect.mapError(invalid))

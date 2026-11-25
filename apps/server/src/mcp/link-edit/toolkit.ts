@@ -1,8 +1,12 @@
-import { Clock, Effect, Schema } from 'effect'
+import { Clock, Effect, Option, Schema } from 'effect'
 import { Tool, Toolkit } from 'effect/ai'
 
+import type { Database } from '@/db/layer'
+
 import { McpPermission } from '../authorization'
+import { CommandAuthority } from '../command-authority'
 import { McpToolError } from '../contracts'
+import type { McpOperationStore } from '../operations/store'
 import { AttachLinkInput, LinkEditResult, ReleaseLinkInput } from './contracts'
 import { applyMusicLink } from './executor'
 
@@ -10,7 +14,7 @@ import { applyMusicLink } from './executor'
 export const LinkEditToolkit = Toolkit.make(
   Tool.make('attach_music_link', {
     description:
-      'Attach one safe source to an existing artist, album or track using an observed parent revision and UUIDv4 retry key. Does not overwrite different URLs or resurrect rejected links; explicitly remove then attach. No imports, providers, playlists, labels, metadata or artwork changes.',
+      'Attach one exact, admin-attested verified streaming/source URL to an existing native artist, album or track. Requires admin and catalogue:write, observed expectedRevision and UUIDv4 requestId. Supports Tidal, Apple Music and Bandcamp through the canonical URL parser. No remote fetch or independent verification: supply an already checked exact link, never a guessed release match. Does not overwrite different URLs or resurrect rejected links. No imports or metadata/artwork changes. Identical retries replay the original committed revision for 24 hours; changed input conflicts and expired keys never write again.',
     parameters: AttachLinkInput,
     success: LinkEditResult,
     failure: McpToolError,
@@ -52,6 +56,8 @@ export const LinkEditToolkit = Toolkit.make(
     .annotate(Tool.Strict, true),
 )
 
+export const MusicLinkAttachmentToolkit = Toolkit.make(LinkEditToolkit.tools.attach_music_link)
+
 const apply = Effect.fn('LinkEdit.tool')(function* (
   input: typeof ReleaseLinkInput.Type | typeof AttachLinkInput.Type,
   change:
@@ -86,23 +92,34 @@ const apply = Effect.fn('LinkEdit.tool')(function* (
 
 export const LinkEditHandlersLayer = LinkEditToolkit.toLayer(
   Effect.gen(function* () {
-    const context = yield* Effect.context<Effect.Services<ReturnType<typeof apply>>>()
+    const context = yield* Effect.context<Database | McpOperationStore>()
+
+    const execute = Effect.fn('LinkEdit.execute')(function* (...args: Parameters<typeof apply>) {
+      const authority = yield* Effect.serviceOption(CommandAuthority)
+
+      if (Option.isNone(authority))
+        return yield* new McpToolError({
+          code: 'access_denied',
+          message: 'Command authority required.',
+        })
+
+      return yield* apply(...args).pipe(
+        Effect.provideService(CommandAuthority, authority.value),
+        Effect.provideContext(context),
+      )
+    })
 
     return {
       attach_music_link: (input) =>
-        apply(input, {
+        execute(input, {
           operation: 'attach_music_link',
           platform: input.platform,
           url: input.url,
-        }).pipe(Effect.provideContext(context)),
+        }),
       reject_music_link: (input) =>
-        apply(input, { operation: 'reject_music_link', linkId: input.linkId }).pipe(
-          Effect.provideContext(context),
-        ),
+        execute(input, { operation: 'reject_music_link', linkId: input.linkId }),
       remove_music_link: (input) =>
-        apply(input, { operation: 'remove_music_link', linkId: input.linkId }).pipe(
-          Effect.provideContext(context),
-        ),
+        execute(input, { operation: 'remove_music_link', linkId: input.linkId }),
     }
   }),
 )

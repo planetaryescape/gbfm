@@ -27,7 +27,12 @@ test('production registry exposes only consented publishing tools, not candidate
   )
 
   expect(publishedScopes).toEqual(
-    expect.arrayContaining(['create_micro_post', 'reply_to_micro_post', 'publish_editorial']),
+    expect.arrayContaining([
+      'create_micro_post',
+      'reply_to_micro_post',
+      'quote_micro_post',
+      'publish_editorial',
+    ]),
   )
 
   for (const name of ['delete_content', 'unpublish_content', 'update_creator_metadata'])
@@ -38,6 +43,7 @@ test('production registry exposes only consented publishing tools, not candidate
   ).result.tools.map((tool) => tool.name)
 
   expect(oldScopes).not.toContain('create_micro_post')
+  expect(oldScopes).not.toContain('quote_micro_post')
   expect(oldScopes).not.toContain('publish_editorial')
   expect(
     (
@@ -49,6 +55,155 @@ test('production registry exposes only consented publishing tools, not candidate
     ).body,
   ).toMatchObject(error('access_denied'))
   expect(await h.db.select().from(postsTable)).toEqual([])
+}, 30_000)
+
+test('native quotes preserve exact content, original source and top-level semantics across concurrent replay and restart', async () => {
+  await using h = await publishingFixture()
+
+  const source = h.result(
+    (
+      await h.call('create_micro_post', {
+        requestId: crypto.randomUUID(),
+        content: 'Original source',
+      })
+    ).body,
+  )
+
+  const before = await h.db
+    .select()
+    .from(postsTable)
+    .where(eq(postsTable.id, source.target.targetId))
+
+  const input = {
+    requestId: crypto.randomUUID(),
+    quotedPostId: source.target.targetId,
+    content: 'Exact quote text.\n\nSecond paragraph.',
+  }
+
+  const quotes = await Promise.all(
+    [1, 2].map(async (id) =>
+      h.result((await h.call('quote_micro_post', input, h.publisher.access_token, id)).body),
+    ),
+  )
+
+  expect(quotes[0]?.target).toEqual(quotes[1]?.target)
+  const quote = quotes[0]
+
+  if (!quote) throw new Error('Missing quote')
+
+  if (!('version' in quote.target)) throw new Error('Missing quote version')
+  expect(
+    await h.db.select().from(postsTable).where(eq(postsTable.id, quote.target.targetId)),
+  ).toMatchObject([
+    {
+      quotedPostId: input.quotedPostId,
+      content: input.content,
+      parentPostId: null,
+      rootPostId: null,
+      depth: 0,
+      draft: false,
+    },
+  ])
+  expect(
+    await h.db.select().from(postsTable).where(eq(postsTable.id, source.target.targetId)),
+  ).toEqual(before)
+  expect(await h.db.select().from(postsTable)).toHaveLength(2)
+  expect(await h.db.select().from(mcpOperations)).toHaveLength(2)
+  expect((await h.version(quote.target.targetId)).version).toBe(quote.target.version)
+  await h.restart()
+  expect(h.result((await h.call('quote_micro_post', input)).body)).toMatchObject({
+    replayed: true,
+    target: quote.target,
+  })
+  expect((await h.call('quote_micro_post', { ...input, content: 'Changed' })).body).toMatchObject(
+    error('conflict'),
+  )
+  const read = await h.publicRead(`/api/content/posts/micro/by-id/${quote.target.targetId}`)
+  expect(read.status).toBe(200)
+  const body = JSON.stringify(await read.json())
+  expect(body).toContain(input.quotedPostId)
+  const screenPath = `/api/content/posts/micro/micro-${quote.target.targetId}/screen`
+  const screen = await h.publicRead(screenPath)
+  expect(screen.status).toBe(200)
+  expect(JSON.stringify(await screen.json())).toContain('Original source')
+  await h.db.update(postsTable).set({ draft: true }).where(eq(postsTable.id, input.quotedPostId))
+  const hidden = await h.publicRead(screenPath)
+  expect(hidden.status).toBe(404)
+  expect(JSON.stringify(await hidden.json())).not.toContain('Original source')
+  expect(h.copies).toEqual([])
+  await createMcpOperationStore(h.database).pruneExpired(Date.now() + 86_400_001)
+  expect((await h.call('quote_micro_post', input)).body).toMatchObject(error('expired'))
+  expect(await h.db.select().from(postsTable)).toHaveLength(2)
+}, 60_000)
+
+test('quotes refuse missing, private, non-micro and moderated targets and do not accept reply fields', async () => {
+  await using h = await publishingFixture()
+  const id = crypto.randomUUID()
+  const input = { requestId: crypto.randomUUID(), quotedPostId: id, content: 'Quote' }
+  expect((await h.call('quote_micro_post', input)).body).toMatchObject(error('not_found'))
+  await h.db
+    .insert(postsTable)
+    .values({ id, slug: id, type: 'post', draft: false, content: 'Source' })
+  await h.db.insert(postCreators).values({ postId: id, creatorId: 'other' })
+  expect((await h.call('quote_micro_post', input)).body).toMatchObject(error('not_found'))
+  await h.db.update(postsTable).set({ type: 'micro', draft: true }).where(eq(postsTable.id, id))
+  expect((await h.call('quote_micro_post', input)).body).toMatchObject(error('not_found'))
+  await h.db.update(postsTable).set({ draft: false }).where(eq(postsTable.id, id))
+  await h.db.update(user).set({ banned: true }).where(eq(user.id, 'other'))
+  expect((await h.call('quote_micro_post', input)).body).toMatchObject(error('not_found'))
+  await h.db.update(user).set({ banned: false }).where(eq(user.id, 'other'))
+  expect((await h.call('quote_micro_post', { ...input, parentPostId: id })).body).toMatchObject({
+    result: { isError: true },
+  })
+  expect((await h.call('quote_micro_post', input, h.reader.access_token)).body).toMatchObject(
+    error('access_denied'),
+  )
+  expect(await h.db.select().from(postsTable)).toHaveLength(1)
+  expect(await h.db.select().from(mcpOperations)).toEqual([])
+}, 30_000)
+
+test('quotes recheck source ancestry inside INSERT and roll back a hidden-root race', async () => {
+  await using h = await publishingFixture()
+  const root = crypto.randomUUID()
+  const reply = crypto.randomUUID()
+  await h.db.insert(postsTable).values([
+    { id: root, slug: root, type: 'micro', content: 'Root', draft: false },
+    {
+      id: reply,
+      slug: reply,
+      type: 'micro',
+      content: 'Reply',
+      draft: false,
+      parentPostId: root,
+      rootPostId: root,
+      depth: 1,
+    },
+  ])
+  await h.db.insert(postCreators).values([
+    { postId: root, creatorId: 'other' },
+    { postId: reply, creatorId: 'other' },
+  ])
+  const input = { requestId: crypto.randomUUID(), quotedPostId: reply, content: 'Quote a reply' }
+  const before = await h.db.select().from(postsTable)
+  await h.database
+    .prepare(`CREATE TRIGGER hide_quote_root AFTER INSERT ON mcp_operations
+    BEGIN UPDATE posts SET draft=1 WHERE id='${root}'; END`)
+    .run()
+  await h.database
+    .prepare(`CREATE TRIGGER restore_quote_root AFTER INSERT ON posts
+    WHEN NEW.quoted_post_id='${reply}'
+    BEGIN UPDATE posts SET draft=0 WHERE id='${root}'; END`)
+    .run()
+  expect((await h.call('quote_micro_post', input)).body).toMatchObject({
+    result: { isError: true },
+  })
+  expect(await h.db.select().from(postsTable)).toEqual(before)
+  expect(await h.db.select().from(mcpOperations)).toEqual([])
+  await h.database.prepare('DROP TRIGGER hide_quote_root').run()
+  const quote = h.result((await h.call('quote_micro_post', input)).body)
+  expect(
+    await h.db.select().from(postsTable).where(eq(postsTable.id, quote.target.targetId)),
+  ).toMatchObject([{ quotedPostId: reply, parentPostId: null, rootPostId: null, depth: 0 }])
 }, 30_000)
 
 test('lost micro acknowledgements, concurrent retries and a new handler return one persisted post and receipt', async () => {

@@ -113,6 +113,27 @@ Draft tools never publish, delete, change creators or edit published posts.
 They do not control playback or access your private listening library.
 Review and publishing stay in GBFM.
 
+## Native quotes and verified catalogue links
+
+- quote_micro_post: publish a native top-level quote-tweet with exact content and
+  quotedPostId. Requires micros:publish. It does not reply to or edit the source.
+  The quoted micro and its ancestor chain must be public and unbanned at commit.
+- attach_music_link: attach one already checked exact streaming/source URL to an
+  existing native artist, album or track. Requires admin and catalogue:write,
+  entityType, entityId, platform, url and an observed expectedRevision from the
+  entity's API response. Tidal, Apple Music and Bandcamp are supported.
+  This is manual admin-attested verification, not remote provider verification.
+  It never fetches URLs, guesses release matches, imports entities, overwrites
+  different existing links or restores rejected links.
+
+Both commands require a UUIDv4 requestId generated once per intended operation.
+After a timeout reuse identical arguments and requestId. Replays return the
+original acknowledgement for 24 hours; changed input conflicts and expired
+keys never repeat a mutation. A link attachment advances its parent revision,
+so read the latest revision before attaching another platform.
+These tools reuse existing scopes. Deploying them requires tool rediscovery,
+not fresh consent when those scopes are already granted and allowed by policy.
+
 ## Authored editorial editing, including live posts
 
 The general tools require posts:read plus creator:write, not merely drafts:write:

@@ -29,6 +29,7 @@ import { EditorialDraftServiceLayer } from '@/mcp/drafts'
 import { EditorialActor, EditorialMcpConfig, EditorialReadServiceLayer } from '@/mcp/editorial'
 import { FavoritesMcpServiceLayer } from '@/mcp/favorites/service'
 import { FavoritesToolkit, FavoritesToolHandlersLayer } from '@/mcp/favorites/toolkit'
+import { LinkEditHandlersLayer, MusicLinkAttachmentToolkit } from '@/mcp/link-edit/toolkit'
 import { ListeningReadServiceLive } from '@/mcp/listening/reads'
 import { ListeningToolkit, ListeningToolHandlersLayer } from '@/mcp/listening/tools'
 import { EditorialMcpSettings } from '@/mcp/model'
@@ -520,6 +521,7 @@ export const EditorialMcpRoutesLive = makeMcpRoutes(
     ReminderCommandToolkit,
     AdminReadToolkit,
     MusicImportToolkit,
+    MusicLinkAttachmentToolkit,
   ),
   Layer.mergeAll(
     DraftArtworkHandlersLive,
@@ -536,6 +538,7 @@ export const EditorialMcpRoutesLive = makeMcpRoutes(
     ),
     ReminderToolHandlersLayer.pipe(Layer.provide(ReminderReadServiceLayer)),
     ReminderCommandToolHandlersLayer,
+    LinkEditHandlersLayer,
     AdminReadToolHandlersLayer.pipe(Layer.provide(AdminReadServiceLayer)),
     MusicImportHandlersLive.pipe(
       Layer.provide(Layer.unwrap(Effect.map(Database, (db) => McpArtworkStoreLayer(db.$client)))),

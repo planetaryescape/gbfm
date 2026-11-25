@@ -51,6 +51,11 @@ export const ReplyToMicroPostInput = Schema.Struct({
   parentPostId: PostId,
 })
 
+export const QuoteMicroPostInput = Schema.Struct({
+  ...CreateMicroPostInput.fields,
+  quotedPostId: PostId,
+})
+
 /** Publishing editorial content is an explicit version-bound transition. */
 export const PublishEditorialInput = Schema.Struct({
   requestId: RequestId,

@@ -417,7 +417,9 @@ test('composed OAuth discovery, exact source import, original receipt replay, co
 
   expect(readTools).not.toContain('import_music_url')
   expect(readTools).not.toContain('get_music_import_status')
+  expect(readTools).not.toContain('attach_music_link')
   expect(adminTools.filter((name) => !readTools.includes(name)).sort()).toEqual([
+    'attach_music_link',
     'get_music_import_status',
     'import_music_url',
   ])

@@ -14,6 +14,8 @@ See [FOLDKIT.md](../FOLDKIT.md) for runtime, navigation, and folder conventions.
 
 ## Visual language
 
+Streaming links use local inline platform glyphs from [Simple Icons](https://github.com/simple-icons/simple-icons), distributed under CC0. The Amazon glyph comes from version 14.0.0. Keep platform names visible; logos are decorative and require no third-party image requests.
+
 - Prefer rectangular surfaces and restrained rounding. Geometry lives in `packages/theme/src/tokens/geometry.ts`, exported as numbers for native and generated CSS variables for web. Do not invent radii in individual components.
 - Use high-contrast dark surfaces with cyan/green accents from the shared theme. Do not copy old palette values into components or introduce new theme selectors without a product requirement.
 - Prefer semantic classes such as `bg-card`, `text-foreground`, `text-muted-foreground`, `border-border`, `text-highlight`, and `ring-ring`. Existing `gb-*` classes map to the same shared brand variables in WWW.

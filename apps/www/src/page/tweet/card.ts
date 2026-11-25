@@ -6,8 +6,9 @@ import type { Model } from '../../model'
 import * as SpotifyPlayback from '../../spotify/playback'
 import { artwork } from '../../view/artwork'
 import { formatDate } from '../../view/format-date'
-import { iconPaths, lucide, spotifyIcon } from '../../view/icons'
+import { iconPaths, lucide } from '../../view/icons'
 import { musicEntityLabels, musicPlatformLabel } from '../../view/music-platform'
+import { musicPlatformIcon } from '../../view/music-platform-icon'
 import { richContent } from '../../view/rich-content/fallback'
 import { richContentView } from '../../view/rich-content/render'
 
@@ -123,12 +124,11 @@ const streamLinks = (links: NonNullable<TweetPost['music']>['links']) =>
           h.Href(link.url),
           h.Target('_blank'),
           h.Rel('noopener noreferrer'),
-          h.Class('btn'),
+          h.Class('btn music-stream-link'),
         ],
         [
-          link.platform === 'spotify' ? spotifyIcon('h-3.5 w-3.5') : h.empty,
+          musicPlatformIcon(link.platform, 'rich-content-music-link-icon'),
           musicPlatformLabel(link.platform),
-          lucide(iconPaths.externalLink, 'h-3 w-3 opacity-40'),
         ],
       ),
     ),

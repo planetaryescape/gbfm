@@ -9,8 +9,9 @@ import type { RichContentBlock, RichContentDocument } from '@gbfm/rich-content/s
 import type { Html, HtmlBuilder } from 'foldkit/html'
 
 import { artwork, imageSource } from '../artwork'
-import { iconPaths, lucide, spotifyIcon } from '../icons'
+import { iconPaths, lucide } from '../icons'
 import { musicEntityLabels, musicPlatformLabel } from '../music-platform'
+import { musicPlatformIcon } from '../music-platform-icon'
 import { microView } from './micro'
 
 type RichContentInline = Extract<
@@ -365,14 +366,8 @@ const musicView = <Message>(
                         ),
                       ],
                       [
-                        ...(link.platform === 'spotify'
-                          ? [spotifyIcon('rich-content-music-link-icon')]
-                          : []),
+                        musicPlatformIcon(link.platform, 'rich-content-music-link-icon'),
                         musicPlatformLabel(link.platform),
-                        lucide(
-                          isYoutubeLink(link.url) ? iconPaths.youtube : iconPaths.externalLink,
-                          'rich-content-music-link-external',
-                        ),
                       ],
                     ),
                   ],

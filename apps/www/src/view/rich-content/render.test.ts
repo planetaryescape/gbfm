@@ -476,6 +476,60 @@ describe('richContentView', () => {
     expect(attribute(first(findAll(card, 'img')), 'decoding')).toBe('async')
   })
 
+  it('gives each streaming platform a distinct decorative icon without losing link labels or destinations', () => {
+    const platforms = [
+      { platform: 'spotify', label: 'Spotify' },
+      { platform: 'apple_music', label: 'Apple Music' },
+      { platform: 'bandcamp', label: 'Bandcamp' },
+      { platform: 'soundcloud', label: 'SoundCloud' },
+      { platform: 'tidal', label: 'Tidal' },
+      { platform: 'deezer', label: 'Deezer' },
+      { platform: 'amazon_music', label: 'Amazon Music' },
+      { platform: 'youtube', label: 'YouTube' },
+      { platform: 'youtube_music', label: 'YT Music' },
+    ]
+
+    const source = Schema.decodeUnknownSync(RichContentDocument)({
+      ...document,
+      blocks: document.blocks.map((block) =>
+        Predicate.isTagged(block, 'MusicEmbed')
+          ? {
+              ...block,
+              music: {
+                ...block.music,
+                links: platforms.map(({ platform }) => ({
+                  platform,
+                  url: `https://example.com/${platform}`,
+                })),
+              },
+            }
+          : block,
+      ),
+    })
+
+    const rendered = richContentView(source, h)
+    const view = first(rendered === null ? [] : [rendered])
+    const card = first(findAll(view, '.rich-content-music-card'))
+    const links = findAll(first(findAll(card, '.rich-content-music-links')), 'a')
+
+    expect(links.map(textContent)).toEqual(platforms.map(({ label }) => label))
+    expect(links.map((link) => attribute(link, 'href'))).toEqual(
+      platforms.map(({ platform }) => `https://example.com/${platform}`),
+    )
+
+    for (const link of links) {
+      const icons = findAll(link, 'svg')
+      expect(icons).toHaveLength(1)
+      expect(attribute(first(icons), 'aria-hidden')).toBe('true')
+      expect(attribute(link, 'target')).toBe('_blank')
+      expect(attribute(link, 'rel')).toBe('noopener noreferrer')
+    }
+
+    expect(new Set(links.map((link) => attribute(first(findAll(link, 'path')), 'd'))).size).toBe(
+      platforms.length,
+    )
+  })
+
   it('marks YouTube links with decorative icons without changing their names or destinations', () => {
     const urls = [
       'https://www.youtube.com/watch?v=example',

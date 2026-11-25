@@ -1,3 +1,10 @@
+## [2.140.1](https://github.com/planetaryescape/gbfm/compare/v2.140.0...v2.140.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **www:** add streaming platform icons and compact music links ([768ab73](https://github.com/planetaryescape/gbfm/commit/768ab7332cc0d22d1959b3cb35b58c4c3cf2cfd1))
+
 # [2.140.0](https://github.com/planetaryescape/gbfm/compare/v2.139.2...v2.140.0) (2026-11-25)
 
 

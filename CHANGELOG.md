@@ -1,3 +1,10 @@
+# [2.140.0](https://github.com/planetaryescape/gbfm/compare/v2.139.2...v2.140.0) (2026-11-25)
+
+
+### Features
+
+* **mcp:** publish native quotes and attach verified music links ([295c9f9](https://github.com/planetaryescape/gbfm/commit/295c9f947bb4ec72b9c4fc9524a06ad01e34d1ef))
+
 ## [2.139.2](https://github.com/planetaryescape/gbfm/compare/v2.139.1...v2.139.2) (2026-11-24)
 
 

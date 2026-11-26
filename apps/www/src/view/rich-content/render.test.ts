@@ -197,6 +197,32 @@ const renderMicroCard = (source: RichContentDocument): VNode => {
 }
 
 describe('richContentView', () => {
+  it('keeps re:fikks and re:prises readable in headings, formatting, links, quotes and lists', () => {
+    const source = [
+      '## Re:fikks',
+      '**re:fikks** and [re:prises](/profile/kimetsu)',
+      '> a [kimetsu.] re:fikks',
+      '- Henrik Schwarz: KEEPING IT UP / re:prises',
+    ].join('\n\n')
+
+    const document = Schema.decodeUnknownSync(RichContentDocument)(
+      parseRichContent(source).document,
+    )
+
+    const rendered = richContentView(document, h)
+    const view = first(rendered === null ? [] : [rendered])
+
+    expect(textContent(view).match(/re:(?:fikks|prises)/gi)).toEqual([
+      'Re:fikks',
+      're:fikks',
+      're:prises',
+      're:fikks',
+      're:prises',
+    ])
+    expect(attribute(first(findAll(view, 'a')), 'href')).toBe('/profile/kimetsu')
+    expect(textContent(first(findAll(view, 'strong')))).toBe('re:fikks')
+  })
+
   /* oxlint-disable anti-slop-effect/no-manual-tagged-construction -- This decoded fixture exercises recursive rich-content wire values. */
   it('renders legacy micro metadata with a profile link, date permalink and inline prose links', () => {
     const source = Schema.decodeUnknownSync(RichContentDocument)({

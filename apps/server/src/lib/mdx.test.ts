@@ -1,5 +1,5 @@
 /* oxlint-disable anti-slop-effect/no-manual-tagged-construction -- Assertions compare decoded tagged-union output. */
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import { describe, expect, test, vi } from 'vitest'
 
 import { withTestLayer } from '@/test/effect'
@@ -22,6 +22,25 @@ const withService = <A, E>(
   )
 
 describe('MdxService', () => {
+  test('renders colon-separated music terminology without consuming it as directives', async () => {
+    const source = 'Re:fikks and re:prises operate as curatorial interventions.'
+
+    const rendered = await withService(
+      () => Promise.resolve(''),
+      (svc) => svc.render(source),
+    )
+
+    const paragraph = rendered.blocks[0]
+    expect(paragraph?._tag).toBe('Paragraph')
+
+    if (paragraph?._tag !== 'Paragraph') throw new Error('Expected paragraph')
+    expect(
+      paragraph.children
+        .flatMap((inline) => (Predicate.isTagged(inline, 'Text') ? [inline.value] : []))
+        .join(''),
+    ).toBe(source)
+  })
+
   test('renders canonical media without executable output', () => {
     expect(renderRichContent('https://www.youtube.com/watch?v=abc').blocks[0]).toMatchObject({
       _tag: 'ExternalMediaEmbed',

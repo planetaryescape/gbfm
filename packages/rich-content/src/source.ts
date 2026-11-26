@@ -210,6 +210,21 @@ const sourceOf = (node: Node, source: string) => {
   return start === undefined || end === undefined ? '' : source.slice(start, end)
 }
 
+const colonWordNodes = (nodes: ReadonlyArray<Node>, source: string): Array<Node> =>
+  nodes.map((node) => {
+    const start = node.position?.start.offset
+
+    if (
+      node.type === 'textDirective' &&
+      start !== undefined &&
+      /[\p{L}\p{N}_]$/u.test(source.slice(Math.max(0, start - 2), start)) &&
+      sourceOf(node, source) === `:${node.name}`
+    )
+      return { ...node, type: 'text', value: sourceOf(node, source) }
+
+    return node.children ? { ...node, children: colonWordNodes(node.children, source) } : node
+  })
+
 const inlines = (
   nodes: Array<Node>,
   diagnostics: Array<RichContentDiagnostic>,
@@ -588,7 +603,11 @@ export const parseRichContent = (
   // oxlint-disable-next-line typescript/consistent-type-assertions, typescript/no-unsafe-type-assertion, anti-slop/require-safety-comment-for-type-assertion
   const nodes = root.children as Array<Node>
   const layout = layoutOf(nodes, diagnostics)
-  const content = nodes.filter((node) => !isLayoutDirective(node))
+
+  const content = colonWordNodes(
+    nodes.filter((node) => !isLayoutDirective(node)),
+    source,
+  )
 
   const projected = blocks(
     options.publicSourceProse ? publicSourceNodes(content) : content,

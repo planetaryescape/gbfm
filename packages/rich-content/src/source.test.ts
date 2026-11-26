@@ -1,11 +1,44 @@
 /* oxlint-disable anti-slop-effect/no-manual-tagged-construction -- Structural expectations intentionally describe the public tagged result. */
-import { Effect, Exit, Schema } from 'effect'
+import { Effect, Exit, Predicate, Schema } from 'effect'
 import { describe, expect, test } from 'vitest'
 
 import { RichContentDocument, SafeUrl } from './schema'
 import { parseRichContent, safeUrl, validateForWrite } from './source'
 
 describe('canonical rich content source', () => {
+  test.each(['re:fikks', 're:prises', 'Re:fikks', 'pre:release', '音:楽'])(
+    'preserves the colon-separated word %s in normal and public prose',
+    async (word) => {
+      const source = `a ${word} of this would bang`
+
+      for (const publicSourceProse of [false, true]) {
+        const result = parseRichContent(source, { publicSourceProse })
+        const paragraph = result.document.blocks[0]
+        expect(result.diagnostics).toEqual([])
+        expect(paragraph?._tag).toBe('Paragraph')
+
+        if (paragraph?._tag !== 'Paragraph') throw new Error('Expected paragraph')
+        expect(
+          paragraph.children
+            .flatMap((inline) => (Predicate.isTagged(inline, 'Text') ? [inline.value] : []))
+            .join(''),
+        ).toBe(source)
+      }
+
+      expect(Exit.isSuccess(await Effect.runPromiseExit(validateForWrite(source)))).toBe(true)
+    },
+  )
+
+  test('keeps labelled and attributed inline directives out of anonymous source prose', () => {
+    for (const source of ['re:widget[private]', 're:widget{token="secret"}']) {
+      const result = parseRichContent(source, { publicSourceProse: true })
+      const projected = JSON.stringify(result.document)
+      expect(projected).toContain('[Unsupported markup omitted]')
+      expect(projected).not.toContain('private')
+      expect(projected).not.toContain('secret')
+    }
+  })
+
   test('parses native micro references, normalizes IDs and preserves surrounding prose', () => {
     const id = 'B19847C2-FE58-4FD8-878A-B2FAF138DFD7'
     const parsed = parseRichContent(`before\n\n::micro{id="${id}"}\n\nafter`)

@@ -1,3 +1,10 @@
+## [2.140.3](https://github.com/planetaryescape/gbfm/compare/v2.140.2...v2.140.3) (2026-11-26)
+
+
+### Bug Fixes
+
+* **content:** consolidate tag aliases and persist micro hashtags ([de88900](https://github.com/planetaryescape/gbfm/commit/de889009f0e9016112b0b431b4092e93372985d7))
+
 ## [2.140.2](https://github.com/planetaryescape/gbfm/compare/v2.140.1...v2.140.2) (2026-11-26)
 
 

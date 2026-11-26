@@ -24,12 +24,14 @@ export const Application = Html.component({
       .class('site')
       .children(
         h.header
-          .class('mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-4 py-6')
+          .class(
+            'mx-auto flex w-full max-w-5xl flex-col items-center justify-between gap-4 px-4 py-6 sm:flex-row',
+          )
           .children(
             h.a.attr('href', '/').class('font-bold tracking-tight').children('goosebumps.fm'),
             h.nav
               .attr('aria-label', 'Primary')
-              .class('flex items-center gap-4')
+              .class('flex min-w-0 flex-wrap items-center justify-center gap-4 sm:justify-end')
               .children(
                 h.a.attr('href', '/about').children('About'),
                 h.a.attr('href', '/privacy').children('Privacy'),

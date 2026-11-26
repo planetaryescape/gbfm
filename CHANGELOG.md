@@ -1,3 +1,10 @@
+## [2.140.2](https://github.com/planetaryescape/gbfm/compare/v2.140.1...v2.140.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* **rich-content:** preserve colon-separated words in prose ([61a9088](https://github.com/planetaryescape/gbfm/commit/61a9088fba5276dc388a6da0653c9b19123c6147))
+
 ## [2.140.1](https://github.com/planetaryescape/gbfm/compare/v2.140.0...v2.140.1) (2026-11-25)
 
 

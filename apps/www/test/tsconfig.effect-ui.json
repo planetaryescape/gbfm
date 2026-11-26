@@ -1,0 +1,22 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [
+    "../src/vite-env.d.ts",
+    "../src/entry.effect.client.ts",
+    "../src/entry.effect.server.ts",
+    "../src/app/application.test.ts",
+    "../src/app/theme-button.test.ts",
+    "../src/server/effect-ui/**/*.ts",
+    "../plugins/effect-ui*.ts",
+    "../vite.effect.config.ts",
+    "../scripts/effect-ui-*.ts",
+    "./effect-ui/**/*.ts",
+    "./effect-ui.fixture.config.ts",
+    "./effect-ui.browser.spec.ts",
+    "./effect-ui.app.browser.spec.ts",
+    "./playwright.effect-ui.config.ts"
+  ]
+}

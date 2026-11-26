@@ -1,6 +1,6 @@
 # Effect UI migration: delivery checkpoints
 
-Status: migration and checkpoint-led learning accepted; foundation implementation in progress on `migration/effect-ui-foundation`. No production promotion authorized.
+Status: foundation PR #640 has passed general CI. Native SSR, Components, queries, and all route-family conversions are in progress on `migration/effect-ui-ssr`. Continue through full-site conversion and Foldkit removal without stopping at individual PRs. Physical-iPhone verification is explicitly deferred; production planning and deployment remain unauthorized.
 
 Inspected baseline: `de889009f0e9016112b0b431b4092e93372985d7` on `prod`.
 
@@ -150,7 +150,7 @@ Acceptance:
 
 Learn: Router and Component queries replace root page replacement and URL-wide `__data` bookkeeping.
 
-Pause after this stack. Review the hosting evidence and walkthrough before committing to more page conversions.
+Record the hosting evidence and walkthrough, then continue through the remaining page conversions. Review checkpoints do not pause delivery.
 
 ### Stack 3: persistent behavior
 
@@ -250,7 +250,7 @@ Every PR handoff includes:
 
 Verify both the incremental diff against the parent and the cumulative application at the stack tip. Rerun gates when an ancestor changes or a PR is retargeted. Do not describe CI as green before checking its result.
 
-Pause at conceptual stack boundaries for the user's walkthrough and questions. Do not generate a separate teaching book or impose exercises unrelated to the PR.
+Continue autonomously through the full-site conversion and Foldkit removal. Conceptual checkpoints are progress updates and review material, not stopping points. Pause only for genuine safety decisions or blockers. Keep walkthroughs tied to the actual diff; do not generate a separate teaching book or unrelated exercises.
 
 ## Promotion gate
 

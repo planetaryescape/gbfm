@@ -207,6 +207,8 @@
         "@codemirror/state": "6.7.6",
         "@codemirror/view": "6.43.15",
         "@effect/platform-browser": "4.1.6",
+        "@effect/ui": "https://pkg.pr.new/Effect-TS/ui/@effect/ui@87a704b",
+        "@effect/ui-kit": "https://pkg.pr.new/Effect-TS/ui/@effect/ui-kit@87a704b",
         "@foldkit/ui": "0.170.0",
         "@gbfm/api": "workspace:*",
         "@gbfm/core": "workspace:*",
@@ -233,6 +235,7 @@
         "web-vitals": "6.2.3",
       },
       "devDependencies": {
+        "@effect/vitest": "4.1.6",
         "@foldkit/vite-plugin": "0.29.0",
         "@overengineering/fps-meter": "0.2.4",
         "@playwright/test": "1.64.1",
@@ -241,6 +244,7 @@
         "@tailwindcss/vite": "4.3.3",
         "@types/node": "26.6.5",
         "globals": "17.13.0",
+        "miniflare": "5.20260801.1-alpha",
         "tailwindcss": "4.3.3",
         "typescript": "7.0.2",
         "vite": "8.3.5",
@@ -723,6 +727,12 @@
     "@effect/tsgo-win32-arm64": ["@effect/tsgo-win32-arm64@0.56.0", "", { "os": "win32", "cpu": "arm64" }, "sha512-uVaLdXULUZx9U30YxlVu5PBiu+1a+9/UT2Ex7jQpIasnJy1CHWlhMbfCD/+7Ez1vqG5fLOvUESoQu5XSjs3Lnw=="],
 
     "@effect/tsgo-win32-x64": ["@effect/tsgo-win32-x64@0.56.0", "", { "os": "win32", "cpu": "x64" }, "sha512-Cf6SDixFTkp7Aoeg2eRwJps/2BG9lvx2m+iVRjUzxdqkTbCCNKmmOAIyDslNZm2sMwaDUw/iN/BPGqxx7xMxww=="],
+
+    "@effect/ui": ["@effect/ui@https://pkg.pr.new/Effect-TS/ui/@effect/ui@87a704b", { "peerDependencies": { "effect": "^4.1.4" } }, "sha512-wiZ/TVbVGpkRoW/Js2x4OhnQiLvCYOw8DOmObSHYM8mhcbxyqFW0RmMrCKtd+iPqMoPTVp4ugIOWDYVQELOpHA=="],
+
+    "@effect/ui-kit": ["@effect/ui-kit@https://pkg.pr.new/Effect-TS/ui/@effect/ui-kit@87a704b", { "peerDependencies": { "@effect/ui": "^0.0.0", "effect": "^4.1.4" } }, "sha512-fzYdI2AaLJQkU36SkDN2fQKlwWx5P4GLllUvWfjg3g58kx7wEIcLLJxwnphAYYifPYtAremxryFW7Yjn1j5NKQ=="],
+
+    "@effect/vitest": ["@effect/vitest@4.1.6", "", { "peerDependencies": { "effect": "^4.1.6", "vitest": ">=5.0.0 <6.0.0" } }, "sha512-Knb13gPhDbtOuNUnPXE/Sl+UvrKFHRATwU2vy+DGQCpjK1yI3oy1feQo1g2X8ZdOdc63sJB7HJXCMNsDy8xYvg=="],
 
     "@emnapi/runtime": ["@emnapi/runtime@1.11.3", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA=="],
 

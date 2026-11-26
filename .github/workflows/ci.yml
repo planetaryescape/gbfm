@@ -115,3 +115,53 @@ jobs:
             --workdir "$GITHUB_WORKSPACE/apps/www" \
             mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f \
             bun run e2e:observability
+
+  effect-ui-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [fixture, app]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup-bun-workspace
+
+      - name: Build native hosting fixture
+        if: matrix.target == 'fixture'
+        working-directory: apps/www
+        run: bun run vite build --config test/effect-ui.fixture.config.ts
+
+      - name: Build native application
+        if: matrix.target == 'app'
+        working-directory: apps/www
+        env:
+          SENTRY_UPLOAD_SOURCEMAPS: 'false'
+        run: bun run build:effect-ui
+
+      - name: Verify native production workerd responses
+        working-directory: apps/www
+        run: bun scripts/effect-ui-workerd.ts ${{ matrix.target == 'fixture' && '--fixture' || '' }}
+
+      - name: Verify native SSR and browser adoption
+        env:
+          GBFM_EFFECT_APP: ${{ matrix.target == 'app' && '1' || '0' }}
+        run: |
+          docker run --rm --init \
+            --user "$(id -u):$(id -g)" \
+            --shm-size=1g \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges \
+            --env CI=true \
+            --env HOME=/tmp \
+            --env GBFM_EFFECT_APP \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            --volume "$(realpath "$(command -v bun)"):/usr/local/bin/bun:ro" \
+            --volume "$(realpath "$(command -v bun)"):/usr/local/bin/bunx:ro" \
+            --workdir "$GITHUB_WORKSPACE/apps/www" \
+            mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f \
+            bun run playwright test --config test/playwright.effect-ui.config.ts

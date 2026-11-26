@@ -1,6 +1,6 @@
 # Effect UI migration: delivery checkpoints
 
-Status: migration and checkpoint-led learning accepted; detailed delivery plan proposed, implementation not started.
+Status: migration and checkpoint-led learning accepted; foundation implementation in progress on `migration/effect-ui-foundation`. No production promotion authorized.
 
 Inspected baseline: `de889009f0e9016112b0b431b4092e93372985d7` on `prod`.
 
@@ -8,13 +8,13 @@ Inspected baseline: `de889009f0e9016112b0b431b4092e93372985d7` on `prod`.
 
 Replace WWW's Foldkit runtime with Effect UI while preserving GBFM's behavior. Deliver short, reviewable GitHub PR stacks with a runnable checkpoint, one primary learning topic, and evidence for each changed contract.
 
-This document is a plan, not verification evidence. No dependency installation, branch creation, GitHub publication, deployment, or database change is recorded as completed here.
+This document is a plan, not verification evidence. Checkpoint results must be recorded separately with resolved versions and commands.
 
 ## Decisions and constraints
 
 - Use Effect UI Components for local state, queries for fetched data, and Providers for intentionally shared mutable state.
 - Retain the existing API contracts, playback engine, Cloudflare hosting, resource identities, and state ownership.
-- Keep Alchemy `2.0.0-beta.83` initially. Its Effect peer range permits 4.1; runtime compatibility must still be tested.
+- Upgrade Alchemy and its separate Cloudflare provider to `2.0.0-beta.87` in a distinct infrastructure checkpoint. Runtime checks disproved beta.83 compatibility: it imports the removed Crypto module. The user selected the provider upgrade rather than a local backport. No infrastructure plan or deployment is authorized.
 - Pin preview UI packages to one commit, initially `87a704b`, rather than moving `main`.
 - Preserve authentication, authorization, revision checks, retry identities, draft privacy, public URLs, status codes, metadata, and no-JS readable content.
 - Do not introduce shared public HTML caching, progressive SSR streaming, database migrations, or new backend architecture as part of this migration.
@@ -30,13 +30,13 @@ Consequently, review checkpoints are not automatically production checkpoints.
 
 Proposed topology:
 
-1. Foundation PR 1 targets `prod`. Merge only after its acceptance gates and explicit approval of the resulting production release.
-2. Create a non-deploying integration branch, proposed name `migration/effect-ui`, from the accepted baseline.
+1. Create a non-deploying integration branch, proposed name `migration/effect-ui`, from the accepted baseline.
+2. Foundation PR 1 targets the integration branch. A separate provider-upgrade checkpoint completes its Alchemy compatibility dependency. Do not promote the runtime-only prefix or merge it into `prod`.
 3. Each migration stack's first PR targets that integration branch; subsequent PRs target their predecessor.
 4. Review incremental diffs and merge bottom-up into the integration branch. Retarget descendants and rerun checks after ancestor merges. Avoid rewriting published history without coordinating first.
 5. Open a separate promotion PR from the integration branch to `prod` only when its complete reachable route set is production-ready. Previously reviewed PRs provide the reading map; cumulative checks verify the exact promotion head.
 
-No branch or promotion PR exists yet. Do not push preliminary migration work directly to `prod`. Ordinary CI currently has no branch filter on `pull_request`, but GitHub rules and required checks still need inspection before publishing the stack.
+The foundation branch exists locally. No promotion PR exists. Do not push preliminary migration work directly to `prod`. Ordinary CI currently has no branch filter on `pull_request`, but GitHub rules and required checks still need inspection before publishing the stack.
 
 Temporary route dispatch may choose Foldkit or Effect UI. Across that boundary, a document navigation can interrupt playback. That is acceptable only on the unpromoted integration branch, not as an unannounced production regression. Before promotion, prove continuity across every reachable boundary or complete the route migration so the boundary is removed.
 
@@ -77,8 +77,9 @@ Scope:
 - Temporarily upgrade Foldkit and its UI package to `0.170.0`, and its Vite plugin to `0.29.0`, for declared Effect 4.1 compatibility.
 - Adapt `apps/server/src/lib/crypto.ts`, personal-access-key and audio services, and their tests to the new crypto services.
 - Port the narrow dialog overlay patch; preserve background isolation and password-manager interaction.
-- Audit callback streams and resource cleanup affected by Effect 4.1's setup timing.
-- Do not change Alchemy, database schema, key format, or audio fingerprint format.
+- Audit callback streams and resource cleanup. Source comparison of 4.0.6 and 4.1.6 found unchanged callback registration/scoping behavior, so no timing adaptation is planned.
+- Keep database schema, key format, and audio fingerprint format unchanged.
+- Deliver the approved Alchemy provider-package upgrade as a separately reviewed infrastructure commit/checkpoint. Preserve resource identities, state backend and state selection, bindings, and provider ownership. Verify module loading and disposable local state offline; a reviewed infrastructure plan remains a promotion prerequisite, not an authorized action.
 
 Acceptance:
 
@@ -259,7 +260,7 @@ Before requesting approval to merge into `prod`:
 - Cumulative lint/typecheck, package/WWW/D1 tests, browser journeys, and production Worker build checks pass for the exact candidate.
 - Browser checks cover initial document, no-JS content, hydration, navigation/history/head, identity transitions, real playback, dialogs, and changed authoring flows.
 - Mobile physical-device evidence is complete for the shared dependency change.
-- Any infrastructure change has a separately reviewed plan; resource replacement, deletion, schema/data changes, or consent changes are not authorized by this spec.
+- The approved provider upgrade has a separately reviewed infrastructure plan before promotion. That plan still requires explicit authorization to run; resource replacement, deletion, schema/data changes, and consent changes are not authorized by this spec.
 - Unverified preview limitations are resolved or explicitly accepted by the user; lower-level tests are not substituted for missing environment evidence.
 - The user knows that merging triggers the production release/deployment pipeline.
 
@@ -275,4 +276,4 @@ After an explicitly authorized deployment, verify the deployed release and inten
 - [Effect UI SSR at the selected snapshot](https://github.com/Effect-TS/ui/blob/87a704b/packages/ui/src/html/HtmlServer.ts)
 - [Effect UI hydration at the selected snapshot](https://github.com/Effect-TS/ui/blob/87a704b/packages/ui/src/html/HtmlHydrate.ts)
 
-Read-only inspection established the dependency constraints, source boundaries, existing tests, and workflow triggers. No migration runtime check has passed yet. Each implementation PR owns its evidence; this plan must not be used as a completed test report.
+Read-only inspection established the dependency constraints, source boundaries, existing tests, and workflow triggers. The [foundation verification record](effect-ui-foundation.md) separates executed checks, failures, and remaining gates. Each implementation PR owns its evidence; this plan must not be used as a completed test report.

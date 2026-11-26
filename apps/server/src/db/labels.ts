@@ -1,5 +1,7 @@
 import { and, asc, eq, inArray, sql, type SQLWrapper } from 'drizzle-orm'
 
+import { canonicalContentTags, contentTagAliases } from '@/lib/content-tags'
+
 import type { DatabaseClient } from './layer'
 import { entityLabelsTable, labelsTable } from './tags.schema'
 
@@ -30,7 +32,7 @@ export const replaceEntityLabels = async (
   entityId: string,
   input: LabelsInput,
 ) => {
-  const tags = input.tags ?? []
+  const tags = canonicalContentTags(input.tags ?? [])
   const genres = input.genres ?? []
 
   const labels = [
@@ -115,7 +117,10 @@ export const hasEntityLabel = (
   WHERE entity_labels.entity_type = ${entityType}
     AND entity_labels.entity_id = ${entityId}
     AND labels.kind = 'tag'
-    AND labels.name = ${name}
+    AND labels.name IN (${sql.join(
+      contentTagAliases(name).map((alias) => sql`${alias}`),
+      sql`, `,
+    )})
 )`
 
 export const hasEntityLabelLike = (

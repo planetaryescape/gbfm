@@ -9,6 +9,7 @@ import { and, asc, eq, exists, inArray, or, sql, type SQL } from 'drizzle-orm'
 import { Effect, Match, Schema } from 'effect'
 
 import { DatabaseError, NotFoundError, ValidationError } from '@/errors'
+import { canonicalContentTags } from '@/lib/content-tags'
 
 import { user } from './auth.schema'
 import { postIdsForCreator } from './creator-membership'
@@ -163,7 +164,7 @@ export const buildGuardedPostUpdate = (
 
   const authorized = sql`${winner} AND (${options.liveGuard ?? sql`1`})`
 
-  const names = [...new Set(tags)]
+  const names = canonicalContentTags(tags ?? [])
 
   const labelWrites =
     tags === undefined

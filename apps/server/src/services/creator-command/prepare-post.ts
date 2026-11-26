@@ -4,6 +4,7 @@ import { Effect, Schema } from 'effect'
 
 import { Database } from '@/db/layer'
 import { validateCanonicalContent } from '@/lib/mdx'
+import { microPostTags } from '@/lib/micro-tags'
 import { McpToolError, PostSlug } from '@/mcp/contracts'
 import {
   CreateMicroPostInput,
@@ -108,12 +109,17 @@ export const prepareCreatorMicro = Effect.fn('CreatorCommand.prepareMicro')(func
     Effect.mapError(invalid),
   )
 
+  const tags = microPostTags(input.content, input.tags)
+
+  if (tags.length > 20 || tags.some((tag) => tag.length > 100)) return yield* invalid()
+
   const data = normalizePostData(
     {
       id,
       slug: `micro-${id}`,
       title: input.title ?? null,
       content: input.content,
+      tags,
       type: 'micro',
       draft: false,
       description: null,
@@ -151,7 +157,7 @@ export const prepareCreatorMicro = Effect.fn('CreatorCommand.prepareMicro')(func
       draft: false,
       createdAt: options.now,
       updatedAt: options.now,
-      tags: [],
+      tags: data.tags ?? [],
       creators: [{ id: actorId }],
       musicEntityType: null,
       musicEntityId: null,

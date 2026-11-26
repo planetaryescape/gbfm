@@ -699,6 +699,7 @@ test('live OAuth account authority is enforced inside the creation batch, not ju
   const input = Schema.decodeUnknownSync(CreateMicroPostInput)({
     requestId: crypto.randomUUID(),
     content: 'Must roll back',
+    tags: ['hip-hop', 'ambient'],
   })
 
   await h.fixture.database
@@ -713,6 +714,8 @@ test('live OAuth account authority is enforced inside the creation batch, not ju
   ).toMatchObject({ failure: { code: 'conflict' } })
   expect(await h.fixture.db.select().from(postsTable)).toEqual([])
   expect(await h.fixture.db.select().from(postCreators)).toEqual([])
+  expect(await h.fixture.db.select().from(entityLabelsTable)).toEqual([])
+  expect(await h.fixture.db.select().from(labelsTable)).toEqual([])
   expect(
     await h.fixture.db.select({ banned: user.banned }).from(user).where(eq(user.id, 'owner')),
   ).toEqual([{ banned: false }])

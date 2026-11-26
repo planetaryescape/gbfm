@@ -208,7 +208,13 @@ test('quotes recheck source ancestry inside INSERT and roll back a hidden-root r
 
 test('lost micro acknowledgements, concurrent retries and a new handler return one persisted post and receipt', async () => {
   await using h = await publishingFixture()
-  const input = { requestId: crypto.randomUUID(), content: 'Clicks n cuts. A disposable note.' }
+
+  const input = {
+    requestId: crypto.randomUUID(),
+    content: 'Clicks n cuts. A disposable note.\n\n#hip hop',
+    tags: ['ambient', 'dub_techno', 'dub-techno'],
+  }
+
   const first = h.result((await h.call('create_micro_post', input)).body)
 
   await h.restart()
@@ -230,7 +236,11 @@ test('lost micro acknowledgements, concurrent retries and a new handler return o
 
   const read = await h.publicRead(`/api/content/posts/micro/by-id/${first.target.targetId}`)
   expect(read.status).toBe(200)
-  expect(JSON.stringify(await read.json())).toContain(input.content)
+  const saved = await read.json()
+  expect(saved).toMatchObject({
+    content: input.content,
+    tags: ['ambient', 'dub techno', 'hip hop'],
+  })
 
   await createMcpOperationStore(h.database).pruneExpired(Date.now() + 86_400_001)
   expect((await h.call('create_micro_post', input)).body).toMatchObject(error('expired'))

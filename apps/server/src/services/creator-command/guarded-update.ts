@@ -7,6 +7,7 @@ import type { DatabaseClient } from '@/db/layer'
 import { showCreators, showsTable, type InsertShow } from '@/db/show.schema'
 import { entityLabelsTable, labelsTable } from '@/db/tags.schema'
 import { uploadAssetsTable } from '@/db/upload-asset.schema'
+import { canonicalContentTags } from '@/lib/content-tags'
 
 /** Audio/show writers share one persisted CAS and one physical attempt for every relation write. */
 export const buildCreatorUpdate = (
@@ -89,7 +90,7 @@ export const buildCreatorUpdate = (
         .getSQL(),
     )
 
-    for (const [position, name] of [...new Set(options.tags)].entries()) {
+    for (const [position, name] of canonicalContentTags(options.tags).entries()) {
       writes.push(
         db
           .insert(labelsTable)

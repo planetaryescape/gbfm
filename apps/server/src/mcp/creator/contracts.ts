@@ -43,6 +43,14 @@ export const CreateMicroPostInput = Schema.Struct({
   requestId: RequestId,
   title: Schema.optionalKey(Title),
   content: Schema.NonEmptyString.check(Schema.isMaxLength(100_000)),
+  tags: Schema.optionalKey(
+    Schema.Array(
+      Schema.NonEmptyString.check(
+        Schema.isMaxLength(100),
+        Schema.makeFilter((value) => value.trim().length > 0),
+      ),
+    ).check(Schema.isMaxLength(20)),
+  ),
 })
 
 /** A reply accepts a canonical parent ID; callers cannot choose thread roots/depth. */

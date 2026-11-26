@@ -50,7 +50,7 @@ export const CreatorToolkit = Toolkit.make(
     .annotate(Tool.Strict, true),
   Tool.make('create_micro_post', {
     description:
-      'Publish a new canonical micro post publicly as yourself. Requires separately consented micros:publish and UUIDv4 requestId. No announcement, provider operation or private-media copying. Identical retries create one logical post and return its original shared PostVersion for later explicit lifecycle commands.',
+      'Publish a new canonical micro post publicly as yourself. Accepts optional tags, canonicalizes known aliases and saves standalone hashtag paragraphs such as #hip hop as actual tags without changing the body. Prefer explicit tags for metadata. Requires separately consented micros:publish and UUIDv4 requestId. No announcement, provider operation or private-media copying. Identical retries create one logical post and return its original shared PostVersion for later explicit lifecycle commands.',
     parameters: CreateMicroPostInput,
     success: CreatorCommandResult,
     failure: McpToolError,

@@ -291,9 +291,23 @@ const make = Effect.gen(function* () {
 
                   const creator = sql`INSERT INTO post_creators(postId,creatorId) SELECT ${id},${actor.userId} WHERE ${authorized}`
 
+                  const tags = data.tags ?? []
+
+                  const tagWrites = tags.flatMap((name, position) => [
+                    sql`INSERT INTO labels(id,kind,name) SELECT ${crypto.randomUUID()},'tag',${name} WHERE ${authorized} ON CONFLICT(kind,name) DO NOTHING`,
+                    sql`INSERT INTO entity_labels(entity_type,entity_id,label_id,position)
+                      SELECT 'post',${id},id,${position} FROM labels WHERE kind='tag' AND name=${name} AND ${authorized}`,
+                  ])
+
                   return {
-                    statements: [ctx.prepare(insert), ctx.prepare(creator)],
-                    assertApplied: sql`${authorized} AND EXISTS(SELECT 1 FROM post_creators WHERE postId=${id} AND creatorId=${actor.userId})`,
+                    statements: [
+                      ctx.prepare(insert),
+                      ctx.prepare(creator),
+                      ...tagWrites.map((statement) => ctx.prepare(statement)),
+                    ],
+                    assertApplied: sql`${authorized}
+                      AND EXISTS(SELECT 1 FROM post_creators WHERE postId=${id} AND creatorId=${actor.userId})
+                      AND (SELECT count(*) FROM entity_labels INNER JOIN labels ON labels.id=entity_labels.label_id WHERE entity_type='post' AND entity_id=${id} AND labels.kind='tag')=${tags.length}`,
                     outcome: {
                       result: { kind: 'micro', targetId: id, version, state: 'published' },
                       revision: version,

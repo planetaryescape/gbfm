@@ -181,9 +181,10 @@ test('stale browser and MCP writes share one version; tag-only writes and legacy
       Effect.flatMap(EditorialMusicService, (s) => s.setDraftTags({ ...stale, tags: ['stale'] })),
     ),
   ).rejects.toMatchObject({ code: 'conflict' })
-  const tagging = { ...(await h.mutation()), tags: ['mcp-tag'] }
+  const tagging = { ...(await h.mutation()), tags: ['mcp-tag', 'hip-hop', 'hip_hop'] }
   const tags = await h.run(Effect.flatMap(EditorialMusicService, (s) => s.setDraftTags(tagging)))
-  expect(tags.post.tags).toEqual(['mcp-tag'])
+  expect(tags.post.tags).toEqual(['hip hop', 'mcp-tag'])
+  expect((await h.mutation()).expectedVersion).toBe(tags.post.version)
   expect(
     await guardedPostUpdate(h.db, post, ownerId, { title: 'Stale browser' }, ['stale'], []),
   ).toEqual([])

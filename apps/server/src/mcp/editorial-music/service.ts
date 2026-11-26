@@ -7,6 +7,7 @@ import {
 import { Clock, Context, Effect, Layer, Option, Schema } from 'effect'
 
 import { Database } from '@/db/layer'
+import { canonicalContentTags } from '@/lib/content-tags'
 import { validateCanonicalContent } from '@/lib/mdx'
 import { validatePostData } from '@/services/post.service'
 
@@ -306,7 +307,7 @@ const makeEditorialMusic = Effect.gen(function* () {
       'set_draft_tags',
       JSON.stringify(input),
       write,
-      () => Effect.succeed({ patch: { tags: input.tags }, targets: [] }),
+      () => Effect.succeed({ patch: { tags: canonicalContentTags(input.tags) }, targets: [] }),
       GetPostResult,
       projectText,
     )

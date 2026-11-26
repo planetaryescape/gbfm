@@ -37,10 +37,10 @@
   "dependencies": {
     "@aws-sdk/client-s3": "3.1156.0",
     "@aws-sdk/s3-request-presigner": "3.1156.0",
-    "@effect/platform-bun": "4.0.6",
-    "@effect/platform-node": "4.0.6",
+    "@effect/platform-bun": "4.1.6",
+    "@effect/platform-node": "4.1.6",
     "alchemy": "2.0.0-beta.83",
-    "effect": "4.0.6",
+    "effect": "4.1.6",
     "vitest": "5.0.5"
   },
   "devDependencies": {
@@ -77,6 +77,6 @@
   ],
   "patchedDependencies": {
     "harfbuzzjs@0.10.0": "patches/harfbuzzjs@0.10.0.patch",
-    "@foldkit/ui@0.169.0": "patches/@foldkit%2Fui@0.169.0.patch"
+    "@foldkit/ui@0.170.0": "patches/@foldkit%2Fui@0.170.0.patch"
   }
 }

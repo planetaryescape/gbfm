@@ -6,7 +6,8 @@ import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-tr
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node'
 import { hashPassword } from 'better-auth/crypto'
 import { eq, sql } from 'drizzle-orm'
-import { Clock, Crypto, Effect, Layer, Logger, Redacted, Schema } from 'effect'
+import { Clock, Effect, Layer, Logger, Redacted, Schema } from 'effect'
+import { Digest, SecureRandom } from 'effect/crypto'
 import { expect, test } from 'vitest'
 
 import { account, session, user } from '@/db/auth.schema'
@@ -284,18 +285,27 @@ test('role changes during issuance report access denial rather than a key limit'
   await using f = await setup()
   await f.login('issuance-race', 'editor')
 
-  const cryptoLive = Layer.succeed(
-    Crypto.Crypto,
-    Crypto.make({
-      randomBytes: (size) => crypto.getRandomValues(new Uint8Array(size)),
-      digest: (algorithm, data) =>
-        Effect.promise(async () => {
-          // Real persistence change at the crypto seam, after the owner read and before INSERT.
-          await f.db.update(user).set({ role: 'user' }).where(eq(user.id, 'issuance-race'))
+  const cryptoLive = Layer.mergeAll(
+    SecureRandom.layerWebCrypto,
+    Layer.effect(
+      Digest.Digest,
+      Effect.gen(function* () {
+        const digest = yield* Digest.Digest
 
-          return new Uint8Array(await crypto.subtle.digest(algorithm, data))
-        }),
-    }),
+        return Digest.Digest.of({
+          ...digest,
+          digest: (algorithm, data) =>
+            Effect.gen(function* () {
+              // Real persistence change at the crypto seam, after the owner read and before INSERT.
+              yield* Effect.promise(() =>
+                f.db.update(user).set({ role: 'user' }).where(eq(user.id, 'issuance-race')),
+              )
+
+              return yield* digest.digest(algorithm, data)
+            }),
+        })
+      }),
+    ).pipe(Layer.provide(Digest.layerWebCrypto)),
   )
 
   const live = PersonalAccessKeysLive.pipe(
@@ -838,6 +848,97 @@ const setup = async () => {
     },
   }
 }
+
+test('historical SHA-256 PAT fixtures authenticate through HTTP without reissuance', async () => {
+  await using fixture = await setup()
+  const id = '00000000-0000-4000-8000-000000000001'
+  const secret = `gbfm_pat_v1_dev_${'A'.repeat(43)}`
+  const secretHash = 'da1d71b666a203ee696428655335f597bc764390c8e2e4a7d679d65c9603101e'
+  const now = Date.now()
+
+  await fixture.db.insert(user).values({
+    id: 'historical-key-owner',
+    name: 'Historical key owner',
+    email: 'historical-key-owner@example.test',
+    role: 'editor',
+  })
+  await fixture.db.insert(personalAccessKeys).values({
+    id,
+    ownerUserId: 'historical-key-owner',
+    issuanceRequestId: '00000000-0000-4000-8000-000000000002',
+    name: 'Historical fixture',
+    environment: 'dev',
+    scopes: '["posts:read"]',
+    secretHash,
+    displayPrefix: 'gbfm_pat_v1_dev_AAAAAA',
+    createdAt: new Date(now - 1000),
+    expiresAt: new Date(now + 86400000),
+  })
+
+  expect((await fixture.request('GET', '/api/content/posts/manage', secret)).status).toBe(200)
+  expect(
+    (await fixture.request('GET', '/api/content/posts/manage', `${secret.slice(0, -1)}E`)).status,
+  ).toBe(401)
+
+  const [stored] = await fixture.db.select().from(personalAccessKeys)
+  expect(stored?.secretHash).toBe(secretHash)
+  expect(stored?.lastUsedAt).toBeInstanceOf(Date)
+  expect(stored?.rateRequestCount).toBe(1)
+})
+
+test('deterministic issuance preserves the v1 token, UUID and stored SHA-256 format', async () => {
+  await using fixture = await setup()
+  await fixture.db.insert(user).values({
+    id: 'deterministic-key-owner',
+    name: 'Deterministic key owner',
+    email: 'deterministic-key-owner@example.test',
+    role: 'editor',
+  })
+
+  const live = PersonalAccessKeysLive.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        DatabaseLayer(fixture.database),
+        ConfigServiceLayer,
+        Digest.layerWebCrypto,
+        Layer.succeed(
+          SecureRandom.SecureRandom,
+          SecureRandom.make((size) =>
+            Uint8Array.from({ length: size }, (_, index) => (index % 2 === 0 ? 251 : 255)),
+          ),
+        ),
+      ),
+    ),
+  )
+
+  const issued = await Effect.runPromise(
+    withTestLayer(
+      Effect.gen(function* () {
+        const keys = yield* PersonalAccessKeys
+
+        return yield* keys.issue(
+          yield* Schema.decodeUnknownEffect(UserId)('deterministic-key-owner'),
+          yield* Schema.decodeUnknownEffect(IssueKeyInput)({
+            requestId: '00000000-0000-4000-8000-000000000003',
+            name: 'Deterministic fixture',
+            scopes: ['posts:read'],
+          }),
+        )
+      }),
+      live,
+    ),
+  )
+
+  expect(issued.key.id).toBe('fbfffbff-fbff-4bff-bbff-fbfffbfffbff')
+  expect(issued.key.displayPrefix).toBe('gbfm_pat_v1_dev_-__7__')
+  expect(Redacted.value(issued.secret)).toBe(
+    'gbfm_pat_v1_dev_-__7__v_-__7__v_-__7__v_-__7__v_-__7__v_-_8',
+  )
+  const [stored] = await fixture.db.select().from(personalAccessKeys)
+  expect(stored?.secretHash).toBe(
+    '07900d3c1cb2ad116f13553e6e2f780cb20b22975f1796bb0c6cad9c8fd342fa',
+  )
+})
 
 test('real session bootstrap issues hash-only credentials and revocation stops independent requests', async () => {
   await using fixture = await setup()

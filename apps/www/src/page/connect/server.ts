@@ -43,7 +43,7 @@ const connectionPage = async (request: Request, continuation: PendingContinuatio
   const url = new URL(request.url)
   const { state, cookies } = await loadConnection(request, continuation)
 
-  const result = await ConsentState.match<Promise<Server.Responded>>(state, {
+  const result = await ConsentState.match(state, {
     Failed: async ({ status }) => failure(status),
     PermissionsUnavailable: async (state) =>
       connectionResponse(permissionsUnavailableDocument(state), undefined, 409),
@@ -240,7 +240,7 @@ export const handleConnection = async (request: Request): Promise<Server.Respond
 
   if (request.method === 'POST' && query === null) return failure(400)
 
-  return Continuation.match<Promise<Server.Responded>>(
+  return Continuation.match(
     parseContinuation(query === null ? url.searchParams : new URLSearchParams(query)),
     {
       Missing: async () => failure(400),

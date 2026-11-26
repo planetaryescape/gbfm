@@ -1,6 +1,6 @@
 import { McpPrincipal } from '@gbfm/core/editorial-mcp'
 import { Effect, Layer, Schema } from 'effect'
-import { Toolkit } from 'effect/ai'
+import { type McpSchema, McpServer, Toolkit } from 'effect/ai'
 import { HttpRouter, HttpServer, HttpServerRequest } from 'effect/http'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 
@@ -12,6 +12,10 @@ import { McpActor } from '../authorization'
 import { CommandAuthority } from '../command-authority'
 import { EditorialMcpConfig } from '../editorial'
 import { domainReadAuthority } from '../editorial-research/authority.test-support'
+import {
+  EditorialResearchService,
+  EditorialResearchServiceLayer,
+} from '../editorial-research/service'
 import { EditorialMcpSettings } from '../model'
 import { makeMcpLayer } from '../server'
 import { LabelProfilePromptLayer } from './prompt'
@@ -23,8 +27,23 @@ const config = Schema.decodeUnknownSync(EditorialMcpSettings)({
   frontendUrl: 'https://example.test',
 })
 
+const researchMiddleware = McpServer.middleware<{ provides: EditorialResearchService }>()(
+  Effect.gen(function* () {
+    const research = yield* EditorialResearchService
+
+    const provideResearch: McpServer.middleware.Fn<
+      EditorialResearchService,
+      McpSchema.McpErrorBase,
+      never
+    > = (effect) => Effect.provideService(effect, EditorialResearchService, research)
+
+    return provideResearch
+  }),
+)
+
 const app = HttpRouter.toWebHandler(
   LabelProfilePromptLayer.pipe(
+    Layer.provide(researchMiddleware.layer.pipe(Layer.provide(EditorialResearchServiceLayer))),
     Layer.provideMerge(makeMcpLayer([], Toolkit.make())),
     Layer.provide(DatabaseTestLayer),
     Layer.provide(Layer.succeed(EditorialMcpConfig, config)),

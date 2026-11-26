@@ -18,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "effect": "4.0.6",
+    "effect": "4.1.6",
     "@sentry/core": "10.77.1"
   },
   "devDependencies": {

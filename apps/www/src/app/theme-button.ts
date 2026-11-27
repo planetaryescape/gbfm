@@ -25,8 +25,8 @@ const nextTheme = (theme: Theme): Theme => {
   return 'system'
 }
 
-export const ThemeButton = Html.component({
-  name: 'ThemeButton',
+export const ThemeControls = Html.component({
+  name: 'ThemeControls',
   model: Schema.Struct({ theme: Theme }),
   message: ThemeMessage,
 }).make({
@@ -39,11 +39,30 @@ export const ThemeButton = Html.component({
       return $.evolve({ theme }).run(PersistTheme.make({ theme }))
     },
   },
-  view: (h, model) =>
-    h.button
-      .attr('type', 'button')
-      .attr('aria-label', `Theme: ${model.theme}`)
-      .class('rounded-full border border-border px-3 py-2 text-sm hover:bg-accent')
-      .on('click', ThemeMessage.ClickedTheme())
-      .children(`Theme: ${model.theme}`),
+  parts: (p, model) => ({
+    label: `Theme: ${model.theme}`,
+    button: p.part('button', (button) =>
+      button
+        .attr('type', 'button')
+        .attr('aria-label', `Theme: ${model.theme}`)
+        .on('click', ThemeMessage.ClickedTheme()),
+    ),
+  }),
+})
+
+export const ThemeButton = Html.component({
+  name: 'ThemeButton',
+  model: Schema.Null,
+  message: Schema.Never,
+}).make({
+  init: () => null,
+  update: {},
+  view: (h) =>
+    ThemeControls(h, {
+      view: (themeControls) =>
+        themeControls
+          .button(h.button)
+          .class('rounded-full border border-border px-3 py-2 text-sm hover:bg-accent')
+          .children(themeControls.label),
+    }),
 })

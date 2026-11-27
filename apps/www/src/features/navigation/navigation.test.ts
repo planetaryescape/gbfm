@@ -14,6 +14,28 @@ const props = {
 }
 
 describe('StationNavigation', () => {
+  it.effect(
+    'places theme controls in desktop navigation and the existing mobile account section',
+    () =>
+      Effect.gen(function* () {
+        const scene = yield* Scene.make(StationNavigation, props)
+        scene.expectMount(NavigationReady())
+        scene.expectMount(TrackMenuDrag({ active: false }))
+        const theme = Locator.attr('aria-label', 'Theme: system')
+        assert.lengthOf(scene.all(theme), 2)
+        assert.lengthOf(
+          scene.all(
+            Locator.inside(Locator.attr('class', 'flex shrink-0 items-center gap-3'), theme),
+          ),
+          1,
+        )
+        assert.lengthOf(
+          scene.all(Locator.inside(Locator.attr('aria-label', 'Menu links'), theme)),
+          1,
+        )
+      }),
+  )
+
   it.effect('keeps menu actions inert before hydration', () =>
     Effect.gen(function* () {
       const story = yield* Story.make(StationNavigation, props)

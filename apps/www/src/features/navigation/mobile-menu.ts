@@ -20,6 +20,7 @@ export const mobileMenu = (
   h: Html.H<NavigationMessage>,
   model: NavigationModel,
   props: StationNavigationProps,
+  appearance: View.Content<NavigationMessage>,
 ) => {
   const pathname = navigationPathname(props.url)
   const principal = props.principal
@@ -105,6 +106,7 @@ export const mobileMenu = (
                     ),
                   ]),
                   section('Account', [
+                    appearance,
                     principal
                       ? link('/dashboard', 'Dashboard', iconPaths.dashboard)
                       : link(signInHref(pathname), 'Log in', iconPaths.logIn),

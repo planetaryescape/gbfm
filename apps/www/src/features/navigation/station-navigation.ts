@@ -1,11 +1,12 @@
-import { Subscription } from '@effect/ui'
-import { Html } from '@effect/ui/html'
+import { Component, Subscription } from '@effect/ui'
+import { Html, HtmlCommand } from '@effect/ui/html'
 import { Stream } from 'effect'
 
+import { ThemeControls } from '../../app/theme-button'
 import { signInHref } from '../../page/auth/links'
 import { iconPaths, lucide } from '../../ui/icons'
 import { wordmark } from '../../ui/wordmark'
-import { accountMenu } from './account-menu'
+import { AccountFirst, accountMenu } from './account-menu'
 import {
   NavigationEvents,
   NavigationMessage,
@@ -45,6 +46,7 @@ export const StationNavigation = Html.component({
     menuOpenMethod: null,
     menuSettled: true,
     accountOpen: false,
+    accountSettled: true,
     minimized: false,
     menuDrag: null,
     menuOffset: 0,
@@ -103,9 +105,21 @@ export const StationNavigation = Html.component({
     },
     OpenedAccount: ($) =>
       $.model.interactive && $.props.principal && $.props.principalKnown
-        ? $.evolve({ accountOpen: true, menuOpen: false, menuDrag: null, menuOffset: 0 })
+        ? $.evolve({
+            accountOpen: !$.model.accountOpen,
+            accountSettled: false,
+            menuOpen: false,
+            menuDrag: null,
+            menuOffset: 0,
+          })
         : $.model,
     ClosedAccount: ($) => $.evolve({ accountOpen: false }),
+    SettledAccount: ($, { open }) =>
+      open && $.model.accountOpen && !$.model.accountSettled
+        ? $.evolve({ accountSettled: true }).run(
+            HtmlCommand.focus(AccountFirst, () => Component.noop, { preventScroll: true }),
+          )
+        : $.model,
     ChangedMinimized: ($, { minimized }) => $.evolve({ minimized }),
     StartedMenuDrag: ($, { pointerId, clientY }) => {
       if (!$.model.menuOpen || !$.model.menuSettled || $.model.menuDrag) return $.model
@@ -140,91 +154,104 @@ export const StationNavigation = Html.component({
         .attr('aria-current', isActiveNavLink(pathname, href) ? 'page' : undefined)
         .children(label)
 
-    return h.div
-      .class('station-navigation')
-      .attr('data-interactive', String(model.interactive))
-      .onMount(NavigationReady())
-      .children(
-        h.el('style').children(navigationStyles),
+    return ThemeControls(h, {
+      view: (themeControls) =>
         h.div
-          .class(
-            'station-desktop fixed inset-x-0 bottom-0 z-40 hidden h-12 shrink-0 items-center gap-4 border-t-2 border-foreground bg-background/95 pl-4 pr-6 backdrop-blur lg:flex',
-          )
+          .class('station-navigation')
+          .attr('data-interactive', String(model.interactive))
+          .onMount(NavigationReady())
           .children(
-            h.a
-              .attr('href', '/')
-              .attr('aria-label', 'goosebumps.fm home')
-              .class(
-                'group flex shrink-0 items-center text-foreground no-underline transition-colors hover:text-highlight',
-              )
-              .children(wordmark(h)),
-            h.nav
-              .attr('aria-label', 'Primary')
-              .class('flex shrink-0 items-center gap-1')
-              .children(links.map(([href, label]) => navLink(href, label))),
-            h.button
-              .attr('type', 'button')
-              .attr('aria-label', 'Search')
-              .disabled(!model.interactive)
-              .on('click', NavigationMessage.RequestedSearch())
-              .class(
-                `btn btn-quiet btn-icon shrink-0 ${focusRing} border-0 bg-transparent text-muted-foreground hover:text-foreground`,
-              )
-              .children(lucide(h, iconPaths.search, 'h-4 w-4')),
-            h.div.class('min-w-0 flex-1'),
+            h.el('style').children(navigationStyles),
             h.div
-              .class('flex shrink-0 items-center gap-3')
+              .class(
+                'station-desktop fixed inset-x-0 bottom-0 z-40 hidden h-12 shrink-0 items-center gap-4 border-t-2 border-foreground bg-background/95 pl-4 pr-6 backdrop-blur lg:flex',
+              )
               .children(
-                DesktopNowPlaying(h, { key: 'station-now-playing' }),
+                h.a
+                  .attr('href', '/')
+                  .attr('aria-label', 'goosebumps.fm home')
+                  .class(
+                    'group flex shrink-0 items-center text-foreground no-underline transition-colors hover:text-highlight',
+                  )
+                  .children(wordmark(h)),
+                h.nav
+                  .attr('aria-label', 'Primary')
+                  .class('flex shrink-0 items-center gap-1')
+                  .children(links.map(([href, label]) => navLink(href, label))),
+                h.button
+                  .attr('type', 'button')
+                  .attr('aria-label', 'Search')
+                  .disabled(!model.interactive)
+                  .on('click', NavigationMessage.RequestedSearch())
+                  .class(
+                    `btn btn-quiet btn-icon shrink-0 ${focusRing} border-0 bg-transparent text-muted-foreground hover:text-foreground`,
+                  )
+                  .children(lucide(h, iconPaths.search, 'h-4 w-4')),
+                h.div.class('min-w-0 flex-1'),
+                h.div
+                  .class('flex shrink-0 items-center gap-3')
+                  .children(
+                    DesktopNowPlaying(h, { key: 'station-now-playing' }),
+                    themeControls
+                      .button(h.button)
+                      .class(`btn btn-quiet shrink-0 text-xs ${focusRing}`)
+                      .children(themeControls.label),
+                    principal
+                      ? accountMenu(
+                          h,
+                          principal,
+                          model.accountOpen,
+                          model.interactive && h.props.principalKnown,
+                        )
+                      : h.a
+                          .attr('href', signInHref(pathname))
+                          .class(
+                            `inline-flex h-8 shrink-0 items-center rounded-sm px-2.5 text-xs font-semibold text-highlight no-underline transition-colors hover:bg-muted/60 ${focusRing}`,
+                          )
+                          .children('Log in'),
+                  ),
+              ),
+            MobileDock(h, {
+              key: 'station-mobile-dock',
+              props: {
+                pathname,
+                interactive: model.interactive,
+                menuOpen: model.menuOpen,
+                minimized: model.minimized,
+              },
+              onEmit: {
+                RequestedSearch: () => NavigationMessage.RequestedSearch(),
+                RequestedMenu: ({ method }) => NavigationMessage.OpenedMenu({ method }),
+                ChangedMinimized: ({ minimized }) =>
+                  NavigationMessage.ChangedMinimized({ minimized }),
+              },
+            }),
+            mobileMenu(
+              h,
+              model,
+              h.props,
+              themeControls.button(h.button).children(themeControls.label),
+            ),
+            h.nav
+              .class('station-fallback flex-wrap items-center gap-2 border-b border-border p-3')
+              .attr('aria-label', 'Navigation without JavaScript')
+              .children(
+                navLink('/', 'Home'),
+                links.map(([href, label]) => navLink(href, label)),
+                navLink('/mixes', 'Mixes'),
+                navLink('/subscribe', 'Subscribe'),
                 principal
-                  ? accountMenu(
-                      h,
-                      principal,
-                      model.accountOpen,
-                      model.interactive && h.props.principalKnown,
-                    )
-                  : h.a
-                      .attr('href', signInHref(pathname))
-                      .class(
-                        `inline-flex h-8 shrink-0 items-center rounded-sm px-2.5 text-xs font-semibold text-highlight no-underline transition-colors hover:bg-muted/60 ${focusRing}`,
-                      )
-                      .children('Log in'),
+                  ? navLink('/dashboard', 'Dashboard')
+                  : navLink(signInHref(pathname), 'Log in'),
+                principal &&
+                  h.form
+                    .attr('method', 'post')
+                    .attr('action', '/actions/sign-out')
+                    .children(
+                      h.button.attr('type', 'submit').class('btn btn-quiet').children('Log out'),
+                    ),
               ),
           ),
-        MobileDock(h, {
-          key: 'station-mobile-dock',
-          props: {
-            pathname,
-            interactive: model.interactive,
-            menuOpen: model.menuOpen,
-            minimized: model.minimized,
-          },
-          onEmit: {
-            RequestedSearch: () => NavigationMessage.RequestedSearch(),
-            RequestedMenu: ({ method }) => NavigationMessage.OpenedMenu({ method }),
-            ChangedMinimized: ({ minimized }) => NavigationMessage.ChangedMinimized({ minimized }),
-          },
-        }),
-        mobileMenu(h, model, h.props),
-        h.nav
-          .class('station-fallback flex-wrap items-center gap-2 border-b border-border p-3')
-          .attr('aria-label', 'Navigation without JavaScript')
-          .children(
-            navLink('/', 'Home'),
-            links.map(([href, label]) => navLink(href, label)),
-            navLink('/mixes', 'Mixes'),
-            navLink('/subscribe', 'Subscribe'),
-            principal
-              ? navLink('/dashboard', 'Dashboard')
-              : navLink(signInHref(pathname), 'Log in'),
-            principal &&
-              h.form
-                .attr('method', 'post')
-                .attr('action', '/actions/sign-out')
-                .children(
-                  h.button.attr('type', 'submit').class('btn btn-quiet').children('Log out'),
-                ),
-          ),
-      )
+    })
   },
 })

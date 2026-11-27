@@ -60,7 +60,13 @@ export const MobileDock = Html.component({
     return h.div
       .class('mobile-dock lg:hidden')
       .attr('data-minimized', minimized ? '' : undefined)
-      .onMount(TrackNavigationScroll({ active: current !== null, minimized }))
+      .onMount(
+        TrackNavigationScroll({
+          active:
+            current !== null && !h.reads.player.fullscreenOpen && h.reads.player.fullscreenSettled,
+          minimized,
+        }),
+      )
       .children(
         MiniPlayer(h, { key: 'station-mini-player' }),
         h.nav

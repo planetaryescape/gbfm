@@ -1,30 +1,55 @@
-import { Story } from '@effect/ui/testing'
-import { expect, it } from '@effect/vitest'
+import { Component } from '@effect/ui'
+import { Html } from '@effect/ui/html'
+import { HtmlLocator, HtmlScene } from '@effect/ui/html/testing'
+import { Locator } from '@effect/ui/testing'
+import { it } from '@effect/vitest'
 import { Effect } from 'effect'
 
-import { PersistTheme, ReadTheme, ThemeButton, ThemeMessage } from './theme-button'
+import { PersistTheme, ReadTheme, ThemeControls, ThemeMessage } from './theme-button'
 
-it.effect('loads the saved theme and persists the next selected theme', () =>
+it.effect('keeps desktop and menu theme controls on the same persisted cycle', () =>
   Effect.gen(function* () {
-    const story = yield* Story.make(ThemeButton, {})
-    story.expectExact(ReadTheme)
-    story.resolve(ReadTheme, ThemeMessage.LoadedTheme({ theme: 'dark' }))
-    story.send(ThemeMessage.ClickedTheme()).expectExact(PersistTheme.make({ theme: 'system' }))
+    const s = yield* HtmlScene.make(
+      ThemeControls,
+      {},
+      {
+        elements: Html.vocabulary,
+        view: (themeControls, h) =>
+          h.div.children(
+            h.nav
+              .attr('aria-label', 'Desktop')
+              .children(themeControls.button(h.button).children(themeControls.label)),
+            h.nav
+              .attr('aria-label', 'Menu')
+              .children(themeControls.button(h.button).children(themeControls.label)),
+          ),
+      },
+    )
 
-    expect(story.model.theme).toBe('system')
-    story.resolve(PersistTheme, Component.noop)
+    const desktop = (name: string) =>
+      Locator.inside(
+        HtmlLocator.role('navigation', { name: 'Desktop' }),
+        HtmlLocator.role('button', { name }),
+      )
+
+    const menu = (name: string) =>
+      Locator.inside(
+        HtmlLocator.role('navigation', { name: 'Menu' }),
+        HtmlLocator.role('button', { name }),
+      )
+
+    s.resolve(ReadTheme, ThemeMessage.LoadedTheme({ theme: 'system' }))
+      .click(desktop('Theme: system'))
+      .resolve(PersistTheme.make({ theme: 'light' }), Component.noop)
+      .expect(menu('Theme: light'))
+      .toExist()
+      .click(menu('Theme: light'))
+      .resolve(PersistTheme.make({ theme: 'dark' }), Component.noop)
+      .expect(desktop('Theme: dark'))
+      .toExist()
+      .click(desktop('Theme: dark'))
+      .resolve(PersistTheme.make({ theme: 'system' }), Component.noop)
+      .expect(menu('Theme: system'))
+      .toExist()
   }),
 )
-
-it.effect('cycles system to light without borrowing state from its parent', () =>
-  Effect.gen(function* () {
-    const story = yield* Story.make(ThemeButton, {})
-    story.resolve(ReadTheme, ThemeMessage.LoadedTheme({ theme: 'system' }))
-    story.send(ThemeMessage.ClickedTheme()).expectExact(PersistTheme.make({ theme: 'light' }))
-
-    expect(story.model.theme).toBe('light')
-    story.resolve(PersistTheme, Component.noop)
-  }),
-)
-
-import { Component } from '@effect/ui'

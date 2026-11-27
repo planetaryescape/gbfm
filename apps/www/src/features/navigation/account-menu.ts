@@ -1,6 +1,6 @@
 import type { View } from '@effect/ui'
 import { Popover } from '@effect/ui-kit'
-import type { Html } from '@effect/ui/html'
+import { Html } from '@effect/ui/html'
 import { canCreatePosts } from '@gbfm/core/roles'
 
 import type { Principal } from '../../domain/principal'
@@ -9,6 +9,10 @@ import { NavigationMessage } from './domain'
 
 const rowClass =
   'flex min-h-10 w-full items-center rounded-sm px-3 py-2 text-left text-sm text-popover-foreground no-underline transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+
+export const AccountFirst = Html.ref('StationNavigation.accountFirst', 'a')
+
+const accountTriggerId = 'station-account-trigger'
 
 export const accountMenu = (
   h: Html.H<NavigationMessage>,
@@ -19,27 +23,26 @@ export const accountMenu = (
   const name = principal.name ?? principal.username ?? '?'
 
   const item = (href: string, label: string): View.Content<NavigationMessage> =>
-    h.a
-      .attr('href', href)
-      .class(rowClass)
-      .on('click', NavigationMessage.ClosedAccount())
-      .children(label)
+    h.a.attr('href', href).class(rowClass).children(label)
 
   return Popover(h, {
     key: 'station-account',
     props: {
       open,
+      triggerId: accountTriggerId,
       side: 'top',
       align: 'end',
       sideOffset: 12,
       collisionPadding: 16,
       positionMethod: 'fixed',
       keepMounted: true,
+      initialFocus: false,
+      topLayer: false,
     },
     onEmit: {
       RequestedOpen: () => NavigationMessage.OpenedAccount(),
       RequestedClose: () => NavigationMessage.ClosedAccount(),
-      Settled: () => undefined,
+      Settled: ({ open }) => NavigationMessage.SettledAccount({ open }),
     },
     view: (popover) =>
       h.div.class('relative').children(
@@ -47,6 +50,7 @@ export const accountMenu = (
           .trigger({
             disabled: !interactive,
             element: h.button
+              .id(accountTriggerId)
               .attr('type', 'button')
               .attr('title', name)
               .attr('aria-label', 'Account menu')
@@ -61,7 +65,7 @@ export const accountMenu = (
               : (name[0] ?? '?'),
           ),
         popover.portal(h.dialog)?.children(
-          popover.backdrop(h.div.class('account-menu-backdrop')),
+          popover.backdrop(h.div.class('account-menu-backdrop').style({ pointerEvents: 'none' })),
           popover.positioner(h.div).children(
             popover.popup(h.div).children(
               h.nav
@@ -80,9 +84,10 @@ export const accountMenu = (
                   h.div
                     .class('py-1')
                     .children(
-                      popover
-                        .initialFocus(h.a.attr('href', '/dashboard').class(rowClass))
-                        .on('click', NavigationMessage.ClosedAccount())
+                      h.a
+                        .ref(AccountFirst)
+                        .attr('href', '/dashboard')
+                        .class(rowClass)
                         .children('Dashboard'),
                       item('/listening', 'Listening pile'),
                       item('/dashboard/profile', 'Edit profile'),

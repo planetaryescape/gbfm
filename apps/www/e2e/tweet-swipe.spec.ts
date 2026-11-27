@@ -1,7 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
 
+import { expectNativeReady } from './fixtures/native-ready'
+
 const ready = async (page: Page, slug: string) => {
-  await expect(page.locator('.site')).toHaveAttribute('data-interactive', 'true')
+  await expectNativeReady(page)
   await expect(page.locator('[data-tweet-swipe]')).toHaveAttribute('data-tweet-swipe', slug)
   await expect(page.locator('[data-tweet-swipe]')).toHaveAttribute('data-swipe-ready', 'true')
   await expect(page.locator('[data-tweet-motion]')).not.toHaveAttribute('data-swipe-phase', /.+/)

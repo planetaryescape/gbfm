@@ -1,6 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 import { Schema } from 'effect'
 
+import { expectModalOpen } from './fixtures/native-ready'
+
 const openReader = async (page: Page) => {
   await page.locator('summary[aria-label="Reading options"]').click()
 
@@ -90,7 +92,8 @@ test('chronological arrows stay adjacent regardless of seen history', async ({ p
   await page.keyboard.press('ArrowRight')
   await expect(page).toHaveURL(/\/tweet\/e2e-archive-one$/)
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: 'Menu', exact: true })).toBeVisible()
+  const menu = page.getByRole('dialog', { name: 'Menu', exact: true })
+  await expectModalOpen(menu, menu.locator('.menu-sheet'))
   await page.keyboard.press('ArrowLeft')
   await expect(page).toHaveURL(/\/tweet\/e2e-archive-one$/)
 })
@@ -289,8 +292,9 @@ test('network failure during resume preserves the checkpoint', async ({ page }) 
   await page.route('**/tweet/e2e-archive-one?__data=1', (route) => route.abort())
   await page.goto('/tweets')
   await expect(
-    page.getByText('This page could not be loaded. Please try again.', { exact: true }),
+    page.getByRole('alert').filter({ hasText: /^This page is unavailable\. Try again\.$/ }),
   ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible()
   expect(await page.evaluate(() => localStorage.getItem('gbfm:tweet-checkpoint:anonymous'))).toBe(
     'e2e-archive-one',
   )
@@ -381,7 +385,15 @@ test('late prefetched and loaded tweet responses cannot change a superseding pag
   })
   await page.goto('/tweet/e2e-archive-one')
   await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeEnabled()
-  await (await openReader(page)).getByRole('link', { name: 'Newer tweet', exact: true }).click()
+  await openReader(page)
+
+  const newer = page
+    .getByRole('navigation', { name: 'Tweet reader', exact: true })
+    .getByRole('link', { name: 'Newer tweet', exact: true })
+
+  await expect(newer).toHaveCount(1)
+  await expect(newer).toHaveAttribute('href', '/tweet/e2e-archive-two')
+  await newer.click()
   await expect(page).toHaveURL(/\/tweet\/e2e-archive-two$/)
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page

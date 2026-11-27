@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { expectNativeReady } from './fixtures/native-ready'
+
 for (const theme of ['light', 'dark']) {
   test(`${theme} mobile dock keeps its fade and active tint while collapsing`, async ({ page }) => {
     await page.addInitScript((theme) => {
@@ -22,7 +24,8 @@ for (const theme of ['light', 'dark']) {
       )
     }, theme)
     await page.goto('/')
-    await expect(page.locator('.site')).toHaveAttribute('data-interactive', 'true')
+    await expectNativeReady(page)
+    await expect(page.getByRole('button', { name: 'Now playing', exact: true })).toBeEnabled()
     const dock = page.locator('.mobile-dock')
     const navigation = page.locator('nav.dock-tabs')
     const active = navigation.getByRole('link', { name: 'Home', exact: true })

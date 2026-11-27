@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { expectModalOpen } from './fixtures/native-ready'
+
 test('client navigation replaces structured data and private robots metadata without duplicate canonicals', async ({
   page,
 }) => {
@@ -52,8 +54,9 @@ test('a menu opened during navigation stays open when the page arrives', async (
   await page.getByRole('link', { name: 'Editorial', exact: true }).click()
   await expect(page.getByRole('status', { name: 'Loading page' })).toBeVisible()
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: 'Menu', exact: true })).toBeVisible()
+  const menu = page.getByRole('dialog', { name: 'Menu', exact: true })
+  await expectModalOpen(menu, menu.locator('.menu-sheet'))
   release()
   await expect(page.getByRole('status', { name: 'Loading page' })).toHaveCount(0)
-  await expect(page.getByRole('dialog', { name: 'Menu', exact: true })).toBeVisible()
+  await expectModalOpen(menu, menu.locator('.menu-sheet'))
 })

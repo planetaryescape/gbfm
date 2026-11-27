@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test'
 
+import {
+  expectBackgroundScrollLocked,
+  expectModalOpen,
+  expectPopupSettled,
+  scrollStyles,
+} from './fixtures/native-ready'
+
 test('mobile visitors can return to the front page from the menu', async ({ page }) => {
   await page.goto('/mixes')
   const trigger = page.getByRole('button', { name: 'Menu', exact: true })
@@ -31,14 +38,13 @@ test('mobile menu contains scrolling and restores the page after dismissal and n
   const trigger = page.getByRole('button', { name: 'Menu', exact: true })
   const sheet = page.locator('.menu-sheet')
   const links = page.locator('.menu-sheet-links')
+  const originalStyles = await scrollStyles(page)
   await expect(trigger).toBeEnabled()
   await trigger.focus()
   await page.keyboard.press('Enter')
-  await expect(sheet).toBeVisible()
-  await expect(sheet).not.toHaveAttribute('data-transition')
-  await expect
-    .poll(() => page.evaluate(() => getComputedStyle(document.documentElement).overflow))
-    .toBe('hidden')
+  await expectModalOpen(page.locator('#mobile-menu'), sheet)
+  await expectPopupSettled(sheet)
+  await expectBackgroundScrollLocked(page)
   const bounds = await sheet.boundingBox()
   expect(bounds?.y).toBeGreaterThanOrEqual(16)
   expect((bounds?.y ?? 600) + (bounds?.height ?? 0)).toBeLessThanOrEqual(600)
@@ -50,23 +56,22 @@ test('mobile menu contains scrolling and restores the page after dismissal and n
   await page.keyboard.press('Escape')
   await expect(sheet).not.toBeVisible()
   await expect(trigger).toBeFocused()
-  await expect
-    .poll(() => page.evaluate(() => getComputedStyle(document.documentElement).overflow))
-    .not.toBe('hidden')
+  await expect.poll(() => scrollStyles(page)).toEqual(originalStyles)
   await trigger.click()
   await expect(sheet).toBeVisible()
   await page.mouse.click(195, 8)
-  await expect(page.locator('#mobile-menu')).not.toBeVisible()
+  await expect(sheet).not.toBeVisible()
   await expect
-    .poll(() => page.evaluate(() => getComputedStyle(document.documentElement).overflow))
-    .not.toBe('hidden')
+    .poll(() =>
+      page.locator('#mobile-menu').evaluate((element) => element.matches(':popover-open')),
+    )
+    .toBe(false)
+  await expect.poll(() => scrollStyles(page)).toEqual(originalStyles)
   await trigger.click()
   await sheet.getByRole('link', { name: 'Tweets', exact: true }).click()
   await expect(page).toHaveURL(/\/tweet\/(?!latest)[^/?]+$/)
   await expect(sheet).not.toBeVisible()
-  await expect
-    .poll(() => page.evaluate(() => getComputedStyle(document.documentElement).overflow))
-    .not.toBe('hidden')
+  await expect.poll(() => scrollStyles(page)).toEqual(originalStyles)
 })
 
 test('mobile menu slides up with the player timing and respects reduced motion', async ({
@@ -139,7 +144,7 @@ test('pulling the mobile menu follows the pointer, snaps back, and dismisses pas
   await expect(trigger).toBeEnabled()
   await trigger.focus()
   await page.keyboard.press('Enter')
-  await expect(sheet).not.toHaveAttribute('data-transition')
+  await expectPopupSettled(sheet)
   const restingY = (await sheet.boundingBox())?.y ?? 0
   const handle = sheet.locator('header')
   const bounds = await handle.boundingBox()

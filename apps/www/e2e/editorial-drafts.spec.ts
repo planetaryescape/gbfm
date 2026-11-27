@@ -78,6 +78,17 @@ test('other signed-in readers, including admins, cannot read someone else’s dr
     const data = await page.request.get(`${path}?__data=1`)
     expect(data.status()).toBe(404)
     expect(await data.text()).not.toContain('private listening notes')
-    await page.request.post('/auth/sign-out', { headers: { origin: new URL(page.url()).origin } })
+
+    const signedOut = await page.request.post('/auth/sign-out', {
+      headers: { origin: new URL(page.url()).origin },
+      data: {},
+    })
+
+    expect(signedOut.ok()).toBe(true)
+
+    const session = await page.request.get('/auth/get-session')
+
+    expect(session.status()).toBe(200)
+    expect(await session.json()).toBeNull()
   }
 })

@@ -145,6 +145,7 @@ const nativeData: PageHandler<Responded> = async (request, dataRequest, startedA
     Response.json(
       {
         dataRequest,
+        origin: page.url.origin,
         pathname: page.url.pathname,
         search: page.url.search,
         requestId: request.headers.get('x-request-id'),
@@ -171,6 +172,26 @@ test('dispatches normalized page requests and JSON navigation to the supplied re
     search: '?keep=value',
     requestId: 'owned-dispatch-fixture',
     document: { status: 200, principal: null, principalKnown: true },
+  })
+})
+
+test('native dispatch does not replace the request origin with unvalidated forwarding headers', async () => {
+  const result = await dispatchHttp(
+    new Request('https://www.fixture.test/about?__data=1', {
+      headers: {
+        host: 'untrusted.example',
+        'x-forwarded-host': 'untrusted.example',
+        'x-forwarded-proto': 'http',
+      },
+    }),
+    nativeData,
+  )
+
+  expect(result.response.status).toBe(200)
+  expect(await result.response.json()).toMatchObject({
+    origin: 'https://www.fixture.test',
+    pathname: '/about',
+    dataRequest: true,
   })
 })
 

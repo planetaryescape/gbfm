@@ -49,20 +49,6 @@ export const dispatchHttp = async <A>(
 ): Promise<A | Responded> => {
   const startedAt = performance.now()
   const url = new URL(routing?.url ?? request.url)
-  const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host')
-  const protocol = request.headers.get('x-forwarded-proto')
-
-  // Foldkit's Vite adapter uses localhost as its URL base; preserve the incoming dev origin.
-  if (routing === undefined && import.meta.env.DEV && host) {
-    const origin = URL.parse(`${(protocol ?? url.protocol).replace(':', '')}://${host}`)
-
-    if (origin) {
-      url.protocol = origin.protocol
-      url.hostname = origin.hostname
-      url.port = origin.port
-    }
-  }
-
   const route = routing?.route ?? parseRoute(url.pathname)
   const dataRequest = url.searchParams.has('__data')
   url.searchParams.delete('__data')

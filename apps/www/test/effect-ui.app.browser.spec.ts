@@ -83,38 +83,54 @@ test('real theme control cycles, persists across reloads and follows system pref
   await page.getByRole('button', { name: 'Theme: system', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Theme: light', exact: true })).toBeVisible()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
-  expect(await page.evaluate(() => localStorage.getItem('vite-ui-theme'))).toBe('light')
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('vite-ui-theme'))).toBe('light')
   await page.reload()
   await expect(page.getByRole('button', { name: 'Theme: light', exact: true })).toBeVisible()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await page.getByRole('button', { name: 'Theme: light', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Theme: dark', exact: true })).toBeVisible()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-  expect(await page.evaluate(() => localStorage.getItem('vite-ui-theme'))).toBe('dark')
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('vite-ui-theme'))).toBe('dark')
   await screenshot(page, info, 'about-native-dark.png')
   await page.getByRole('button', { name: 'Theme: dark', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Theme: system', exact: true })).toBeVisible()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-  expect(await page.evaluate(() => localStorage.getItem('vite-ui-theme'))).toBe('system')
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('vite-ui-theme'))).toBe('system')
 })
 
 test('real static navigation follows the visible links between documents', async ({ page }) => {
   await page.goto('/about')
+  await expect(page.locator('html')).toHaveAttribute('data-gbfm-hydrated', 'true')
+  const timeOrigin = await page.evaluate(() => performance.timeOrigin)
+
+  await page.evaluate(() => {
+    document.documentElement.dataset.nativeNavigationProof = 'same-document'
+  })
 
   for (const route of [
-    { ...pages[1], label: 'Privacy' },
-    { ...pages[2], label: 'Terms' },
-    { ...pages[0], label: 'About' },
+    { ...pages[1], label: 'Privacy policy', navigation: false },
+    { ...pages[0], label: 'About', navigation: true },
+    { ...pages[2], label: 'Terms of service', navigation: false },
+    { ...pages[0], label: 'About', navigation: true },
   ]) {
     if (!route.path || !route.heading) throw new Error('Missing static navigation fixture')
-    const navigation = page.getByRole('navigation', { name: 'Primary', exact: true })
-    const link = navigation.getByRole('link', { name: route.label, exact: true })
+
+    const region = route.navigation
+      ? page.getByRole('navigation', { name: 'Primary', exact: true })
+      : page.getByRole('main')
+
+    const link = region.getByRole('link', { name: route.label, exact: true })
     await expect(link).toHaveAttribute('href', route.path)
     await Promise.all([page.waitForURL(`**${route.path}`), link.click()])
     await expect(
       page.getByRole('heading', { level: 1, name: route.heading, exact: true }),
     ).toBeVisible()
     await expect(page.locator('html')).toHaveAttribute('data-gbfm-hydrated', 'true')
+    expect(await page.evaluate(() => performance.timeOrigin)).toBe(timeOrigin)
+    await expect(page.locator('html')).toHaveAttribute(
+      'data-native-navigation-proof',
+      'same-document',
+    )
   }
 })
 

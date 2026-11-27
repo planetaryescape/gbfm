@@ -1,5 +1,6 @@
 import { Component, Head, Query } from '@effect/ui'
 import { Html } from '@effect/ui/html'
+import { parseRichContent } from '@gbfm/rich-content/source'
 import { Context, Effect, Predicate, Schema } from 'effect'
 
 export class FixtureIdentity extends Context.Service<
@@ -40,6 +41,8 @@ const Identity = Html.component({
   },
 })
 
+const workerDocument = parseRichContent('Worker-safe **markdown** &amp; entities').document
+
 export const FixtureProps = Schema.Struct({ title: Schema.String })
 
 export const FixtureApp = Html.component({
@@ -57,6 +60,9 @@ export const FixtureApp = Html.component({
         .class('font-jetbrains')
         .children(
           h.h1(h.props.title),
+          h.p
+            .attr('data-worker-markdown', '')
+            .children(`Worker markdown blocks: ${workerDocument.blocks.length}`),
           Identity(h, { key: 'first' }),
           Identity(h, { key: 'second' }),
           h.button.on('click', 'ClickedIncrement').children(`Clicks: ${model.clicks}`),

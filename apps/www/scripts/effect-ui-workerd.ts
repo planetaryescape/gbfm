@@ -4,6 +4,8 @@ import { fileURLToPath, URL } from 'node:url'
 
 import { Miniflare } from 'miniflare'
 
+import { createFixtureApiBinding, parseFixtureBase } from './effect-ui-fixture-api'
+
 const fixture = process.argv.includes('--fixture')
 
 const serve = process.argv.includes('--serve')
@@ -15,6 +17,10 @@ const output = resolve(root, fixture ? 'dist-effect-fixture' : 'dist-effect')
 const previewPath = process.env.GBFM_EFFECT_PREVIEW_PATH ?? (fixture ? '/' : '/about')
 
 const requestedPort = Number(process.env.GBFM_EFFECT_PREVIEW_PORT ?? '4175')
+
+const fixtureBase = parseFixtureBase(process.env.GBFM_FRONTEND_FIXTURE_BASE)
+
+const fixtureTurnstileSiteKey = '1x00000000000000000000AA'
 
 if (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65535)
   throw new Error('GBFM_EFFECT_PREVIEW_PORT must be a valid port')
@@ -31,12 +37,16 @@ const runtime = new Miniflare({
       modulesRules: [{ type: 'ESModule', include: ['**/*.js'], fallthrough: true }],
       compatibilityDate: '2026-07-04',
       compatibilityFlags: ['nodejs_compat'],
-      serviceBindings: { API: 'api', SOCIAL_IMAGES: 'social-images' },
+      serviceBindings: {
+        API: createFixtureApiBinding(fixtureBase?.origin),
+        SOCIAL_IMAGES: 'social-images',
+      },
       bindings: {
         APP_STAGE: 'test',
         APP_RELEASE: 'local-effect-ui-fixture',
-        EDITORIAL_OAUTH_ISSUER: 'http://127.0.0.1/auth',
+        EDITORIAL_OAUTH_ISSUER: new URL('/auth', fixtureBase ?? 'http://127.0.0.1').href,
         BROWSER_TELEMETRY_ORIGIN: 'http://127.0.0.1',
+        TURNSTILE_SITE_KEY: fixtureBase ? fixtureTurnstileSiteKey : '',
       },
       assets: {
         directory: resolve(output, 'client'),
@@ -49,22 +59,6 @@ const runtime = new Miniflare({
       },
       outboundService: () =>
         new Response('External network disabled in SSR fixture', { status: 502 }),
-    },
-    {
-      name: 'api',
-      modules: true,
-      compatibilityDate: '2026-07-04',
-      script: `export default {
-        async fetch(request) {
-          const url = new URL(request.url)
-          if (url.pathname === '/api/auth/get-session')
-            return Response.json(null)
-          if (url.pathname === '/api/content/homepage-mixes')
-            return Response.json([])
-          return Response.json({ error: 'Unconfigured local fixture endpoint' }, { status: 404 })
-        }
-      }`,
-      outboundService: () => new Response(null, { status: 502 }),
     },
     {
       name: 'social-images',
@@ -111,6 +105,7 @@ try {
   assert.deepEqual(head.headers.getSetCookie(), page.headers.getSetCookie())
 
   if (fixture) {
+    assert.match(html, /Worker markdown blocks: 1/)
     assert.equal(page.headers.getSetCookie().length, 2)
     const identities = ['Alpha', 'Beta']
 
@@ -137,6 +132,44 @@ try {
     assert.deepEqual(await data.json(), { title: 'Native fixture' })
     const missing = await fetchPage('http://fixture.test/missing')
     assert.equal(missing.status, 404)
+  } else {
+    for (const path of [
+      '/spotify/callback',
+      '/dashboard/spotify-callback',
+      '/dashboard/%73potify-callback',
+    ]) {
+      for (const data of [false, true]) {
+        const callback = new URL(path, 'http://fixture.test')
+        callback.searchParams.set('code', 'synthetic-code-never-serialized')
+        callback.searchParams.set('state', 'synthetic-state-never-serialized')
+
+        if (data) callback.searchParams.set('__data', '1')
+        const response = await fetchPage(callback.href)
+        assert.equal(response.status, 200)
+        assert.equal(response.headers.get('location'), null)
+        assert.equal(response.headers.get('referrer-policy'), 'no-referrer')
+        assert.match(response.headers.get('x-robots-tag') ?? '', /noindex/)
+        assert.match(response.headers.get('content-type') ?? '', /text\/html/)
+        const document = await response.text()
+        assert.match(document, /"kind":"spotify-callback"/)
+        assert.doesNotMatch(document, /synthetic-code-never-serialized/)
+        assert.doesNotMatch(document, /synthetic-state-never-serialized/)
+      }
+    }
+
+    if (fixtureBase) {
+      for (const path of ['/auth/sign-up', '/subscribe']) {
+        const response = await fetchPage(new URL(path, 'http://fixture.test').href)
+        assert.equal(response.status, 200)
+        const document = await response.text()
+        assert.ok(
+          document.includes(fixtureTurnstileSiteKey),
+          `Local ${path} must receive the public Turnstile test site key`,
+        )
+        assert.match(document, /data-turnstile/)
+        assert.doesNotMatch(document, /Verification is unavailable/)
+      }
+    }
   }
 
   process.stdout.write(

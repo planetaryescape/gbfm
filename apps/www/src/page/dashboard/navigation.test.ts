@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveSection, sectionLabel, visibleWorkspaces } from './navigation'
+import {
+  resolveSection,
+  sectionLabel,
+  visibleWorkspaces,
+} from '../../features/dashboard/navigation'
 
 const located = (section: string, role: Parameters<typeof resolveSection>[1] = 'admin') => {
   const resolved = resolveSection(section, role)

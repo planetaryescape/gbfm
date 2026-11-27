@@ -235,7 +235,7 @@ describe('native dashboard section interactions', () => {
           })
 
           expect(s.current.query(Locator.text('Send announcement'))).toBeUndefined()
-          s.click('Review recipients').expectNone()
+          s.click('Review announcement').expectNone()
           s.expect(Locator.text('Send announcement')).toBeAbsent()
         }),
       ),
@@ -256,7 +256,7 @@ describe('native dashboard section interactions', () => {
           })
 
           s.fire(Locator.attr('name', 'mixSlug'), 'change', { value: 'fixture-mix' })
-            .click('Review recipients')
+            .click('Review announcement')
             .loaded('review', { ...emptyDocument, announcementOptions: options })
             .click(Locator.tag('input'))
             .click('Send announcement')

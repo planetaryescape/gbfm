@@ -15,7 +15,7 @@ import { Effect, Layer, Match, Predicate, Schema } from 'effect'
 
 import { Principal } from '../../domain/principal'
 import { DashboardDocument } from './document'
-import { Field, Notice, Rows } from './presentation'
+import { DataTable, Field, Notice } from './presentation'
 import { endpointFor, entityRoute } from './sections'
 import {
   DashboardRequestError,
@@ -419,7 +419,11 @@ export const DashboardCatalogNoDeps = CatalogDef.make({
         confirming: false,
         deleted: action === 'delete',
         revision: $.model.revision + 1,
-        notice: action === 'delete' ? 'Entity deleted.' : 'Catalogue changes saved.',
+        notice: Match.value(action).pipe(
+          Match.when('save', () => 'Entity saved.'),
+          Match.when('delete', () => 'Entity deleted.'),
+          Match.orElse(() => 'Catalogue changes saved.'),
+        ),
         fields: { ...$.model.fields, linkUrl: '' },
       }),
     FailedWrite: ($, { message, pending, uncertain }) =>
@@ -433,7 +437,19 @@ export const DashboardCatalogNoDeps = CatalogDef.make({
       : h.props.initialDocument
 
     const field = (name: string) => {
-      const label = name.replace(/([A-Z])/g, ' $1')
+      const labelFor = () => {
+        if (!entity && name === 'name') return 'Label name'
+
+        if (!entity && name === 'slug') return 'Label slug'
+
+        if (name === 'platform') return 'Platform'
+
+        if (name === 'linkUrl') return 'Link URL'
+
+        return name
+      }
+
+      const label = labelFor()
       const disabled = model.busy || model.refreshing || model.pending !== null
 
       if (['bio', 'content', 'description'].includes(name))
@@ -484,12 +500,14 @@ export const DashboardCatalogNoDeps = CatalogDef.make({
               )
           : undefined,
         entity
-          ? h.a.attr('href', '/dashboard/music').children('Back to catalogue')
+          ? h.a.attr('href', '/dashboard/music').children('Back to catalog')
           : h.nav
               .attr('aria-label', 'Music catalogue')
               .children(
                 ['artists', 'albums', 'tracks', 'playlists', 'labels'].map((tab) =>
-                  h.a.attr('href', `/dashboard/music?tab=${tab}`).children(tab),
+                  h.a
+                    .attr('href', `/dashboard/music?tab=${tab}`)
+                    .children(`${tab[0]?.toUpperCase()}${tab.slice(1)}`),
                 ),
               ),
         h.button
@@ -498,7 +516,25 @@ export const DashboardCatalogNoDeps = CatalogDef.make({
           .children('Refresh'),
         !entity
           ? [
-              Rows(h, document.rows),
+              DataTable(
+                h,
+                `${(document.fields.tab ?? 'artists')[0]?.toUpperCase()}${(document.fields.tab ?? 'artists').slice(1)}`,
+                ['Name', 'Slug', 'Status', 'Actions'],
+              ).children(
+                h.tbody.children(
+                  document.rows.map((row) =>
+                    h.tr
+                      .key(row.id)
+                      .class('admin-row')
+                      .children(
+                        h.td(row.title),
+                        h.td(row.detail),
+                        h.td(row.status ?? ''),
+                        h.td.children(h.a.attr('href', row.href ?? undefined).children('Edit')),
+                      ),
+                  ),
+                ),
+              ),
               document.fields.tab === 'labels'
                 ? h.details.children(
                     h.summary('New label'),
@@ -517,35 +553,41 @@ export const DashboardCatalogNoDeps = CatalogDef.make({
                 h.div
                   .class('dashboard-form')
                   .children(fieldsFor(entity.kind).map(field), action('save', 'Save entity')),
-                h.button
-                  .disabled(model.busy)
-                  .on('click', CatalogMessage.ClickedDelete())
-                  .children('Delete entity'),
-                model.confirming
-                  ? h.div.children(
-                      h.p('Permanently delete this entity?'),
-                      action('delete', 'Confirm delete'),
-                      h.button.on('click', CatalogMessage.ClickedCancelDelete()).children('Cancel'),
-                    )
-                  : undefined,
+                h.details.children(
+                  h.summary.on('click', CatalogMessage.ClickedDelete()).children('Delete entity'),
+                  model.confirming
+                    ? h.div.children(
+                        h.p('Permanently delete this entity?'),
+                        action('delete', 'Confirm delete entity'),
+                        h.button
+                          .on('click', CatalogMessage.ClickedCancelDelete())
+                          .children('Cancel'),
+                      )
+                    : undefined,
+                ),
                 h.h2('Source links'),
                 Predicate.isTagged(h.queries.links, 'Success')
-                  ? h.ul.children(
-                      h.queries.links.value.rows.map((row) =>
-                        h.li
-                          .key(row.id)
-                          .children(
-                            h.strong(row.title),
-                            h.a.attr('href', row.href ?? undefined).children(row.detail),
-                            h.span(row.status ?? ''),
-                            action('remove-link', 'Remove link', row.id),
-                          ),
+                  ? DataTable(h, 'Source links', ['Platform', 'URL', 'Status', 'Actions']).children(
+                      h.tbody.children(
+                        h.queries.links.value.rows.map((row) =>
+                          h.tr
+                            .key(row.id)
+                            .class('admin-row')
+                            .children(
+                              h.td(row.title),
+                              h.td.children(
+                                h.a.attr('href', row.href ?? undefined).children(row.detail),
+                              ),
+                              h.td(row.status ?? ''),
+                              h.td.children(action('remove-link', 'Remove link', row.id)),
+                            ),
+                        ),
                       ),
                     )
                   : h.p('Source links are unavailable.'),
                 field('platform'),
                 field('linkUrl'),
-                action('add-link', 'Add verified source link'),
+                action('add-link', 'Add link'),
               ]
             : undefined,
       )

@@ -38,6 +38,9 @@ export const DashboardPage = Html.component({
     const props = { section, principal, initialDocument: document, url }
 
     const title = () => {
+      if (isAdminSection(section) && principal.role !== 'admin')
+        return 'Administrator access required'
+
       if (section === 'overview') return 'Your dashboard'
 
       if (entity) return `Edit ${entity.kind}`
@@ -47,7 +50,13 @@ export const DashboardPage = Html.component({
 
     const content = () => {
       if (isAdminSection(section) && principal.role !== 'admin')
-        return h.p.attr('role', 'alert').children('Administrator access required.')
+        return h.p
+          .attr('role', 'alert')
+          .class('dashboard-forbidden')
+          .children(
+            'Administrator access required. This area is not available to your account. ',
+            h.a.attr('href', '/dashboard').children('Go to your dashboard'),
+          )
 
       if (['profile', 'email', 'player', 'appearance'].includes(section))
         return DashboardSettings(h, {

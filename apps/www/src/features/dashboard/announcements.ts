@@ -224,23 +224,26 @@ export const DashboardAnnouncementsNoDeps = AnnouncementDef.make({
           ),
           Notice(h, model.notice),
           model.stage === 'uncertain'
-            ? h.p(
-                'The result is uncertain. Some or all emails may have been sent. Do not repeat this send before checking delivery history.',
-              )
+            ? h.p
+                .attr('role', 'alert')
+                .children(
+                  'We could not confirm the result. Some emails may have been accepted. This screen will not retry the send.',
+                )
             : undefined,
-          h.a.attr('href', '/dashboard/email-logs').children('View email history'),
+          h.a.attr('href', '/dashboard/email-logs').children('View delivery history'),
         )
     const reviewing = model.stage === 'review' || model.stage === 'sending'
 
-    return h.section.class('dashboard-form').children(
+    return h.section.class('dashboard-form comms-summary').children(
       h.p('Choose the music, check the audience, then send.'),
       Notice(h, model.error, true),
       !reviewing
         ? [
             h.label.children(
-              'Mix',
+              'Published mix',
               h.select
                 .attr('name', 'mixSlug')
+                .attr('aria-label', 'Published mix')
                 .disabled(model.stage === 'checking')
                 .value(model.mixSlug)
                 .on('change', ({ value }) => AnnouncementMessage.UpdatedMix({ value }))
@@ -261,7 +264,7 @@ export const DashboardAnnouncementsNoDeps = AnnouncementDef.make({
             ),
             model.audience === 'selected'
               ? h.label.children(
-                  'Addresses',
+                  'Email addresses',
                   h.textarea
                     .value(model.addresses)
                     .on('input', ({ value }) => AnnouncementMessage.UpdatedAddresses({ value })),
@@ -270,17 +273,17 @@ export const DashboardAnnouncementsNoDeps = AnnouncementDef.make({
             h.button
               .disabled(model.stage === 'checking')
               .on('click', AnnouncementMessage.ClickedReview())
-              .children(model.stage === 'checking' ? 'Checking recipients…' : 'Review recipients'),
+              .children(
+                model.stage === 'checking' ? 'Checking recipients…' : 'Review announcement',
+              ),
           ]
         : [
             h.h2('Review announcement'),
-            h.p(plural(model.recipients.length, 'eligible recipient')),
+            h.p(`${plural(model.recipients.length, 'recipient')} at review`),
             h.ul.children(model.recipients.map((email) => h.li(email))),
             model.excluded.length
               ? h.details.children(
-                  h.summary(
-                    plural(model.excluded.length, 'excluded address', 'excluded addresses'),
-                  ),
+                  h.summary(`${plural(model.excluded.length, 'address', 'addresses')} excluded`),
                   h.ul.children(model.excluded.map((email) => h.li(email))),
                 )
               : undefined,

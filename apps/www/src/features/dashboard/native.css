@@ -1,3 +1,18 @@
+.gbfm-dashboard .admin-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+.gbfm-dashboard .admin-table td.dashboard-actions-cell {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.gbfm-dashboard .dashboard-actions-cell > button {
+  max-width: 100%;
+}
+@media (scripting: none) {
+  body:has(.gbfm-dashboard) .station-navigation .station-fallback {
+    position: static;
+  }
+}
 .gbfm-dashboard .dashboard-collection {
   display: grid;
   gap: 0.75rem;

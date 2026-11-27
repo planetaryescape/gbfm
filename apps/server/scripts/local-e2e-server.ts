@@ -265,6 +265,7 @@ await database.insert(musicPlaylistsTable).values({
   title: 'A retained playlist without cover artwork',
   slug: 'e2e-artwork-free-playlist',
   coverImageUrl: null,
+  publishedAt: new Date('2020-01-01T00:00:00Z'),
 })
 
 await database.insert(musicEntityLinksTable).values({
@@ -287,6 +288,7 @@ await database.insert(musicSourceIdentitiesTable).values({
 })
 
 const embeddedMicroId = crypto.randomUUID()
+
 const microEditorialId = crypto.randomUUID()
 
 await database.insert(postsTable).values([
@@ -307,6 +309,7 @@ await database.insert(postsTable).values([
     draft: false,
   },
 ])
+
 await database.insert(postCreators).values([
   { postId: embeddedMicroId, creatorId: creator.id },
   { postId: microEditorialId, creatorId: creator.id },

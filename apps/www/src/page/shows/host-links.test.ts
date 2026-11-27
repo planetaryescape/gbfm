@@ -2,7 +2,7 @@
 import type { RichContentDocument } from '@gbfm/rich-content/schema'
 import { describe, expect, it } from 'vitest'
 
-import { linkHostMentions } from './host-links'
+import { linkHostMentions } from '../../domain/shows/host-links'
 
 const paragraph = (value: string): RichContentDocument => ({
   version: 1,

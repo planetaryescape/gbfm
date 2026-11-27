@@ -3,10 +3,13 @@ import * as Effect from 'effect/Effect'
 import type * as Layer from 'effect/Layer'
 import { describe, expect, test } from 'vitest'
 
-import { cancelProgram } from './program'
-import type { PersistedResumableUpload } from './protocol'
-import { ResumableUploadStorage, ResumableUploadStorageInMemory } from './storage'
-import { UploadTransport } from './transport'
+import { cancelProgram } from '../../../features/creator/upload/program'
+import type { PersistedResumableUpload } from '../../../features/creator/upload/protocol'
+import {
+  ResumableUploadStorage,
+  ResumableUploadStorageInMemory,
+} from '../../../features/creator/upload/storage'
+import { UploadTransport } from '../../../features/creator/upload/transport'
 
 const makePersisted = (
   overrides: Partial<PersistedResumableUpload> = {},

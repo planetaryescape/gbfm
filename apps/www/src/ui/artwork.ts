@@ -82,8 +82,11 @@ export const shouldFallbackArtwork = (image: HTMLImageElement, baseUri: string):
 
 /** Capturing error events also covers image failures before hydration and avoids fallback loops. */
 export const startArtworkFallback = () => {
+  const ownerDocument = document
+  const capture = { capture: true }
+
   const recover = (image: HTMLImageElement) => {
-    if (!shouldFallbackArtwork(image, document.baseURI)) return
+    if (!shouldFallbackArtwork(image, ownerDocument.baseURI)) return
     image.removeAttribute('srcset')
     image.src = fallbackArtwork
   }
@@ -92,11 +95,11 @@ export const startArtworkFallback = () => {
     if (event.target instanceof HTMLImageElement) recover(event.target)
   }
 
-  document.addEventListener('error', onError, true)
-  document.querySelectorAll('img.artwork').forEach((image) => {
+  ownerDocument.addEventListener('error', onError, capture)
+  ownerDocument.querySelectorAll('img.artwork').forEach((image) => {
     if (image instanceof HTMLImageElement && image.complete && image.naturalWidth === 0)
       recover(image)
   })
 
-  return () => document.removeEventListener('error', onError, true)
+  return () => ownerDocument.removeEventListener('error', onError, capture)
 }

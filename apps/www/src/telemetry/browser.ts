@@ -203,6 +203,8 @@ export function startBrowserTelemetry(input: {
       case 'LCP':
         name = 'lcp'
         break
+      default:
+        return
     }
 
     batcher.add({

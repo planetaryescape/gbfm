@@ -1,3 +1,5 @@
+import { Html } from '@effect/ui/html'
+import { Locator, TestHost } from '@effect/ui/testing'
 import {
   AudioEngine,
   layerFromAdapter,
@@ -6,10 +8,26 @@ import {
   PlayReporter,
   type QueueTrackType,
 } from '@gbfm/player'
-import { Effect, Fiber, Layer, ManagedRuntime, Stream } from 'effect'
+import {
+  Effect,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  Option,
+  Predicate,
+  Schedule,
+  Schema,
+  Stream,
+} from 'effect'
 import { describe, expect, it } from 'vitest'
 
-import { initialModel, Message, update } from './model'
+import {
+  PlayerControlMessage,
+  PlayerProviderMessage,
+  PlayerProviderModel,
+} from '../features/player/domain'
+import { PlayerProvider, playerCommandsLayer } from '../features/player/provider'
+import { runWithLayer } from '../features/player/testing'
 import { makeHtmlAudioEngineLayer, PlayerClient, type AudioPort } from './runtime'
 
 class PlatformAudio extends EventTarget implements AudioPort {
@@ -164,6 +182,57 @@ const fixture = () => {
   }
 }
 
+const SeekProbe = Html.component({
+  name: 'PlatformSeekProbe',
+  props: Schema.Struct({ seconds: Schema.Number }),
+  model: Schema.Null,
+  message: PlayerControlMessage,
+  reads: { provider: PlayerProvider },
+}).make({
+  init: () => null,
+  update: ($, message) => $.send(PlayerProvider, message),
+  view: (h) =>
+    h.div.children(
+      h.button
+        .attr('aria-label', 'Open player')
+        .on('click', PlayerProviderMessage.RequestedToggleFullscreen()),
+      h.button.attr('aria-label', 'Preview seek').on(
+        'click',
+        PlayerProviderMessage.PreviewedSeek({
+          trackId: 'one',
+          seconds: h.props.seconds,
+          fine: false,
+          referenceSeconds: 0,
+          pointerRatio: 0.5,
+        }),
+      ),
+      h.button.attr('aria-label', 'Commit seek').on(
+        'click',
+        PlayerProviderMessage.CommittedSeek({
+          trackId: 'one',
+          seconds: h.props.seconds,
+        }),
+      ),
+      h.output
+        .attr('data-testid', 'native-player-model')
+        .children(JSON.stringify(h.reads.provider)),
+    ),
+})
+
+const SeekHarness = Html.component({
+  name: 'PlatformSeekHarness',
+  model: Schema.Struct({ seconds: Schema.Number }),
+  message: Schema.Struct({ seconds: Schema.Number }),
+}).make({
+  init: () => ({ seconds: 42 }),
+  update: ($, { seconds }) => $.evolve({ seconds }),
+  view: (h, model) =>
+    PlayerProvider(h, {
+      props: { principalId: null, principalKnown: true, returnTo: '/' },
+      view: () => SeekProbe(h, { props: { seconds: model.seconds } }),
+    }),
+})
+
 describe('browser adapter with shared playback orchestration', () => {
   it('keeps the released second through the real seek command and reconciles playback and failures', async () => {
     const f = fixture()
@@ -186,55 +255,78 @@ describe('browser adapter with shared playback orchestration', () => {
           })
           yield* controller.pause
 
-          let model = {
-            ...initialModel,
-            snapshot: controller.getSnapshot(),
-            playerDialog: { ...initialModel.playerDialog, isOpen: true },
-          }
+          yield* Effect.promise(() =>
+            runWithLayer(
+              Layer.merge(
+                TestHost.layer(),
+                playerCommandsLayer.pipe(
+                  Layer.provide(Layer.succeed(PlayerClient, { controller })),
+                ),
+              ),
+              Effect.gen(function* () {
+                const root = yield* TestHost.mount(SeekHarness, {})
+                yield* TestHost.settle
+                Locator.fire(root.get(Locator.attr('aria-label', 'Open player')), 'click')
+                yield* TestHost.settle
 
-          const displayed: Array<number> = []
+                const model = () =>
+                  Schema.decodeUnknownSync(Schema.fromJsonString(PlayerProviderModel))(
+                    Locator.textOf(root.get(Locator.attr('data-testid', 'native-player-model'))),
+                  )
 
-          const unsubscribe = controller.subscribeSnapshot((snapshot) => {
-            model = update(model, Message.SnapshotChanged({ snapshot })).model
-            displayed.push(model.seekPreview?.seconds ?? model.snapshot.transport.currentTime)
-          })
+                const displayed: Array<number> = []
 
-          yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
+                const release = Effect.fnUntraced(function* (seconds: number) {
+                  root.send({ seconds })
+                  yield* TestHost.settle
+                  Locator.fire(root.get(Locator.attr('aria-label', 'Preview seek')), 'click')
+                  yield* TestHost.settle
+                  const offset = root.log().length
+                  Locator.fire(root.get(Locator.attr('aria-label', 'Commit seek')), 'click')
+                  yield* TestHost.settle
 
-          const release = (seconds: number) => {
-            model = update(
-              model,
-              Message.PreviewSeek({
-                trackId: 'one',
-                seconds,
-                fine: false,
-                referenceSeconds: 0,
-                pointerRatio: 0.5,
+                  for (const entry of root.log().slice(offset)) {
+                    if (!Predicate.isTagged(entry, 'Update')) continue
+                    const message = Schema.decodeUnknownOption(PlayerProviderMessage)(entry.message)
+                    const state = Schema.decodeUnknownOption(PlayerProviderModel)(entry.model)
+
+                    if (
+                      Option.isSome(message) &&
+                      Option.isSome(state) &&
+                      (Predicate.isTagged(message.value, 'CommittedSeek') ||
+                        Predicate.isTagged(message.value, 'ChangedSnapshot'))
+                    )
+                      displayed.push(
+                        state.value.seekPreview?.seconds ??
+                          state.value.snapshot.transport.currentTime,
+                      )
+                  }
+                })
+
+                displayed.length = 0
+                yield* release(42)
+                expect(f.audio.currentTime).toBe(42)
+                expect(displayed).toEqual([42, 42])
+                f.audio.currentTime = 43
+                f.audio.dispatchEvent(new Event('timeupdate'))
+                yield* TestHost.settle.pipe(
+                  Effect.repeat({
+                    while: () => model().snapshot.transport.currentTime !== 43,
+                    schedule: Schedule.spaced('1 millis'),
+                  }),
+                  Effect.timeout('1 second'),
+                )
+                yield* Effect.promise(async () => {
+                  await expect.poll(() => model().snapshot.transport.currentTime).toBe(43)
+                })
+                f.audio.rejectSeek = true
+                displayed.length = 0
+                yield* release(80)
+                expect(displayed).toEqual([80, 43])
+                expect(f.errors).toContain('Unable to seek audio')
               }),
-            ).model
-            const result = update(model, Message.CommitSeek({ trackId: 'one', seconds }))
-            model = result.model
-            displayed.push(model.snapshot.transport.currentTime)
-
-            return Effect.forEach(result.commands ?? [], (command) =>
-              command.effect.pipe(Effect.provideService(PlayerClient, { controller })),
-            )
-          }
-
-          displayed.length = 0
-          yield* release(42)
-          expect(f.audio.currentTime).toBe(42)
-          expect(displayed).toEqual([42, 42])
-          f.audio.currentTime = 43
-          f.audio.dispatchEvent(new Event('timeupdate'))
-          yield* Effect.promise(async () => {
-            await expect.poll(() => model.snapshot.transport.currentTime).toBe(43)
-          })
-          f.audio.rejectSeek = true
-          displayed.length = 0
-          yield* release(80)
-          expect(displayed).toEqual([80, 43])
-          expect(f.errors).toContain('Unable to seek audio')
+            ),
+          )
         }).pipe(Effect.scoped),
       )
     } finally {

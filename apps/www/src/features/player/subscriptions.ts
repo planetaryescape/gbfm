@@ -40,8 +40,10 @@ export const playerSnapshotLayer = Layer.effect(
 )
 
 export const subscriptions = ({ props }: { readonly props: PlayerProviderProps }) => [
-  Subscription.make('playerPrincipal', [props.principalKnown, props.principalId], () =>
-    Stream.succeed(PlayerProviderMessage.ChangedPrincipal()),
+  Subscription.make(
+    'playerPrincipal',
+    [props.principalKnown, props.principalId, props.authorizationSuspended === true],
+    () => Stream.succeed(PlayerProviderMessage.ChangedPrincipal()),
   ),
   Subscription.make(
     'playerSnapshots',

@@ -197,7 +197,10 @@ describe('native PlayerProvider', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const s = yield* Story.make(PlayerState, props)
-          expect(s.subscriptions).toEqual(['playerPrincipal:true,"listener"', 'playerSnapshots'])
+          expect(s.subscriptions).toEqual([
+            'playerPrincipal:true,"listener",false',
+            'playerSnapshots',
+          ])
           s.send(PlayerProviderMessage.RequestedToggleQueue())
           s.send(PlayerProviderMessage.RequestedToggleFullscreen())
           expect(s.model.queueOpen).toBe(true)
@@ -331,7 +334,7 @@ describe('native PlayerProvider', () => {
           expect(s.model.snapshot).toEqual(playing.snapshot)
           expect(s.model.fullscreenOpen).toBe(true)
           expect(s.subscriptions).toEqual([
-            'playerPrincipal:true,"another-listener"',
+            'playerPrincipal:true,"another-listener",false',
             'playerSnapshots',
           ])
           expect(PlayerProvider.definition.restore).toBe(false)

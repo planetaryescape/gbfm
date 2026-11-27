@@ -71,6 +71,7 @@ export const updatePlayerProvider = PlayerProviderDef.update({
         operation: PlayerOperation.ConfirmPrincipal({
           principalId: $.props.principalId,
           principalKnown: $.props.principalKnown,
+          authorizationSuspended: $.props.authorizationSuspended,
         }),
       }),
     ),

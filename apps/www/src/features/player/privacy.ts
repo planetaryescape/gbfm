@@ -14,6 +14,8 @@ export const isPrivateTrack = (track: QueueTrackType) =>
 export const visibleQueueIndices = (model: PlayerProviderModel, props: PlayerProviderProps) =>
   model.snapshot.queue.tracks.flatMap((track, index) => {
     if (!isPrivateTrack(track)) return [index]
+
+    if (props.authorizationSuspended) return []
     const access = model.privateAccess
 
     if (!access?.principalKnown || access.principalId === null) return []

@@ -7,8 +7,9 @@ import { Context, Effect, Layer, ManagedRuntime, Predicate, Schema } from 'effec
 import { describe, expect, it } from 'vitest'
 
 import { makePlayerClientLayer, PlayerClient, type AudioPort } from '../../player/runtime'
-import { PlayerControlMessage, PlayerProviderMessage } from './domain'
+import { initialModel, PlayerControlMessage, PlayerProviderMessage } from './domain'
 import { MiniPlayer } from './mini-player'
+import { presentedSnapshot } from './privacy'
 import { PlayerProvider, playerCommandsLayer } from './provider'
 import { runWithLayer } from './testing'
 
@@ -28,6 +29,13 @@ const publicTrack: QueueTrackType = {
   url: 'https://cdn.fixture.test/public/song.wav',
   thumbnailUrl: null,
   type: 'mix',
+}
+
+const queuedPrivateTrack = {
+  ...privateTrack,
+  id: 'privacy-fixture-private-queued',
+  title: 'Fixture A queued private title',
+  url: 'https://cdn.fixture.test/user-content/private/fixture-a/audio/queued.wav',
 }
 
 class PrivateAudioPort extends EventTarget implements AudioPort {
@@ -87,6 +95,18 @@ const Probe = Html.component({
           'click',
           PlayerProviderMessage.RequestedPlayAll({ tracks: [privateTrack, publicTrack] }),
         ),
+      h.button.attr('aria-label', 'Play private queue fixture').on(
+        'click',
+        PlayerProviderMessage.RequestedPlayAll({
+          tracks: [privateTrack, queuedPrivateTrack, publicTrack],
+        }),
+      ),
+      h.button
+        .attr('aria-label', 'Play queued private fixture')
+        .on(
+          'click',
+          PlayerProviderMessage.RequestedPlayAll({ tracks: [queuedPrivateTrack, publicTrack] }),
+        ),
       h.output
         .attr('data-testid', 'queue')
         .children(h.reads.provider.snapshot.queue.tracks.map((track) => track.title).join(', ')),
@@ -96,6 +116,7 @@ const Probe = Html.component({
 const Principal = Schema.Struct({
   principalId: Schema.NullOr(Schema.String),
   principalKnown: Schema.Boolean,
+  authorizationSuspended: Schema.optional(Schema.Boolean),
 })
 
 const AppMessage = UiSchema.TaggedEnum({ ChangedPrincipal: Principal.fields })
@@ -111,6 +132,7 @@ const App = Html.component({
     $.evolve({
       principalId: message.principalId,
       principalKnown: message.principalKnown,
+      authorizationSuspended: message.authorizationSuspended,
     }),
   view: (h, principal) =>
     PlayerProvider(h, {
@@ -238,6 +260,17 @@ const fixture = (restore = false, holdGrant = false) => {
       allowed = true
     },
     acquisitions: () => controllerAcquisitions,
+    access: () =>
+      runtime.runPromise(
+        Effect.flatMap(PlayerClient, ({ privateAccess }) => {
+          if (!privateAccess)
+            return Effect.die(new Error('Isolated player fixture requires private playback access'))
+
+          return Effect.sync(privateAccess.getSnapshot)
+        }),
+      ),
+    snapshot: () =>
+      runtime.runPromise(Effect.map(PlayerClient, ({ controller }) => controller.getSnapshot())),
   }
 }
 
@@ -253,6 +286,351 @@ const artworkSources = (
     )
 
 describe('native private player principal isolation', () => {
+  it('explicit suspension masks an already authorized private current and queue before a command or access update runs', () => {
+    const model = {
+      ...initialModel,
+      snapshot: {
+        ...initialModel.snapshot,
+        queue: {
+          tracks: [privateTrack, queuedPrivateTrack, publicTrack],
+          current: privateTrack,
+          currentIndex: 0,
+        },
+      },
+      privateAccess: {
+        principalId: 'fixture-a',
+        principalKnown: true,
+        revision: 7,
+        authorizedUrls: [privateTrack.url, queuedPrivateTrack.url],
+      },
+    }
+
+    const visible = presentedSnapshot(model, {
+      principalId: 'fixture-a',
+      principalKnown: true,
+      returnTo: '/mixes',
+      authorizationSuspended: true,
+    })
+
+    expect(visible.queue).toEqual({
+      tracks: [publicTrack],
+      current: null,
+      currentIndex: -1,
+    })
+    expect(JSON.stringify(visible)).not.toContain(privateTrack.title)
+    expect(JSON.stringify(visible)).not.toContain(queuedPrivateTrack.url)
+    expect(model.privateAccess.authorizedUrls).toEqual([privateTrack.url, queuedPrivateTrack.url])
+  })
+
+  it('explicit suspension clears private current and queue, advances authority and requires a fresh intent and grant after verification', async () => {
+    const f = fixture()
+
+    try {
+      await runWithLayer(
+        f.layer,
+        Effect.gen(function* () {
+          const root = yield* TestHost.mount(App, {
+            principalId: 'fixture-a',
+            principalKnown: true,
+          })
+
+          yield* TestHost.settle
+          Locator.fire(root.get(Locator.attr('aria-label', 'Play queued private fixture')), 'click')
+          yield* TestHost.settle
+          Locator.fire(root.get(Locator.attr('aria-label', 'Play private queue fixture')), 'click')
+          yield* TestHost.settle
+          expect(root.text()).toContain(privateTrack.title)
+          expect(root.text()).toContain(queuedPrivateTrack.title)
+          const before = yield* Effect.promise(f.access)
+          const source = f.instances.at(-1)
+          const metadataStart = f.metadata.length
+          const grants = f.grants()
+          expect(before.authorizedUrls).toContain(privateTrack.url)
+          root.send(
+            AppMessage.ChangedPrincipal({
+              principalId: 'fixture-a',
+              principalKnown: true,
+              authorizationSuspended: true,
+            }),
+          )
+          yield* TestHost.settle
+          expect(root.text()).not.toContain(privateTrack.title)
+          expect(root.text()).not.toContain(queuedPrivateTrack.title)
+          expect(artworkSources(root)).not.toContain(privateTrack.thumbnailUrl)
+          expect(source).toMatchObject({ src: '', paused: true })
+          expect(f.activeSessions()).toBe(0)
+          expect(f.metadata.slice(metadataStart)).toContain(null)
+          expect(
+            f.metadata.slice(metadataStart).some((value) => value?.title === privateTrack.title),
+          ).toBe(false)
+          const suspended = yield* Effect.promise(f.access)
+          expect(suspended).toEqual({
+            principalId: null,
+            principalKnown: false,
+            revision: before.revision + 1,
+            authorizedUrls: [],
+          })
+          expect((yield* Effect.promise(f.snapshot)).queue.tracks.map((track) => track.id)).toEqual(
+            [publicTrack.id],
+          )
+          root.send(
+            AppMessage.ChangedPrincipal({
+              principalId: 'fixture-a',
+              principalKnown: true,
+              authorizationSuspended: false,
+            }),
+          )
+          yield* TestHost.settle
+          expect((yield* Effect.promise(f.access)).authorizedUrls).toEqual([])
+          expect(f.grants()).toBe(grants)
+          expect(root.text()).not.toContain(privateTrack.title)
+          Locator.fire(root.get(Locator.attr('aria-label', 'Play private fixture')), 'click')
+          yield* TestHost.settle
+          expect(f.grants()).toBeGreaterThan(grants)
+          expect(root.text()).toContain(privateTrack.title)
+          expect(f.metadata.at(-1)?.title).toBe(privateTrack.title)
+          expect(f.acquisitions()).toBe(1)
+        }),
+      )
+    } finally {
+      await f.runtime.dispose()
+    }
+  })
+
+  it.each(['before verification', 'after verification'])(
+    'explicit suspension fences an old successful private grant resolving %s without replaying it',
+    async (arrival) => {
+      const f = fixture(true, true)
+
+      try {
+        await runWithLayer(
+          f.layer,
+          Effect.gen(function* () {
+            const root = yield* TestHost.mount(App, {
+              principalId: 'fixture-a',
+              principalKnown: true,
+            })
+
+            yield* TestHost.settle
+            yield* Effect.promise(async () => {
+              await expect.poll(f.grants).toBeGreaterThan(0)
+            })
+            const revision = (yield* Effect.promise(f.access)).revision
+            root.send(
+              AppMessage.ChangedPrincipal({
+                principalId: null,
+                principalKnown: false,
+                authorizationSuspended: true,
+              }),
+            )
+            yield* TestHost.settle
+            expect(yield* Effect.promise(f.access)).toMatchObject({
+              principalId: null,
+              principalKnown: false,
+              revision: revision + 1,
+              authorizedUrls: [],
+            })
+
+            if (arrival === 'before verification') {
+              f.releaseGrant(true)
+              yield* TestHost.settle
+            }
+
+            root.send(
+              AppMessage.ChangedPrincipal({
+                principalId: 'fixture-a',
+                principalKnown: true,
+                authorizationSuspended: false,
+              }),
+            )
+            yield* TestHost.settle
+
+            if (arrival === 'after verification') {
+              f.releaseGrant(true)
+              yield* TestHost.settle
+            }
+
+            expect(root.text()).not.toContain(privateTrack.title)
+            expect(root.text()).toContain(publicTrack.title)
+            expect(artworkSources(root)).not.toContain(privateTrack.thumbnailUrl)
+            expect((yield* Effect.promise(f.access)).authorizedUrls).toEqual([])
+            expect(f.metadata.some((value) => value?.title === privateTrack.title)).toBe(false)
+            expect(f.instances.every((audio) => audio.src !== privateTrack.url)).toBe(true)
+            expect(f.activeSessions()).toBe(0)
+            expect(f.grants()).toBe(1)
+            expect(f.acquisitions()).toBe(1)
+          }),
+        )
+      } finally {
+        f.releaseGrant(false)
+        await f.runtime.dispose()
+      }
+    },
+  )
+
+  it('explicit suspension preserves public source, clock, playing state, volume and metadata while removing private queue entries', async () => {
+    const f = fixture()
+
+    try {
+      await runWithLayer(
+        f.layer,
+        Effect.gen(function* () {
+          const root = yield* TestHost.mount(App, {
+            principalId: 'fixture-a',
+            principalKnown: true,
+          })
+
+          yield* TestHost.settle
+
+          for (const label of [
+            'Play public fixture',
+            'Seek fixture',
+            'Fixture volume',
+            'Fixture mute',
+          ]) {
+            Locator.fire(root.get(Locator.attr('aria-label', label)), 'click')
+            yield* TestHost.settle
+          }
+
+          const source = f.instances.at(-1)
+          root.send(
+            AppMessage.ChangedPrincipal({
+              principalId: 'fixture-a',
+              principalKnown: true,
+              authorizationSuspended: true,
+            }),
+          )
+          yield* TestHost.settle
+          expect(f.instances.at(-1)).toBe(source)
+          expect(source).toMatchObject({
+            src: publicTrack.url,
+            currentTime: 42,
+            volume: 0.3,
+            muted: true,
+            paused: false,
+          })
+          expect(yield* Effect.promise(f.access)).toMatchObject({
+            principalId: null,
+            principalKnown: false,
+            authorizedUrls: [],
+          })
+          expect((yield* Effect.promise(f.snapshot)).queue.tracks.map((track) => track.id)).toEqual(
+            [publicTrack.id],
+          )
+          expect(root.text()).toContain(publicTrack.title)
+          expect(root.text()).not.toContain(privateTrack.title)
+          expect(f.metadata.at(-1)?.title).toBe(publicTrack.title)
+          expect(f.grants()).toBe(0)
+          expect(f.instances).toHaveLength(1)
+          expect(f.acquisitions()).toBe(1)
+        }),
+      )
+    } finally {
+      await f.runtime.dispose()
+    }
+  })
+
+  it('explicit suspension releases an initial unknown-authority waiter without letting verification replay its restored private queue', async () => {
+    const f = fixture(true)
+
+    try {
+      await runWithLayer(
+        f.layer,
+        Effect.gen(function* () {
+          const root = yield* TestHost.mount(App, {
+            principalId: null,
+            principalKnown: false,
+          })
+
+          yield* TestHost.settle
+          yield* Effect.promise(async () => {
+            await expect.poll(() => f.instances.length).toBeGreaterThan(0)
+          })
+          expect(f.grants()).toBe(0)
+          expect(f.activeSessions()).toBe(0)
+          root.send(
+            AppMessage.ChangedPrincipal({
+              principalId: null,
+              principalKnown: false,
+              authorizationSuspended: true,
+            }),
+          )
+          yield* TestHost.settle
+          expect(f.activeSessions()).toBe(0)
+          expect((yield* Effect.promise(f.snapshot)).queue.tracks.map((track) => track.id)).toEqual(
+            [publicTrack.id],
+          )
+          root.send(
+            AppMessage.ChangedPrincipal({
+              principalId: 'fixture-a',
+              principalKnown: true,
+              authorizationSuspended: false,
+            }),
+          )
+          yield* TestHost.settle
+          expect(f.grants()).toBe(0)
+          expect((yield* Effect.promise(f.access)).authorizedUrls).toEqual([])
+          expect(root.text()).not.toContain(privateTrack.title)
+          expect(f.metadata.some((value) => value?.title === privateTrack.title)).toBe(false)
+          expect(f.acquisitions()).toBe(1)
+        }),
+      )
+    } finally {
+      await f.runtime.dispose()
+    }
+  })
+
+  it('a private play requested while explicitly suspended cannot wait for verification and replay itself', async () => {
+    const f = fixture()
+
+    try {
+      await runWithLayer(
+        f.layer,
+        Effect.gen(function* () {
+          const root = yield* TestHost.mount(App, {
+            principalId: 'fixture-a',
+            principalKnown: true,
+          })
+
+          yield* TestHost.settle
+          root.send(
+            AppMessage.ChangedPrincipal({
+              principalId: null,
+              principalKnown: false,
+              authorizationSuspended: true,
+            }),
+          )
+          yield* TestHost.settle
+          Locator.fire(root.get(Locator.attr('aria-label', 'Play private fixture')), 'click')
+          yield* TestHost.settle
+          expect(f.grants()).toBe(0)
+          expect(f.activeSessions()).toBe(0)
+          expect((yield* Effect.promise(f.access)).authorizedUrls).toEqual([])
+          root.send(
+            AppMessage.ChangedPrincipal({
+              principalId: 'fixture-a',
+              principalKnown: true,
+              authorizationSuspended: false,
+            }),
+          )
+          yield* TestHost.settle
+          expect(f.grants()).toBe(0)
+          expect((yield* Effect.promise(f.access)).authorizedUrls).toEqual([])
+          expect(f.instances.every((audio) => audio.src !== privateTrack.url)).toBe(true)
+          expect((yield* Effect.promise(f.snapshot)).queue.tracks.map((track) => track.id)).toEqual(
+            [publicTrack.id],
+          )
+          expect(root.text()).not.toContain(privateTrack.title)
+          expect(root.text()).toContain(publicTrack.title)
+          expect(f.metadata.some((value) => value?.title === privateTrack.title)).toBe(false)
+          expect(f.acquisitions()).toBe(1)
+        }),
+      )
+    } finally {
+      await f.runtime.dispose()
+    }
+  })
+
   it('publishes previously denied private playback only after a fresh successful retry grant', async () => {
     const f = fixture(true)
 

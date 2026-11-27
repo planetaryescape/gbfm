@@ -15,10 +15,13 @@ export class PerformPlayer extends Command.Service<PerformPlayer>()('player/Perf
       ({ controller, privateAccess }) =>
         ({ operation }) =>
           PlayerOperation.match(operation, {
-            ConfirmPrincipal: ({ principalId, principalKnown }) =>
+            ConfirmPrincipal: ({ principalId, principalKnown, authorizationSuspended }) =>
               Effect.gen(function* () {
                 if (!privateAccess) return
-                const changed = yield* privateAccess.confirmPrincipal(principalId, principalKnown)
+
+                const changed = yield* authorizationSuspended
+                  ? privateAccess.suspendAuthorization
+                  : privateAccess.confirmPrincipal(principalId, principalKnown)
 
                 if (!changed) return
                 const revision = privateAccess.getSnapshot().revision

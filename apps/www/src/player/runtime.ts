@@ -75,6 +75,7 @@ export type PrivatePlaybackAccess = {
   readonly getSnapshot: () => PrivatePlaybackSnapshot
   readonly subscribe: (listener: (snapshot: PrivatePlaybackSnapshot) => void) => () => void
   readonly confirmPrincipal: (principalId: string | null, known: boolean) => Effect.Effect<boolean>
+  readonly suspendAuthorization: Effect.Effect<boolean>
 }
 
 const makePrivatePlaybackAccess = () => {
@@ -86,6 +87,7 @@ const makePrivatePlaybackAccess = () => {
   }
 
   let closed = false
+  let authorizationSuspended = false
   const listeners = new Set<(snapshot: PrivatePlaybackSnapshot) => void>()
   const waiters = new Set<() => void>()
   const invalidators = new Set<() => void>()
@@ -96,6 +98,7 @@ const makePrivatePlaybackAccess = () => {
 
   const current = (revision: number) =>
     !closed &&
+    !authorizationSuspended &&
     snapshot.principalKnown &&
     snapshot.principalId !== null &&
     snapshot.revision === revision
@@ -114,7 +117,8 @@ const makePrivatePlaybackAccess = () => {
       Effect.sync(() => {
         if (!known || closed || (snapshot.principalKnown && snapshot.principalId === principalId))
           return false
-        const changed = snapshot.principalKnown
+        const changed = snapshot.principalKnown || authorizationSuspended
+        authorizationSuspended = false
         snapshot = {
           principalId,
           principalKnown: true,
@@ -130,7 +134,27 @@ const makePrivatePlaybackAccess = () => {
 
         return changed
       }),
+    suspendAuthorization: Effect.sync(() => {
+      if (closed) return false
+      authorizationSuspended = true
+      snapshot = {
+        principalId: null,
+        principalKnown: false,
+        revision: snapshot.revision + 1,
+        authorizedUrls: [],
+      }
+
+      for (const invalidate of invalidators) invalidate()
+      emit()
+
+      for (const resume of waiters) resume()
+      waiters.clear()
+
+      return true
+    }),
     ready: async () => {
+      if (authorizationSuspended || closed) return null
+
       if (!snapshot.principalKnown && !closed)
         await new Promise<void>((resolve) => {
           waiters.add(resolve)
@@ -431,6 +455,20 @@ export const makeHtmlAudioEngineLayer = (
               const audio = owned.audio
 
               if (isPrivateMedia(url)) {
+                audio.pause()
+                const revision = privateAccess ? await privateAccess.ready() : undefined
+
+                if (disposed || active !== owned) return
+
+                if (
+                  revision === null ||
+                  (privateAccess && revision !== undefined && !privateAccess.current(revision))
+                ) {
+                  resetSource()
+
+                  return
+                }
+
                 const pending = BrowserSource.PrivatePending({
                   generation: nextGeneration,
                   url,
@@ -455,10 +493,6 @@ export const makeHtmlAudioEngineLayer = (
                 })
 
                 source = pending
-                audio.pause()
-                const revision = privateAccess ? await privateAccess.ready() : undefined
-
-                if (revision === null || source !== pending) return
                 const result = await pending.preview.ensure()
 
                 if (

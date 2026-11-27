@@ -47,6 +47,7 @@ export const PlayerProviderProps = Schema.Struct({
   principalId: Schema.NullOr(Schema.String),
   principalKnown: Schema.Boolean,
   returnTo: Schema.String,
+  authorizationSuspended: Schema.optional(Schema.Boolean),
 })
 
 export type PlayerProviderProps = typeof PlayerProviderProps.Type
@@ -171,7 +172,11 @@ export const PlayerControlMessage = Schema.Union([
 export type PlayerControlMessage = typeof PlayerControlMessage.Type
 
 export const PlayerOperation = UiSchema.TaggedEnum({
-  ConfirmPrincipal: { principalId: Schema.NullOr(Schema.String), principalKnown: Schema.Boolean },
+  ConfirmPrincipal: {
+    principalId: Schema.NullOr(Schema.String),
+    principalKnown: Schema.Boolean,
+    authorizationSuspended: Schema.optional(Schema.Boolean),
+  },
   PlayTrack: { track: QueueTrack },
   PlayAll: { tracks: Schema.Array(QueueTrack) },
   Enqueue: { track: QueueTrack },

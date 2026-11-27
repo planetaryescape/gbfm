@@ -131,13 +131,13 @@ export const ListeningPage = Html.component({
                 h.a
                   .attr('href', deskHref(item.id))
                   .attr('aria-current', item.id === collectionId ? 'page' : 'false')
-                  .children(item.title),
+                  .children(`${item.title} · ${item.published ? 'public' : 'private'}`),
               ),
             ),
           CollectionSettings(h, collection, returnTo),
         ),
         h.div.children(
-          ImportPanel(h, page, returnTo),
+          ImportPanel(h, { props: { page, returnTo, url: props.url } }),
           h.nav
             .attr('aria-label', 'Listening status')
             .class('flex gap-5 py-4')

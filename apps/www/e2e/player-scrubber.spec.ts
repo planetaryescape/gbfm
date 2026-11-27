@@ -11,7 +11,15 @@ const openPausedPlayer = async (page: Page) => {
   await expect(player.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
   await player.getByRole('button', { name: 'Pause', exact: true }).click()
   await expect(player.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
-  await expect(page.locator('#fullscreen-player-panel')).not.toHaveAttribute('data-transition')
+  const panel = player.locator('.native-player-panel')
+  await expect(panel).not.toHaveAttribute('data-starting-style')
+  await expect
+    .poll(() =>
+      panel.evaluate((panel) =>
+        panel.getAnimations().some((animation) => animation.playState === 'running'),
+      ),
+    )
+    .toBe(false)
 }
 
 test('closing during a held preview cancels the mounted gesture before the leave animation ends', async ({
@@ -22,8 +30,9 @@ test('closing during a held preview cancels the mounted gesture before the leave
   const slider = hill.getByRole('slider')
   await slider.focus()
   await page.keyboard.press('Home')
-  await expect(slider).toHaveAttribute('value', '0')
+  await expect(slider).toHaveValue('0')
   const bounds = await hill.boundingBox()
+
   if (!bounds) throw new Error('Expected a mobile scrubber')
   await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 20)
   await page.mouse.down()
@@ -47,6 +56,7 @@ test('the full hill target seeks, acknowledges press, drags outside bounds and s
   await expect(slider).toBeEnabled()
   await expect(slider).toHaveAttribute('max', '30')
   const bounds = await slider.boundingBox()
+
   if (!bounds) throw new Error('Expected a mobile scrubber')
   expect(bounds.height).toBeGreaterThanOrEqual(64)
   const y = bounds.y + 8
@@ -59,7 +69,7 @@ test('the full hill target seeks, acknowledges press, drags outside bounds and s
   await expect
     .poll(() => hill.locator('svg').evaluate((el) => getComputedStyle(el).transform))
     .not.toBe('none')
-  await expect(page.locator('#fullscreen-player-panel')).not.toHaveAttribute('data-dragging')
+  await expect(page.locator('.native-player-panel')).not.toHaveAttribute('data-dragging')
   await page.screenshot({ path: testInfo.outputPath('hill-pressed.png') })
   await testInfo.attach('Hill pressed', {
     path: testInfo.outputPath('hill-pressed.png'),
@@ -96,10 +106,11 @@ test('keyboard seeking, reduced motion and desktop presentation are preserved', 
   await openPausedPlayer(page)
   const hill = page.locator('.hill-scrubber')
   const slider = hill.getByRole('slider', { name: 'Playback position' })
+  await expect(slider).toHaveJSProperty('step', '0.1')
   await slider.focus()
   await page.keyboard.press('Home')
   await expect(slider).toHaveValue('0')
-  await expect(slider).toHaveAttribute('value', '0')
+  await expect(slider).toHaveValue('0')
   await page.keyboard.press('ArrowRight')
   await expect(slider).toHaveValue('0.1')
   await page.keyboard.press('End')
@@ -112,9 +123,12 @@ test('keyboard seeking, reduced motion and desktop presentation are preserved', 
   await expect(hill).toBeHidden()
   const desktop = page.getByRole('slider', { name: 'Playback position' })
   await expect(desktop).toBeVisible()
+  await expect(desktop).toHaveJSProperty('step', '0.1')
   await desktop.focus()
   await page.keyboard.press('Home')
   await expect(desktop).toHaveValue('0')
+  await page.keyboard.press('ArrowRight')
+  await expect(desktop).toHaveValue('0.1')
 })
 
 test('touch drags seek without dismissing the sheet and cancellation releases feedback', async ({
@@ -125,6 +139,7 @@ test('touch drags seek without dismissing the sheet and cancellation releases fe
   await openPausedPlayer(page)
   const slider = page.locator('.hill-scrubber-input')
   const bounds = await slider.boundingBox()
+
   if (!bounds) throw new Error('Expected a mobile scrubber')
   const session = await page.context().newCDPSession(page)
   const y = bounds.y + 10
@@ -132,12 +147,14 @@ test('touch drags seek without dismissing the sheet and cancellation releases fe
     type: 'touchStart',
     touchPoints: [{ x: bounds.x + bounds.width * 0.25, y }],
   })
+
   for (const ratio of [0.35, 0.5, 0.65, 0.75]) {
     await session.send('Input.dispatchTouchEvent', {
       type: 'touchMove',
       touchPoints: [{ x: bounds.x + bounds.width * ratio, y }],
     })
   }
+
   await expect.poll(async () => Number(await slider.inputValue())).toBeGreaterThan(22)
   await expect
     .poll(() => page.locator('.hill-scrubber-thumb').evaluate((el) => getComputedStyle(el).r))
@@ -148,10 +165,10 @@ test('touch drags seek without dismissing the sheet and cancellation releases fe
     .toBe('6px')
   await expect.poll(async () => Number(await slider.inputValue())).toBeLessThan(1)
   await expect(page.getByRole('dialog', { name: 'Now playing', exact: true })).toBeVisible()
-  await expect(page.locator('#fullscreen-player-panel')).not.toHaveAttribute('data-dragging')
+  await expect(page.locator('.native-player-panel')).not.toHaveAttribute('data-dragging')
   await slider.focus()
   await page.keyboard.press('Home')
-  await expect(slider).toHaveAttribute('value', '0')
+  await expect(slider).toHaveValue('0')
   await session.send('Input.dispatchTouchEvent', {
     type: 'touchStart',
     touchPoints: [{ x: bounds.x + (24 / 320) * bounds.width, y }],
@@ -163,7 +180,7 @@ test('touch drags seek without dismissing the sheet and cancellation releases fe
   })
   await expect(slider).toHaveValue('15')
   await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-  await expect(slider).toHaveAttribute('value', '15')
+  await expect(slider).toHaveValue('15')
   await page
     .getByRole('dialog', { name: 'Now playing', exact: true })
     .getByRole('button', { name: 'Play', exact: true })
@@ -196,7 +213,7 @@ test('the full hill is visible before pressing and its shoulders drag without ju
   const slider = hill.getByRole('slider')
   await slider.focus()
   await page.keyboard.press('Home')
-  await expect(slider).toHaveAttribute('value', '0')
+  await expect(slider).toHaveValue('0')
   const dot = hill.locator('circle')
   await expect(dot).toHaveAttribute('cx', '56')
   await expect(dot).toHaveAttribute('cy', '44')
@@ -213,6 +230,7 @@ test('the full hill is visible before pressing and its shoulders drag without ju
     contentType: 'image/png',
   })
   const bounds = await hill.boundingBox()
+
   if (!bounds) throw new Error('Expected the hill touch target')
   const shoulder = bounds.x + (24 / 320) * bounds.width
   const y = bounds.y + 36
@@ -227,7 +245,7 @@ test('the full hill is visible before pressing and its shoulders drag without ju
   await expect(slider).toHaveValue('15')
   await slider.focus()
   await page.keyboard.press('End')
-  await expect(slider).toHaveAttribute('value', '30')
+  await expect(slider).toHaveValue('30')
   await expect(dot).toHaveAttribute('cx', '264')
   await expect(hill.locator('.hill-scrubber-track')).toHaveAttribute(
     'd',

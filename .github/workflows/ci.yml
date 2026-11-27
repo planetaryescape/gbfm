@@ -141,7 +141,7 @@ jobs:
         working-directory: apps/www
         env:
           SENTRY_UPLOAD_SOURCEMAPS: 'false'
-        run: bun run build:effect-ui
+        run: bun run build
 
       - name: Verify native production workerd responses
         working-directory: apps/www
@@ -217,3 +217,20 @@ jobs:
             --workdir "$GITHUB_WORKSPACE/apps/www" \
             mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f \
             bun run playwright test --config test/player-home-touch.playwright.config.ts
+
+      - name: Verify native Dashboard query and dialog ownership
+        if: matrix.target == 'app'
+        run: |
+          docker run --rm --init \
+            --user "$(id -u):$(id -g)" \
+            --shm-size=1g \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges \
+            --env CI=true \
+            --env HOME=/tmp \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            --volume "$(realpath "$(command -v bun)"):/usr/local/bin/bun:ro" \
+            --volume "$(realpath "$(command -v bun)"):/usr/local/bin/bunx:ro" \
+            --workdir "$GITHUB_WORKSPACE/apps/www" \
+            mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f \
+            bun run playwright test --config test/dashboard-retirement.playwright.config.ts

@@ -4,7 +4,6 @@ import { expect, it } from 'vitest'
 
 import { consentFormActionSource } from '../../domain/auth/callback'
 import { ConsentState, Continuation, SignedOAuthQuery } from '../../domain/auth/connect'
-import { consentDocument as legacyConsentDocument } from '../../page/connect/view'
 import { connectionLoginDocument } from './login'
 import { consentDocument } from './view'
 
@@ -71,19 +70,18 @@ it.each([false, true])(
       account: { name: 'Local Editor', email: 'editor@example.test' },
     })
 
-    for (const html of [consentDocument(state), legacyConsentDocument(state)]) {
-      expect(
-        html.includes(
-          'Create and edit your own unpublished editorial drafts, including private artwork',
-        ),
-      ).toBe(writes)
-      expect(html.includes('Cannot publish, delete or edit published posts.')).toBe(writes)
-      expect(html.includes('Cannot create, edit, publish or delete.')).toBe(!writes)
-      expect(html).not.toContain('Cannot publish, delete, upload files or edit published posts.')
-      expect(html).not.toContain('Upload files for your authorized content')
-      expect(html).not.toContain('Publish or unpublish your authored content')
-      expect(html).not.toContain('Delete your authored content')
-    }
+    const html = consentDocument(state)
+    expect(
+      html.includes(
+        'Create and edit your own unpublished editorial drafts, including private artwork',
+      ),
+    ).toBe(writes)
+    expect(html.includes('Cannot publish, delete or edit published posts.')).toBe(writes)
+    expect(html.includes('Cannot create, edit, publish or delete.')).toBe(!writes)
+    expect(html).not.toContain('Cannot publish, delete, upload files or edit published posts.')
+    expect(html).not.toContain('Upload files for your authorized content')
+    expect(html).not.toContain('Publish or unpublish your authored content')
+    expect(html).not.toContain('Delete your authored content')
   },
 )
 

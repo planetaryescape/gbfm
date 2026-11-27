@@ -2,8 +2,8 @@ import { EditorialScopes, McpScopes, OAuthClientId } from '@gbfm/core/editorial-
 import { Schema } from 'effect'
 import { expect, test } from 'vitest'
 
-import { ConsentState, Continuation, SignedOAuthQuery } from './domain'
-import { consentDocument } from './view'
+import { ConsentState, Continuation, SignedOAuthQuery } from '../../domain/auth/connect'
+import { consentDocument } from '../../features/connect/view'
 
 test.each([false, true])('consent accurately describes draft-write permission: %s', (writes) => {
   const scopes = writes

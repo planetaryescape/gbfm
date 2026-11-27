@@ -12,16 +12,16 @@ export const ChallengeView = <M>(h: Html.H<M>, sitekey: string, status: Status) 
         ? h.button
             .attr('type', 'button')
             .attr('data-challenge-retry', '')
-            .children('Try verification again')
+            .children('Retry verification')
         : null,
-      h.p.children('JavaScript is required to complete verification.'),
+      h.p.children('JavaScript is required to verify your browser and submit this form.'),
     )
 
 const challengeStatus = (sitekey: string, status: Status) => {
   if (!sitekey || status === 'unavailable')
     return 'Verification is unavailable. Please try again later.'
 
-  if (status === 'failed') return 'Verification failed. Please try again.'
+  if (status === 'failed') return 'Please retry verification.'
 
   if (status === 'submitting') return 'Submitting…'
 

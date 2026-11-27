@@ -15,8 +15,6 @@
     "../src/server/http-routes.ts",
     "../src/server/http-routes.test.ts",
     "../src/server/prepare-page-response.ts",
-    "../src/server/prepare-page-response.test.ts",
-    "../src/server/request-dispatch.ts",
-    "../src/server/page-response.ts"
+    "../src/server/prepare-page-response.test.ts"
   ]
 }

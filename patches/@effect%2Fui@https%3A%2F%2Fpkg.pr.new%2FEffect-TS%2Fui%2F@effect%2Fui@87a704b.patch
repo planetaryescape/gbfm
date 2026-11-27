@@ -1,0 +1,52 @@
+diff --git a/dist/html/HtmlHydrate.js b/dist/html/HtmlHydrate.js
+index 0fe56ace62fd4ddfdccb466cc4980044ebd326bf..446d5390779058ad893bff9408a3e22b27bdd07e 100644
+--- a/dist/html/HtmlHydrate.js
++++ b/dist/html/HtmlHydrate.js
+@@ -260,10 +260,12 @@ const between = (base, container, start, end, edges, holds, edits) => {
+   }) => {
+     const element = node;
+     const inside = parent === element || element.contains(parent);
+-    for (let node = previous === undefined ? element.firstChild : previous.nextSibling; node !== null;) {
+-      const following = node.nextSibling;
+-      element.removeChild(node);
+-      node = following;
++    if (element.localName !== "textarea" || previous !== undefined) {
++      for (let node = previous === undefined ? element.firstChild : previous.nextSibling; node !== null;) {
++        const following = node.nextSibling;
++        element.removeChild(node);
++        node = following;
++      }
+     }
+     if (names !== undefined || propped === element || element.hasAttributes()) {
+       const served = element.getAttributeNames();
+diff --git a/src/html/HtmlHydrate.ts b/src/html/HtmlHydrate.ts
+index 5c0e2c013228bb03120535c46830d7f127c4043d..a4fc77484bc9d5302e4a247065cba4fe84b42dfb 100644
+--- a/src/html/HtmlHydrate.ts
++++ b/src/html/HtmlHydrate.ts
+@@ -359,15 +359,17 @@ const between = (
+   ): void => {
+     const element = node as Element
+     const inside = parent === element || element.contains(parent)
+-    for (
+-      let node = previous === undefined
+-        ? element.firstChild
+-        : previous.nextSibling;
+-      node !== null;
+-    ) {
+-      const following = node.nextSibling
+-      element.removeChild(node)
+-      node = following
++    if (element.localName !== "textarea" || previous !== undefined) {
++      for (
++        let node = previous === undefined
++          ? element.firstChild
++          : previous.nextSibling;
++        node !== null;
++      ) {
++        const following = node.nextSibling
++        element.removeChild(node)
++        node = following
++      }
+     }
+     if (names !== undefined || propped === element || element.hasAttributes()) {
+       const served = element.getAttributeNames()

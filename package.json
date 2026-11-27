@@ -78,6 +78,7 @@
   ],
   "patchedDependencies": {
     "harfbuzzjs@0.10.0": "patches/harfbuzzjs@0.10.0.patch",
-    "@foldkit/ui@0.170.0": "patches/@foldkit%2Fui@0.170.0.patch"
+    "@foldkit/ui@0.170.0": "patches/@foldkit%2Fui@0.170.0.patch",
+    "@effect/ui@https://pkg.pr.new/Effect-TS/ui/@effect/ui@87a704b": "patches/@effect%2Fui@https%3A%2F%2Fpkg.pr.new%2FEffect-TS%2Fui%2F@effect%2Fui@87a704b.patch"
   }
 }

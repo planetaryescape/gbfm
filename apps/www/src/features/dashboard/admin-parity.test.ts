@@ -119,7 +119,9 @@ describe('native admin projection and controls parity', () => {
             ...document,
             fields: { mixId: '', savedMixId: '', unavailableTitle: '' },
           })
-          expect(s.current.query(Locator.text('Featured mix saved.'))).toBeDefined()
+          expect(
+            s.current.query(Locator.text('Current selection: Automatic, newest published mix')),
+          ).toBeDefined()
         }),
       ),
     )

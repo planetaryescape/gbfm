@@ -225,12 +225,19 @@ if (!rootPost) throw new Error('Local E2E tweet was not seeded')
 
 for (const kind of ['album', 'playlist'] as const) {
   const id = crypto.randomUUID()
-  await database.insert(kind === 'album' ? musicAlbumsTable : musicPlaylistsTable).values({
+
+  const entity = {
     id,
     title: `Local ${kind}`,
     slug: `e2e-spotify-${kind}`,
     coverImageUrl: '/fav.png',
-  })
+  }
+
+  await database
+    .insert(kind === 'album' ? musicAlbumsTable : musicPlaylistsTable)
+    .values(
+      kind === 'playlist' ? { ...entity, publishedAt: new Date('2020-01-01T00:00:00Z') } : entity,
+    )
   await database.insert(musicEntityLinksTable).values({
     entityType: kind,
     entityId: id,

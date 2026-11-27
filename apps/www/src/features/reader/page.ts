@@ -1,5 +1,5 @@
 import { Component, Subscription } from '@effect/ui'
-import { HtmlCommand } from '@effect/ui/html'
+import { HtmlCommand, HtmlSubscription } from '@effect/ui/html'
 import { Layer, Stream } from 'effect'
 
 import { readerCommandsLayer, RecordVisit, ResolveCheckpoint, StoreCheckpoint } from './commands'
@@ -114,6 +114,14 @@ export const ReaderPageNoDeps = ReaderPageDef.make({
       )
     },
     ClickedRetryNavigation: ($) => $.evolve({ refresh: $.model.refresh + 1 }),
+    FocusedReaderWindow: ($) =>
+      $.props.active !== false &&
+      $.props.principalKnown !== false &&
+      $.model.current !== null &&
+      matchesReservation($.model, destination($.props)) &&
+      !hasPendingVisits($.model)
+        ? $.evolve({ refresh: $.model.refresh + 1 })
+        : $.model,
     ClickedLatest: ($) => $.evolve({ returnSlug: $.model.returnSlug ?? $.model.current }),
     EnteredReader: ($) =>
       $.props.active !== false && isEntry($.props.url) && !$.model.entryResolved
@@ -149,6 +157,12 @@ export const ReaderPageNoDeps = ReaderPageDef.make({
         : $.model,
   },
   subscriptions: ({ props, model }) => [
+    props.active !== false &&
+      props.principalKnown !== false &&
+      model.current !== null &&
+      matchesReservation(model, destination(props)) &&
+      !hasPendingVisits(model) &&
+      HtmlSubscription.onWindow('focus', () => ReaderPageMessage.FocusedReaderWindow()),
     Subscription.make(
       'readerDestination',
       [
@@ -172,7 +186,7 @@ export const ReaderPageNoDeps = ReaderPageDef.make({
   ],
   view: (h, model) =>
     h.section
-      .attrs({ hidden: h.props.active === false ? '' : undefined })
+      .attrs({ hidden: (h.props.visible ?? h.props.active) === false ? '' : undefined })
       .attr('data-reader-active', String(h.props.active !== false))
       .attr('data-reader-request', String(h.props.navigationId ?? 0))
       .attr('data-reader-status', readerStatus(h.props))
@@ -183,7 +197,7 @@ export const ReaderPageNoDeps = ReaderPageDef.make({
             model.identity === (h.props.principal?.id ?? 'anonymous')
               ? model.generation
               : model.generation + 1,
-          active: h.props.active !== false,
+          active: h.props.active !== false && h.props.principalKnown !== false,
         }),
       )
       .class('mx-auto max-w-3xl space-y-4 px-4 py-6')

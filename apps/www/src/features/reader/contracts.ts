@@ -22,6 +22,7 @@ export const ReaderPageProps = Schema.Struct({
   navigationId: Schema.optionalKey(Schema.Number),
   navigationAction: Schema.optionalKey(Schema.Literals(['initial', 'push', 'replace', 'pop'])),
   active: Schema.optionalKey(Schema.Boolean),
+  visible: Schema.optionalKey(Schema.Boolean),
 })
 
 export type ReaderPageProps = typeof ReaderPageProps.Type
@@ -51,6 +52,7 @@ export const NavigationSnapshot = Schema.Struct({
 export const ReaderPageMessage = UiSchema.TaggedEnum({
   ChangedDestination: VisitDestination.fields,
   CommittedReader: VisitToken.fields,
+  FocusedReaderWindow: {},
   SucceededRecordVisit: VisitToken.fields,
   FailedRecordVisit: VisitToken.fields,
   ClickedRetryVisit: {},

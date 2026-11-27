@@ -55,10 +55,20 @@ export const ReaderDetail = ReaderPageDef.fragment((h, model: ReaderPageModel) =
 
   if (!chronological)
     hint = failed ? 'Navigation unavailable · open Options to retry' : 'Loading navigation…'
+  let readingStatus = 'loading'
+
+  if (failed) readingStatus = 'error'
+  else if (metadata) readingStatus = 'ready'
 
   return h.div
     .attr('data-tweet-swipe', post.slug)
-    .attr('data-swipe-ready', String(chronological !== null))
+    .attr(
+      'data-swipe-ready',
+      String(
+        chronological !== null && h.props.active !== false && h.props.principalKnown !== false,
+      ),
+    )
+    .attr('data-reading-status', readingStatus)
     .class('space-y-4')
     .children(
       h.p
@@ -87,6 +97,7 @@ export const ReaderDetail = ReaderPageDef.fragment((h, model: ReaderPageModel) =
         live && !metadata && !failed,
         failed,
         chronological?.timeline ?? model.lastTimeline,
+        monthOf(post.createdAt),
       ),
       h.p.class('text-xs text-muted-foreground lg:hidden').children(hint),
       h.progress
@@ -170,9 +181,8 @@ const ReaderReplies = ReaderPageDef.fragment((h, model: ReaderPageModel) => {
               .children('Sign in'),
             ' to reply',
           ),
-      live &&
-        AsyncResult.isInitial(repliesResult) &&
-        (post.replyCount ?? 0) > 0 &&
+      (!live || AsyncResult.isInitial(repliesResult)) &&
+        (post.replyCount ?? 0) > replies.length &&
         h.p.attr('role', 'status').children('Loading replies…'),
       live &&
         AsyncResult.isFailure(repliesResult) &&

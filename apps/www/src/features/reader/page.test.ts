@@ -7,12 +7,73 @@ import { Effect } from 'effect'
 
 import { RecordVisit, ResolveCheckpoint, StoreCheckpoint } from './commands'
 import { destination, ReaderPageMessage } from './contracts'
+import { initialReader } from './decisions'
 import { neighbours, props } from './fixtures.test-support'
-import { TrackReader } from './mounts'
+import { FollowReaderEntry, TrackReader } from './mounts'
 import { ReaderPageNoDeps } from './page'
 import { ReaderUnavailable } from './requests'
 
 describe('native reader', () => {
+  it.effect(
+    'refreshes current unread metadata on focus without navigating or bypassing pending visits',
+    () =>
+      Effect.gen(function* () {
+        const page = props()
+        const s = yield* Story.make(ReaderPageNoDeps, page)
+        const token = { ...destination(page), generation: 0 }
+        s.send(ReaderPageMessage.CommittedReader(token))
+          .expectExact(StoreCheckpoint, RecordVisit)
+          .keepPending(StoreCheckpoint)
+          .keepPending(RecordVisit)
+          .loaded('replies', [])
+          .send(ReaderPageMessage.FocusedReaderWindow())
+        assert.strictEqual(s.model.refresh, 0)
+        s.resolve(StoreCheckpoint, Component.noop)
+          .resolve(RecordVisit, ReaderPageMessage.SucceededRecordVisit(token))
+          .loaded('neighbours', { ...token, revision: 2, refresh: 0, neighbours })
+          .send(ReaderPageMessage.FocusedReaderWindow())
+          .loaded('neighbours', { ...token, revision: 2, refresh: 1, neighbours })
+        assert.strictEqual(s.model.refresh, 1)
+        assert.strictEqual(s.model.current, token.slug)
+        assert.strictEqual(s.model.checkpoint, token.slug)
+        assert.deepStrictEqual(s.pending, [])
+
+        for (const inactive of [
+          { ...page, active: false },
+          { ...page, principalKnown: false },
+          { ...page, url: new URL('https://goosebumps.fm/tweet/stale-target') },
+        ]) {
+          s.props(inactive).send(ReaderPageMessage.FocusedReaderWindow())
+          assert.strictEqual(s.model.refresh, 1)
+          assert.deepStrictEqual(s.pending, [])
+        }
+      }),
+  )
+
+  for (const state of [
+    { active: false, principalKnown: true },
+    { active: true, principalKnown: false },
+  ]) {
+    it.effect(
+      `keeps automatic entry and visit mounts inert when active=${state.active} and principalKnown=${state.principalKnown}`,
+      () =>
+        Effect.gen(function* () {
+          const page = {
+            ...props(),
+            ...state,
+            url: new URL('https://goosebumps.fm/tweets'),
+            screen: null,
+          }
+
+          const s = yield* HtmlScene.make(ReaderPageNoDeps, page)
+          s.expectMount(TrackReader({ ...destination(page), generation: 0, active: false }))
+          s.given({ ...initialReader('anonymous'), entryResolved: true, resumeSlug: 'a' })
+          s.expectMount(TrackReader({ ...destination(page), generation: 0, active: false }))
+          s.expectMount(FollowReaderEntry({ enabled: false, href: '/tweet/a' }))
+        }),
+    )
+  }
+
   it.effect('reserves initial content without writing a visit before the mount commits', () =>
     Effect.gen(function* () {
       const page = props()

@@ -4,8 +4,8 @@ import type { MicroPostNeighboursResponse, MicroPostTimelineMonth } from '@gbfm/
 import { tweetHref } from './cards'
 import { ReaderPageMessage, type ReaderPageModel } from './contracts'
 import { nextUnread, UnreadTarget } from './decisions'
+import { ReaderMonthPicker } from './month-picker'
 import { ReaderNewer, ReaderOlder } from './mounts'
-import { monthLabel, timelineMonths } from './timeline'
 
 export const NavigationArrow = (
   h: Html.H<ReaderPageMessage>,
@@ -43,93 +43,89 @@ export const ReaderNavigation = (
   checking: boolean,
   failed: boolean,
   timeline: ReadonlyArray<MicroPostTimelineMonth>,
+  currentMonth: string,
 ) =>
   h.nav
     .attr('aria-label', 'Tweet reader')
-    .class('space-y-3')
+    .class('tweet-reader-navigation relative shrink-0 space-y-3')
     .children(
       h.div
         .class('flex gap-2')
         .children(
           NavigationArrow(h, 'newer', chronological?.newer),
           NavigationArrow(h, 'older', chronological?.older),
-          h.a
-            .attr('href', '/tweet/latest')
-            .class('btn')
-            .on('click', ReaderPageMessage.ClickedLatest())
-            .children('Latest'),
         ),
       h.details
+        .key(slug)
         .attr('data-tweet-dock', '')
-        .class('group')
+        .class('group relative')
         .children(
           h.summary
             .attr('aria-label', 'Reading options')
             .class('btn btn-quiet cursor-pointer')
             .children('Options'),
-          h.div.class('space-y-3 rounded-md border border-border p-4').children(
-            UnreadTarget.$match(nextUnread(neighbours), {
-              Older: ({ slug }) =>
-                h.a
-                  .attr('href', tweetHref(slug))
-                  .class('btn btn-primary')
-                  .attr('aria-label', 'Next unread (older)')
-                  .children('Next unread · older'),
-              Newer: ({ slug }) =>
-                h.a
-                  .attr('href', tweetHref(slug))
-                  .class('btn btn-primary')
-                  .attr('aria-label', 'Next unread (newer)')
-                  .children('Next unread · newer'),
-              CaughtUp: () =>
-                h.div.children(
-                  h.p.attr('role', 'status').children('Caught up'),
-                  ResetForm(h, slug, 'Start over'),
-                ),
-              Unavailable: () =>
-                h.div.children(
-                  h.p
-                    .attr('role', 'status')
-                    .children(checking ? 'Checking unread…' : 'Unread navigation unavailable'),
-                  failed &&
-                    h.button
-                      .attr('type', 'button')
-                      .class('btn')
-                      .on('click', ReaderPageMessage.ClickedRetryNavigation())
-                      .children('Retry navigation'),
-                ),
-            }),
-            neighbours !== null &&
-              h.p.attr('role', 'status').children(`${neighbours.unreadCount} unread`),
-            h.form.attrs({ method: 'post', action: '/actions/tweet-random' }).children(
-              h.input.attrs({ type: 'hidden', name: 'slug', value: slug }),
-              h.button
-                .attr('type', 'submit')
-                .attrs({
-                  disabled: UnreadTarget.$is('CaughtUp')(nextUnread(neighbours)) ? '' : undefined,
-                })
+          h.div
+            .class(
+              'tweet-reader-options absolute right-0 top-full z-30 mt-2 max-h-[min(70dvh,36rem)] w-[min(24rem,calc(100vw-2rem))] space-y-4 overflow-y-auto rounded-xl border border-border bg-background p-4 shadow-xl',
+            )
+            .children(
+              h.a
+                .attr('href', '/tweet/latest')
                 .class('btn')
-                .children('Surprise me'),
-            ),
-            h.details.children(
-              h.summary.class('btn btn-quiet').children('Reset reading history…'),
-              h.p.children('Mark every tweet as unread again and start from the latest.'),
-              ResetForm(h, slug, 'Reset'),
-            ),
-            h.nav
-              .attr('aria-label', 'Reading timeline')
-              .class('flex flex-wrap gap-2')
-              .children(
-                timelineMonths(timeline).map((month) =>
-                  month.newestSlug
-                    ? h.a
-                        .attr('href', tweetHref(month.newestSlug))
+                .on('click', ReaderPageMessage.ClickedLatest())
+                .children('Latest'),
+              UnreadTarget.$match(nextUnread(neighbours), {
+                Older: ({ slug }) =>
+                  h.a
+                    .attr('href', tweetHref(slug))
+                    .class('btn btn-primary')
+                    .attr('aria-label', 'Next unread (older)')
+                    .children('Next unread · older'),
+                Newer: ({ slug }) =>
+                  h.a
+                    .attr('href', tweetHref(slug))
+                    .class('btn btn-primary')
+                    .attr('aria-label', 'Next unread (newer)')
+                    .children('Next unread · newer'),
+                CaughtUp: () =>
+                  h.div.children(
+                    h.p.attr('role', 'status').children('Caught up'),
+                    ResetForm(h, slug, 'Start over'),
+                  ),
+                Unavailable: () =>
+                  h.div.children(
+                    h.p
+                      .attr('role', 'status')
+                      .children(checking ? 'Checking unread…' : 'Unread navigation unavailable'),
+                    failed &&
+                      h.button
+                        .attr('type', 'button')
                         .class('btn')
-                        .children(`${monthLabel(month.month)} · ${month.unread}/${month.total}`)
-                    : h.span.class('btn opacity-30').children(monthLabel(month.month)),
-                ),
+                        .on('click', ReaderPageMessage.ClickedRetryNavigation())
+                        .children('Retry navigation'),
+                  ),
+              }),
+              neighbours !== null &&
+                h.p.attr('role', 'status').children(`${neighbours.unreadCount} unread`),
+              h.form.attrs({ method: 'post', action: '/actions/tweet-random' }).children(
+                h.input.attrs({ type: 'hidden', name: 'slug', value: slug }),
+                h.button
+                  .attr('type', 'submit')
+                  .attrs({
+                    disabled: UnreadTarget.$is('CaughtUp')(nextUnread(neighbours)) ? '' : undefined,
+                  })
+                  .class('btn')
+                  .children('Surprise me'),
               ),
-          ),
+              h.details.children(
+                h.summary.class('btn btn-quiet').children('Reset reading history…'),
+                h.p.children('Mark every tweet as unread again and start from the latest.'),
+                ResetForm(h, slug, 'Reset'),
+              ),
+              h.nav
+                .attr('aria-label', 'Reading timeline')
+                .children(ReaderMonthPicker(h, timeline, currentMonth)),
+            ),
         ),
       (neighbours?.newerUnread || model.returnSlug) &&
         h.section

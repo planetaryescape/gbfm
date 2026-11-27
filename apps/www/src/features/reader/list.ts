@@ -10,6 +10,12 @@ export const ReaderList = ReaderPageDef.fragment((h, model: ReaderPageModel) => 
   if (model.identity !== identity) model = initialReader(identity)
   const resumeSlug = model.resumeSlug ?? model.checkpoint
 
+  if (h.props.status === 404 && !isEntry(h.props.url) && !model.entryFallback)
+    return h.section.children(
+      h.h1.class('text-2xl font-bold').children('Tweet not found.'),
+      h.a.attr('href', '/tweet/latest').class('btn').children('Latest'),
+    )
+
   return h.div.class('space-y-4').children(
     h.h1.class('text-2xl font-bold').children('Tweets'),
     h.form
@@ -31,7 +37,11 @@ export const ReaderList = ReaderPageDef.fragment((h, model: ReaderPageModel) => 
         .attr('href', resumeSlug ? tweetHref(resumeSlug) : '/tweet/latest')
         .onMount(
           FollowReaderEntry({
-            enabled: (isEntry(h.props.url) && model.entryResolved) || model.entryFallback,
+            href: resumeSlug ? tweetHref(resumeSlug) : '/tweet/latest',
+            enabled:
+              h.props.active !== false &&
+              h.props.principalKnown !== false &&
+              ((isEntry(h.props.url) && model.entryResolved) || model.entryFallback),
           }),
         )
         .class('btn btn-primary')

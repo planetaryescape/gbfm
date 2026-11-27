@@ -37,7 +37,11 @@ test.describe('without JavaScript', () => {
   test('production HTML and its stylesheet work without hydration', async ({ page }) => {
     await page.goto('/')
     await expect(page.getByRole('heading', { name: 'Native fixture' })).toBeVisible()
-    await expect(page.locator('main p')).toHaveText(['Anonymous', 'Anonymous'])
+    await expect(page.locator('main p')).toHaveText([
+      'Worker markdown blocks: 1',
+      'Anonymous',
+      'Anonymous',
+    ])
     await expect(page.locator('#root')).not.toHaveAttribute('data-adopted')
     await expect(page.locator('main')).toHaveCSS('font-family', /JetBrainsMono/)
     expect(

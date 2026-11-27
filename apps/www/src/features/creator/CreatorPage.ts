@@ -360,6 +360,7 @@ export const CreatorPageNoDeps = D.make({
         tagsInput: result.value.tags.join(', '),
         savedDraft: result.value,
         ready: true,
+        recovered: true,
         bodyOpen: Boolean(result.value.content.trim()),
         episodeInput: result.value.episodeNumber?.toString() ?? '',
         authorLabels: Object.fromEntries(
@@ -1012,6 +1013,7 @@ export const CreatorPageNoDeps = D.make({
   subscriptions: ({ model, props }) => [
     model.ready &&
       !model.choosing &&
+      !model.draft.editSlug &&
       !model.recovered &&
       canCreatePosts(props.principal.role) &&
       Subscription.make(

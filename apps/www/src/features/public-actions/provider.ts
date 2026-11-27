@@ -16,6 +16,7 @@ import {
 
 export const MembershipProviderModel = Schema.Struct({
   ...MembershipModel.fields,
+  recoveryOwnerId: Schema.optional(Schema.String),
   navigation: Schema.optional(
     Schema.Struct({
       navigationId: Schema.Number,
@@ -33,6 +34,10 @@ export const MembershipProviderDefinition = Html.component({
   events: MembershipProviderEvents,
   restore: false,
   shares: {
+    schema: Schema.Struct({
+      ...MembershipModel.fields,
+      signInRequired: Schema.optional(Schema.Boolean),
+    }),
     value: ({ model, props }) =>
       model.principalId === props.principalId && model.principalKnown === props.principalKnown
         ? {
@@ -41,6 +46,9 @@ export const MembershipProviderDefinition = Html.component({
             generation: model.generation,
             revision: model.revision,
             entries: model.entries,
+            signInRequired:
+              model.recoveryOwnerId !== undefined &&
+              (!props.principalKnown || props.principalId === model.recoveryOwnerId),
           }
         : {
             principalId: null,
@@ -48,6 +56,9 @@ export const MembershipProviderDefinition = Html.component({
             generation: model.generation,
             revision: null,
             entries: {},
+            signInRequired:
+              model.recoveryOwnerId !== undefined &&
+              (!props.principalKnown || props.principalId === model.recoveryOwnerId),
           },
     receives: ['RequestedMembership', 'RequestedToggleMembership', 'RequestedRetryMembership'],
   },
@@ -74,12 +85,17 @@ export const membershipUpdate = MembershipProviderDefinition.update(($, message)
       revision: null,
       entries: {},
       navigation: undefined,
+      recoveryOwnerId:
+        message.principalKnown && message.principalId !== $.model.recoveryOwnerId
+          ? undefined
+          : $.model.recoveryOwnerId,
     })
   }
 
   if (
     $.props.principalId !== $.model.principalId ||
-    $.props.principalKnown !== $.model.principalKnown
+    $.props.principalKnown !== $.model.principalKnown ||
+    $.model.recoveryOwnerId !== undefined
   )
     return $.model
 
@@ -167,6 +183,7 @@ export const membershipUpdate = MembershipProviderDefinition.update(($, message)
     message.unauthorized
   ) {
     return $.evolve({
+      recoveryOwnerId: message.principalId,
       generation: $.model.generation + 1,
       revision: null,
       entries: Object.fromEntries(
@@ -182,7 +199,7 @@ export const membershipUpdate = MembershipProviderDefinition.update(($, message)
           },
         ]),
       ),
-    })
+    }).emit(MembershipProviderEvents.RequestedPrincipalRefresh())
   }
 
   return Match.value(message).pipe(
@@ -281,6 +298,7 @@ const membershipLifecycleUpdate = MembershipProviderDefinition.update(($) => {
 
   if (
     !lifecycle ||
+    $.model.recoveryOwnerId !== undefined ||
     $.props.principalId !== $.model.principalId ||
     $.props.principalKnown !== $.model.principalKnown
   )

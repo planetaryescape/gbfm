@@ -1,7 +1,8 @@
-import { Command, Component, Head, Router, UiSchema } from '@effect/ui'
+import { Command, Component, Head, Router, Subscription, UiSchema } from '@effect/ui'
 import { Html, HtmlHead } from '@effect/ui/html'
+import { JourneyOutcome } from '@gbfm/observability'
 import { makeStaticSiteMetadata, SiteMetadata } from '@gbfm/site-metadata'
-import { Effect, Layer, Option, Redacted, Schema } from 'effect'
+import { Effect, Layer, Option, Redacted, Schema, Stream } from 'effect'
 import * as AsyncResult from 'effect/reactivity/AsyncResult'
 
 import { PageDocument } from '../domain/page'
@@ -10,12 +11,13 @@ import { StationNavigation } from '../features/navigation/station-navigation'
 import { PlayerProvider } from '../features/player/provider'
 import { PersistentPlayer } from '../features/player/view'
 import { membershipCommandsLayer, MembershipProvider } from '../features/public-actions/provider'
-import { parseCheckpoint } from '../features/reader/location'
+import { concreteSlug, isEntry, parseCheckpoint } from '../features/reader/location'
 import { SearchDialog } from '../features/search/dialog'
+import { SpotifyProviderMessage } from '../features/spotify/domain'
 import { spotifyCommandsLayer, SpotifyProvider } from '../features/spotify/provider'
 import { parseRoute, Route as PageRoute } from '../route'
-import { navigationCompleted, navigationStarted } from './browser-runtime'
 import { siteHead } from './head'
+import { navigationCompleted, navigationStarted } from './navigation-events'
 import { PageContent, ReaderContent } from './page-content'
 import {
   GetPage,
@@ -46,6 +48,23 @@ export type AppBootstrap = typeof AppBootstrap.Type
 
 const NavigationAction = Schema.Literals(['initial', 'push', 'replace', 'pop'])
 
+const ReaderNavigationReceipt = Schema.Struct({
+  url: Schema.String,
+  navigationId: Schema.Number,
+  identity: Schema.String,
+})
+
+const CreatorLease = Schema.Struct({
+  realm: Schema.String,
+  url: Schema.String,
+  ownerId: Schema.String,
+  editorEpoch: Schema.Number,
+  verificationEpoch: Schema.Number,
+  navigationId: Schema.Number,
+})
+
+type CreatorLease = typeof CreatorLease.Type
+
 export const RoutedApplicationModel = Schema.Struct({
   route: AppRoute,
   identity: PageIdentity,
@@ -60,6 +79,12 @@ export const RoutedApplicationModel = Schema.Struct({
   spotifyIdentity: Schema.String,
   membershipPrincipalId: Schema.NullOr(Schema.String),
   membershipPrincipalKnown: Schema.Boolean,
+  retainedPublicPath: Schema.NullOr(Schema.String),
+  retainedPublicEpoch: Schema.Number,
+  retainedPublicRealm: Schema.NullOr(Schema.String),
+  readerNavigationPending: Schema.Boolean,
+  acceptedReaderNavigation: Schema.NullOr(ReaderNavigationReceipt),
+  creatorLease: Schema.NullOr(CreatorLease),
 })
 
 export type RoutedApplicationModel = typeof RoutedApplicationModel.Type
@@ -71,6 +96,7 @@ export const RoutedApplicationMessage = UiSchema.TaggedEnum({
   RequestedCloseSearch: {},
   ChangedAuthentication: {},
   ClickedRetryPage: {},
+  RequestedCreatorRefresh: { lease: CreatorLease },
   ObservedRouteLocation: {
     held: AppRoute,
     navigationId: Schema.Number,
@@ -102,14 +128,17 @@ export class ReadRouteLocation extends Command.Service<ReadRouteLocation>()(
 }
 
 export class ReportNavigation extends Command.Service<ReportNavigation>()('app/ReportNavigation', {
-  args: { phase: Schema.Literals(['started', 'completed']) },
+  args: {
+    phase: Schema.Literals(['started', 'completed']),
+    outcome: Schema.optional(JourneyOutcome),
+  },
   success: Schema.Void,
   mode: 'queue',
 }) {
-  static readonly layer = this.toLayer(({ phase }) =>
+  static readonly layer = this.toLayer(({ phase, outcome }) =>
     Effect.sync(() => {
       if (phase === 'started') navigationStarted()
-      else navigationCompleted()
+      else navigationCompleted(outcome)
     }),
   )
 }
@@ -157,6 +186,82 @@ const dashboardContentKey = (realm: string, principalId: string | null, url: URL
     ? `${realm}:dashboard:${encodeURIComponent(principalId)}:${pathOf(url)}`
     : null
 
+const creatorLeaseForPage = (
+  page: PageDocument | undefined | null,
+  url: URL,
+  realm: string,
+  epoch: number,
+  navigationId: number,
+  previous: CreatorLease | null,
+): CreatorLease | null => {
+  if (
+    !page ||
+    page.status !== 200 ||
+    page.failure !== null ||
+    page.principalKnown !== true ||
+    !page.principal ||
+    page.url !== url.href ||
+    !PageRoute.guards.Composer(parseRoute(url.pathname))
+  )
+    return null
+
+  const same =
+    previous?.realm === realm &&
+    previous.url === url.href &&
+    previous.ownerId === page.principal.id &&
+    previous.verificationEpoch === epoch &&
+    previous.navigationId === navigationId
+
+  return {
+    realm,
+    url: url.href,
+    ownerId: page.principal.id,
+    editorEpoch: same ? previous.editorEpoch : epoch,
+    verificationEpoch: epoch,
+    navigationId,
+  }
+}
+
+const creatorLeaseKey = (lease: CreatorLease) =>
+  `${lease.realm}:creator:${encodeURIComponent(lease.ownerId)}:${encodeURIComponent(lease.url)}:${lease.editorEpoch}`
+
+const sameCreatorLease = (first: CreatorLease | null, second: CreatorLease) =>
+  first !== null &&
+  creatorLeaseKey(first) === creatorLeaseKey(second) &&
+  first.verificationEpoch === second.verificationEpoch &&
+  first.navigationId === second.navigationId
+
+const retainedCreatorKey = (props: {
+  readonly realm: string
+  readonly url: URL
+  readonly epoch: number
+  readonly navigationId: number
+  readonly page: PageDocument | null
+  readonly creatorLease: CreatorLease | null
+  readonly creatorVerificationPending: boolean
+}) => {
+  const fresh = creatorLeaseForPage(
+    props.page,
+    props.url,
+    props.realm,
+    props.epoch,
+    props.navigationId,
+    props.creatorLease,
+  )
+
+  if (fresh) return creatorLeaseKey(fresh)
+  const lease = props.creatorLease
+
+  return props.page === null &&
+    props.creatorVerificationPending &&
+    lease?.realm === props.realm &&
+    lease.url === props.url.href &&
+    lease.verificationEpoch === props.epoch &&
+    lease.navigationId === props.navigationId
+    ? creatorLeaseKey(lease)
+    : null
+}
+
 export const isReaderPageDocument = (page: PageDocument) => {
   const url = URL.parse(page.url)
 
@@ -198,10 +303,27 @@ export const visiblePageDocument = (
   result: AsyncResult.AsyncResult<PageDocument, PageQueryError>,
   url: URL,
   identity: PageIdentity,
+  retained?: {
+    readonly page: PageDocument | null
+    readonly realm: string | null
+    readonly currentRealm: string
+  },
 ): PageDocument | undefined => {
   const current = currentPageDocument(result)
 
-  if (current) return current
+  if (current) {
+    if (current.status === 401) return undefined
+    const currentUrl = URL.parse(current.url)
+
+    if (
+      currentUrl &&
+      PageRoute.guards.Composer(parseRoute(currentUrl.pathname)) &&
+      current.principalKnown !== true
+    )
+      return undefined
+
+    return current
+  }
 
   if (!identity.known || identity.principalId !== null || isPrivatePageUrl(url)) return undefined
 
@@ -217,12 +339,30 @@ export const visiblePageDocument = (
       return undefined
   }
 
-  const previous = Option.getOrUndefined(AsyncResult.value(result))
+  const previous =
+    Option.getOrUndefined(AsyncResult.value(result)) ??
+    (retained?.realm === retained?.currentRealm ? (retained?.page ?? undefined) : undefined)
 
-  if (!previous || !isPublicPageDocument(previous)) return undefined
+  if (!previous || previous.principalKnown !== true || !isPublicPageDocument(previous))
+    return undefined
   const previousUrl = URL.parse(previous.url, url)
 
-  return previousUrl?.origin === url.origin && pathOf(previousUrl) === pathOf(url)
+  const failedEntryDestination =
+    AsyncResult.isFailure(result) &&
+    !result.waiting &&
+    Option.getOrUndefined(AsyncResult.error(result))?.reason === 'transport' &&
+    previousUrl !== null &&
+    isEntry(previousUrl) &&
+    previous.tweet === null &&
+    concreteSlug(url) !== null
+
+  if (failedEntryDestination) return undefined
+
+  return previousUrl?.origin === url.origin &&
+    (pathOf(previousUrl) === pathOf(url) ||
+      (previous === retained?.page &&
+        retained.realm === retained.currentRealm &&
+        previous.principalKnown))
     ? previous
     : undefined
 }
@@ -252,6 +392,13 @@ export const retainedSpotlightDocument = (
 
   return previous.search === next.search ? page : undefined
 }
+
+const retainedPublicSnapshot = (
+  result: AsyncResult.AsyncResult<PageDocument, PageQueryError>,
+  path: string | null,
+  origin: URL,
+  identity: PageIdentity,
+) => (path === null ? null : (visiblePageDocument(result, new URL(path, origin), identity) ?? null))
 
 export const failedReaderPushReturn = (
   page: PageDocument | undefined,
@@ -309,19 +456,24 @@ const nextIdentity = (identity: PageIdentity): PageIdentity => ({
 
 const startedNavigation = () => ReportNavigation.make({ phase: 'started' }).pipe(Command.asNoop)
 
-const completedNavigation = () => ReportNavigation.make({ phase: 'completed' }).pipe(Command.asNoop)
+const completedNavigation = (outcome: typeof JourneyOutcome.Type = 'succeeded') =>
+  ReportNavigation.make({ phase: 'completed', outcome }).pipe(Command.asNoop)
 
 const RoutedChromeMessage = UiSchema.TaggedEnum({
   RequestedSearchStationNavigation: {},
   RequestedOpenSearchDialog: {},
   RequestedCloseSearchDialog: {},
   RequestedRefreshPageContent: {},
+  ObservedReaderNavigation: {},
+  RequestedCreatorRefresh: { lease: CreatorLease },
+  ObservedCreatorDocument: {},
 })
 
 const RoutedChromeEvents = UiSchema.TaggedEnum({
   RequestedSearch: {},
   RequestedCloseSearch: {},
   RequestedRefresh: {},
+  RequestedCreatorRefresh: { lease: CreatorLease },
 })
 
 const RoutedChrome = Html.component({
@@ -343,21 +495,72 @@ const RoutedChrome = Html.component({
     navigationAction: Schema.NullOr(NavigationAction),
     pending: Schema.Boolean,
     failed: Schema.Boolean,
+    readerError: Schema.Boolean,
+    acceptedReaderNavigation: Schema.NullOr(ReaderNavigationReceipt),
+    creatorLease: Schema.NullOr(CreatorLease),
+    creatorVerificationPending: Schema.Boolean,
     searchOpen: Schema.Boolean,
   }),
-  model: Schema.Null,
+  model: Schema.Struct({
+    observedReaderNavigation: Schema.NullOr(ReaderNavigationReceipt),
+    creatorKey: Schema.NullOr(Schema.String),
+  }),
   message: RoutedChromeMessage,
   events: RoutedChromeEvents,
   restore: false,
 }).make({
-  init: () => null,
+  init: ({ props }) => ({
+    observedReaderNavigation: props.acceptedReaderNavigation,
+    creatorKey: retainedCreatorKey(props),
+  }),
+  subscriptions: ({ model, props }) => [
+    retainedCreatorKey(props) !== model.creatorKey &&
+      Subscription.make('creatorDocument', [retainedCreatorKey(props)], () =>
+        Stream.succeed(RoutedChromeMessage.ObservedCreatorDocument()),
+      ),
+    props.acceptedReaderNavigation &&
+      props.acceptedReaderNavigation.navigationId !==
+        model.observedReaderNavigation?.navigationId &&
+      props.acceptedReaderNavigation.navigationId === props.navigationId &&
+      props.acceptedReaderNavigation.url === props.url.href &&
+      !props.pending &&
+      Subscription.make(
+        'acceptedReaderNavigation',
+        [
+          props.acceptedReaderNavigation.navigationId,
+          props.acceptedReaderNavigation.url,
+          props.acceptedReaderNavigation.identity,
+        ],
+        () => Stream.succeed(RoutedChromeMessage.ObservedReaderNavigation()),
+      ),
+  ],
   update: {
+    ObservedCreatorDocument: ($) => $.evolve({ creatorKey: retainedCreatorKey($.props) }),
     RequestedSearchStationNavigation: ($) => $.emit(RoutedChromeEvents.RequestedSearch()),
     RequestedOpenSearchDialog: ($) => $.emit(RoutedChromeEvents.RequestedSearch()),
     RequestedCloseSearchDialog: ($) => $.emit(RoutedChromeEvents.RequestedCloseSearch()),
     RequestedRefreshPageContent: ($) => $.emit(RoutedChromeEvents.RequestedRefresh()),
+    RequestedCreatorRefresh: ($, { lease }) =>
+      $.props.pending ||
+      retainedCreatorKey($.props) !== creatorLeaseKey(lease) ||
+      !sameCreatorLease($.props.creatorLease, lease)
+        ? $.model
+        : $.emit(RoutedChromeEvents.RequestedCreatorRefresh({ lease })),
+    ObservedReaderNavigation: ($) =>
+      !$.props.acceptedReaderNavigation ||
+      $.props.pending ||
+      $.props.acceptedReaderNavigation.navigationId !== $.props.navigationId ||
+      $.props.acceptedReaderNavigation.url !== $.props.url.href ||
+      $.props.acceptedReaderNavigation.identity !== ($.props.page?.principal?.id ?? 'anonymous') ||
+      $.props.acceptedReaderNavigation.navigationId ===
+        $.model.observedReaderNavigation?.navigationId
+        ? $.model
+        : $.evolve({ observedReaderNavigation: $.props.acceptedReaderNavigation }).send(
+            SpotifyProvider,
+            SpotifyProviderMessage.RequestedRefreshStatus(),
+          ),
   },
-  view: (h) => {
+  view: (h, model) => {
     const { page, reader, readerUrl, url } = h.props
     const principal = page?.principal ?? null
     const principalKnown = page ? (page.principalKnown ?? true) : false
@@ -367,6 +570,45 @@ const RoutedChrome = Html.component({
       h.props.dashboardPrincipalId,
       url,
     )
+
+    const creatorKey = retainedCreatorKey(h.props)
+
+    const creatorContent = () =>
+      h.keepAlive(
+        ({ key, props, model }) => key === retainedCreatorKey(props) && key === model.creatorKey,
+        (s) => {
+          const lease = creatorLeaseForPage(
+            page,
+            url,
+            h.props.realm,
+            h.props.epoch,
+            h.props.navigationId,
+            h.props.creatorLease,
+          )
+
+          if (
+            !page ||
+            !lease ||
+            h.props.pending ||
+            h.props.navigationAction === null ||
+            creatorLeaseKey(lease) !== model.creatorKey
+          )
+            return null
+
+          return PageContent(s, {
+            key: creatorLeaseKey(lease),
+            props: {
+              page,
+              navigationId: h.props.navigationId,
+              navigationAction: h.props.navigationAction,
+              active: true,
+            },
+            onEmit: {
+              RequestedRefresh: () => RoutedChromeMessage.RequestedCreatorRefresh({ lease }),
+            },
+          })
+        },
+      )
 
     const dashboardContent = () =>
       h.keepAlive(
@@ -396,8 +638,12 @@ const RoutedChrome = Html.component({
       )
 
     const content = () => {
-      if (page && (h.props.navigationAction !== null || h.props.spotlightPending)) {
-        if (isReaderPageDocument(page) || retainedDashboardKey !== null) return h.text('')
+      if (
+        page &&
+        (h.props.navigationAction !== null || h.props.spotlightPending || h.props.pending)
+      ) {
+        if (isReaderPageDocument(page) || retainedDashboardKey !== null || creatorKey !== null)
+          return h.text('')
 
         return PageContent(h, {
           key: `${h.props.realm}:${h.props.epoch}:${isPrivatePageUrl(url) ? 'private' : 'public'}`,
@@ -467,6 +713,10 @@ const RoutedChrome = Html.component({
       h.main
         .key('main-content')
         .attr('id', 'main-content')
+        .attr('data-reader-active', h.props.readerError ? 'true' : undefined)
+        .attr('data-reader-status', h.props.readerError ? 'error' : undefined)
+        .attr('data-reader-request', h.props.readerError ? String(h.props.navigationId) : undefined)
+        .attr('data-reader-destination', h.props.readerError ? url.href : undefined)
         .attr('aria-busy', String(page === null || h.props.navigationAction === null))
         .children(
           h.keepAlive(
@@ -502,6 +752,7 @@ const RoutedChrome = Html.component({
                 : null,
           ),
           dashboardContent(),
+          creatorContent(),
           content(),
           h.props.failed && page
             ? h.section
@@ -566,7 +817,84 @@ export const RoutedApplicationDefinition = Html.component({
           : undefined
       },
     },
+    retainedPublic: {
+      query: GetPage,
+      args: ({ props, model }) =>
+        model.retainedPublicPath !== null &&
+        model.retainedPublicRealm === props.realm &&
+        model.identity.known &&
+        model.identity.principalId === null
+          ? {
+              path: model.retainedPublicPath,
+              identity: { ...model.identity, epoch: model.retainedPublicEpoch },
+              realm: props.realm,
+            }
+          : undefined,
+    },
   },
+})
+
+const changedAuthentication = RoutedApplicationDefinition.update(($) => {
+  const next = $.evolve({
+    identity: nextIdentity($.model.identity),
+    pending: true,
+    searchOpen: false,
+    navigationId: $.model.navigationId + 1,
+    membershipPrincipalId: null,
+    membershipPrincipalKnown: false,
+    readerPath: null,
+    spotlightPath: null,
+    readerPrincipalId: null,
+    spotifyIdentity: 'anonymous',
+    retainedPublicPath: null,
+    retainedPublicRealm: null,
+    readerNavigationPending: false,
+    acceptedReaderNavigation: null,
+    creatorLease: null,
+  }).run(InvalidatePages.make({}).pipe(Command.asNoop))
+
+  return $.model.pending ? next : next.run(startedNavigation())
+})
+
+const retryPage = RoutedApplicationDefinition.update(($) => {
+  const url = routeUrl($.model.route, $.props.url)
+
+  const anonymousPublic =
+    $.model.identity.known && $.model.identity.principalId === null && !isPrivatePageUrl(url)
+
+  const identity = anonymousPublic ? $.model.identity : nextIdentity($.model.identity)
+
+  const verified = $.model.pending
+    ? null
+    : creatorLeaseForPage(
+        currentPageDocument($.queries.page),
+        url,
+        $.props.realm,
+        $.model.identity.epoch,
+        $.model.navigationId,
+        $.model.creatorLease,
+      )
+
+  const creatorLease = verified
+    ? {
+        ...verified,
+        verificationEpoch: identity.epoch,
+        navigationId: $.model.navigationId + 1,
+      }
+    : null
+
+  const next = $.evolve({
+    identity,
+    pending: true,
+    searchOpen: false,
+    navigationId: $.model.navigationId + 1,
+    readerNavigationPending: false,
+    retainedPublicPath: anonymousPublic ? $.model.retainedPublicPath : null,
+    retainedPublicRealm: anonymousPublic ? $.model.retainedPublicRealm : null,
+    creatorLease,
+  }).run(InvalidatePages.make({}).pipe(Command.asNoop))
+
+  return $.model.pending ? next : next.run(startedNavigation())
 })
 
 export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
@@ -586,6 +914,12 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
       : 'anonymous',
     membershipPrincipalId: props.identity.known ? props.identity.principalId : null,
     membershipPrincipalKnown: props.identity.known,
+    retainedPublicPath: null,
+    retainedPublicEpoch: props.identity.epoch,
+    retainedPublicRealm: null,
+    readerNavigationPending: false,
+    acceptedReaderNavigation: null,
+    creatorLease: null,
   }),
   subscriptions: ({ model }) => [
     routeSubscription(model.route, (route) => RoutedApplicationMessage.ChangedRoute({ route })),
@@ -617,6 +951,19 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
         searchOpen: false,
         navigationId: $.model.navigationId + 1,
         navigationAction: null,
+        creatorLease: null,
+        readerNavigationPending:
+          PageRoute.guards.Detail(parsed) &&
+          parsed.kind === 'tweets' &&
+          parseCheckpoint(parsed.slug) !== null,
+        retainedPublicPath:
+          nextIdentity.known && nextIdentity.principalId === null && !isPrivatePageUrl(nextUrl)
+            ? $.model.retainedPublicPath
+            : null,
+        retainedPublicRealm:
+          nextIdentity.known && nextIdentity.principalId === null && !isPrivatePageUrl(nextUrl)
+            ? $.model.retainedPublicRealm
+            : null,
       })
         .run(startedNavigation())
         .run(ReadRouteLocation.make({ held: route, navigationId: $.model.navigationId + 1 }))
@@ -624,6 +971,24 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
     ChangedPage: ($) => {
       const result = $.queries.page
       const page = currentPageDocument(result)
+
+      if (page?.status === 401) {
+        if (
+          $.model.identity.known ||
+          $.model.membershipPrincipalKnown ||
+          $.model.creatorLease !== null
+        )
+          return changedAuthentication($, RoutedApplicationMessage.ChangedAuthentication())
+
+        if (!$.model.pending) return $.model
+
+        return $.evolve({
+          pending: false,
+          creatorLease: null,
+          membershipPrincipalId: null,
+          membershipPrincipalKnown: false,
+        }).run(completedNavigation('failed'))
+      }
 
       if (page) {
         const canonical = URL.parse(page.url, $.props.url)
@@ -667,8 +1032,39 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
         const membershipPrincipalKnown = page.principalKnown ?? true
         const membershipPrincipalId = membershipPrincipalKnown ? (page.principal?.id ?? null) : null
 
-        if ($.model.pending && $.model.navigationAction !== null)
-          return $.evolve({
+        const creatorLease = creatorLeaseForPage(
+          page,
+          routeUrl($.model.route, $.props.url),
+          $.props.realm,
+          $.model.identity.epoch,
+          $.model.navigationId,
+          $.model.creatorLease,
+        )
+
+        const retainPublic =
+          $.model.identity.known &&
+          $.model.identity.principalId === null &&
+          page.principalKnown === true &&
+          isPublicPageDocument(page)
+
+        const retainedPublicPath = retainPublic && canonical ? pathOf(canonical) : null
+
+        const retainedPublicEpoch = retainPublic
+          ? $.model.identity.epoch
+          : $.model.retainedPublicEpoch
+
+        const retainedPublicRealm = retainPublic ? $.props.realm : null
+
+        const refreshSpotify =
+          $.model.readerNavigationPending &&
+          page.status === 200 &&
+          page.failure === null &&
+          page.principalKnown === true &&
+          page.tweet !== null &&
+          isReaderPageDocument(page)
+
+        if ($.model.pending && $.model.navigationAction !== null) {
+          const next = $.evolve({
             pending: false,
             readerPath,
             readerEpoch,
@@ -677,7 +1073,18 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
             spotifyIdentity,
             membershipPrincipalId,
             membershipPrincipalKnown,
+            retainedPublicPath,
+            retainedPublicEpoch,
+            retainedPublicRealm,
+            creatorLease,
+            readerNavigationPending: false,
+            acceptedReaderNavigation: refreshSpotify
+              ? { url: page.url, navigationId: $.model.navigationId, identity: spotifyIdentity }
+              : $.model.acceptedReaderNavigation,
           }).run(completedNavigation())
+
+          return next
+        }
 
         return readerPath === $.model.readerPath &&
           readerEpoch === $.model.readerEpoch &&
@@ -685,7 +1092,12 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
           readerPrincipalId === $.model.readerPrincipalId &&
           spotifyIdentity === $.model.spotifyIdentity &&
           membershipPrincipalId === $.model.membershipPrincipalId &&
-          membershipPrincipalKnown === $.model.membershipPrincipalKnown
+          membershipPrincipalKnown === $.model.membershipPrincipalKnown &&
+          retainedPublicPath === $.model.retainedPublicPath &&
+          retainedPublicEpoch === $.model.retainedPublicEpoch &&
+          retainedPublicRealm === $.model.retainedPublicRealm &&
+          (creatorLease === $.model.creatorLease ||
+            (creatorLease !== null && sameCreatorLease($.model.creatorLease, creatorLease)))
           ? $.model
           : $.evolve({
               readerPath,
@@ -695,6 +1107,10 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
               spotifyIdentity,
               membershipPrincipalId,
               membershipPrincipalKnown,
+              retainedPublicPath,
+              retainedPublicEpoch,
+              retainedPublicRealm,
+              creatorLease,
             })
       }
 
@@ -702,6 +1118,14 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
 
       const error = Option.getOrUndefined(AsyncResult.error(result))
       const redirect = error?.location ? URL.parse(error.location, $.props.url) : null
+
+      if (
+        error?.status === 401 &&
+        ($.model.identity.known ||
+          $.model.membershipPrincipalKnown ||
+          $.model.creatorLease !== null)
+      )
+        return changedAuthentication($, RoutedApplicationMessage.ChangedAuthentication())
 
       const rollback = $.model.pending
         ? failedReaderPushReturn(
@@ -715,7 +1139,7 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
 
       if (rollback)
         return $.evolve({ pending: false })
-          .run(completedNavigation())
+          .run(completedNavigation('failed'))
           .run(
             FollowPageLocation.make({
               held: $.model.route,
@@ -740,6 +1164,11 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
           spotlightPath: null,
           readerPrincipalId: null,
           spotifyIdentity: 'anonymous',
+          retainedPublicPath: null,
+          retainedPublicRealm: null,
+          readerNavigationPending: false,
+          acceptedReaderNavigation: null,
+          creatorLease: null,
         }).run(InvalidatePages.make({}).pipe(Command.asNoop))
 
         return $.model.pending ? next : next.run(startedNavigation())
@@ -755,7 +1184,9 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
         )
 
       return $.model.pending && $.model.navigationAction !== null
-        ? $.evolve({ pending: false }).run(completedNavigation())
+        ? $.evolve({ pending: false, readerNavigationPending: false, creatorLease: null }).run(
+            completedNavigation(error?.reason === 'transport' ? 'failed' : 'succeeded'),
+          )
         : $.model
     },
     RequestedSearchNavigation: ($) => $.evolve({ searchOpen: true }),
@@ -772,6 +1203,9 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
       const canonical = page ? URL.parse(page.url, $.props.url) : null
       const error = Option.getOrUndefined(AsyncResult.error(result))
       const redirect = error?.location ? URL.parse(error.location, $.props.url) : null
+
+      if (page?.status === 401 || error?.status === 401)
+        return $.evolve({ navigationAction: action })
 
       const redirecting =
         error?.reason === 'redirect' &&
@@ -801,7 +1235,7 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
 
       if (rollback)
         return $.evolve({ navigationAction: action, pending: false })
-          .run(completedNavigation())
+          .run(completedNavigation('failed'))
           .run(
             FollowPageLocation.make({
               held: $.model.route,
@@ -810,47 +1244,64 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
             }).pipe(Command.asNoop),
           )
 
-      if ($.model.pending && (ready || failed))
-        return $.evolve({ navigationAction: action, pending: false }).run(completedNavigation())
+      if ($.model.pending && (ready || failed)) {
+        const refreshSpotify =
+          ready &&
+          $.model.readerNavigationPending &&
+          page?.status === 200 &&
+          page.failure === null &&
+          page.principalKnown === true &&
+          page.tweet !== null &&
+          isReaderPageDocument(page)
+
+        const next = $.evolve({
+          navigationAction: action,
+          pending: false,
+          creatorLease: failed ? null : $.model.creatorLease,
+          readerNavigationPending: false,
+          acceptedReaderNavigation:
+            refreshSpotify && page
+              ? {
+                  url: page.url,
+                  navigationId: $.model.navigationId,
+                  identity: page.principal?.id ?? 'anonymous',
+                }
+              : $.model.acceptedReaderNavigation,
+        }).run(
+          completedNavigation(failed && error?.reason === 'transport' ? 'failed' : 'succeeded'),
+        )
+
+        return next
+      }
 
       return $.evolve({ navigationAction: action })
     },
-    ChangedAuthentication: ($) => {
-      const next = $.evolve({
-        identity: nextIdentity($.model.identity),
-        pending: true,
-        searchOpen: false,
-        navigationId: $.model.navigationId + 1,
-        membershipPrincipalId: null,
-        membershipPrincipalKnown: false,
-        readerPath: null,
-        spotlightPath: null,
-        readerPrincipalId: null,
-        spotifyIdentity: 'anonymous',
-      }).run(InvalidatePages.make({}).pipe(Command.asNoop))
-
-      return $.model.pending ? next : next.run(startedNavigation())
-    },
-    ClickedRetryPage: ($) => {
-      const anonymousPublic =
-        $.model.identity.known &&
-        $.model.identity.principalId === null &&
-        !isPrivatePageUrl(routeUrl($.model.route, $.props.url))
-
-      const identity = anonymousPublic ? $.model.identity : nextIdentity($.model.identity)
-
-      const next = $.evolve({
-        identity,
-        pending: true,
-        searchOpen: false,
-        navigationId: $.model.navigationId + 1,
-      }).run(InvalidatePages.make({}).pipe(Command.asNoop))
-
-      return $.model.pending ? next : next.run(startedNavigation())
-    },
+    ChangedAuthentication: changedAuthentication,
+    ClickedRetryPage: retryPage,
+    RequestedCreatorRefresh: ($, { lease }) =>
+      $.model.pending ||
+      !sameCreatorLease($.model.creatorLease, lease) ||
+      lease.realm !== $.props.realm ||
+      lease.url !== routeUrl($.model.route, $.props.url).href
+        ? $.model
+        : retryPage($, RoutedApplicationMessage.ClickedRetryPage()),
   },
   head: ({ props, model, queries }) => {
-    const page = visiblePageDocument(queries.page, routeUrl(model.route, props.url), model.identity)
+    const page = visiblePageDocument(
+      queries.page,
+      routeUrl(model.route, props.url),
+      model.identity,
+      {
+        page: retainedPublicSnapshot(
+          queries.retainedPublic,
+          model.retainedPublicPath,
+          props.url,
+          model.identity,
+        ),
+        realm: model.retainedPublicRealm,
+        currentRealm: props.realm,
+      },
+    )
 
     if (page) {
       const url = URL.parse(page.url, props.url) ?? routeUrl(model.route, props.url)
@@ -893,6 +1344,12 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
   view: (h, model) => {
     const freshPage = currentPageDocument(h.queries.page)
 
+    const currentUnauthorized =
+      freshPage?.status === 401 ||
+      (AsyncResult.isFailure(h.queries.page) &&
+        !h.queries.page.waiting &&
+        Option.getOrUndefined(AsyncResult.error(h.queries.page))?.status === 401)
+
     const spotlight = model.pending
       ? retainedSpotlightDocument(
           Option.getOrUndefined(AsyncResult.value(h.queries.retainedSpotlight)) ??
@@ -903,15 +1360,22 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
       : undefined
 
     const page =
-      visiblePageDocument(h.queries.page, routeUrl(model.route, h.props.url), model.identity) ??
-      spotlight
+      visiblePageDocument(h.queries.page, routeUrl(model.route, h.props.url), model.identity, {
+        page: retainedPublicSnapshot(
+          h.queries.retainedPublic,
+          model.retainedPublicPath,
+          h.props.url,
+          model.identity,
+        ),
+        realm: model.retainedPublicRealm,
+        currentRealm: h.props.realm,
+      }) ?? spotlight
 
     const principal = page?.principal ?? null
-    const principalKnown = page ? (page.principalKnown ?? true) : false
 
-    const membershipPrincipalKnown = freshPage
-      ? (freshPage.principalKnown ?? true)
-      : model.membershipPrincipalKnown
+    const membershipPrincipalKnown =
+      !currentUnauthorized &&
+      (freshPage ? (freshPage.principalKnown ?? true) : model.membershipPrincipalKnown)
 
     const membershipPrincipalId = freshPage
       ? (freshPage.principal?.id ?? null)
@@ -977,7 +1441,12 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
       },
       view: () =>
         PlayerProvider(h, {
-          props: { principalId: principal?.id ?? null, principalKnown, returnTo: pathOf(url) },
+          props: {
+            principalId: membershipPrincipalKnown ? membershipPrincipalId : null,
+            principalKnown: membershipPrincipalKnown,
+            authorizationSuspended: !membershipPrincipalKnown,
+            returnTo: pathOf(url),
+          },
           view: () =>
             MembershipProvider(h, {
               props: {
@@ -1009,13 +1478,33 @@ export const RoutedApplicationNoDeps = RoutedApplicationDefinition.make({
                     navigationId: model.navigationId,
                     navigationAction: model.navigationAction,
                     pending: model.pending,
-                    failed: AsyncResult.isFailure(h.queries.page),
+                    failed:
+                      AsyncResult.isFailure(h.queries.page) ||
+                      (freshPage !== undefined &&
+                        PageRoute.guards.Composer(parseRoute(url.pathname)) &&
+                        freshPage.principalKnown !== true),
+                    readerError:
+                      !model.pending &&
+                      model.navigationAction !== null &&
+                      AsyncResult.isFailure(h.queries.page) &&
+                      !h.queries.page.waiting &&
+                      Option.getOrUndefined(AsyncResult.error(h.queries.page))?.reason ===
+                        'transport' &&
+                      (PageRoute.guards.Detail(readerRoute) ||
+                        PageRoute.guards.Listing(readerRoute)) &&
+                      readerRoute.kind === 'tweets',
+                    acceptedReaderNavigation: model.acceptedReaderNavigation,
+                    creatorLease: model.creatorLease,
+                    creatorVerificationPending:
+                      model.pending && h.queries.page.waiting && !currentUnauthorized,
                     searchOpen: model.searchOpen,
                   },
                   onEmit: {
                     RequestedSearch: () => RoutedApplicationMessage.RequestedSearchNavigation(),
                     RequestedCloseSearch: () => RoutedApplicationMessage.RequestedCloseSearch(),
                     RequestedRefresh: () => RoutedApplicationMessage.ClickedRetryPage(),
+                    RequestedCreatorRefresh: ({ lease }) =>
+                      RoutedApplicationMessage.RequestedCreatorRefresh({ lease }),
                   },
                 }),
             }),

@@ -146,7 +146,7 @@ export const PlayerFavorite = Html.component({
     const label = active ? 'Remove from favorites' : 'Add to favorites'
 
     const control = (() => {
-      if (entry?.status === 'anonymous')
+      if (membership.signInRequired || entry?.status === 'anonymous')
         return h.a
           .class(heartButton)
           .attr(

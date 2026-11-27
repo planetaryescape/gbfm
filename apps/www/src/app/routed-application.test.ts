@@ -109,7 +109,7 @@ const noRequestsLayer = Layer.succeed(
 
 describe('native routed application', () => {
   it.each(['network', 'server', 'rate-limit'])(
-    'keeps only matching anonymous public content after a %s revalidation failure',
+    'retains verified anonymous public content across a %s public navigation failure',
     async (failure) => {
       let unavailable = false
 
@@ -167,8 +167,9 @@ describe('native routed application', () => {
             path: '/privacy',
             route: '/privacy',
           })
-          expect(root.text()).not.toContain('/about anonymous')
-          expect(root.text()).toContain('This page is unavailable.')
+          expect(root.text()).toContain('/about anonymous')
+          expect(root.text()).toContain('Showing the last loaded content.')
+          expect(root.head<{ title: string }>().title).toBe(title)
         }).pipe(Effect.scoped),
         Layer.mergeAll(
           TestHost.layer(),

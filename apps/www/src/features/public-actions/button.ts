@@ -79,7 +79,7 @@ export const MembershipButton = Html.component({
 
     if (entry?.busy) text = entry.revision === null ? 'Checking…' : 'Saving…'
 
-    if (status === 'anonymous')
+    if (h.reads.provider.signInRequired || status === 'anonymous')
       return h.a
         .attr('href', `/auth/sign-in?returnTo=${encodeURIComponent(document.path)}`)
         .attr(

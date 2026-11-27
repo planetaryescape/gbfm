@@ -113,7 +113,8 @@ export const ReaderPageNoDeps = ReaderPageDef.make({
         }),
       )
     },
-    ClickedRetryNavigation: ($) => $.evolve({ refresh: $.model.refresh + 1 }),
+    ClickedRetryNavigation: ($) =>
+      hasPendingVisits($.model) ? $.model : $.evolve({ refresh: $.model.refresh + 1 }),
     FocusedReaderWindow: ($) =>
       $.props.active !== false &&
       $.props.principalKnown !== false &&

@@ -1,5 +1,4 @@
-import * as Server from 'foldkit/experimental/server'
-
+import * as Server from '../../server/http-result'
 import { consentFormActionSource } from './callback'
 import { type ClientLogoUrl, clientLogoScriptHash } from './client-logo'
 import { connectionErrorDocument } from './document'

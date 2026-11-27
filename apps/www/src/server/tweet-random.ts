@@ -1,7 +1,7 @@
 import { MicroPostRandomUnreadResponse, MicroPostSeenResponse } from '@gbfm/api/navigation'
 import { Option, Schema } from 'effect'
 
-import { parseCheckpoint } from '../page/tweet/reader'
+import { parseCheckpoint } from '../features/reader/location'
 
 type ApiRequest = (request: Request, path: string, init: RequestInit) => Promise<Response>
 

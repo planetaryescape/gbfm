@@ -1,12 +1,20 @@
 import { Option, Schema } from 'effect'
-import type * as Server from 'foldkit/experimental/server'
 
+import { permissionsUnavailableDocument } from '../../features/connect/document'
+import { connectionLoginDocument } from '../../features/connect/login'
+import {
+  connectionFailure as failure,
+  connectionRedirect as redirect,
+  connectionResponse,
+  withConnectionCookies,
+} from '../../features/connect/response'
+import { consentDocument } from '../../features/connect/view'
 import { apiRequest } from '../../server/api'
+import type * as Server from '../../server/http-result'
 import { authErrorKey, authErrorMessages, readAuthErrorCode } from '../auth/errors'
 import { consentFormActionSource } from './callback'
 import { connectionIssuer } from './configuration'
 import { providerRedirect } from './continuation'
-import { permissionsUnavailableDocument } from './document'
 import {
   ConsentState,
   Continuation,
@@ -15,14 +23,6 @@ import {
   ProviderOutcome,
 } from './domain'
 import { loadConnection } from './load'
-import { connectionLoginDocument } from './login'
-import {
-  connectionFailure as failure,
-  connectionRedirect as redirect,
-  connectionResponse,
-  withConnectionCookies,
-} from './response'
-import { consentDocument } from './view'
 
 const providerResponse = async (
   response: Response,

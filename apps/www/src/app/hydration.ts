@@ -12,7 +12,7 @@ export const HydrationState = Schema.StructWithRest(
   [Schema.Record(Schema.String, Schema.Unknown)],
 )
 
-const jsonScript = (document: Document, id: string) => {
+export const jsonScript = (document: Document, id: string) => {
   const element = document.getElementById(id)
 
   if (element?.tagName !== 'SCRIPT' || element.getAttribute('type') !== 'application/json')

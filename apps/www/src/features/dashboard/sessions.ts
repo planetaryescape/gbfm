@@ -2,7 +2,7 @@ import { Command, Component, Query, UiSchema } from '@effect/ui'
 import { Html } from '@effect/ui/html'
 import { Context, Effect, Layer, Predicate, Schema } from 'effect'
 
-import { Field, Notice } from './presentation'
+import { DataTable, Field, Notice } from './presentation'
 import { Timestamp } from './timestamp'
 
 const SessionUser = Schema.Struct({ id: Schema.String, name: Schema.String, email: Schema.String })
@@ -186,6 +186,46 @@ export class RevokeSession extends Command.Service<RevokeSession>()('dashboard/R
   )
 }
 
+const SessionTable = (
+  h: Html.H<typeof SessionsMessage.Type>,
+  sessions: ReadonlyArray<typeof SessionMetadata.Type>,
+  busy: boolean,
+) => {
+  if (sessions.length === 0) return h.p('No active sessions found.')
+
+  return DataTable(h, 'Active sessions', [
+    'Device',
+    'IP address',
+    'Created',
+    'Expires',
+    'Actions',
+  ]).children(
+    h.tbody.children(
+      sessions.map((session) =>
+        h.tr
+          .key(session.id)
+          .class('admin-row')
+          .children(
+            h.td(session.userAgent ?? 'Unknown device'),
+            h.td(session.ipAddress ?? 'Unknown address'),
+            h.td.children(
+              Timestamp(h, { key: `${session.id}/created`, props: { iso: session.createdAt } }),
+            ),
+            h.td.children(
+              Timestamp(h, { key: `${session.id}/expires`, props: { iso: session.expiresAt } }),
+            ),
+            h.td.children(
+              h.button
+                .disabled(busy)
+                .on('click', SessionsMessage.ClickedRevoke({ id: session.id }))
+                .children('Revoke session'),
+            ),
+          ),
+      ),
+    ),
+  )
+}
+
 const SessionsDef = Html.component({
   name: 'DashboardSessions',
   model: Schema.Struct({
@@ -300,12 +340,15 @@ export const DashboardSessionsNoDeps = SessionsDef.make({
       Field(
         h,
         'search',
-        'Search by email',
+        'Search user by email',
         model.query,
         (value) => SessionsMessage.UpdatedQuery({ value }),
         'search',
       ),
-      h.button.disabled(model.busy).on('click', SessionsMessage.ClickedSearch()).children('Search'),
+      h.button
+        .disabled(model.busy)
+        .on('click', SessionsMessage.ClickedSearch())
+        .children('Search users'),
       Predicate.isTagged(h.queries.users, 'Success')
         ? h.ul.children(
             h.queries.users.value.map((user) =>
@@ -313,6 +356,7 @@ export const DashboardSessionsNoDeps = SessionsDef.make({
                 .key(user.id)
                 .children(
                   h.button
+                    .attr('aria-label', `View sessions for ${user.email}`)
                     .disabled(model.busy)
                     .on('click', SessionsMessage.PickedUser({ user }))
                     .children(`${user.name} · ${user.email}`),
@@ -327,60 +371,39 @@ export const DashboardSessionsNoDeps = SessionsDef.make({
         ? h.p.attr('role', 'alert').children('Could not load session data. Refresh to try again.')
         : undefined,
       model.user
-        ? h.div.children(
-            h.h2(`${model.user.name} · ${model.user.email}`),
-            h.button
-              .disabled(model.busy)
-              .on('click', SessionsMessage.ClickedClear())
-              .children('Choose another account'),
-            h.button
-              .disabled(model.busy)
-              .on('click', SessionsMessage.ClickedRefresh())
-              .children('Refresh sessions'),
-            h.button
-              .disabled(model.busy)
-              .on('click', SessionsMessage.ClickedRevokeAll())
-              .children('Revoke all sessions'),
-            model.confirming
-              ? h.div.children(
-                  h.p('Sign this user out of every device?'),
-                  h.button
-                    .disabled(model.busy)
-                    .on('click', SessionsMessage.ClickedConfirmAll())
-                    .children('Confirm revoke all'),
-                  h.button
-                    .disabled(model.busy)
-                    .on('click', SessionsMessage.ClickedCancelAll())
-                    .children('Cancel'),
-                )
-              : undefined,
-            Predicate.isTagged(h.queries.sessions, 'Success')
-              ? h.ul.children(
-                  h.queries.sessions.value.map((session) =>
-                    h.li.key(session.id).children(
-                      h.p(session.userAgent ?? 'Unknown device'),
-                      h.p(session.ipAddress ?? 'Unknown address'),
-                      h.p.children(
-                        'Created ',
-                        Timestamp(h, {
-                          key: `${session.id}/created`,
-                          props: { iso: session.createdAt },
-                        }),
-                        ' · Expires ',
-                        Timestamp(h, {
-                          key: `${session.id}/expires`,
-                          props: { iso: session.expiresAt },
-                        }),
-                      ),
-                      h.button
-                        .disabled(model.busy)
-                        .on('click', SessionsMessage.ClickedRevoke({ id: session.id }))
-                        .children('Revoke session'),
-                    ),
-                  ),
-                )
-              : h.p.attr('role', 'status').children('Loading sessions…'),
-          )
+        ? h.div
+            .key('selected-user')
+            .children(
+              h.h2(`${model.user.name} · ${model.user.email}`),
+              h.button
+                .disabled(model.busy)
+                .on('click', SessionsMessage.ClickedClear())
+                .children('Choose another account'),
+              h.button
+                .disabled(model.busy)
+                .on('click', SessionsMessage.ClickedRefresh())
+                .children('Refresh sessions'),
+              h.button
+                .disabled(model.busy)
+                .on('click', SessionsMessage.ClickedRevokeAll())
+                .children('Revoke all'),
+              model.confirming
+                ? h.div.children(
+                    h.p('Sign this user out of every device? They will need to sign in again.'),
+                    h.button
+                      .disabled(model.busy)
+                      .on('click', SessionsMessage.ClickedConfirmAll())
+                      .children('Confirm revoke all'),
+                    h.button
+                      .disabled(model.busy)
+                      .on('click', SessionsMessage.ClickedCancelAll())
+                      .children('Cancel'),
+                  )
+                : undefined,
+              Predicate.isTagged(h.queries.sessions, 'Success')
+                ? SessionTable(h, h.queries.sessions.value, model.busy)
+                : h.p.attr('role', 'status').children('Loading sessions…'),
+            )
         : undefined,
     ),
 })

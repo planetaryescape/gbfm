@@ -35,6 +35,22 @@ const revokedPage = Schema.decodeUnknownSync(KeyPage)({
 })
 
 describe('native API-key management parity', () => {
+  it('cannot start credential confirmation for a non-author or an unopened dialog', () =>
+    Effect.runSync(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const s = yield* Story.make(DashboardApiKeysNoDeps, {
+            principal: { ...principal, role: 'user' },
+          })
+
+          s.send(ApiKeysMessage.RequestedPassword()).expectNone()
+          s.send(ApiKeysMessage.StartedVerification()).expectNone()
+          expect(s.model.passwordOpen).toBe(false)
+          expect(s.model.verifying).toBe(false)
+        }),
+      ),
+    ))
+
   it('keeps passwords out of the model and ignores cancellation during verification', () =>
     Effect.runSync(
       Effect.scoped(

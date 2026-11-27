@@ -1,6 +1,8 @@
 import { type Component, Mount } from '@effect/ui'
 import { Effect, Schema, Stream } from 'effect'
 
+import { focusedHostLeaf, focusedOutsideHost } from './password-manager-hosts'
+
 const allowedHosts = 'com-1password-button,com-1password-menu'
 
 interface RelocatedHost {
@@ -8,6 +10,7 @@ interface RelocatedHost {
   readonly parent: Node
   readonly next: Node | null
   readonly ariaHidden: string | null
+  readonly inert: boolean
   readonly container: HTMLDialogElement
 }
 
@@ -26,13 +29,16 @@ export const AllowPasswordManager = Mount.makeStream(
         let open = initial.open
 
         const restore = () => {
-          for (const { node, parent, next, ariaHidden, container } of relocated.values()) {
+          for (const { node, parent, next, ariaHidden, inert, container } of relocated.values()) {
             if (node.parentNode === container && parent.isConnected) {
+              const focused = focusedHostLeaf(node)
               parent.insertBefore(node, next?.parentNode === parent ? next : null)
+              focused?.focus({ preventScroll: true })
             }
 
             if (ariaHidden === null) node.removeAttribute('aria-hidden')
             else node.setAttribute('aria-hidden', ariaHidden)
+            node.inert = inert
           }
 
           relocated.clear()
@@ -78,11 +84,27 @@ export const AllowPasswordManager = Mount.makeStream(
 
           if (!element.isConnected) return
 
-          const portal = element.querySelector('dialog[popover="manual"]')
+          const form = element.querySelector('[data-key-password-form]')
+          const portal = form?.closest('dialog[popover="manual"]')
 
-          if (!(portal instanceof HTMLDialogElement)) return
-          document.querySelectorAll(allowedHosts).forEach((node) => {
-            if (!(node instanceof HTMLElement) || portal.contains(node) || !node.parentNode) return
+          if (
+            !(portal instanceof HTMLDialogElement) ||
+            portal.ownerDocument !== document ||
+            !element.contains(portal)
+          )
+            return
+          const candidates = Array.from(document.querySelectorAll(allowedHosts))
+          const external = focusedOutsideHost(document)
+
+          if (external) candidates.push(external)
+          candidates.forEach((node) => {
+            if (
+              !(node instanceof HTMLElement) ||
+              node.ownerDocument !== document ||
+              portal.contains(node) ||
+              !node.parentNode
+            )
+              return
 
             if (node.parentElement?.closest(allowedHosts)) return
 
@@ -90,18 +112,25 @@ export const AllowPasswordManager = Mount.makeStream(
               ? (visibility.get(node) ?? null)
               : node.getAttribute('aria-hidden')
 
+            const inert = isolated.has(node) ? false : node.inert
+            const focused = focusedHostLeaf(node)
+            isolated.delete(node)
+
             relocated.set(node, {
               node,
               parent: node.parentNode,
               next: node.nextSibling,
               ariaHidden,
+              inert,
               container: portal,
             })
             // Only these extension hosts join this password dialog's top layer; its native page blocker remains intact.
             portal.append(node)
+            node.inert = inert
 
             if (ariaHidden === null) node.removeAttribute('aria-hidden')
             else node.setAttribute('aria-hidden', ariaHidden)
+            focused?.focus({ preventScroll: true })
           })
           isolate(portal)
         }
@@ -110,10 +139,14 @@ export const AllowPasswordManager = Mount.makeStream(
 
         const containExtensionTab = (event: KeyboardEvent) => {
           if (!open || event.key !== 'Tab' || !(event.target instanceof Element)) return
-          const host = event.target.closest(allowedHosts)
+
+          const host = event
+            .composedPath()
+            .find((node) => node instanceof HTMLElement && relocated.has(node))
+
           const portal = element.querySelector('dialog[popover="manual"]')
 
-          if (!host || !portal?.contains(host)) return
+          if (!(host instanceof HTMLElement) || !portal?.contains(host)) return
           const selector = event.shiftKey ? 'button[type="button"]' : 'input[type="password"]'
           const target = portal.querySelector(`[data-key-password-form] ${selector}`)
 
@@ -125,13 +158,15 @@ export const AllowPasswordManager = Mount.makeStream(
         yield* Effect.acquireRelease(
           Effect.sync(() => {
             refresh()
-            observer.observe(document.body, { childList: true, subtree: true })
+            observer.observe(document.documentElement, { childList: true, subtree: true })
+            document.addEventListener('focusin', refresh, true)
             document.addEventListener('keydown', containExtensionTab, true)
           }),
           () =>
             Effect.sync(() => {
               open = false
               observer.disconnect()
+              document.removeEventListener('focusin', refresh, true)
               document.removeEventListener('keydown', containExtensionTab, true)
               restore()
             }),

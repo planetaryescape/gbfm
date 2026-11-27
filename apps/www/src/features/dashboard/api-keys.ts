@@ -1,5 +1,4 @@
 import { Command, Component, Mount, Query, UiSchema } from '@effect/ui'
-import { Dialog } from '@effect/ui-kit/Dialog'
 import { Html } from '@effect/ui/html'
 import { IssueKeyInput } from '@gbfm/api/personal-access-keys'
 import { canAuthorWithKey, canPublishWithKey, KeyId } from '@gbfm/core/personal-access-keys'
@@ -14,8 +13,10 @@ import {
   KeyService,
   KeyServiceLive,
 } from '../../page/dashboard/page/api-keys/service'
-import { AllowPasswordManager } from './password-manager'
+import { PasswordConfirmation } from './password-confirmation'
 import { Notice } from './presentation'
+
+const canIssue = (role: string | null) => canAuthorWithKey(role && isRole(role) ? role : null)
 
 export const ApiKeysMessage = UiSchema.TaggedEnum({
   ClickedRefresh: { offset: Schema.Number },
@@ -388,8 +389,13 @@ export const DashboardApiKeysNoDeps = ApiKeysDef.make({
       }),
     FailedRevoke: ($, { message }) => $.evolve({ busy: false, error: message }),
     RequestedPassword: ($) =>
-      $.evolve({ passwordOpen: true, focusSecret: false, error: null, notice: null }),
-    StartedVerification: ($) => $.evolve({ verifying: true, error: null }),
+      canIssue($.props.principal.role)
+        ? $.evolve({ passwordOpen: true, focusSecret: false, error: null, notice: null })
+        : $.model,
+    StartedVerification: ($) =>
+      $.model.passwordOpen && !$.model.verifying && canIssue($.props.principal.role)
+        ? $.evolve({ verifying: true, error: null })
+        : $.model,
     FailedVerification: ($, { message }) => $.evolve({ verifying: false, error: message }),
     CancelledPassword: ($) =>
       $.model.verifying ? $.model : $.evolve({ passwordOpen: false, error: null }),
@@ -439,6 +445,7 @@ export const DashboardApiKeysNoDeps = ApiKeysDef.make({
           ? h.form
               .key('key-create-form')
               .attr('data-key-create-form', '')
+              .on('submit', () => undefined, { preventDefault: 'always' })
               .attr('inert', model.passwordOpen ? '' : undefined)
               .class('dashboard-panel dashboard-form')
               .children(
@@ -485,72 +492,12 @@ export const DashboardApiKeysNoDeps = ApiKeysDef.make({
           : h.p(
               'Creator access is required to create API keys. You can still view and revoke existing keys.',
             ),
-        Dialog(h, {
-          props: { open: model.passwordOpen, disablePointerDismissal: true },
-          onEmit: (event) => {
-            if (Predicate.isTagged(event, 'Settled'))
-              return ApiKeysMessage.SettledPassword({ open: event.open })
-
-            return undefined
-          },
-          view: (dialog) =>
-            h.div
-              .key('key-password-dialog')
-              .onMount(AllowPasswordManager({ open: model.passwordOpen }))
-              .children(
-                dialog.portal(h.dialog.class('key-password-portal'))?.children(
-                  dialog.backdrop(h.div)?.class('dialog-backdrop'),
-                  dialog
-                    .viewport(h.div)
-                    .class('dialog-viewport')
-                    .children(
-                      dialog
-                        .popup(h.div)
-                        .class('dialog-panel')
-                        .children(
-                          dialog.title(h.h2).children('Confirm your password'),
-                          dialog
-                            .description(h.p)
-                            .children('Verify your password before creating this API key.'),
-                          h.form
-                            .attr('data-key-password-form', '')
-                            .on(
-                              'keydown',
-                              ({ key, composing }) =>
-                                key === 'Escape' && !composing
-                                  ? ApiKeysMessage.CancelledPassword()
-                                  : undefined,
-                              { preventDefault: true },
-                            )
-                            .class('dashboard-form')
-                            .children(
-                              h.label.children(
-                                'Password',
-                                dialog
-                                  .initialFocus(h.input)
-                                  .attr('type', 'password')
-                                  .attr('name', 'password')
-                                  .attr('autocomplete', 'current-password')
-                                  .attr('required', '')
-                                  .disabled(model.verifying),
-                              ),
-                              Notice(h, model.error, true),
-                              h.button
-                                .attr('type', 'submit')
-                                .disabled(model.verifying)
-                                .children(
-                                  model.verifying ? 'Verifying…' : 'Confirm and create key',
-                                ),
-                              dialog
-                                .close(h.button)
-                                .disabled(model.verifying)
-                                .on('click', ApiKeysMessage.CancelledPassword())
-                                .children('Cancel'),
-                            ),
-                        ),
-                    ),
-                ),
-              ),
+        PasswordConfirmation(h, {
+          open: model.passwordOpen,
+          verifying: model.verifying,
+          error: model.error,
+          cancelled: ApiKeysMessage.CancelledPassword(),
+          settled: (open) => ApiKeysMessage.SettledPassword({ open }),
         }),
         h.h2.key('key-list-title').onMount(StartKeyListing({})).children('Your API keys'),
         h.button

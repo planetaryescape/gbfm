@@ -11,7 +11,7 @@
     "dev:effect-ui": "vite --config vite.effect.config.ts",
     "bio": "oxlint ./src --fix && oxfmt ./src --write",
     "preview": "vite preview",
-    "typecheck": "tsgo --noEmit && tsgo --noEmit -p test/tsconfig.effect-ui.json",
+    "typecheck": "tsgo --noEmit && tsgo --noEmit -p test/tsconfig.effect-ui.json && tsgo --noEmit -p test/tsconfig.effect-ui-browser-scripts.json",
     "unit": "vitest run",
     "e2e": "playwright test",
     "e2e:mcp": "playwright test --config playwright.mcp.config.ts",

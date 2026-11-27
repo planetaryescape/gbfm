@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "types": ["bun", "node"]
+  },
+  "include": [
+    "../src/vite-env.d.ts",
+    "./dashboard/browser-check.ts",
+    "./dashboard/grid-browser-check.ts",
+    "./dashboard/lifetime-browser-check.ts",
+    "./dashboard/lifetime-browser-fixture.ts"
+  ]
+}

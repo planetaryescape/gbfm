@@ -3,10 +3,7 @@ import { Match, Schema } from 'effect'
 
 let fixtureClient = 1
 
-const expectCanvas = async (canvas: Locator, text: string) => {
-  if (process.env.MCP_NATIVE_WWW === '1') await expect(canvas).toHaveText(text)
-  else await expect(canvas).toHaveValue(text)
-}
+const expectCanvas = (canvas: Locator, text: string) => expect(canvas).toHaveText(text)
 
 test.beforeEach(async ({ context }, info) => {
   const subnet = Match.value(info.project.name).pipe(

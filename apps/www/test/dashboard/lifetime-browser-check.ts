@@ -54,7 +54,7 @@ const css = await Bun.file(
 
 const styles = new Bun.Glob('client/assets/*.css')
 
-const dist = new URL('../../dist-effect/', import.meta.url).pathname
+const dist = new URL('../../dist/', import.meta.url).pathname
 
 const baseCss = (
   await Promise.all(Array.from(styles.scanSync(dist), (path) => Bun.file(`${dist}${path}`).text()))

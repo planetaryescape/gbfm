@@ -44,7 +44,7 @@ const render = async () => {
     HtmlServer.renderToHtml(RichContentSsrFixture, { document }),
   )
 
-  const assets = new URL('../dist-effect/client/assets/', import.meta.url)
+  const assets = new URL('../dist/client/assets/', import.meta.url)
   const styles = (await readdir(assets)).filter((name) => name.endsWith('.css'))
   expect(styles.length).toBeGreaterThan(0)
 

@@ -12,7 +12,7 @@ const serve = process.argv.includes('--serve')
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 
-const output = resolve(root, fixture ? 'dist-effect-fixture' : 'dist-effect')
+const output = resolve(root, fixture ? 'dist-effect-fixture' : 'dist')
 
 const previewPath = process.env.GBFM_EFFECT_PREVIEW_PATH ?? (fixture ? '/' : '/about')
 

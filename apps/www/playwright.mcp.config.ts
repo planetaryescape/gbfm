@@ -4,20 +4,17 @@ const frontend = 'https://gbfm-oauth-onboarding.localhost'
 
 const api = 'https://gbfm-oauth-onboarding-api.localhost'
 
-const native = process.env.MCP_NATIVE_WWW === '1'
-
 const externalServers = process.env.MCP_EXTERNAL_SERVERS === '1'
 
 const connections = process.env.MCP_CONNECTIONS_UI === '1'
 
-const frontendBaseEnv = {
+const frontendEnv = {
   VPS_PROXY_TARGET: 'http://127.0.0.1:3194',
   EDITORIAL_OAUTH_ISSUER: `${api}/auth`,
+  GBFM_FRONTEND_ORIGIN: frontend,
+  VITE_SENTRY_ENABLED: 'false',
+  SENTRY_UPLOAD_SOURCEMAPS: 'false',
 }
-
-const frontendEnv = native
-  ? { ...frontendBaseEnv, GBFM_FRONTEND_ORIGIN: frontend, VITE_SENTRY_DSN: '', SENTRY_DSN: '' }
-  : frontendBaseEnv
 
 export default defineConfig({
   testDir: './e2e',
@@ -25,7 +22,7 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   forbidOnly: Boolean(process.env.CI),
-  use: { baseURL: frontend, trace: 'off', video: 'off', ignoreHTTPSErrors: native },
+  use: { baseURL: frontend, trace: 'off', video: 'off', ignoreHTTPSErrors: true },
   projects: [
     {
       name: 'desktop',
@@ -56,9 +53,8 @@ export default defineConfig({
           gracefulShutdown: { signal: 'SIGTERM', timeout: 3000 },
         },
         {
-          command: native
-            ? 'bunx portless gbfm-oauth-onboarding --app-port 5194 bunx vite --config vite.mcp.effect.config.ts --host 127.0.0.1 --strictPort'
-            : 'bunx portless gbfm-oauth-onboarding --app-port 5194 bunx vite --host 127.0.0.1 --strictPort',
+          command:
+            'bunx portless gbfm-oauth-onboarding --app-port 5194 bunx vite --config vite.mcp.effect.config.ts --host 127.0.0.1 --strictPort',
           url: `${frontend}/@vite/client`,
           env: frontendEnv,
           gracefulShutdown: { signal: 'SIGTERM', timeout: 3000 },

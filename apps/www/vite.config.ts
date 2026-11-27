@@ -1,10 +1,10 @@
 import { resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, URL as NodeURL } from 'node:url'
 
-import { foldkit, foldkitSsr, foldkitViewIdentity } from '@foldkit/vite-plugin'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'vite'
 
+import { effectUi } from './plugins/effect-ui.ts'
 import { repoChangelogPlugin } from './plugins/repo-changelog.ts'
 import { sentryBuildPlugins } from './plugins/sentry.ts'
 
@@ -14,8 +14,8 @@ import { sentryBuildPlugins } from './plugins/sentry.ts'
 const VPS_PROXY_TARGET =
   process.env.VPS_PROXY_TARGET || process.env.VITE_VPS_BASE_URL || 'http://127.0.0.1:3003'
 
-// Let Foldkit coordinate generated production IDs across Vite environments.
-const buildId = process.env.FOLDKIT_BUILD_ID ?? process.env.APP_RELEASE
+const buildId =
+  process.env.GBFM_BUILD_ID ?? process.env.APP_RELEASE ?? process.env.GITHUB_SHA ?? 'local'
 
 const uploadSourceMaps = process.env.SENTRY_UPLOAD_SOURCEMAPS === 'true'
 
@@ -24,32 +24,22 @@ const sentryRelease =
   (process.env.APP_RELEASE ? `gbfm-www@${process.env.APP_RELEASE}` : undefined)
 
 const vpsProxy = {
-  target: VPS_PROXY_TARGET,
+  target: process.env.GBFM_FRONTEND_FIXTURE_BASE ?? VPS_PROXY_TARGET,
   changeOrigin: true,
 }
 
-// https://vitejs.dev/config/
 export default defineConfig(({ command }) => ({
+  define: {
+    'import.meta.env.GBFM_BUILD_ID': JSON.stringify(buildId),
+  },
   plugins: [
-    // Aggregate development reloads preserve one server-cached model across clients.
-    // Authenticated SSR must always initialize from the current request's flags.
-    ...(command === 'serve'
-      ? [
-          foldkitViewIdentity(),
-          foldkitSsr({
-            serverEntry: '/src/entry.server.ts',
-            clientEntry: '/src/entry.client.ts',
-            buildId,
-          }),
-        ]
-      : foldkit({
-          buildId,
-          ssr: {
-            serverEntry: '/src/entry.server.ts',
-            clientEntry: '/src/entry.client.ts',
-            build: { clientOutDir: 'dist/client', serverOutDir: 'dist/server' },
-          },
-        })),
+    effectUi({
+      serverEntry: '/src/entry.effect.server.ts',
+      clientEntry: '/src/entry.effect.client.ts',
+      clientOutDir: 'dist/client',
+      serverOutDir: 'dist/server',
+      origin: process.env.GBFM_FRONTEND_ORIGIN,
+    }),
     tailwindcss(),
     repoChangelogPlugin(),
     ...sentryBuildPlugins({
@@ -58,14 +48,31 @@ export default defineConfig(({ command }) => ({
       release: sentryRelease,
     }),
   ],
-  ssr: { external: ['cloudflare:workers'] },
+  ssr: {
+    target: 'webworker',
+    noExternal: true,
+    external: [
+      'cloudflare:workers',
+      'node:async_hooks',
+      ...(command === 'serve' ? ['debug', 'extend'] : []),
+    ],
+  },
+  environments:
+    command === 'serve'
+      ? {
+          ssr: {
+            keepProcessEnv: true,
+            resolve: { builtins: ['node:async_hooks'] },
+          },
+        }
+      : undefined,
   build: {
     sourcemap: uploadSourceMaps ? 'hidden' : false,
-    rolldownOptions: { external: ['cloudflare:workers'] },
+    rolldownOptions: { external: ['cloudflare:workers', /^node:/] },
   },
   resolve: {
     alias: {
-      '@': resolve(fileURLToPath(new URL('.', import.meta.url)), 'src'),
+      '@': resolve(fileURLToPath(new NodeURL('.', import.meta.url)), 'src'),
     },
   },
   server: {

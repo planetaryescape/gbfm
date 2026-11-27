@@ -18,11 +18,14 @@ test('malformed connection links cannot redirect the browser to a supplied callb
 test('an author signs in, denies, allows and disconnects a disposable read-only app', async ({
   page,
   request,
+  baseURL,
 }) => {
   const resource = process.env.GBFM_MCP_E2E_RESOURCE
   test.skip(!resource, 'Requires an explicitly configured disposable MCP fixture environment')
 
   if (!resource) return
+
+  if (!baseURL) throw new Error('The disposable frontend origin must be configured')
 
   const ownerEmail = process.env.GBFM_MCP_E2E_OWNER_EMAIL
   const ownerPassword = process.env.GBFM_MCP_E2E_OWNER_PASSWORD
@@ -123,7 +126,7 @@ test('an author signs in, denies, allows and disconnects a disposable read-only 
     } finally {
       const cleanup = await page.request.post(
         `/api/user/mcp-connections/${encodeURIComponent(client.client_id)}/revoke`,
-        { headers: { origin: new URL(resource).origin } },
+        { headers: { origin: new URL(baseURL).origin } },
       )
 
       expect(cleanup.ok(), `Disposable grant cleanup returned ${cleanup.status()}`).toBe(true)

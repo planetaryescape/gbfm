@@ -221,7 +221,8 @@ export const DashboardCollectionNoDeps = CollectionDef.make({
                 row.thumbnailUrl ? h.img.attr('src', row.thumbnailUrl).attr('alt', '') : undefined,
                 row.href ? h.a.attr('href', row.href).children(row.title) : h.strong(row.title),
                 h.p(row.detail),
-                row.actionId && ['favorites', 'reminders'].includes(h.props.section)
+                (row.actionId || model.pending?.rowId === row.id) &&
+                  ['favorites', 'reminders'].includes(h.props.section)
                   ? h.button
                       .disabled(
                         model.busy || (model.pending !== null && model.pending.rowId !== row.id),

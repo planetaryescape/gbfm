@@ -1,13 +1,32 @@
-import { UiSchema } from '@effect/ui'
+import { Component, Mount, UiSchema } from '@effect/ui'
 import { Html } from '@effect/ui/html'
 import { SavedMix } from '@gbfm/api/listening'
-import { Schema } from 'effect'
+import { Effect, Schema } from 'effect'
 
 import { ListeningPage } from '../../domain/listening'
 import { HiddenField } from '../account/fields'
 import { fieldClass, ListeningAction, MixEmbed, MixSource, Submit } from './forms'
 
 const Status = SavedMix.fields.status
+
+export const RevealMixNotes = Mount.make(
+  'RevealMixNotes',
+  { args: { id: Schema.String } },
+  (node: HTMLElement, { id }) =>
+    Effect.sync(() => {
+      const location = new URL(node.ownerDocument.location.href)
+
+      if (
+        node.isConnected &&
+        location.pathname === '/listening' &&
+        location.hash === '#mix-notes' &&
+        location.searchParams.get('mix') === id
+      )
+        node.scrollIntoView({ block: 'start' })
+
+      return Component.noop
+    }),
+)
 
 export const MixEditorMessage = UiSchema.TaggedEnum({
   UpdatedTitle: { value: Schema.String },
@@ -39,6 +58,7 @@ export const MixEditor = Html.component({
     h.aside
       .attr('id', 'mix-notes')
       .attr('aria-label', 'Mix notes')
+      .onMount(RevealMixNotes({ id: mix.id }))
       .class('min-w-0 border-l border-border p-5')
       .children(
         h.a.attr('href', h.props.queueHref).children('← Back to queue'),

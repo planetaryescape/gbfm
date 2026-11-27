@@ -10,6 +10,7 @@ export const CollectionSettings = <M>(
   returnTo: string,
 ) =>
   h.div
+    .key(collection?.id ?? 'new-collection')
     .class('grid gap-2 border-t border-border pt-3')
     .children(
       h.details.children(

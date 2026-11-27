@@ -67,13 +67,13 @@ export const PlaybackControls = Html.component({
       !h.props.compact &&
         h.button
           .attr('type', 'button')
-          .class('btn btn-quiet btn-icon')
+          .class('btn btn-quiet btn-icon text-foreground')
           .attr('aria-label', 'Previous track')
           .disabled(!current)
           .on('click', PlayerProviderMessage.RequestedPrevious())
           .children(lucide(h, iconPaths.skipBack, 'size-6 fill-current')),
       button
-        .class('player-primary-control')
+        .class('btn btn-primary player-primary-control')
         .disabled(!current)
         .on('click', play)
         .children(
@@ -82,7 +82,7 @@ export const PlaybackControls = Html.component({
       !h.props.compact &&
         h.button
           .attr('type', 'button')
-          .class('btn btn-quiet btn-icon')
+          .class('btn btn-quiet btn-icon text-foreground')
           .attr('aria-label', 'Next track')
           .disabled(!current)
           .on('click', PlayerProviderMessage.RequestedNext())

@@ -60,4 +60,4 @@ Use GBFM IDs, not Spotify IDs, in these directives:
 
 ## Code changes
 
-Read `FOLDKIT.md` and the installed framework version before changing WWW. Use `gbfm-images` for artwork delivery changes. Follow the repo's test instructions, including `bun precommit`; draft edits alone do not justify unrelated UI changes or a deployment.
+Read `EFFECT-UI.md` and the installed framework version before changing WWW. Use `gbfm-images` for artwork delivery changes. Follow the repo's test instructions, including `bun precommit`; draft edits alone do not justify unrelated UI changes or a deployment.

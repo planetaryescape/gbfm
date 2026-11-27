@@ -1,6 +1,6 @@
 # Effect UI migration: delivery checkpoints
 
-Status: foundation PR #640 has passed general CI. Native SSR, Components, queries, and all route-family conversions are in progress on `migration/effect-ui-ssr`. Continue through full-site conversion and Foldkit removal without stopping at individual PRs. Physical-iPhone verification is explicitly deferred; production planning and deployment remain unauthorized.
+Status context: this specification records the migration plan and earlier checkpoints, including foundation PR #640 and `migration/effect-ui-ssr`. Current native ownership and the unmerged, undeployed B13 default cutover on `migration/effect-ui-default-cutover` are documented in [EFFECT-UI.md](../../EFFECT-UI.md). Historical steps below are not a current dual-renderer architecture map. Physical-iPhone verification is explicitly deferred; production planning and deployment remain unauthorized.
 
 Inspected baseline: `de889009f0e9016112b0b431b4092e93372985d7` on `prod`.
 
@@ -9,6 +9,8 @@ Inspected baseline: `de889009f0e9016112b0b431b4092e93372985d7` on `prod`.
 Replace WWW's Foldkit runtime with Effect UI while preserving GBFM's behavior. Deliver short, reviewable GitHub PR stacks with a runnable checkpoint, one primary learning topic, and evidence for each changed contract.
 
 This document is a plan, not verification evidence. Checkpoint results must be recorded separately with resolved versions and commands.
+
+The [retirement evidence map](effect-ui-retirement-evidence.md) links original framework assertions to retained native witnesses, records approved behavior differences, and identifies unresolved gates.
 
 ## Decisions and constraints
 
@@ -21,6 +23,18 @@ This document is a plan, not verification evidence. Checkpoint results must be r
 - Never serialize credentials, server bindings, session tokens, or internal-only query results. Every settled Effect UI query entry can enter hydration state, including failures and entries not displayed.
 - Keep request identity and SSR query state request-owned. Browser cache keys and invalidation must account for account changes.
 - Production deployment and merging into `prod` require explicit confirmation.
+
+### Approved favorite-state differences, 2026-11-27
+
+The user explicitly selected **Keep safer native behavior** for five conflicts with literal legacy assertions:
+
+- Page and Player controls share one pending membership intent. A correctly correlated acknowledgement settles that intent for both controls instead of leaving a separate stale retry store.
+- Other membership writes wait while the listener's revision-owned write is pending. Do not start competing writes against the same observed revision.
+- Explicitly unknown identity suspends prior-account membership and private playback access until independent verification. Ordinary page loading alone does not revoke a still-validated global identity.
+- A matched current 401 suspends identity rather than inventing a confirmed anonymous session. Superseded failures cannot invalidate a newer owner.
+- Independently confirmed signed-out state shows Sign in, not an unavailable-membership error or an unnecessary membership lookup.
+
+These are approved state/timing differences, not permission to discard the remaining behavioral assertions. Preserve native witnesses for exact retry identity, account/target/revision correlation, private-output suspension, stale-result rejection and confirmed sign-out.
 
 ## Stack topology and production boundary
 
@@ -154,11 +168,11 @@ Record the hosting evidence and walkthrough, then continue through the remaining
 
 ### Stack 3: persistent behavior
 
-| PR | Delivered behavior | Primary concept | Required evidence |
-| --- | --- | --- | --- |
-| 5 | Persistent shell and player backed by the existing `@gbfm/player` engine | Component lifetime and resource ownership | Real audio advances across client navigation; queue/position retained; no duplicate media engine or listeners; close/unmount cleanup; mixed-route boundary behavior explicitly tested |
-| 6 | One shared membership owner for player/page favorite controls | Providers instead of bidirectional Submodel synchronization | Matching controls agree; A/B account switch, revision conflict, lost acknowledgement/retry identity, and stale page responses remain safe |
-| 7 | Search dialog and query lifecycle migrated | Interaction Model versus query state | Blank input makes no request; controlled-time debounce; late responses; close/reopen; Enter navigation; shortcuts; focus restoration and modal isolation |
+| PR  | Delivered behavior                                                       | Primary concept                                             | Required evidence                                                                                                                                                                     |
+| --- | ------------------------------------------------------------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 5   | Persistent shell and player backed by the existing `@gbfm/player` engine | Component lifetime and resource ownership                   | Real audio advances across client navigation; queue/position retained; no duplicate media engine or listeners; close/unmount cleanup; mixed-route boundary behavior explicitly tested |
+| 6   | One shared membership owner for player/page favorite controls            | Providers instead of bidirectional Submodel synchronization | Matching controls agree; A/B account switch, revision conflict, lost acknowledgement/retry identity, and stale page responses remain safe                                             |
+| 7   | Search dialog and query lifecycle migrated                               | Interaction Model versus query state                        | Blank input makes no request; controlled-time debounce; late responses; close/reopen; Enter navigation; shortcuts; focus restoration and modal isolation                              |
 
 PR 5 does not rewrite the playback engine. PR 6 centralizes domain safeguards rather than deleting them. PR 7 must prove dialog behavior; the article's component list is not enough to establish API or patch parity.
 
@@ -166,12 +180,12 @@ PR 5 does not rewrite the playback engine. PR 6 centralizes domain safeguards ra
 
 These are delivery groups, not one large PR per row. Refine each group before implementing it.
 
-| Group | Proposed PR boundaries | Promotion-sensitive behavior |
-| --- | --- | --- |
-| Public reading | Editorial/listing; shows and episode controls; tweet navigation/resume/spotlight; profiles and collections | No-JS content, canonical URLs, private drafts, reader position and history, media controls |
-| Dashboard | Small section-based PRs; dedicated API-key issuance PR | Server authorization, native form fallback, one-time secret disclosure, password-manager overlay isolation |
-| Creator | Editor state; preview/publish; upload lifecycle | Unsaved edits, upload pause/retry, navigation races, publication authority and draft media privacy |
-| Removal | Foldkit packages/build integration; obsolete state/messages/cache protocol; documentation | All existing routes accounted for; no required capability lost; no permanent adapter or duplicate state left behind |
+| Group          | Proposed PR boundaries                                                                                     | Promotion-sensitive behavior                                                                                        |
+| -------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Public reading | Editorial/listing; shows and episode controls; tweet navigation/resume/spotlight; profiles and collections | No-JS content, canonical URLs, private drafts, reader position and history, media controls                          |
+| Dashboard      | Small section-based PRs; dedicated API-key issuance PR                                                     | Server authorization, native form fallback, one-time secret disclosure, password-manager overlay isolation          |
+| Creator        | Editor state; preview/publish; upload lifecycle                                                            | Unsaved edits, upload pause/retry, navigation races, publication authority and draft media privacy                  |
+| Removal        | Foldkit packages/build integration; obsolete state/messages/cache protocol; documentation                  | All existing routes accounted for; no required capability lost; no permanent adapter or duplicate state left behind |
 
 ## Verification as work proceeds
 
@@ -268,7 +282,7 @@ After an explicitly authorized deployment, verify the deployed release and inten
 
 ## References and current evidence
 
-- [Foldkit ownership and SSR conventions](../../FOLDKIT.md)
+- [Current Effect UI ownership and SSR conventions](../../EFFECT-UI.md), superseding the historical Foldkit ownership guide.
 - [Existing PR CI](../../.github/workflows/ci.yml)
 - [Production release trigger](../../.github/workflows/release.yml)
 - [Production deployment](../../.github/workflows/alchemy-deploy.yml)

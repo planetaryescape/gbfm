@@ -2,12 +2,21 @@
 
 ## Signup abuse protection (October 2026)
 
-`POST /api/newsletter/subscribe` requires a Turnstile token. The Foldkit form loads a
+`POST /api/newsletter/subscribe` requires a Turnstile token. The native Effect UI form loads a
 managed widget and forwards its token through the WWW service binding. The API
 verifies the token's hostname and `newsletter-subscribe` action before creating a
 subscriber or sending mail. Verification failures return 403; provider failures
 return 503. Missing tokens return 400. The form requires JavaScript; unsubscribe
 forms still work without it.
+
+Current frontend ownership is in [the newsletter Component](../../apps/www/src/features/newsletter/page.ts)
+and [SignupChallenge](../../apps/www/src/features/signup-challenge/mount.ts).
+The managed mount loads the Turnstile script, owns widget/listener cleanup, and
+submits the token with form data to the WWW action using an abortable request.
+Do not move tokens into shared query state or add a browser verification bypass.
+Token-bearing newsletter links use the standalone credential root described in
+[EFFECT-UI.md](../../EFFECT-UI.md), not the routed page cache. This describes the
+unmerged, undeployed native conversion, not new production verification.
 
 Alchemy owns `SignupTurnstile`, binds its public sitekey to WWW, and its secret
 to the API as a Worker secret. Deployment credentials need account-level Turnstile
@@ -40,6 +49,7 @@ this change. Password reset and unsubscribe-link requests are not covered by
 these new limits; the change does not restore a global API rate limiter.
 
 The sections below describe the original implementation and are historical.
+Their React/VPS paths and completion markers are not current frontend guidance.
 
 ## Overview
 

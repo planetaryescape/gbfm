@@ -130,7 +130,9 @@ test('retains a secret after the browser clipboard outcome, then erases it on di
   await expect(secret).toHaveCount(0)
   await confirm(page)
   await expect(secret).toBeVisible()
-  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')))
+  await page.evaluate(() =>
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })),
+  )
   await expect(secret).toHaveCount(0)
 })
 
@@ -181,7 +183,11 @@ for (const event of ['pagehide', 'fixture:pause']) {
     await requested.promise
 
     if (event === 'fixture:pause') await setViewState(page, 'Paused')
-    else await page.evaluate((event) => window.dispatchEvent(new Event(event)), event)
+    else
+      await page.evaluate(
+        (event) => window.dispatchEvent(new PageTransitionEvent(event, { persisted: true })),
+        event,
+      )
     await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeDisabled()
     release.resolve()
     await expect(page.locator('#fixture')).toHaveAttribute(
@@ -195,8 +201,29 @@ for (const event of ['pagehide', 'fixture:pause']) {
   })
 }
 
+test('nonpersisted pagehide disposes the fixture instead of resuming its secret host', async ({
+  page,
+}) => {
+  await page.route('**/auth/sign-in/email', (route) => route.fulfill({ json: {} }))
+  await page.route('**/api/user/api-keys', (route) => route.fulfill({ json: issued }))
+  await start(page)
+  await confirm(page)
+  await expect(page.getByRole('textbox', { name: 'New API key secret', exact: true })).toBeVisible()
+  await page.evaluate(() =>
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false })),
+  )
+  await expect(page.locator('[data-key-create-form]')).toHaveCount(0)
+  await expect(page.getByRole('textbox', { name: 'New API key secret', exact: true })).toHaveCount(
+    0,
+  )
+  await page.evaluate(() =>
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })),
+  )
+  await expect(page.locator('[data-key-create-form]')).toHaveCount(0)
+})
+
 for (const { clear, restore } of [
-  { clear: 'pagehide', restore: 'none' },
+  { clear: 'pagehide', restore: 'after-settlement' },
   { clear: 'pagehide', restore: 'pageshow' },
   { clear: 'pagehide', restore: 'fixture:live' },
   { clear: 'fixture:pause', restore: 'fixture:live' },
@@ -219,11 +246,17 @@ for (const { clear, restore } of [
     await requested.promise
 
     if (clear === 'fixture:pause') await setViewState(page, 'Paused')
-    else await page.evaluate((event) => window.dispatchEvent(new Event(event)), clear)
+    else
+      await page.evaluate(
+        (event) => window.dispatchEvent(new PageTransitionEvent(event, { persisted: true })),
+        clear,
+      )
 
     if (restore === 'fixture:live') await setViewState(page, 'Live')
-    else if (restore !== 'none')
-      await page.evaluate((event) => window.dispatchEvent(new Event(event)), restore)
+    else if (restore === 'pageshow')
+      await page.evaluate(() =>
+        window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })),
+      )
     await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeDisabled()
     release.resolve()
     await expect(page.locator('[data-key-status]')).toContainText('Revoke it from the list')
@@ -231,6 +264,14 @@ for (const { clear, restore } of [
       page.getByRole('textbox', { name: 'New API key secret', exact: true }),
     ).toHaveCount(0)
     expect(creations).toBe(1)
+
+    if (restore === 'after-settlement') {
+      await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeDisabled()
+      await page.evaluate(() =>
+        window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })),
+      )
+    }
+
     await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeEnabled()
     await confirm(page)
     await expect(
@@ -273,13 +314,19 @@ for (const failure of ['password', 'issuance']) {
     await start(page)
     await confirm(page)
     await requested.promise
-    await page.evaluate(() => window.dispatchEvent(new Event('pagehide')))
+    await page.evaluate(() =>
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })),
+    )
     release.resolve()
     await expect(page.locator('#fixture')).toHaveAttribute(
       'data-message',
       'PasswordVerificationFailed',
     )
     await page.evaluate(() => document.querySelector('dialog')?.close())
+    await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeDisabled()
+    await page.evaluate(() =>
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })),
+    )
     await expect(page.getByRole('button', { name: 'Create key', exact: true })).toBeEnabled()
     await expect(
       page.getByRole('textbox', { name: 'New API key secret', exact: true }),

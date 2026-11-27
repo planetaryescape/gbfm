@@ -1,7 +1,8 @@
-import { Component } from '@effect/ui'
+import { Component, Router } from '@effect/ui'
 import { Html } from '@effect/ui/html'
 import { Schema } from 'effect'
 
+import { AppRoute } from '../../app/route'
 import { ContentItem } from '../../domain/content-item'
 import { PageDocument } from '../../domain/page'
 import { MembershipProvider, membershipCommandsLayer } from '../public-actions/provider'
@@ -30,7 +31,11 @@ export const PublicContentTestRoot = Html.component({
           }),
       }),
   })
-  .pipe(Component.provide(membershipCommandsLayer), Component.provide(spotifyCommandsLayer))
+  .pipe(
+    Component.provide(membershipCommandsLayer),
+    Component.provide(spotifyCommandsLayer),
+    Component.provide(Router.static({ routes: AppRoute, url: '/' })),
+  )
 
 export const publicMix = ContentItem.make({
   id: 'mix-1',

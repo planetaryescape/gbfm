@@ -1,4 +1,4 @@
-import { Command, Component, Subscription, UiSchema } from '@effect/ui'
+import { Command, Component, Router, Subscription, UiSchema } from '@effect/ui'
 import { Dialog } from '@effect/ui-kit/Dialog'
 import { Html } from '@effect/ui/html'
 import type { RichContentDocument } from '@gbfm/rich-content/schema'
@@ -14,7 +14,7 @@ import { ContentItem } from '../../domain/content-item'
 import { normalizeSpotlightProgress } from '../../domain/editorial/spotlight-location'
 import { spotlightPresentation } from '../../domain/editorial/spotlight-presentation'
 import { spotlightKeys } from '../../spotlight-keys'
-import { readProgress, SpotlightProgress, writeProgress } from '../../spotlight-progress'
+import { readProgress, SpotlightProgress, writeProgress, withSeen } from '../../spotlight-progress'
 import { artwork } from '../../ui/artwork'
 import { richContent } from '../../ui/rich-content/fallback'
 import { richContentView } from '../../ui/rich-content/render'
@@ -54,36 +54,77 @@ export const ContentDetailPageMessage = UiSchema.TaggedEnum({
 
 export type ContentDetailPageMessage = typeof ContentDetailPageMessage.Type
 
+export class SyncSpotlightProgress extends Command.Service<SyncSpotlightProgress>()(
+  'content/SyncSpotlightProgress',
+  {
+    args: { url: Schema.String, progress: SpotlightProgress },
+    success: Component.Noop,
+    mode: 'queue',
+  },
+) {
+  static readonly layer = this.toLayer(
+    Effect.map(
+      Router.Router,
+      (router) =>
+        ({ url: held, progress }) =>
+          Effect.gen(function* () {
+            const location = router.location()
+            const url = new URL(location.url, held)
+            const expected = new URL(held)
+
+            if (url.pathname !== expected.pathname || url.search !== expected.search)
+              return Component.noop
+            writeProgress(progress)
+
+            if (progress.at === null) url.searchParams.delete('at')
+            else url.searchParams.set('at', progress.at)
+
+            if (url.search !== expected.search)
+              yield* router.navigate(`${url.pathname}${url.search}${location.hash}`, {
+                replace: true,
+              })
+
+            return Component.noop
+          }),
+    ),
+  )
+}
+
 export class SaveSpotlightProgress extends Command.Service<SaveSpotlightProgress>()(
   'content/SaveSpotlightProgress',
   { args: { progress: SpotlightProgress }, success: Component.Noop, mode: 'queue' },
 ) {
-  static readonly layer = this.toLayer(({ progress }) =>
-    Effect.sync(() => {
-      writeProgress(progress)
-      const url = new URL(window.location.href)
+  static readonly layer = this.toLayer(
+    Effect.map(
+      Router.Router,
+      (router) =>
+        ({ progress }) =>
+          Effect.gen(function* () {
+            const location = router.location()
+            const url = new URL(location.url, window.location.href)
 
-      if (url.pathname !== progress.path) return Component.noop
+            if (url.pathname !== progress.path) return Component.noop
+            writeProgress(progress)
 
-      if (progress.at === null) url.searchParams.delete('at')
-      else url.searchParams.set('at', progress.at)
-      window.history.replaceState(
-        window.history.state,
-        '',
-        `${url.pathname}${url.search}${url.hash}`,
-      )
-      const stage = document.querySelector<HTMLElement>('.spotlight-stage')
+            if (progress.at === null) url.searchParams.delete('at')
+            else url.searchParams.set('at', progress.at)
+            const stage = document.querySelector<HTMLElement>('.spotlight-stage')
 
-      if (document.activeElement === document.body) stage?.focus({ preventScroll: true })
+            if (document.activeElement === document.body) stage?.focus({ preventScroll: true })
 
-      if (stage && getComputedStyle(stage).overflowY === 'auto') {
-        stage.scrollTo({ top: 0, behavior: 'instant' })
-      } else {
-        document.querySelector('.content-detail')?.scrollIntoView({ block: 'start' })
-      }
+            if (stage && getComputedStyle(stage).overflowY === 'auto') {
+              stage.scrollTo({ top: 0, behavior: 'instant' })
+            } else {
+              document.querySelector('.content-detail')?.scrollIntoView({ block: 'start' })
+            }
 
-      return Component.noop
-    }),
+            yield* router.navigate(`${url.pathname}${url.search}${location.hash}`, {
+              replace: true,
+            })
+
+            return Component.noop
+          }),
+    ),
   )
 }
 
@@ -195,17 +236,25 @@ export const ContentDetailPageNoDeps = Html.component({
       RequestedPreviousEntry: () => relativeStep(-1),
       RequestedNextEntry: () => relativeStep(1),
       RestoredSpotlight: ({ progress }) => {
-        if (
-          !document ||
-          !progress ||
-          $.model.interacted ||
-          new URL($.props.url).searchParams.has('at')
+        if (!document || $.model.interacted) return $.model
+        const url = new URL($.props.url)
+
+        if (progress && progress.path !== url.pathname) return $.model
+        const at = url.searchParams.has('at') ? url.searchParams.get('at') : (progress?.at ?? null)
+
+        const normalized = normalizeSpotlightProgress(
+          document,
+          withSeen(progress, url.pathname, at),
         )
-          return $.model
 
-        const normalized = normalizeSpotlightProgress(document, progress)
+        const seen = withSeen(normalized, normalized.path, normalized.at).seen
 
-        return $.evolve({ at: normalized.at, seen: normalized.seen })
+        return $.evolve({ at: normalized.at, seen }).run(
+          SyncSpotlightProgress.make({
+            url: $.props.url,
+            progress: { ...normalized, seen },
+          }),
+        )
       },
       OpenedVideo: ({ video }) => $.evolve({ video }),
       RequestedCloseVideoDialog: () => $.evolve({ video: null }),
@@ -245,50 +294,53 @@ export const ContentDetailPageNoDeps = Html.component({
             .class('mt-6 max-w-prose text-base leading-relaxed text-foreground/80')
             .children(item.description),
         showMasthead && ContentMeta(h, item),
-        h.div.class(spotlight ? 'spotlight-body mt-4' : 'mt-10 max-w-prose').children(
-          spotlight
-            ? spotlightView(h, spotlight, {
-                at: model.at,
-                seen: model.seen,
-                direction: model.direction,
-                onStep: (at) => ContentDetailPageMessage.SteppedSpotlight({ at }),
-                onVideo: (video) => ContentDetailPageMessage.OpenedVideo({ video }),
-                musicActions: (music) => {
-                  const spotify = music.links.find((link) => link.platform === 'spotify')
+        h.div
+          .key('content-body')
+          .class(spotlight ? 'spotlight-body mt-4' : 'mt-10 max-w-prose')
+          .children(
+            spotlight
+              ? spotlightView(h, spotlight, {
+                  at: model.at,
+                  seen: model.seen,
+                  direction: model.direction,
+                  onStep: (at) => ContentDetailPageMessage.SteppedSpotlight({ at }),
+                  onVideo: (video) => ContentDetailPageMessage.OpenedVideo({ video }),
+                  musicActions: (music) => {
+                    const spotify = music.links.find((link) => link.platform === 'spotify')
 
-                  return spotify
-                    ? SpotlightSpotify(h, {
-                        key: `${h.props.principalId ?? 'anonymous'}:${music.canonicalUrl}`,
-                        props: {
-                          url: spotify.url,
-                          identity: h.props.principalId ?? 'anonymous',
-                          onboarding: false,
-                        },
-                      })
-                    : h.text('')
-                },
-                onboarding: SpotlightSpotify(h, {
-                  key: `${h.props.principalId ?? 'anonymous'}:onboarding`,
-                  props: {
-                    url: 'spotify:onboarding',
-                    identity: h.props.principalId ?? 'anonymous',
-                    onboarding: true,
+                    return spotify
+                      ? SpotlightSpotify(h, {
+                          key: `${h.props.principalId ?? 'anonymous'}:${music.canonicalUrl}`,
+                          props: {
+                            url: spotify.url,
+                            identity: h.props.principalId ?? 'anonymous',
+                            onboarding: false,
+                          },
+                        })
+                      : h.text('')
                   },
-                }),
-                endArtwork: item.imageUrl
-                  ? artwork(
-                      h,
-                      item.imageUrl,
-                      `Record mosaic for ${item.title}`,
-                      '160px',
-                      false,
-                      'spotlight-end-artwork',
-                    )
-                  : undefined,
-              })
-            : body,
-          spotlight && h.el('noscript').children(richContentView(h, spotlight)),
-        ),
+                  onboarding: SpotlightSpotify(h, {
+                    key: `${h.props.principalId ?? 'anonymous'}:onboarding`,
+                    props: {
+                      url: 'spotify:onboarding',
+                      identity: h.props.principalId ?? 'anonymous',
+                      onboarding: true,
+                    },
+                  }),
+                  endArtwork: item.imageUrl
+                    ? artwork(
+                        h,
+                        item.imageUrl,
+                        `Record mosaic for ${item.title}`,
+                        '160px',
+                        false,
+                        'spotlight-end-artwork',
+                      )
+                    : undefined,
+                })
+              : body,
+            spotlight && h.el('noscript').children(richContentView(h, spotlight)),
+          ),
         (showMasthead || model.at === 'end') &&
           (kind === 'mixes' || kind === 'editorial') &&
           EmailUpdatesInvite(h),
@@ -342,4 +394,5 @@ export const ContentDetailPageNoDeps = Html.component({
 
 export const ContentDetailPage = ContentDetailPageNoDeps.pipe(
   Component.provide(SaveSpotlightProgress.layer),
+  Component.provide(SyncSpotlightProgress.layer),
 )

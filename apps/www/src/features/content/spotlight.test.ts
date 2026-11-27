@@ -7,7 +7,12 @@ import { RichContentDocument } from '@gbfm/rich-content/schema'
 import { parseRichContent } from '@gbfm/rich-content/source'
 import { Effect, Schema } from 'effect'
 
-import { ContentDetailPageMessage, ContentDetailPageNoDeps, SaveSpotlightProgress } from './detail'
+import {
+  ContentDetailPageMessage,
+  ContentDetailPageNoDeps,
+  SaveSpotlightProgress,
+  SyncSpotlightProgress,
+} from './detail'
 import { publicMix, publicPage, PublicContentTestRoot } from './fixtures'
 
 const parsed = Schema.decodeUnknownSync(RichContentDocument)(
@@ -39,24 +44,33 @@ for (const at of ['', '2.3', 'garbage', '0', '1.999', null]) {
           ContentDetailPageMessage.RestoredSpotlight({
             progress: { path: '/editorial/night-mix', at: '1.1', seen: ['1.1'] },
           }),
-        )
+        ).expectExact(SyncSpotlightProgress)
+        assert.deepStrictEqual(s.pending[0]?.command.args, {
+          url: location.href,
+          progress: { path: '/editorial/night-mix', at: null, seen: ['1.1', 'intro'] },
+        })
+        s.resolve(SyncSpotlightProgress, Component.noop)
       }
 
       s.expect(Locator.text('Night Mix')).toExist()
       s.click('Start').expectExact(SaveSpotlightProgress)
       assert.deepStrictEqual(s.pending[0]?.command.args, {
-        progress: { path: '/editorial/night-mix', at: '1', seen: ['1'] },
+        progress: {
+          path: '/editorial/night-mix',
+          at: '1',
+          seen: at === null ? ['1'] : ['1.1', 'intro', '1'],
+        },
       })
       s.resolve(SaveSpotlightProgress, Component.noop)
     }),
   )
 }
 
-for (const [at, next] of [
-  ['1', '1.1'],
-  ['1.1', 'end'],
-  ['end', 'end'],
-]) {
+for (const [at, next, seen] of [
+  ['1', '1.1', ['intro', '1', '1.1']],
+  ['1.1', 'end', ['intro', '1.1', 'end']],
+  ['end', 'end', ['intro', 'end']],
+] satisfies ReadonlyArray<readonly [string, string, ReadonlyArray<string>]>) {
   it.effect(`preserves valid spotlight URL position ${at} over stored progress`, () =>
     Effect.gen(function* () {
       const s = yield* HtmlScene.make(
@@ -71,12 +85,14 @@ for (const [at, next] of [
           progress: { path: '/editorial/night-mix', at: null, seen: ['intro'] },
         }),
       )
+        .expectExact(SyncSpotlightProgress)
+        .resolve(SyncSpotlightProgress, Component.noop)
       s.subscription(
         'SpotlightKeyboard:',
         ContentDetailPageMessage.RequestedNextEntry(),
       ).expectExact(SaveSpotlightProgress)
       assert.deepStrictEqual(s.pending[0]?.command.args, {
-        progress: { path: '/editorial/night-mix', at: next, seen: [next] },
+        progress: { path: '/editorial/night-mix', at: next, seen },
       })
       s.resolve(SaveSpotlightProgress, Component.noop)
     }),
@@ -104,6 +120,8 @@ it.effect(
           'RestoreSpotlight:"/editorial/night-mix"',
           ContentDetailPageMessage.RestoredSpotlight({ progress }),
         )
+          .expectExact(SyncSpotlightProgress)
+          .resolve(SyncSpotlightProgress, Component.noop)
       }
 
       s.expect(Locator.text('Night Mix')).toExist()

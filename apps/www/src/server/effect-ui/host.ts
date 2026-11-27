@@ -25,7 +25,11 @@ export const handleRequest = async (
 
   let negotiated = false
 
-  if ((method === 'GET' || method === 'HEAD') && !resolvesToIndex(request.url)) {
+  if (
+    (method === 'GET' || method === 'HEAD') &&
+    !entry.handlesHttpRequest?.(request) &&
+    !resolvesToIndex(request.url)
+  ) {
     const classification = classifyRequest(request)
 
     if (classification === 'PathAsset') return new Response(null, { status: 404 })

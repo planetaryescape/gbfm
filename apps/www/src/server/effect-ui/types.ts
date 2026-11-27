@@ -26,4 +26,5 @@ export type EntryResult = Data.TaggedEnum<{
 
 export interface ServerEntry {
   readonly renderPage: (request: Request) => Promise<EntryResult>
+  readonly handlesHttpRequest?: (request: Request) => boolean
 }

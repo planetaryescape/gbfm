@@ -3,6 +3,7 @@ import { Html, HtmlServer } from '@effect/ui/html'
 import { Effect, Schema } from 'effect'
 import { expect, test } from 'vitest'
 
+import { handlesHttpRequest } from '../http-routes'
 import { handleRequest } from './host'
 import { Rendered, Responded } from './index'
 import type { DocumentAssets, EntryResult, ServerEntry } from './types'
@@ -210,3 +211,72 @@ test('passes OPTIONS and streaming POST bodies to the application', async () => 
   expect(posted.status).toBe(201)
   expect(await posted.text()).toBe('streamed form')
 })
+
+test.each(['/about?__data=1', '/api/fixture.json', '/rss.xml', '/sitemap.xml', '/mcp.txt'])(
+  'explicit application HTTP endpoint %s bypasses HTML negotiation and asset classification',
+  async (path) => {
+    const received: Array<string> = []
+
+    const http: ServerEntry = {
+      handlesHttpRequest,
+      async renderPage(request) {
+        received.push(request.url)
+        const headers = new Headers({ 'content-type': 'application/json', vary: 'Cookie' })
+        headers.append('set-cookie', 'http-first=1; HttpOnly')
+        headers.append('set-cookie', 'http-second=2; HttpOnly')
+
+        return Responded(new Response('{"native":"http"}', { status: 202, headers }))
+      },
+    }
+
+    const response = await handleRequest(
+      new Request(`https://fixture.test${path}`, { headers: { accept: 'application/json' } }),
+      http,
+      assets,
+    )
+
+    expect(received).toEqual([`https://fixture.test${path}`])
+    expect(response.status).toBe(202)
+    expect(response.headers.get('vary')).toBe('Cookie')
+    expect(response.headers.getSetCookie()).toEqual([
+      'http-first=1; HttpOnly',
+      'http-second=2; HttpOnly',
+    ])
+    expect(await response.text()).toBe('{"native":"http"}')
+
+    const head = await handleRequest(
+      new Request(`https://fixture.test${path}`, {
+        method: 'HEAD',
+        headers: { accept: 'application/json' },
+      }),
+      http,
+      assets,
+    )
+
+    expect(head.status).toBe(202)
+    expect(head.headers.get('content-type')).toBe('application/json')
+    expect(head.headers.getSetCookie()).toEqual(response.headers.getSetCookie())
+    expect(await head.text()).toBe('')
+  },
+)
+
+test.each(['/about', '/assets/stale.js', '/missing.png'])(
+  'HTTP endpoint claims do not allow an ordinary page or static miss through negotiation: %s',
+  async (path) => {
+    const http: ServerEntry = {
+      handlesHttpRequest,
+      async renderPage() {
+        throw new Error('An unclaimed JSON page request or static miss must not reach the app')
+      },
+    }
+
+    const response = await handleRequest(
+      new Request(`https://fixture.test${path}`, { headers: { accept: 'application/json' } }),
+      http,
+      assets,
+    )
+
+    expect(response.status).toBe(404)
+    expect(await response.text()).toBe('')
+  },
+)

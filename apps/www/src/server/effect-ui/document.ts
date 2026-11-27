@@ -32,7 +32,15 @@ const shellHead = String.raw`
       const queue = JSON.parse(localStorage.getItem('gbfm-audio-queue.json') || 'null')
       const current = queue && Array.isArray(queue.tracks) ? queue.tracks[queue.currentIndex] : null
       if (!current) return
-      const art = new URL(current.thumbnailUrl || '${fallbackArtwork}', location.origin)
+      let art = new URL('${fallbackArtwork}', location.origin)
+      try {
+        const candidate = new URL(current.thumbnailUrl || '${fallbackArtwork}', location.origin)
+        const path = decodeURIComponent(candidate.pathname).replace(/\\/g, '/')
+        const publicPath = !/^\/(?:user-content|mixes)\/private(?:\/|$)/.test(path)
+        if ((candidate.protocol === 'http:' || candidate.protocol === 'https:') && publicPath) {
+          art = candidate
+        }
+      } catch {}
       if (art.hostname === 'cdn.goosebumps.fm') {
         art.searchParams.set('w', '96')
         art.searchParams.set('q', '80')

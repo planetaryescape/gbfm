@@ -16,7 +16,13 @@ const proxyTarget =
 
 const proxy = { target: proxyTarget, changeOrigin: true }
 
+const buildId =
+  process.env.GBFM_BUILD_ID ?? process.env.APP_RELEASE ?? process.env.GITHUB_SHA ?? 'local'
+
 export default defineConfig({
+  define: {
+    'import.meta.env.GBFM_BUILD_ID': JSON.stringify(buildId),
+  },
   plugins: [
     effectUi({
       serverEntry: '/src/entry.effect.server.ts',

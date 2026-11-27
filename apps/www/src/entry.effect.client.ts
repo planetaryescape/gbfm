@@ -1,24 +1,104 @@
-import { HtmlHydrate } from '@effect/ui/html'
-import { Effect, Fiber, Layer } from 'effect'
+import { BrowserRouter, HtmlHydrate } from '@effect/ui/html'
+import { Effect, Fiber, Function, Layer, Schema } from 'effect'
 
 import './styles/main.css'
-import { Application } from './app/application'
-import { readHydration } from './app/hydration'
-import { startTheme } from './theme'
+import { BootstrapJson } from './app/bootstrap'
+import { makeBrowserSupportLayer } from './app/browser-runtime'
+import { CredentialApplication, readCredentialProps } from './app/credential-application'
+import { siteHttpClientLayer } from './app/http-client'
+import { HydrationState, jsonScript } from './app/hydration'
+import { browserPageLayer } from './app/page-query'
+import { AppRoute, PatchPageSearch } from './app/route'
+import { RoutedApplication } from './app/routed-application'
+import { nativePlayerClientLayer } from './features/player/provider'
+import {
+  makeSpotifyCallbackProps,
+  SpotifyCallbackApplication,
+  spotifyCallbackLayer,
+} from './features/spotify/callback-application'
 
 const container = document.getElementById('root')
 
 if (!container) throw new Error('Missing application root')
 
-const { props, state } = readHydration(document)
+const bootstrap = Schema.decodeUnknownSync(Schema.fromJsonString(BootstrapJson))(
+  jsonScript(document, 'gbfm-ui-props'),
+)
 
-const application = Layer.effectDiscard(
-  Effect.gen(function* () {
-    yield* Effect.acquireRelease(Effect.sync(startTheme), (stop) => Effect.sync(stop))
-    const root = yield* HtmlHydrate.hydrateEffect(Application, props, container, state)
-    yield* root.adopted
-    document.documentElement.dataset.gbfmHydrated = 'true'
-  }),
+const state = Schema.decodeUnknownSync(Schema.fromJsonString(HydrationState))(
+  jsonScript(document, 'gbfm-ui-state'),
+)
+
+const markHydrated = Effect.sync(() => {
+  document.documentElement.dataset.gbfmHydrated = 'true'
+})
+
+const applicationLayer = () => {
+  switch (bootstrap.kind) {
+    case 'credential':
+      return Layer.effectDiscard(
+        Effect.gen(function* () {
+          const root = yield* HtmlHydrate.hydrateEffect(
+            CredentialApplication,
+            readCredentialProps(bootstrap, document),
+            container,
+            state,
+          )
+
+          yield* root.adopted
+        }).pipe(Effect.tap(markHydrated)),
+      )
+    case 'spotify-callback':
+      return Layer.effectDiscard(
+        Effect.gen(function* () {
+          const root = yield* HtmlHydrate.hydrateEffect(
+            SpotifyCallbackApplication,
+            makeSpotifyCallbackProps(bootstrap),
+            container,
+            state,
+          )
+
+          yield* root.adopted
+        }).pipe(Effect.tap(markHydrated)),
+      ).pipe(Layer.provide(spotifyCallbackLayer))
+    case 'routed': {
+      const router = BrowserRouter.layer({ routes: AppRoute })
+
+      return Layer.effectDiscard(
+        Effect.gen(function* () {
+          const root = yield* HtmlHydrate.hydrateEffect(
+            RoutedApplication,
+            bootstrap,
+            container,
+            state,
+          )
+
+          yield* root.adopted
+        }).pipe(Effect.tap(markHydrated)),
+      ).pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            router,
+            PatchPageSearch.layer.pipe(Layer.provide(router)),
+            browserPageLayer(bootstrap.url, bootstrap.realm),
+            siteHttpClientLayer(bootstrap.url),
+            nativePlayerClientLayer,
+          ),
+        ),
+      )
+    }
+
+    default:
+      return Function.absurd<never>(bootstrap)
+  }
+}
+
+const application = applicationLayer().pipe(
+  Layer.provide(
+    makeBrowserSupportLayer({
+      release: import.meta.env.PROD ? import.meta.env.GBFM_BUILD_ID : 'local',
+    }),
+  ),
 )
 
 const fiber = Effect.runFork(Layer.launch(application))

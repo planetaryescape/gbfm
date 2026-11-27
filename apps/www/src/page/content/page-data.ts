@@ -2,11 +2,11 @@ import { AudioPageResponse } from '@gbfm/api/audio'
 import { makeStaticSiteMetadata } from '@gbfm/site-metadata'
 import { Schema } from 'effect'
 
-import type { Flags } from '../../model'
+import type { PageDocument } from '../../domain/page'
+import { skipsSeenTweets } from '../../features/reader/location'
 import type { Route } from '../../route'
 import { apiRequest } from '../../server/api'
 import { contentItems } from '../../server/page-data/shared'
-import { skipsSeenTweets } from '../tweet/navigation'
 
 export const loadAudioDetailData = async (
   request: Request,
@@ -51,7 +51,7 @@ export const loadAudioDetailData = async (
   const description =
     items[0]?.description ?? 'Independent music, mixes and stories on goosebumps.fm.'
 
-  const flags: Flags = {
+  const flags: PageDocument = {
     url: url.href,
     status,
     principal: page.principal,

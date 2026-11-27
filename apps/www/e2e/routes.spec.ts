@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test'
 
+import { expectCanvasSource, replaceCanvasSource } from './creator-editor'
+import {
+  expectBackgroundScrollLocked,
+  expectModalOpen,
+  expectNativeReady,
+} from './fixtures/native-ready'
+
 test('primary tweet and structured metadata are rendered before replies', async ({ request }) => {
   const response = await request.get('/tweet/e2e-music-thread')
   expect(response.status()).toBe(200)
@@ -72,7 +79,7 @@ test('creator profile persists and private SSR avoids a duplicate browser accoun
   })
   await page.goto('/dashboard/profile')
   await expect(page.getByRole('textbox', { name: 'Username' })).toHaveValue('local-creator')
-  await expect(page.getByRole('button', { name: 'Save profile' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeEnabled()
   expect(accountRequests).toEqual([])
 
   const bio = 'Independent frequencies, tested against local D1.'
@@ -83,7 +90,7 @@ test('creator profile persists and private SSR avoids a duplicate browser accoun
       response.url().endsWith('/api/user/profile') && response.request().method() === 'PATCH',
   )
 
-  await page.getByRole('button', { name: 'Save profile' }).click()
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
   expect((await saved).status()).toBe(200)
   await page.reload()
   await expect(page.getByRole('textbox', { name: 'Bio' })).toHaveValue(bio)
@@ -109,10 +116,15 @@ test('auth forms reject a cross-origin submission', async ({ request }) => {
   expect(response.headers()['set-cookie']).toBeUndefined()
 })
 
-test('auth forms accept their forwarded development origin', async ({ request }) => {
+test('auth forms accept their authoritative origin and reject a spoofed forwarded origin', async ({
+  request,
+  baseURL,
+}) => {
+  if (!baseURL) throw new Error('The disposable frontend origin must be configured')
+
   const response = await request.post('/auth/sign-in', {
     headers: {
-      origin: 'https://gbfm.localhost',
+      origin: new URL(baseURL).origin,
       'x-forwarded-host': 'gbfm.localhost',
       'x-forwarded-proto': 'https',
     },
@@ -122,6 +134,19 @@ test('auth forms accept their forwarded development origin', async ({ request })
 
   expect(response.status()).toBe(303)
   expect(response.headers()['location']).toContain('/auth/sign-in?error=credentials')
+
+  const spoofed = await request.post('/auth/sign-in', {
+    headers: {
+      origin: 'https://gbfm.localhost',
+      'x-forwarded-host': 'gbfm.localhost',
+      'x-forwarded-proto': 'https',
+    },
+    form: { email: 'nobody@invalid.example', password: 'wrong' },
+    maxRedirects: 0,
+  })
+
+  expect(spoofed.status()).toBe(403)
+  expect(spoofed.headers()['set-cookie']).toBeUndefined()
 })
 
 test('playback advances and persists through client navigation', async ({ page }) => {
@@ -158,23 +183,18 @@ test('playback advances and persists through client navigation', async ({ page }
     .getByRole('link', { name: 'About', exact: true })
     .click()
   await expect(page.getByRole('heading', { name: 'About', exact: true })).toBeVisible()
-  await page
-    .getByRole('navigation', { name: 'Primary', exact: true })
-    .getByRole('button', { name: 'Now playing', exact: true })
-    .click()
+  await page.getByRole('button', { name: 'Now playing', exact: true }).click()
   await expect(player.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
   await player.getByRole('button', { name: /^Queue \(/ }).click()
-  await expect(page.getByRole('dialog', { name: 'Playback queue' })).toContainText(
+  await expect(page.getByRole('dialog', { name: 'Queue', exact: true })).toContainText(
     'Local Frequencies',
   )
   await page
-    .getByRole('dialog', { name: 'Playback queue' })
+    .getByRole('dialog', { name: 'Queue', exact: true })
     .getByRole('button', { name: 'Close queue', exact: true })
     .click()
-  await expect(page.getByRole('dialog', { name: 'Playback queue' })).not.toBeVisible()
-  await expect
-    .poll(() => page.evaluate(() => getComputedStyle(document.documentElement).overflow))
-    .toBe('hidden')
+  await expect(page.getByRole('dialog', { name: 'Queue', exact: true })).not.toBeVisible()
+  await expectBackgroundScrollLocked(page)
   await player.getByRole('button', { name: 'Pause', exact: true }).click()
   await expect(player.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
 })
@@ -189,56 +209,63 @@ test('creator restores an autosaved draft, publishes it, and reads its public SS
   await expect(page).toHaveURL(/\/dashboard$/)
   await page.goto('/new/tweet')
   const slug = `e2e-published-${Date.now()}`
+
+  const source = 'An independent signal from the native composer.'
+
+  await expectNativeReady(page)
   await page.getByRole('button', { name: '+ Add a longer note', exact: true }).click()
-  await page
-    .getByRole('textbox', { name: 'Writing canvas' })
-    .fill('An independent signal from the Foldkit composer.')
+  const canvas = page.getByRole('textbox', { name: 'Writing canvas', exact: true })
+
+  await replaceCanvasSource(canvas, { before: '', after: source })
   await page.reload()
-  await expect(page.getByRole('textbox', { name: 'Writing canvas' })).toHaveValue(
-    'An independent signal from the Foldkit composer.',
-  )
+  await expectCanvasSource(canvas, source)
   const continueButton = page.getByRole('button', { name: 'Continue', exact: true })
   await continueButton.focus()
   await page.keyboard.press('Enter')
-  const review = page.getByRole('dialog', { name: 'Publish post', exact: true })
-  await expect(review).toBeVisible()
+  const portal = page.getByRole('dialog', { name: 'Publish post', exact: true })
+  const review = portal.locator('.creator-review')
+  await expectModalOpen(portal, review)
   await page.keyboard.press('Escape')
   await expect(review).not.toBeVisible()
   await expect(continueButton).toBeFocused()
   await continueButton.click()
-  await expect(review).toBeVisible()
+  await expectModalOpen(portal, review)
   await review.getByRole('textbox', { name: 'Story URL', exact: true }).fill(slug)
   await review.getByRole('button', { name: 'Publish', exact: true }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Published.' })).toBeVisible()
-  await page.getByRole('link', { name: 'View post' }).click()
+  const published = page.getByRole('link', { name: 'View published content', exact: true })
+  await expect(published).toHaveAttribute('href', `/tweet/${slug}`)
+  await published.click()
   await expect(page).toHaveURL(new RegExp(`/tweet/${slug}$`))
   const response = await page.request.get(`/tweet/${slug}`)
   expect(response.status()).toBe(200)
-  expect(await response.text()).toContain('An independent signal from the Foldkit composer.')
+  expect(await response.text()).toContain(source)
 })
 
 test('bottom navigation search groups results and closes on selection', async ({ page }) => {
   await page.goto('/privacy')
   await page.getByRole('button', { name: 'Search', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: 'Search', exact: true })
-  await expect(dialog).toBeVisible()
+  const portal = page.getByRole('dialog', { name: 'Search', exact: true })
+  const dialog = portal.locator('.search-dialog')
+  await expectModalOpen(portal, dialog)
   await dialog.getByRole('searchbox', { name: 'Search query' }).focus()
   await page.keyboard.press('Enter')
-  await expect(dialog).toBeVisible()
+  await expectModalOpen(portal, dialog)
   await dialog.getByRole('searchbox', { name: 'Search query' }).fill('Local Frequencies')
   await expect(dialog.getByRole('heading', { name: 'Mixes', exact: true })).toBeVisible()
   await dialog.getByRole('link', { name: 'Local Frequencies', exact: true }).click()
   await expect(page).toHaveURL(/\/mixes\/e2e-local-frequencies$/)
   await expect(dialog).not.toBeVisible()
   await page.keyboard.press('Control+k')
-  await expect(dialog).toBeVisible()
+  await expectModalOpen(portal, dialog)
   await page.keyboard.press('Escape')
   await expect(dialog).not.toBeVisible()
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: 'Menu', exact: true })).toBeVisible()
+  const menu = page.getByRole('dialog', { name: 'Menu', exact: true })
+  await expectModalOpen(menu, menu.locator('.menu-sheet'))
   await page.getByRole('link', { name: 'Mixes', exact: true }).click()
   await expect(page).toHaveURL(/\/mixes$/)
-  await expect(page.getByRole('dialog', { name: 'Menu', exact: true })).not.toBeVisible()
+  await expect(menu.locator('.menu-sheet')).not.toBeVisible()
 })
 
 test('appearance persists explicit themes and responds to system changes', async ({ page }) => {
@@ -248,20 +275,21 @@ test('appearance persists explicit themes and responds to system changes', async
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(page).toHaveURL(/\/dashboard$/)
   await page.goto('/dashboard/appearance')
-  await page.getByRole('button', { name: 'Light Always use the light interface' }).click()
+  await page.getByRole('button', { name: 'light', exact: true }).click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await page.reload()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
-  await expect(
-    page.getByRole('button', { name: 'Light Always use the light interface' }),
-  ).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: 'light', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
   await page.emulateMedia({ colorScheme: 'dark' })
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
-  await page.getByRole('button', { name: 'System Follow your device preference' }).click()
+  await page.getByRole('button', { name: 'system', exact: true }).click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   await page.emulateMedia({ colorScheme: 'light' })
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
-  await page.getByRole('button', { name: 'Dark Always use the dark interface' }).click()
+  await page.getByRole('button', { name: 'dark', exact: true }).click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page
@@ -301,7 +329,9 @@ test('subscription explains its JavaScript requirement while unsubscribe remains
   const context = await browser.newContext({ javaScriptEnabled: false })
   const page = await context.newPage()
   await page.goto('/subscribe')
-  await expect(page.getByRole('navigation', { name: 'Primary' })).toHaveCSS('position', 'fixed')
+  await expect(
+    page.getByRole('navigation', { name: 'Navigation without JavaScript', exact: true }),
+  ).toHaveCSS('position', 'fixed')
   await expect(page.locator('body')).toHaveCSS('margin', '0px')
   await page
     .getByRole('textbox', { name: 'Email', exact: true })

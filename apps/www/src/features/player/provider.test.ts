@@ -59,6 +59,103 @@ const playing: PlayerProviderModel = {
   },
 }
 
+describe('native seek receipt ownership', () => {
+  it('keeps the pending target through old snapshots and cancellation, then commits one preview', () =>
+    Effect.runSync(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const s = yield* Story.make(PlayerState, props)
+          s.given(playing)
+            .send(PlayerProviderMessage.RequestedSeek({ seconds: 0 }))
+            .expectExact(PerformPlayer.make({ operation: PlayerOperation.Seek({ seconds: 0 }) }))
+            .keepPending(PerformPlayer)
+          s.send(
+            PlayerProviderMessage.ChangedSnapshot({
+              snapshot: {
+                ...playing.snapshot,
+                volume: { volume: 25, isMuted: true },
+              },
+            }),
+          )
+          expect(s.model.snapshot.transport.currentTime).toBe(0)
+          expect(s.model.snapshot.volume).toEqual({ volume: 25, isMuted: true })
+          expect(s.model.pendingSeek).toEqual({ sequence: 1, seconds: 0 })
+
+          const preview = PlayerProviderMessage.PreviewedSeek({
+            trackId: track.id,
+            seconds: 15,
+            fine: false,
+            referenceSeconds: 0,
+            pointerRatio: 0.4,
+          })
+
+          s.send(preview).send(PlayerProviderMessage.CancelledSeek({ trackId: track.id }))
+          expect(s.model.seekPreview).toBeNull()
+          expect(s.model.pendingSeek?.seconds).toBe(0)
+          s.send(preview).resolve(PerformPlayer, Component.noop)
+          expect(s.model.pendingSeek).toBeNull()
+          expect(s.model.seekPreview?.seconds).toBe(15)
+          s.send(PlayerProviderMessage.CommittedSeek({ trackId: track.id, seconds: 15 }))
+            .expectExact(PerformPlayer.make({ operation: PlayerOperation.Seek({ seconds: 15 }) }))
+            .resolve(PerformPlayer, Component.noop)
+          expect(s.model.snapshot.transport.currentTime).toBe(15)
+          expect(s.model.pendingSeek).toBeNull()
+          s.send(PlayerProviderMessage.CommittedSeek({ trackId: track.id, seconds: 15 }))
+          expect(s.pending).toEqual([])
+        }),
+      ),
+    ))
+
+  it('rejects old and wrong-track receipts through newer seeks and track replacement', () =>
+    Effect.runSync(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const s = yield* Story.make(PlayerState, props)
+          s.given(playing)
+            .send(PlayerProviderMessage.RequestedSeek({ seconds: 0 }))
+            .expectExact(PerformPlayer.make({ operation: PlayerOperation.Seek({ seconds: 0 }) }))
+            .keepPending(PerformPlayer)
+          s.send(PlayerProviderMessage.RequestedSeek({ seconds: 10 }))
+            .expectExact(
+              PerformPlayer.make({ operation: PlayerOperation.Seek({ seconds: 0 }) }),
+              PerformPlayer.make({ operation: PlayerOperation.Seek({ seconds: 10 }) }),
+            )
+            .keepPending(PerformPlayer)
+          s.send(PlayerProviderMessage.CompletedSeek({ sequence: 1, trackId: track.id }))
+          s.send(PlayerProviderMessage.CompletedSeek({ sequence: 2, trackId: 'other-track' }))
+          expect(s.model.pendingSeek).toEqual({ sequence: 2, seconds: 10 })
+          const other = { ...track, id: 'other-track' }
+          s.send(
+            PlayerProviderMessage.ChangedSnapshot({
+              snapshot: {
+                ...playing.snapshot,
+                queue: { tracks: [other], currentIndex: 0, current: other },
+              },
+            }),
+          )
+          expect(s.model.pendingSeek).toBeNull()
+          s.resolve(
+            PerformPlayer.make({ operation: PlayerOperation.Seek({ seconds: 0 }) }),
+            Component.noop,
+          ).resolve(
+            PerformPlayer.make({ operation: PlayerOperation.Seek({ seconds: 10 }) }),
+            Component.noop,
+          )
+          expect(s.model.snapshot.queue.current?.id).toBe(other.id)
+          expect(s.model.snapshot.transport.currentTime).toBe(60)
+          s.send(PlayerProviderMessage.ChangedSnapshot({ snapshot: playing.snapshot }))
+            .send(PlayerProviderMessage.RequestedSeek({ seconds: 20 }))
+            .expectExact(PerformPlayer.make({ operation: PlayerOperation.Seek({ seconds: 20 }) }))
+            .keepPending(PerformPlayer)
+          s.send(PlayerProviderMessage.CompletedSeek({ sequence: 1, trackId: track.id }))
+          expect(s.model.pendingSeek).toEqual({ sequence: 3, seconds: 20 })
+          s.resolve(PerformPlayer, Component.noop)
+          expect(s.model.pendingSeek).toBeNull()
+        }),
+      ),
+    ))
+})
+
 describe('native PlayerProvider', () => {
   it('maps visible queue actions to their engine indices when ungranted private rows are hidden', () =>
     Effect.runSync(

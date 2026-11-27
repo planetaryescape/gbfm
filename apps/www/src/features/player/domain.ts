@@ -67,6 +67,8 @@ export const PlayerProviderModel = Schema.Struct({
   playerDrag: Schema.NullOr(Schema.Struct({ pointerId: Schema.Number, startY: Schema.Number })),
   playerOffset: Schema.Number,
   seekPreview: Schema.NullOr(SeekPreview),
+  seekSequence: Schema.Number,
+  pendingSeek: Schema.NullOr(Schema.Struct({ sequence: Schema.Number, seconds: Schema.Number })),
   hasHadTrack: Schema.Boolean,
 })
 
@@ -81,6 +83,8 @@ export const initialModel: PlayerProviderModel = {
   playerDrag: null,
   playerOffset: 0,
   seekPreview: null,
+  seekSequence: 0,
+  pendingSeek: null,
   hasHadTrack: false,
 }
 
@@ -97,6 +101,7 @@ export const PlayerProviderMessage = UiSchema.TaggedEnum({
   RequestedNext: {},
   RequestedPrevious: {},
   RequestedSeek: { seconds: Schema.Number },
+  CompletedSeek: { sequence: Schema.Number, trackId: Schema.String },
   RequestedJump: { seconds: Schema.Number },
   RequestedVolume: { volume: Schema.Number },
   RequestedToggleMute: {},

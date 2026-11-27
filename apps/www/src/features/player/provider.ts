@@ -1,4 +1,4 @@
-import { Component } from '@effect/ui'
+import { Command, Component } from '@effect/ui'
 import { Html } from '@effect/ui/html'
 import { Effect, Layer, Predicate, Stream } from 'effect'
 
@@ -75,15 +75,22 @@ export const updatePlayerProvider = PlayerProviderDef.update({
       }),
     ),
   ChangedPrivateAccess: ($, { access }) => $.evolve({ privateAccess: access }),
-  ChangedSnapshot: ($, { snapshot }) =>
-    $.evolve({
-      snapshot,
-      seekPreview:
-        $.model.snapshot.queue.current?.id === snapshot.queue.current?.id
-          ? $.model.seekPreview
-          : null,
+  ChangedSnapshot: ($, { snapshot }) => {
+    const sameTrack = $.model.snapshot.queue.current?.id === snapshot.queue.current?.id
+    const pendingSeek = sameTrack ? $.model.pendingSeek : null
+
+    return $.evolve({
+      snapshot: pendingSeek
+        ? {
+            ...snapshot,
+            transport: { ...snapshot.transport, currentTime: pendingSeek.seconds },
+          }
+        : snapshot,
+      pendingSeek,
+      seekPreview: sameTrack ? $.model.seekPreview : null,
       hasHadTrack: $.model.hasHadTrack || snapshot.queue.current !== null,
-    }),
+    })
+  },
   RequestedPlayTrack: ($, { track }) =>
     $.evolve({
       fullscreenOpen: true,
@@ -118,18 +125,38 @@ export const updatePlayerProvider = PlayerProviderDef.update({
     $.run(PerformPlayer.make({ operation: PlayerOperation.TogglePlayPause() })),
   RequestedNext: ($) => $.run(PerformPlayer.make({ operation: PlayerOperation.Next() })),
   RequestedPrevious: ($) => $.run(PerformPlayer.make({ operation: PlayerOperation.Previous() })),
-  RequestedSeek: ($, { seconds }) =>
-    $.evolve({
+  RequestedSeek: ($, { seconds }) => {
+    const sequence = $.model.seekSequence + 1
+    const trackId = $.model.snapshot.queue.current?.id
+
+    const available =
+      Number.isFinite($.model.snapshot.transport.duration) &&
+      $.model.snapshot.transport.duration > 0
+
+    return $.evolve({
       seekPreview: null,
-      snapshot:
-        Number.isFinite($.model.snapshot.transport.duration) &&
-        $.model.snapshot.transport.duration > 0
-          ? {
-              ...$.model.snapshot,
-              transport: { ...$.model.snapshot.transport, currentTime: seconds },
-            }
-          : $.model.snapshot,
-    }).run(PerformPlayer.make({ operation: PlayerOperation.Seek({ seconds }) })),
+      seekSequence: sequence,
+      pendingSeek: available && trackId ? { sequence, seconds } : null,
+      snapshot: available
+        ? {
+            ...$.model.snapshot,
+            transport: { ...$.model.snapshot.transport, currentTime: seconds },
+          }
+        : $.model.snapshot,
+    }).run(
+      PerformPlayer.make({ operation: PlayerOperation.Seek({ seconds }) }).pipe(
+        Command.map(() =>
+          available && trackId
+            ? PlayerProviderMessage.CompletedSeek({ sequence, trackId })
+            : Component.noop,
+        ),
+      ),
+    )
+  },
+  CompletedSeek: ($, { sequence, trackId }) =>
+    $.model.pendingSeek?.sequence === sequence && $.model.snapshot.queue.current?.id === trackId
+      ? $.evolve({ pendingSeek: null })
+      : $.model,
   RequestedJump: ($, { seconds }) =>
     $.run(PerformPlayer.make({ operation: PlayerOperation.Jump({ seconds }) })),
   RequestedVolume: ($, { volume }) =>
@@ -205,13 +232,21 @@ export const updatePlayerProvider = PlayerProviderDef.update({
     )
       return $.model
 
+    const sequence = $.model.seekSequence + 1
+
     return $.evolve({
       seekPreview: null,
+      seekSequence: sequence,
+      pendingSeek: { sequence, seconds },
       snapshot: {
         ...$.model.snapshot,
         transport: { ...$.model.snapshot.transport, currentTime: seconds },
       },
-    }).run(PerformPlayer.make({ operation: PlayerOperation.Seek({ seconds }) }))
+    }).run(
+      PerformPlayer.make({ operation: PlayerOperation.Seek({ seconds }) }).pipe(
+        Command.map(() => PlayerProviderMessage.CompletedSeek({ sequence, trackId })),
+      ),
+    )
   },
   CancelledSeek: ($, { trackId }) =>
     $.model.snapshot.queue.current?.id === trackId ? $.evolve({ seekPreview: null }) : $.model,

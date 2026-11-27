@@ -8,22 +8,13 @@ import {
 } from '../telemetry/browser'
 import { startTheme } from '../theme'
 import { startArtworkFallback } from '../ui/artwork'
+import { navigationEnd, navigationStart } from './navigation-events'
+
+export { navigationCompleted, navigationStarted } from './navigation-events'
 
 export type BrowserSupportOptions = {
   readonly release: string
   readonly currentRoute?: () => TelemetryRoute
-}
-
-const navigationStart = 'gbfm:navigation-start'
-
-const navigationEnd = 'gbfm:navigation-end'
-
-export const navigationStarted = (): void => {
-  window.dispatchEvent(new Event(navigationStart))
-}
-
-export const navigationCompleted = (): void => {
-  window.dispatchEvent(new Event(navigationEnd))
 }
 
 const browserNavigation = (current: () => TelemetryRoute): TelemetryNavigation => ({

@@ -17,9 +17,7 @@ const config = telemetryConfig({
   dsn: import.meta.env.VITE_PUBLIC_SENTRY_DSN,
   enabled: import.meta.env.VITE_SENTRY_ENABLED,
   environment: import.meta.env.VITE_SENTRY_ENVIRONMENT,
-  release:
-    import.meta.env.VITE_SENTRY_RELEASE ??
-    `gbfm-www@${import.meta.env.GBFM_BUILD_ID ?? import.meta.env.FOLDKIT_BUILD_ID}`,
+  release: import.meta.env.VITE_SENTRY_RELEASE ?? `gbfm-www@${import.meta.env.GBFM_BUILD_ID}`,
   development: import.meta.env.DEV,
 })
 

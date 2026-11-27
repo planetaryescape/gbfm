@@ -3,6 +3,7 @@ import { journeyObserver } from '@gbfm/observability/callbacks'
 import { AudioEngine } from '@gbfm/player'
 import { Effect, Exit, ManagedRuntime, Stream } from 'effect'
 
+import { navigationCompleted, navigationStarted } from '../src/app/navigation-events'
 import { webObservabilityLayer } from '../src/observability/sentry'
 import { makeHtmlAudioEngineLayer } from '../src/player/runtime'
 
@@ -169,7 +170,36 @@ document.getElementById('propagation')?.addEventListener('click', async () => {
   }
 })
 
-for (const id of ['run', 'reader', 'playback', 'propagation']) {
+document.getElementById('native-navigation')?.addEventListener('click', async () => {
+  const result = document.getElementById('result')
+  const runtime = ManagedRuntime.make(webObservabilityLayer)
+
+  try {
+    await runtime.runPromise(Observability)
+    navigationStarted()
+    navigationCompleted()
+    navigationStarted()
+    navigationCompleted('failed')
+    navigationStarted()
+    navigationStarted()
+    window.dispatchEvent(
+      new CustomEvent('gbfm:navigation-end', {
+        detail: { outcome: 'synthetic-secret-do-not-export' },
+      }),
+    )
+    navigationCompleted()
+    navigationStarted()
+    await runtime.dispose()
+    navigationStarted()
+    navigationCompleted()
+    if (result) result.textContent = 'Native navigation outcomes delivered'
+  } catch {
+    await runtime.dispose()
+    if (result) result.textContent = 'Native navigation fixture failed'
+  }
+})
+
+for (const id of ['run', 'reader', 'playback', 'propagation', 'native-navigation']) {
   const button = document.getElementById(id)
 
   if (button instanceof HTMLButtonElement) button.disabled = false

@@ -145,9 +145,11 @@
   },
   "overrides": [
     {
-      "files": ["apps/www/src/entry.effect.client.ts"],
+      "files": ["apps/www/src/entry.effect.client.ts", "apps/www/src/entry.effect.server.ts"],
       "rules": {
-        "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }]
+        "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }],
+        "anti-slop-effect/no-service-constructor-imports": "off",
+        "effecttsgo/strict-effect-provide": "off"
       }
     },
     {

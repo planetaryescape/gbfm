@@ -34,6 +34,17 @@ export const Field = <M>(
 export const Notice = <M>(h: Html.H<M>, message: string | null, error = false) =>
   message ? h.p.attr('role', error ? 'alert' : 'status').children(message) : undefined
 
+export const DataTable = <M>(h: Html.H<M>, label: string, columns: ReadonlyArray<string>) =>
+  h.table
+    .class('admin-table')
+    .attr('aria-label', label)
+    .children(
+      h.thead.children(
+        h.tr.children(columns.map((column) => h.th.attr('scope', 'col').children(column))),
+      ),
+    )
+    .forward((table) => h.div.class('admin-table-wrap').children(table))
+
 export const Rows = <M>(h: Html.H<M>, rows: ReadonlyArray<typeof Row.Type>) =>
   rows.length
     ? h.ul
@@ -52,7 +63,12 @@ export const Rows = <M>(h: Html.H<M>, rows: ReadonlyArray<typeof Row.Type>) =>
         )
     : h.p.class('dashboard-state').children('Nothing here yet.')
 
-export const Pagination = <M>(h: Html.H<M>, document: DashboardDocument, url: string) => {
+export const Pagination = <M>(
+  h: Html.H<M>,
+  document: DashboardDocument,
+  url: string,
+  label = 'Pagination',
+) => {
   const pagination = document.pagination
 
   if (!pagination) return undefined
@@ -65,7 +81,7 @@ export const Pagination = <M>(h: Html.H<M>, document: DashboardDocument, url: st
   }
 
   return h.nav
-    .attr('aria-label', 'Pagination')
+    .attr('aria-label', label)
     .children(
       h.span(
         pageRange(

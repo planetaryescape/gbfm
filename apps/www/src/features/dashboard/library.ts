@@ -1,4 +1,4 @@
-import { Command, Component, UiSchema } from '@effect/ui'
+import { Command, Component } from '@effect/ui'
 import { Html } from '@effect/ui/html'
 import { CreatePlaylistInput, UpdatePlaylistInput } from '@gbfm/api/music'
 import { CreateShowInput, UpdateShowInput } from '@gbfm/api/shows'
@@ -6,47 +6,14 @@ import { Effect, Layer, Predicate, Schema } from 'effect'
 
 import { Principal } from '../../domain/principal'
 import { DashboardDocument } from './document'
-import { plural } from './formatting'
-import { Field, Notice } from './presentation'
+import { LibraryAction, LibraryMessage } from './library-messages'
+import { libraryFormFields, LibraryView } from './library-view'
 import { DashboardService, DashboardServiceLive, ReadDashboard } from './service'
 
-const LibraryAction = Schema.Literals([
-  'save',
-  'delete',
-  'import',
-  'add',
-  'remove',
-  'reorder',
-  'sync',
-])
-
-export const LibraryMessage = UiSchema.TaggedEnum({
-  ClickedNew: {},
-  ClickedBack: {},
-  ClickedEdit: { id: Schema.String },
-  UpdatedField: { name: Schema.String, value: Schema.String },
-  ToggledDraft: {},
-  ClickedRefresh: { offset: Schema.Number },
-  ChangedDocument: {},
-  ClickedDelete: {},
-  ClickedCancelDelete: {},
-  ClickedAction: { action: LibraryAction, trackId: Schema.String },
-  ClickedMove: { id: Schema.String, direction: Schema.Literals(['up', 'down']) },
-  SucceededWrite: {
-    action: LibraryAction,
-    selected: Schema.NullOr(Schema.String),
-    notice: Schema.String,
-  },
-  FailedWrite: { message: Schema.String },
-})
-
-const formFields = (section: string) =>
-  section === 'shows'
-    ? ['title', 'slug', 'description', 'content', 'thumbnailUrl', 'bannerImageUrl', 'tags']
-    : ['title', 'slug', 'description', 'coverImageUrl', 'curatorId', 'publishedAt']
+export { LibraryMessage } from './library-messages'
 
 const emptyForm = (section: string) =>
-  Object.fromEntries(formFields(section).map((name) => [name, '']))
+  Object.fromEntries(libraryFormFields(section).map((name) => [name, '']))
 
 const playlistPath = (id: string) => `/api/music/playlists/${encodeURIComponent(id)}`
 
@@ -184,7 +151,9 @@ export class WriteLibrary extends Command.Service<WriteLibrary>()('dashboard/Wri
             Effect.succeed(
               LibraryMessage.FailedWrite({
                 message:
-                  'Could not complete the action. Refresh to check the current state before retrying.',
+                  section === 'shows'
+                    ? 'Could not save the show. Check required fields, slug availability and your access.'
+                    : 'Playlist action failed. Check the fields, provider availability and your access, then retry.',
               }),
             ),
           ),
@@ -387,6 +356,16 @@ export const DashboardLibraryNoDeps = LibraryDef.make({
         })
       },
       ClickedDelete: () => ($.model.busy ? $.model : $.evolve({ confirming: true })),
+      ClickedDeleteRow: ({ id }) => {
+        if (
+          $.model.busy ||
+          $.props.section !== 'shows' ||
+          !document.shows?.data.some((show) => show.slug === id)
+        )
+          return $.model
+
+        return $.evolve({ selected: id, confirming: true })
+      },
       ClickedCancelDelete: () => ($.model.busy ? $.model : $.evolve({ confirming: false })),
       ClickedEdit: (message) => {
         if ($.model.busy) return $.model
@@ -463,7 +442,8 @@ export const DashboardLibraryNoDeps = LibraryDef.make({
           resetForm: ['save', 'import', 'delete'].includes(message.action),
           editor: message.selected !== null && $.props.section === 'playlists',
         }),
-      FailedWrite: (message) => $.evolve({ busy: false, operation: null, error: message.message }),
+      FailedWrite: (message) =>
+        $.evolve({ busy: false, operation: null, error: message.message, notice: null }),
     })
   }),
   view: (h, model) => {
@@ -471,189 +451,18 @@ export const DashboardLibraryNoDeps = LibraryDef.make({
       ? h.queries.document.value
       : h.props.initialDocument
 
-    const field = (name: string) => {
-      const label = name.replace(/([A-Z])/g, ' $1')
-
-      if (['description', 'content'].includes(name))
-        return h.label.children(
-          label,
-          h.textarea
-            .disabled(model.busy)
-            .attr('rows', '5')
-            .value(model.fields[name] ?? '')
-            .on('input', ({ value }) => LibraryMessage.UpdatedField({ name, value })),
-        )
-
-      return Field(
-        h,
-        name,
-        label,
-        model.fields[name] ?? '',
-        (value) => LibraryMessage.UpdatedField({ name, value }),
-        'text',
-        model.busy,
-      )
-    }
-
-    const action = (value: typeof LibraryAction.Type, label: string, trackId = '') =>
-      h.button
-        .disabled(model.busy)
-        .on('click', LibraryMessage.ClickedAction({ action: value, trackId }))
-        .children(label)
-
     const tracks = Predicate.isTagged(h.queries.tracks, 'Success')
       ? (h.queries.tracks.value.playlistTracks ?? [])
       : []
 
-    const saveLabel = () => {
-      if (model.operation === 'save') return 'Saving'
-
-      if (model.selected) return 'Save changes'
-
-      return h.props.section === 'shows' ? 'Create show' : 'Create playlist'
-    }
-
-    return h.section.class('admin-page').children(
-      Notice(h, model.error, true),
-      Notice(h, model.notice),
+    return LibraryView(
+      h,
+      model,
+      h.props.section,
+      document,
+      tracks,
       Predicate.isTagged(h.queries.document, 'Failure') ||
-        Predicate.isTagged(h.queries.tracks, 'Failure')
-        ? h.p
-            .attr('role', 'alert')
-            .children('Could not refresh the current library data. Try again before editing.')
-        : undefined,
-      h.button
-        .disabled(model.busy)
-        .on('click', LibraryMessage.ClickedRefresh({ offset: model.offset }))
-        .children('Refresh'),
-      model.editor
-        ? [
-            h.button
-              .disabled(model.busy)
-              .on('click', LibraryMessage.ClickedBack())
-              .children('Back to list'),
-            h.div
-              .class('dashboard-form')
-              .children(
-                formFields(h.props.section).map(field),
-                h.props.section === 'shows'
-                  ? h.label.children(
-                      h.input
-                        .attr('type', 'checkbox')
-                        .disabled(model.busy)
-                        .checked(model.draft)
-                        .on('click', LibraryMessage.ToggledDraft()),
-                      'Draft',
-                    )
-                  : undefined,
-                action('save', saveLabel()),
-              ),
-            model.selected
-              ? h.div.children(
-                  h.button
-                    .disabled(model.busy)
-                    .on('click', LibraryMessage.ClickedDelete())
-                    .children('Delete'),
-                  model.confirming
-                    ? h.div.children(
-                        h.p('Permanently delete this item?'),
-                        action('delete', 'Confirm delete'),
-                        h.button
-                          .disabled(model.busy)
-                          .on('click', LibraryMessage.ClickedCancelDelete())
-                          .children('Cancel'),
-                      )
-                    : undefined,
-                )
-              : undefined,
-            h.props.section === 'playlists' && model.selected
-              ? h.div.children(
-                  h.h2('Tracks'),
-                  field('trackUrl'),
-                  action('add', 'Add Spotify track'),
-                  action('sync', 'Sync source links'),
-                  h.ol.children(
-                    tracks.map((entry, index) =>
-                      h.li.key(entry.track.id).children(
-                        h.span(entry.track.title),
-                        h.button
-                          .disabled(model.busy || index === 0)
-                          .on(
-                            'click',
-                            LibraryMessage.ClickedMove({ id: entry.track.id, direction: 'up' }),
-                          )
-                          .children('Move up'),
-                        h.button
-                          .disabled(model.busy || index === tracks.length - 1)
-                          .on(
-                            'click',
-                            LibraryMessage.ClickedMove({ id: entry.track.id, direction: 'down' }),
-                          )
-                          .children('Move down'),
-                        action('remove', 'Remove track', entry.track.id),
-                      ),
-                    ),
-                  ),
-                )
-              : undefined,
-          ]
-        : [
-            h.button
-              .disabled(model.busy)
-              .on('click', LibraryMessage.ClickedNew())
-              .children(h.props.section === 'shows' ? 'New show' : 'New playlist'),
-            h.props.section === 'shows'
-              ? h.ul.children(
-                  document.shows?.data.map((show) =>
-                    h.li.key(show.id).children(
-                      h.a
-                        .attr('href', `/shows/${encodeURIComponent(show.slug)}`)
-                        .children(show.title),
-                      h.span(show.draft ? 'Draft' : 'Published'),
-                      h.button
-                        .disabled(model.busy)
-                        .on('click', LibraryMessage.ClickedEdit({ id: show.slug }))
-                        .children('Edit'),
-                    ),
-                  ),
-                )
-              : h.ul.children(
-                  document.playlists?.map((playlist) =>
-                    h.li
-                      .key(playlist.id)
-                      .children(
-                        h.a
-                          .attr('href', `/music/playlists/${encodeURIComponent(playlist.slug)}`)
-                          .children(playlist.title),
-                        h.span(playlist.publishedAt ? 'Published' : 'Draft'),
-                        h.button
-                          .on('click', LibraryMessage.ClickedEdit({ id: playlist.id }))
-                          .children('Edit'),
-                      ),
-                  ),
-                ),
-            h.props.section === 'playlists'
-              ? h.div
-                  .class('dashboard-form')
-                  .children(field('importUrl'), action('import', 'Import Spotify playlist'))
-              : undefined,
-          ],
-      document.shows
-        ? h.nav.attr('aria-label', 'Show pages').children(
-            h.button
-              .disabled(model.busy || model.offset === 0)
-              .on(
-                'click',
-                LibraryMessage.ClickedRefresh({ offset: Math.max(0, model.offset - 25) }),
-              )
-              .children('Previous'),
-            h.span(plural(document.shows.pagination.total, 'show')),
-            h.button
-              .disabled(model.busy || !document.shows.pagination.hasMore)
-              .on('click', LibraryMessage.ClickedRefresh({ offset: model.offset + 25 }))
-              .children('Next'),
-          )
-        : undefined,
+        Predicate.isTagged(h.queries.tracks, 'Failure'),
     )
   },
 })

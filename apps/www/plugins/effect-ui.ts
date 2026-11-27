@@ -86,7 +86,12 @@ const readAssets = async (
 }
 
 const isServerEntry = (value: unknown): value is ServerEntry =>
-  Predicate.isObject(value) && 'renderPage' in value && Predicate.isFunction(value.renderPage)
+  Predicate.isObject(value) &&
+  'renderPage' in value &&
+  Predicate.isFunction(value.renderPage) &&
+  (!('handlesHttpRequest' in value) ||
+    value.handlesHttpRequest === undefined ||
+    Predicate.isFunction(value.handlesHttpRequest))
 
 const isHost = (
   value: unknown,
@@ -99,16 +104,47 @@ const isHost = (
 } =>
   Predicate.isObject(value) && 'handleRequest' in value && Predicate.isFunction(value.handleRequest)
 
-const devOrigin = (server: ViteDevServer, options: EffectUiOptions): string => {
+const parseLoopbackOrigin = (value: string | undefined): URL | undefined => {
+  const url = value === undefined ? null : URL.parse(value)
+
+  if (
+    url === null ||
+    !['http:', 'https:'].includes(url.protocol) ||
+    !(
+      ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) ||
+      url.hostname.endsWith('.localhost')
+    ) ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash
+  )
+    return undefined
+
+  return url
+}
+
+const devOrigin = (
+  server: ViteDevServer,
+  options: EffectUiOptions,
+  host: string | undefined,
+): string => {
   if (options.origin) return options.origin
 
   if (server.config.server.origin) return server.config.server.origin
+  const portless = parseLoopbackOrigin(process.env.PORTLESS_URL)
+
+  if (portless) return portless.origin
   const local = server.resolvedUrls?.local[0]
-
-  if (local) return new URL(local).origin
   const scheme = server.config.server.https ? 'https' : 'http'
+  const fallback = new URL(local ?? `${scheme}://localhost:${server.config.server.port ?? 5173}`)
+  const candidate = parseLoopbackOrigin(host === undefined ? undefined : `${scheme}://${host}`)
 
-  return `${scheme}://localhost:${server.config.server.port ?? 5173}`
+  if (candidate && candidate.port === fallback.port && candidate.protocol === fallback.protocol)
+    return candidate.origin
+
+  return fallback.origin
 }
 
 export const effectUi = (options: EffectUiOptions): Plugin => {
@@ -129,6 +165,9 @@ export const effectUi = (options: EffectUiOptions): Plugin => {
             },
           },
           ssr: {
+            resolve: {
+              conditions: ['workerd', 'worker', 'module', 'development|production'],
+            },
             build: {
               ssr: true,
               outDir: options.serverOutDir ?? 'dist/server',
@@ -198,7 +237,7 @@ export default { fetch: request => handleRequest(request, entry, assets) }
     configureServer(server) {
       const render: Connect.NextHandleFunction = async (incoming, outgoing, next) => {
         const target = incoming.originalUrl ?? incoming.url ?? '/'
-        const url = resolveRequestUrl(target, devOrigin(server, options))
+        const url = resolveRequestUrl(target, devOrigin(server, options, incoming.headers.host))
 
         if (!url) {
           outgoing.statusCode = 400
@@ -275,7 +314,7 @@ export default { fetch: request => handleRequest(request, entry, assets) }
 
       server.middlewares.use((incoming, outgoing, next) => {
         const target = incoming.originalUrl ?? incoming.url ?? '/'
-        const url = resolveRequestUrl(target, devOrigin(server, options))
+        const url = resolveRequestUrl(target, devOrigin(server, options, incoming.headers.host))
 
         if (!url) {
           outgoing.statusCode = 400

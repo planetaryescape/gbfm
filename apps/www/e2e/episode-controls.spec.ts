@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { expectPopupSettled } from './fixtures/native-ready'
+
 for (const viewport of [
   { name: 'mobile', width: 390, height: 844 },
   { name: 'tablet', width: 768, height: 1024 },
@@ -36,9 +38,9 @@ for (const viewport of [
     expect(pageWidth.content).toBeLessThanOrEqual(pageWidth.viewport)
     await control.click()
     const player = page.getByRole('dialog', { name: 'Now playing', exact: true })
-    const panel = page.locator('#fullscreen-player-panel')
+    const panel = player.locator('.native-player-panel')
     await expect(player.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
-    await expect(panel).not.toHaveAttribute('data-transition')
+    await expectPopupSettled(panel)
     await player.getByRole('button', { name: 'Collapse player' }).click()
 
     const pause = page.getByRole('button', {
@@ -65,7 +67,7 @@ for (const viewport of [
     await expect(mini.getByRole('button', { name: 'Next track', exact: true })).toHaveCount(0)
     await mini.getByRole('button', { name: 'Now playing', exact: true }).click()
     await expect(player).toBeVisible()
-    await expect(panel).not.toHaveAttribute('data-transition')
+    await expectPopupSettled(panel)
     await player.getByRole('button', { name: 'Collapse player' }).click()
     await expect(player).not.toBeVisible()
 

@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
+import { expectModalOpen } from './fixtures/native-ready'
+
 const signIn = async (page: Page, email: string) => {
   await page.goto('/auth/sign-in')
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill(email)
@@ -21,15 +23,20 @@ for (const role of ['anonymous', 'listener', 'creator', 'admin'] as const) {
     const desktopLink = page
       .getByRole('navigation', { name: 'Primary', exact: true })
       .getByRole('link', { name: 'Collections', exact: true })
+
     await expect(desktopLink).toHaveCount(role === 'admin' ? 1 : 0)
+
     if (role === 'admin') await expect(desktopLink).toBeVisible()
 
     await page.setViewportSize({ width: 390, height: 844 })
     await page.getByRole('button', { name: 'Menu', exact: true }).click()
+
     const mobileLink = page
       .getByRole('dialog', { name: 'Menu', exact: true })
       .getByRole('link', { name: 'Collections', exact: true })
+
     await expect(mobileLink).toHaveCount(role === 'admin' ? 1 : 0)
+
     if (role === 'admin') await expect(mobileLink).toBeVisible()
   })
 }
@@ -66,7 +73,17 @@ test('desktop account actions support keyboard, dismissal, navigation and sign-o
   await trigger.click()
   await expect(menu).not.toBeVisible()
   await trigger.click()
-  await page.locator('.account-menu-backdrop').click({ position: { x: 20, y: 20 } })
+  const backdrop = await page.locator('.account-menu-backdrop').boundingBox()
+
+  if (!backdrop) throw new Error('Expected the account backdrop')
+  const outside = { x: backdrop.x + backdrop.width - 20, y: backdrop.y + 20 }
+  expect(
+    await menu.evaluate(
+      (element, point) => element.contains(document.elementFromPoint(point.x, point.y)),
+      outside,
+    ),
+  ).toBe(false)
+  await page.mouse.click(outside.x, outside.y)
   await expect(menu).not.toBeVisible()
   await trigger.click()
   await expect(menu.getByRole('link', { name: 'Dashboard', exact: true })).toBeFocused()
@@ -102,7 +119,7 @@ test('listener menu hides creator actions and respects themes and mobile navigat
   await expect(trigger).not.toBeVisible()
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
   const mobileMenu = page.getByRole('dialog', { name: 'Menu', exact: true })
-  await expect(mobileMenu).toBeVisible()
+  await expectModalOpen(mobileMenu, mobileMenu.locator('.menu-sheet'))
   await expect(mobileMenu.getByRole('link', { name: 'Dashboard', exact: true })).toBeVisible()
 })
 

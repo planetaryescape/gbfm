@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 
-import { verificationState } from './verification'
+import { verificationState } from '../../domain/auth/verification'
 
 const at = (search: string) => new URL(`https://goosebumps.fm/auth/verify-email${search}`)
 

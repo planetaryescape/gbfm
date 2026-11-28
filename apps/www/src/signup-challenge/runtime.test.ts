@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import type { Status } from './model'
-import { startSignupChallenge, type ChallengeWidget } from './runtime'
+import type { Status } from '../domain/auth/challenge'
+import { startSignupChallenge, type ChallengeWidget } from '../features/signup-challenge/runtime'
 
 const fixture = (
   options: {

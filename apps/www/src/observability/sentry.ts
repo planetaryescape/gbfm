@@ -12,6 +12,7 @@ import { sentryExporterLayer } from '@gbfm/observability/sentry'
 import * as Sentry from '@sentry/browser'
 import { Effect, Layer } from 'effect'
 
+import { browserNavigationLayer } from './navigation'
 import { browserReaderLayer } from './reader'
 
 const config = telemetryConfig({
@@ -19,7 +20,7 @@ const config = telemetryConfig({
   dsn: import.meta.env.VITE_PUBLIC_SENTRY_DSN,
   enabled: import.meta.env.VITE_SENTRY_ENABLED,
   environment: import.meta.env.VITE_SENTRY_ENVIRONMENT,
-  release: import.meta.env.VITE_SENTRY_RELEASE ?? `gbfm-www@${import.meta.env.FOLDKIT_BUILD_ID}`,
+  release: import.meta.env.VITE_SENTRY_RELEASE ?? `gbfm-www@${import.meta.env.GBFM_BUILD_ID}`,
   development: import.meta.env.DEV,
 })
 
@@ -83,5 +84,9 @@ const signals = observabilityLayer.pipe(
 )
 
 export const webObservabilityLayer = config.enabled
-  ? Layer.merge(signals, browserReaderLayer.pipe(Layer.provide(signals)))
+  ? Layer.mergeAll(
+      signals,
+      browserReaderLayer.pipe(Layer.provide(signals)),
+      browserNavigationLayer.pipe(Layer.provide(signals)),
+    )
   : disabledObservabilityLayer

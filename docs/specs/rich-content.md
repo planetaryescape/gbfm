@@ -21,7 +21,7 @@ This design requires no database schema change, although storage implementation 
 
 ## Context and Current State
 
-The inventory in this section records the migration-planning baseline, including the former React app and UI package. It is not the current UI ownership map: `packages/ui` has been retired. See [FOLDKIT.md](../../FOLDKIT.md) for the current WWW structure.
+The inventory in this section records the migration-planning baseline, including the former React app and UI package. It is not the current UI ownership map: `packages/ui` has been retired. See [EFFECT-UI.md](../../EFFECT-UI.md) for the current native WWW structure. Foldkit renderer paths and checkpoint language below retain their historical context, not current implementation guidance.
 
 ### Current data model
 

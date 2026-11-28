@@ -12,8 +12,8 @@ import {
   UploadPaused,
   isFatalError,
   isRetryableError,
-} from './errors'
-import type { PersistedResumableUpload } from './protocol'
+} from '../../../features/creator/upload/errors'
+import type { PersistedResumableUpload } from '../../../features/creator/upload/protocol'
 
 const pausedCheckpoint: PersistedResumableUpload = {
   fileFingerprint: 'fp',

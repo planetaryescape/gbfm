@@ -1,10 +1,10 @@
 import { GetAllShowsResponse } from '@gbfm/api/shows'
 import { Effect, Schema } from 'effect'
 
+import type { ShowsDocument } from '../../domain/shows'
 import { Route } from '../../route'
 import { optionalPageRequest } from '../../server/page-data/requests'
 import { json } from '../../server/page-data/shared'
-import type { ShowsDocument } from './document'
 
 export const loadShowsData = (
   request: Request,

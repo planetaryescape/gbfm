@@ -59,12 +59,12 @@ test('public writing renders canonical rich content without executing arbitrary 
   await expect(page.locator('.rich-content iframe')).toHaveCount(1)
   await expect(page.locator('.rich-content iframe')).toHaveAttribute(
     'src',
-    'https://w.soundcloud.com/player/?url=https%3A%2F%2Fsoundcloud.com%2Fgbfm%2Flocal-frequencies',
+    'https://w.soundcloud.com/player/?url=https%3A%2F%2Fsoundcloud.com%2Fgbfm%2Flocal-frequencies&visual=false',
   )
   await expect(page.locator('.rich-content a[href^="javascript:"]')).toHaveCount(0)
   await page.getByRole('button', { name: 'Add to queue', exact: true }).click()
   await page.getByRole('button', { name: 'Open queue', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: 'Playback queue' })).toContainText(
+  await expect(page.getByRole('dialog', { name: 'Queue', exact: true })).toContainText(
     'Local Frequencies',
   )
 })
@@ -91,11 +91,15 @@ test('a migrated legacy track renders from the GBFM catalog without client metad
   const fallback = page
     .locator('.rich-content-music-card')
     .filter({ hasText: 'A retained playlist without cover artwork' })
+
   await expect(fallback.locator('img')).toHaveCount(0)
-  await expect(fallback.getByRole('link', { name: 'Spotify', exact: true })).toHaveAttribute(
-    'href',
-    'https://open.spotify.com/playlist/3m4J7Xt1mA5CqSnXl4zgpZ',
-  )
+  await expect(
+    fallback.getByRole('link', {
+      name: 'Listen to A retained playlist without cover artwork on Spotify (opens in a new tab)',
+      exact: true,
+    }),
+  ).toHaveAttribute('href', 'https://open.spotify.com/playlist/3m4J7Xt1mA5CqSnXl4zgpZ')
+
   const copyShare = (music: typeof card) =>
     music.evaluate((element) => {
       const head = element.querySelector('.rich-content-music-head')
@@ -103,6 +107,7 @@ test('a migrated legacy track renders from the GBFM catalog without client metad
 
       return (copy?.clientWidth ?? 0) / (head?.clientWidth ?? 1)
     })
+
   for (const width of [390, 1280]) {
     await page.setViewportSize({ width, height: 1000 })
     expect(await copyShare(fallback)).toBeGreaterThan(0.99)
@@ -111,6 +116,7 @@ test('a migrated legacy track renders from the GBFM catalog without client metad
     expect(withArtwork).toBeGreaterThan(0.5)
     expect(withArtwork).toBeLessThan(0.95)
   }
+
   expect(spotifyRequests).toEqual([])
 })
 
@@ -130,7 +136,7 @@ test('reset form preserves its token and signing out invalidates the session', a
   await page.getByRole('link', { name: 'Player', exact: true }).click()
   await expect(page.getByRole('checkbox', { name: 'Continue through queue' })).toBeChecked()
   await page.getByRole('checkbox', { name: 'Continue through queue' }).uncheck()
-  await page.getByRole('button', { name: 'Save player preferences', exact: true }).click()
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click()
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem('gbfm-player-preferences.json')))
     .toBe('{"continueQueue":false,"restorePosition":true}')

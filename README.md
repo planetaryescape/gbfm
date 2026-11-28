@@ -21,7 +21,7 @@ Dev & infra via [SST](https://sst.dev)
 
 ### Frontend
 
-- WWW uses Vite + Foldkit. See [FOLDKIT.md](FOLDKIT.md) for UI ownership and [Design System](docs/design-system.md) for visual guidance.
+- WWW uses Vite + native Effect UI. See [EFFECT-UI.md](EFFECT-UI.md) for runtime ownership and the unmerged, undeployed default-cutover boundary, and [Design System](docs/design-system.md) for visual guidance.
 - Expo mobile, email templates, and social-image rendering retain React.
 
 ### Backend

@@ -1,0 +1,192 @@
+import { resolveRequestId } from '@gbfm/core/observability/request-id'
+import { Option, Schema } from 'effect'
+
+import { connectionRedirect } from '../features/connect/response'
+import { parseCheckpoint } from '../features/reader/location'
+import { safeReturnPath } from '../page/auth/links'
+import { loginOAuthQuery } from '../page/connect/continuation'
+import { handleConnection } from '../page/connect/server'
+import { parseRoute, Route } from '../route'
+import { handleBrowserTelemetry } from '../telemetry/server'
+import { apiRequest } from './api'
+import { handleFormAction, redirect } from './form-actions'
+import { Responded } from './http-result'
+import { handleMosaicGeneration } from './mosaic'
+import { forwardOAuthAuthorization } from './oauth-authorization'
+import { loadPageData, type LoadedPage } from './page-data'
+
+export type { LoadedPage } from './page-data'
+
+export type PageHandler<A> = (
+  request: Request,
+  dataRequest: boolean,
+  startedAt: number,
+  page: LoadedPage,
+) => Promise<A>
+
+export interface HttpRequestRouting {
+  readonly url: URL
+  readonly route: Route
+}
+
+const isSignInOrUp = (action: string) => action === 'sign-in' || action === 'sign-up'
+
+const JsonObject = Schema.Record(Schema.String, Schema.Json)
+
+const latestTweetSlug = async (response: Response) => {
+  const payload = Schema.decodeUnknownSync(Schema.Json)(await response.json())
+  const record = Option.getOrNull(Schema.decodeUnknownOption(JsonObject)(payload))
+
+  return (
+    parseCheckpoint(Option.getOrNull(Schema.decodeUnknownOption(Schema.String)(record?.slug))) ?? ''
+  )
+}
+
+export const dispatchHttp = async <A>(
+  request: Request,
+  renderPage: PageHandler<A>,
+  routing?: HttpRequestRouting,
+): Promise<A | Responded> => {
+  const startedAt = performance.now()
+  const url = new URL(routing?.url ?? request.url)
+  const route = routing?.route ?? parseRoute(url.pathname)
+  const dataRequest = url.searchParams.has('__data')
+  url.searchParams.delete('__data')
+  const requestId = resolveRequestId(request.headers.get('x-request-id'))
+  const ownedRequest = new Request(url, request)
+  ownedRequest.headers.set('x-request-id', requestId)
+
+  if (url.pathname === '/connect/gbfm' || url.pathname.startsWith('/connect/gbfm/'))
+    return handleConnection(ownedRequest)
+
+  if (Route.guards.Auth(route) && isSignInOrUp(route.action) && request.method === 'GET') {
+    const continuation = loginOAuthQuery(url.searchParams.get('returnTo') ?? '', url.origin)
+
+    if (continuation) return connectionRedirect(`/connect/gbfm?${continuation}`)
+  }
+
+  if (url.pathname === '/telemetry/browser') {
+    if (!import.meta.env.PROD) return Responded(new Response(null, { status: 204 }))
+    const { env } = await import('cloudflare:workers')
+
+    return Responded(
+      await handleBrowserTelemetry(ownedRequest, {
+        ...env,
+        BROWSER_TELEMETRY_ORIGIN: url.origin,
+      }),
+    )
+  }
+
+  if (url.pathname.startsWith('/social/cards/') || url.pathname.startsWith('/social/tweets/')) {
+    if (!import.meta.env.PROD) return Responded(new Response(null, { status: 404 }))
+    const { env } = await import('cloudflare:workers')
+
+    return Responded(await env.SOCIAL_IMAGES.fetch(ownedRequest))
+  }
+
+  if (url.pathname === '/actions/mosaic') {
+    return Responded(
+      await handleMosaicGeneration(
+        ownedRequest,
+        (content) =>
+          apiRequest(ownedRequest, '/api/content/posts/preview', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ content }),
+          }),
+        async (renderRequest) => {
+          if (import.meta.env.DEV) {
+            const { renderMosaicInDevelopment } = await import('./mosaic-dev')
+
+            return renderMosaicInDevelopment(renderRequest)
+          }
+
+          const { env } = await import('cloudflare:workers')
+
+          return env.SOCIAL_IMAGES.fetch(renderRequest)
+        },
+      ),
+    )
+  }
+
+  if (
+    request.method === 'POST' &&
+    (Route.guards.Auth(route) || url.pathname.startsWith('/actions/'))
+  )
+    return handleFormAction(ownedRequest)
+
+  if (url.pathname === '/auth/oauth2/authorize' && request.method === 'GET')
+    return Responded(await forwardOAuthAuthorization(ownedRequest))
+
+  if (
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/s/') ||
+    (url.pathname === '/auth/verify-email' && url.searchParams.has('token')) ||
+    (url.pathname.startsWith('/auth/') && !Route.guards.Auth(route)) ||
+    ['/rss.xml', '/sitemap.xml', '/mcp.txt'].includes(url.pathname)
+  )
+    return Responded(
+      await apiRequest(
+        url.pathname.startsWith('/auth/oauth2/')
+          ? new Request(ownedRequest, { redirect: 'manual' })
+          : ownedRequest,
+        `${url.pathname}${url.search}`,
+      ),
+    )
+
+  if (!['GET', 'HEAD'].includes(request.method))
+    return Responded(new Response(null, { status: 405 }))
+
+  const redirectPage = (path: string) => {
+    const target = new URL(path, url)
+
+    if (dataRequest) target.searchParams.set('__data', '1')
+
+    return redirect(`${target.pathname}${target.search}`)
+  }
+
+  if (url.pathname === '/tweet') {
+    const slug = parseCheckpoint(url.searchParams.get('visit'))
+
+    return redirectPage(slug ? `/tweet/${encodeURIComponent(slug)}` : '/tweets')
+  }
+
+  if (url.pathname === '/tweets' && url.searchParams.get('q') === 'archive')
+    return redirectPage('/tweets')
+
+  if (url.pathname === '/tweet/new') return redirectPage('/new/tweet')
+
+  if (url.pathname === '/tweet/latest') {
+    const latest = await apiRequest(ownedRequest, '/api/content/posts/micro/latest', {
+      method: 'GET',
+    }).catch(() => null)
+
+    const slug = latest?.ok ? await latestTweetSlug(latest).catch(() => '') : ''
+
+    if (slug) return redirectPage(`/tweet/${encodeURIComponent(slug)}`)
+
+    if (!latest?.ok) {
+      const page = await loadPageData(ownedRequest, request, url, route, requestId)
+
+      if (page.redirect === null)
+        return renderPage(ownedRequest, dataRequest, startedAt, {
+          ...page,
+          flags: { ...page.flags, status: 503, failure: 'Latest tweet is unavailable right now.' },
+        })
+    }
+  }
+
+  const page = await loadPageData(ownedRequest, request, url, route, requestId)
+
+  if (page.redirect !== null) return redirectPage(page.redirect)
+
+  if (
+    page.flags.principal &&
+    Route.guards.Auth(route) &&
+    isSignInOrUp(route.action) &&
+    !loginOAuthQuery(url.searchParams.get('returnTo') ?? '', url.origin)
+  )
+    return redirectPage(safeReturnPath(url.searchParams.get('returnTo') ?? '', url.origin))
+
+  return renderPage(ownedRequest, dataRequest, startedAt, page)
+}

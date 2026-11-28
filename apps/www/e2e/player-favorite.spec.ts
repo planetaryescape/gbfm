@@ -2,13 +2,23 @@ import { expect, type Page, test } from '@playwright/test'
 
 const mixPath = '/mixes/e2e-local-frequencies'
 
-const nowPlaying = (page: Page) => page.getByRole('region', { name: 'Now playing' })
+const playerDialog = (page: Page) => page.getByRole('dialog', { name: 'Now playing', exact: true })
+
+const nowPlaying = (page: Page) =>
+  playerDialog(page).getByRole('region', { name: 'Now playing', exact: true })
+
+const pageHeart = (page: Page, name: string) =>
+  page
+    .getByRole('main', { includeHidden: true })
+    .getByRole('button', { name, exact: true, includeHidden: true })
 
 const openPlayer = (page: Page) =>
   page.getByRole('button', { name: 'Now playing', exact: true }).click()
 
-const collapse = (page: Page) =>
-  page.getByRole('button', { name: 'Collapse player', exact: true }).click()
+const collapse = async (page: Page) => {
+  await playerDialog(page).getByRole('button', { name: 'Collapse player', exact: true }).click()
+  await expect(playerDialog(page)).not.toBeVisible()
+}
 
 test('signed-out listeners get a sign-in link that returns to the current page', async ({
   page,
@@ -32,11 +42,11 @@ test('the player heart saves the queued track only after the server acknowledges
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`${mixPath}$`))
   await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled()
-  const leftover = page.getByRole('button', { name: 'Remove from favorites', exact: true })
+  const leftover = pageHeart(page, 'Remove from favorites')
 
   if (await leftover.isVisible()) {
     await leftover.click()
-    await expect(page.getByRole('button', { name: 'Add to favorites', exact: true })).toBeVisible()
+    await expect(pageHeart(page, 'Add to favorites')).toBeVisible()
   }
 
   await page.getByRole('button', { name: 'Play', exact: true }).click()
@@ -105,25 +115,32 @@ test('the player heart saves the queued track only after the server acknowledges
 
   let release = () => {}
 
+  let writes = 0
+
   const held = new Promise<void>((resolve) => {
     release = resolve
   })
 
   await page.route('**/api/favorites', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    writes++
     await held
     await route.continue()
   })
   await add.click()
   await expect(add).toBeDisabled()
   await expect(add).toHaveAttribute('aria-pressed', 'false')
+  await expect(pageHeart(page, 'Add to favorites')).toBeDisabled()
+  await expect(pageHeart(page, 'Add to favorites')).toHaveAttribute('aria-pressed', 'false')
+  await expect.poll(() => writes).toBe(1)
   release()
   await expect(remove).toHaveAttribute('aria-pressed', 'true')
+  await expect(pageHeart(page, 'Remove from favorites')).toHaveAttribute('aria-pressed', 'true')
+  expect(writes).toBe(1)
   await page.unroute('**/api/favorites')
 
   await collapse(page)
-  await expect(
-    page.getByRole('button', { name: 'Remove from favorites', exact: true }),
-  ).toBeVisible()
+  await expect(pageHeart(page, 'Remove from favorites')).toBeVisible()
 
   await page
     .getByRole('navigation', { name: 'Primary', exact: true })
@@ -136,21 +153,21 @@ test('the player heart saves the queued track only after the server acknowledges
 
   await page.goBack()
   await expect(page).toHaveURL(new RegExp(`${mixPath}$`))
-  const pageRemove = page.getByRole('button', { name: 'Remove from favorites', exact: true })
+  const pageRemove = pageHeart(page, 'Remove from favorites')
   await expect(pageRemove).toBeVisible()
   await pageRemove.click()
-  await expect(page.getByRole('button', { name: 'Add to favorites', exact: true })).toBeVisible()
+  await expect(pageHeart(page, 'Add to favorites')).toBeVisible()
   await openPlayer(page)
   await expect(add).toHaveAttribute('aria-pressed', 'false')
   await collapse(page)
 
-  await page.route('**/api/content/audio/mix/e2e-local-frequencies/page', (route) =>
+  await page.route('**/api/favorites/audio/*/state', (route) =>
     route.fulfill({ status: 503, body: 'Unavailable' }),
   )
   await page.reload()
   await openPlayer(page)
   await expect(nowPlaying(page).getByText('Favorite status could not be loaded.')).toBeVisible()
-  await page.unroute('**/api/content/audio/mix/e2e-local-frequencies/page')
+  await page.unroute('**/api/favorites/audio/*/state')
   await nowPlaying(page)
     .getByRole('button', { name: 'Retry loading favorite', exact: true })
     .click()

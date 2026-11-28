@@ -1,15 +1,16 @@
 import { OAuthClientId } from '@gbfm/core/editorial-mcp'
 import { isRole } from '@gbfm/core/roles'
 import { Match, Option, Schema } from 'effect'
-import * as Server from 'foldkit/experimental/server'
 
+import { readModeCookie } from '../features/reader/location'
 import { authErrorKey, authErrorLocation, readAuthErrorCode } from '../page/auth/errors'
 import { authHref, safeReturnPath } from '../page/auth/links'
 import { loginOAuthQuery, providerRedirect } from '../page/connect/continuation'
 import { ProviderOutcome } from '../page/connect/domain'
 import { handleListeningAction } from '../page/listening/form-action'
-import { readModeCookie } from '../page/tweet/navigation'
 import { apiRequest } from './api'
+import { handleCreatorSave } from './creator-form-action'
+import * as Server from './http-result'
 import { randomTweet } from './tweet-random'
 import { resetReadingHistory } from './tweet-reset'
 
@@ -26,6 +27,8 @@ export const handleFormAction = async (request: Request): Promise<Server.Respond
 
   if (request.headers.get('origin') !== url.origin)
     return Server.Responded(new Response('Forbidden', { status: 403 }))
+
+  if (url.pathname === '/actions/creator/save') return handleCreatorSave(request)
   const form = await request.formData()
 
   const field = (name: string) =>

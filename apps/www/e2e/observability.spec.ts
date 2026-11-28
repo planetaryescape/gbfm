@@ -141,3 +141,19 @@ test('the browser SDK propagates matching Sentry and W3C parents only to first-p
   expect(envelopes.join('\n')).not.toContain('synthetic-secret-do-not-export')
   await expect.poll(() => envelopes.join('\n')).toContain(`"parent_span_id":"${serverSpanId}"`)
 })
+
+test('native navigation events deliver bounded outcomes and stop at disposal', async ({ page }) => {
+  const envelopes = await start(page)
+  await page.getByRole('button', { name: 'Run native navigation smoke' }).click()
+  await expect(page.locator('#result')).toHaveText('Native navigation outcomes delivered')
+  await expect
+    .poll(() => outcomes(envelopes))
+    .toEqual([
+      { operation: 'navigation', outcome: 'succeeded' },
+      { operation: 'navigation', outcome: 'failed' },
+      { operation: 'navigation', outcome: 'canceled' },
+      { operation: 'navigation', outcome: 'succeeded' },
+      { operation: 'navigation', outcome: 'canceled' },
+    ])
+  expect(envelopes.join('\n')).not.toContain('synthetic-secret-do-not-export')
+})

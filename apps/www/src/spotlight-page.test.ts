@@ -3,7 +3,7 @@ import { parseRichContent } from '@gbfm/rich-content/source'
 import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 
-import { normalizeSpotlightProgress } from './spotlight-page'
+import { normalizeSpotlightProgress } from './domain/editorial/spotlight-location'
 
 const document = Schema.decodeUnknownSync(RichContentDocument)(
   parseRichContent('Intro.\n\n## Chapter\n\n### Record\n\nA thought.').document,

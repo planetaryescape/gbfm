@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test'
 
+test.beforeEach(async ({ page }) => {
+  await page.route(/^https:\/\/(?:[^/]+\.)?spotify\.com\//, (route) =>
+    route.abort('blockedbyclient'),
+  )
+})
+
 test('Spotify callback rejects unsolicited codes without exposing them in SSR or exchanging tokens', async ({
   page,
   request,
@@ -10,6 +16,7 @@ test('Spotify callback rejects unsolicited codes without exposing them in SSR or
   let tokenExchanges = 0
   await page.route('https://accounts.spotify.com/api/token', (route) => {
     tokenExchanges += 1
+
     return route.abort()
   })
   await page.goto('/spotify/callback?code=unsolicited-fixture&state=wrong')
@@ -17,7 +24,10 @@ test('Spotify callback rejects unsolicited codes without exposing them in SSR or
     'authorization is missing, expired, or invalid',
   )
   await expect(page).toHaveURL(/\/spotify\/callback$/)
-  await expect(page.locator('meta[name=robots]')).toHaveAttribute('content', 'noindex, nofollow')
+  await expect(page.locator('meta[name=robots]')).toHaveAttribute(
+    'content',
+    /^noindex,\s*nofollow$/,
+  )
   expect(tokenExchanges).toBe(0)
 })
 

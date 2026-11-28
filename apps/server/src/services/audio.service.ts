@@ -1,5 +1,6 @@
 import { and, asc, count, desc, eq, type SQL, sql } from 'drizzle-orm'
-import { Context, Crypto, Effect, Layer } from 'effect'
+import { Context, Effect, Layer } from 'effect'
+import { Digest } from 'effect/crypto'
 import { Hex } from 'effect/encoding'
 
 import { audioVisibilityCondition } from '@/db/audio-visibility'
@@ -106,13 +107,13 @@ const canonicalize = (value: CanonicalValue): CanonicalValue => {
 
 export const createAudioFingerprint = (data: CreateAudioData, creatorIds: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    const crypto = yield* Crypto.Crypto
+    const digest = yield* Digest.Digest
 
     const input = new TextEncoder().encode(
       JSON.stringify(canonicalize({ data, creatorIds: [...creatorIds].toSorted() })),
     )
 
-    return yield* crypto.digest('SHA-256', input).pipe(Effect.orDie, Effect.map(Hex.encode))
+    return yield* digest.digest(Digest.sha256, input).pipe(Effect.map(Hex.encode))
   })
 
 type AudioWithCreators = SelectAudio & {
@@ -834,7 +835,7 @@ export const AudioServiceLayer = Layer.effect(
   Effect.gen(function* () {
     const db = yield* Database
     const mdx = yield* MdxService
-    const crypto = yield* Crypto.Crypto
+    const digest = yield* Digest.Digest
     const config = yield* ConfigService
     const uploadAssetService = yield* UploadAssetService
     const store = yield* ObjectStoreClient
@@ -908,7 +909,7 @@ export const AudioServiceLayer = Layer.effect(
         ).pipe(Effect.withSpan('audio.getBySlugForEdit', { attributes: { type, slug } })),
       create: (data, creatorIds, options) =>
         provideDb(createEffect(data, creatorIds, options, media)).pipe(
-          Effect.provideService(Crypto.Crypto, crypto),
+          Effect.provideService(Digest.Digest, digest),
           Effect.provideService(ConfigService, config),
           Effect.provideService(UploadAssetService, uploadAssetService),
           Effect.withSpan('audio.create'),

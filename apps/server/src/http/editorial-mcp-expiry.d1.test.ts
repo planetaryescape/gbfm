@@ -22,9 +22,7 @@ const PrivateResultToolkit = Toolkit.make(
   Tool.make('fixture_private_result', {
     parameters: Schema.Struct({ progress: Schema.Boolean }),
     success: Schema.Struct({ privateResult: Schema.String }),
-  })
-    .annotate(McpPermission, { scopes: ['posts:read'] })
-    .addDependency(McpServer.McpServer),
+  }).annotate(McpPermission, { scopes: ['posts:read'] }),
 )
 
 for (const format of ['json', 'sse']) {
@@ -45,26 +43,30 @@ for (const format of ['json', 'sse']) {
 
     const privateResult = 'Disposable private tool result that must never escape on failure'
 
-    const handlers = PrivateResultToolkit.toLayer({
-      fixture_private_result: ({ progress }) =>
-        Effect.gen(function* () {
-          if (progress) {
-            const server = yield* McpServer.McpServer
+    const handlers = PrivateResultToolkit.toLayer(
+      Effect.gen(function* () {
+        const server = yield* McpServer.McpServer
 
-            yield* server.notifications['notifications/progress']({
-              progressToken: 'private-result-progress',
-              progress: 1,
-              total: 1,
-              message: privateResult,
-            })
-          }
+        return {
+          fixture_private_result: ({ progress }) =>
+            Effect.gen(function* () {
+              if (progress) {
+                yield* server.notifications['notifications/progress']({
+                  progressToken: 'private-result-progress',
+                  progress: 1,
+                  total: 1,
+                  message: privateResult,
+                })
+              }
 
-          state.executions++
-          state.unavailable = state.failAfterExecution
+              state.executions++
+              state.unavailable = state.failAfterExecution
 
-          return { privateResult }
-        }),
-    })
+              return { privateResult }
+            }),
+        }
+      }),
+    ).pipe(Layer.provide(McpServer.McpServer.layer))
 
     const oauth = Layer.succeed(EditorialOAuth, {
       ...fixture.service,

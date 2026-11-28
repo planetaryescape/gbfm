@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 const port = process.env.OBSERVABILITY_TEST_PORT ?? '5191'
 
-const baseURL = `http://127.0.0.1:${port}`
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${port}`
 
 export default defineConfig({
   testDir: './e2e',
@@ -21,14 +21,16 @@ export default defineConfig({
     },
     { name: 'WebKit', use: { ...devices['iPhone 14 Pro'] } },
   ],
-  webServer: {
-    command: `bunx vite --host 127.0.0.1 --port ${port} --strictPort`,
-    url: `${baseURL}/@vite/client`,
-    env: {
-      VITE_SENTRY_ENABLED: 'true',
-      VITE_PUBLIC_SENTRY_DSN: 'https://abc123@o1.ingest.sentry.io/123',
-      VITE_SENTRY_ENVIRONMENT: 'development',
-      VITE_SENTRY_RELEASE: 'gbfm-www@0000000000000000000000000000000000000000',
-    },
-  },
+  webServer: process.env.PLAYWRIGHT_BASE_URL
+    ? undefined
+    : {
+        command: `bunx vite --host 127.0.0.1 --port ${port} --strictPort`,
+        url: `${baseURL}/@vite/client`,
+        env: {
+          VITE_SENTRY_ENABLED: 'true',
+          VITE_PUBLIC_SENTRY_DSN: 'https://abc123@o1.ingest.sentry.io/123',
+          VITE_SENTRY_ENVIRONMENT: 'development',
+          VITE_SENTRY_RELEASE: 'gbfm-www@0000000000000000000000000000000000000000',
+        },
+      },
 })

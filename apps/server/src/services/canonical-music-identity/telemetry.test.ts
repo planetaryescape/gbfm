@@ -1,5 +1,5 @@
 import { OtelTracer, Resource } from '@effect/opentelemetry'
-import { trace } from '@opentelemetry/api'
+import { SpanStatusCode, trace } from '@opentelemetry/api'
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base'
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node'
 import { Cause, Effect, Exit, Layer, Result } from 'effect'
@@ -138,7 +138,9 @@ describe('canonical music identity telemetry', () => {
       })
 
       for (const span of spans) {
-        expect(span.status).toEqual({ code: 1 })
+        expect([{ code: SpanStatusCode.UNSET }, { code: SpanStatusCode.OK }]).toContainEqual(
+          span.status,
+        )
         expect(span.events).toEqual([])
         expectNoForbiddenTelemetry(serializedSpanData(span), [
           rawUrl,

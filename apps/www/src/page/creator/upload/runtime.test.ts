@@ -1,16 +1,16 @@
 import { Cause, Effect, Exit, Fiber, Layer, Option, Schema, Scope } from 'effect'
 import { describe, expect, it } from 'vitest'
 
-import { StorageQuotaError } from './errors'
-import { uploadProgram } from './program'
+import { StorageQuotaError } from '../../../features/creator/upload/errors'
+import { uploadProgram } from '../../../features/creator/upload/program'
 import {
   computeFileFingerprint,
   createPersistedUpload,
   type PersistedResumableUpload,
-} from './protocol'
-import { CreatorUpload, CreatorUploadLayer } from './runtime'
-import { ResumableUploadStorage } from './storage'
-import { UploadTransport } from './transport'
+} from '../../../features/creator/upload/protocol'
+import { CreatorUpload, CreatorUploadLayer } from '../../../features/creator/upload/runtime'
+import { ResumableUploadStorage } from '../../../features/creator/upload/storage'
+import { UploadTransport } from '../../../features/creator/upload/transport'
 
 const file = (name = 'mix.mp3') =>
   new File(['abcdef'], name, { type: 'audio/mpeg', lastModified: 1 })

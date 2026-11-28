@@ -132,7 +132,14 @@ export function startBrowserTelemetry(input: {
 }): () => void {
   const release = boundedName(input.release, 'unknown')
   const sampleRate = input.sampleRate ?? (release === 'local' ? 1 : TELEMETRY_SAMPLE_RATE)
-  const session = anonymousSession(localStorage, Date.now())
+
+  const session = anonymousSession(
+    {
+      getItem: (key) => localStorage.getItem(key),
+      setItem: (key, value) => localStorage.setItem(key, value),
+    },
+    Date.now(),
+  )
 
   if (!isSampled(session, sampleRate)) return () => undefined
 
@@ -203,6 +210,8 @@ export function startBrowserTelemetry(input: {
       case 'LCP':
         name = 'lcp'
         break
+      default:
+        return
     }
 
     batcher.add({

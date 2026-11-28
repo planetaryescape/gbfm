@@ -5,14 +5,21 @@ test('player accepts a real collapse click during entry', async ({ page }) => {
   await page.goto('/shows/e2e-local-radio')
   await page.addStyleTag({
     content:
-      '.player-panel[data-enter] { transition-duration: 4s !important; transition-timing-function: linear !important; }',
+      '.native-player-panel[data-open] { transition-duration: 4s !important; transition-timing-function: linear !important; }',
   })
   await page.getByRole('button', { name: 'Play episode 1: Local Frequencies', exact: true }).click()
 
   const player = page.getByRole('dialog', { name: 'Now playing', exact: true })
-  const panel = page.locator('#fullscreen-player-panel')
+  const panel = player.locator('.native-player-panel')
   const collapse = player.getByRole('button', { name: 'Collapse player', exact: true })
-  await expect(panel).toHaveAttribute('data-enter')
+  await expect(panel).toHaveAttribute('data-open', '')
+  await expect
+    .poll(() =>
+      panel.evaluate((panel) =>
+        panel.getAnimations().some((animation) => animation.playState === 'running'),
+      ),
+    )
+    .toBe(true)
   await expect.poll(async () => (await collapse.boundingBox())?.y ?? Infinity).toBeLessThan(800)
   await collapse.evaluate((button) => {
     button.addEventListener(
@@ -20,7 +27,14 @@ test('player accepts a real collapse click during entry', async ({ page }) => {
       () => {
         button.setAttribute(
           'data-clicked-during-entry',
-          String(Boolean(button.closest('[data-enter]'))),
+          String(
+            Boolean(
+              button
+                .closest('.native-player-panel')
+                ?.getAnimations()
+                .some((animation) => animation.playState === 'running'),
+            ),
+          ),
         )
       },
       { once: true },
@@ -58,7 +72,7 @@ test('player slides as one opaque panel and releases scroll locking after collap
 
     while (performance.now() - started < 800) {
       await new Promise(requestAnimationFrame)
-      const panel = document.querySelector('#fullscreen-player-panel')
+      const panel = document.querySelector('.native-player-panel')
 
       if (panel) {
         const bounds = panel.getBoundingClientRect()
@@ -97,7 +111,7 @@ test('player slides as one opaque panel and releases scroll locking after collap
 
       while (performance.now() - started < 600) {
         await new Promise(requestAnimationFrame)
-        const panel = document.querySelector('#fullscreen-player-panel')
+        const panel = document.querySelector('.native-player-panel')
 
         if (panel) positions.push(panel.getBoundingClientRect().top)
       }
@@ -116,7 +130,7 @@ test('player slides as one opaque panel and releases scroll locking after collap
   await expect
     .poll(() =>
       page
-        .locator('#fullscreen-player-panel')
+        .locator('.native-player-panel')
         .evaluate((element) => getComputedStyle(element).transitionDuration),
     )
     .toBe('0s')

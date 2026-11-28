@@ -6,11 +6,11 @@ GBFM is a compact, music-first archive and studio tool, not a generic SaaS kit. 
 
 - `packages/theme/src/tokens/brand.ts` owns the brand palette; `packages/theme/styles/theme.css` supplies shared semantic CSS variables through `@gbfm/theme/styles.css`.
 - `apps/www/src/styles/main.css` maps those variables into Tailwind CSS v4 and owns web utilities, typography, and motion styles.
-- `apps/www/src/view/` owns shared Foldkit presentation, including artwork, icons, links, navigation, and rich content.
-- `@foldkit/ui` supplies accessible dialog and popover primitives. State, messages, commands, and workflow behavior belong to the feature or page submodel, not a shared UI package.
+- `apps/www/src/ui/` owns shared native Effect UI presentation, including artwork, icons, links and rich content. `src/features/` owns stateful Components and feature presentation; `src/app/` composes the routed shell.
+- `@effect/ui-kit` supplies dialog and popover primitives. Schema-backed model/messages, updates, queries, commands and managed mounts belong to the owning Component or provider, not a shared UI package.
 - React is still used by Expo mobile, React Email templates, and social-image rendering. It is not the WWW view layer.
 
-See [FOLDKIT.md](../FOLDKIT.md) for runtime, navigation, and folder conventions.
+See [EFFECT-UI.md](../EFFECT-UI.md) for runtime, navigation, request isolation and folder conventions. This guidance describes the conversion branch, not a deployed default cutover.
 
 ## Visual language
 
@@ -79,7 +79,7 @@ The compact player shows artwork, track identity, and play/pause only. Queue and
 
 - Motion confirms interactivity: small lifts, border emphasis, subtle image scaling, and short transitions. Respect reduced motion.
 - Keep keyboard focus visible. Label controls, name icon-only actions, preserve native input types, and make disabled/loading states clear.
-- Prefer native selects, sliders, and disclosures when they already meet the need. Use the Foldkit primitives for modal focus, dismissal, and scroll locking.
+- Prefer native selects, sliders, and disclosures when they already meet the need. Use the pinned Effect UI Kit primitives for modal focus, dismissal, and scroll locking; preserve keyboard behavior and narrowly scoped password-manager access.
 - Show loading progress or skeletons, useful empty-state instructions, and visible errors. Use badges and metadata for draft/published/review status rather than oversized alerts.
 - Compose existing views before adding new styling patterns. Keep data fetching, persistence, playback, and route behavior in their owning submodels.
 - Verify realistic music content, long titles, empty/loading/error states, keyboard interaction, and constrained widths through the running app and existing browser tests. There is no separate story gallery.

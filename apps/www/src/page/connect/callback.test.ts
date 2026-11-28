@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 
-import { consentFormActionSource } from './callback'
-import { ConsentState, Continuation, parseContinuation } from './domain'
+import { consentFormActionSource } from '../../domain/auth/callback'
+import { ConsentState, Continuation, parseContinuation } from '../../domain/auth/connect'
 
 const verified = (callback: string) => {
   const params = new URLSearchParams({

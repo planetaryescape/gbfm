@@ -325,7 +325,8 @@ const enrichImportedPlaylistLinksEffect = (
           if (execution) yield* execution.checkpoint
           const exit = yield* Effect.exit(enrichTrackLinksEffect(identity, playlistId, track))
 
-          if (execution && Exit.hasInterrupts(exit)) return yield* Effect.failCause(exit.cause)
+          if (execution && Exit.isFailure(exit) && Exit.hasInterrupts(exit))
+            return yield* Effect.failCause(exit.cause)
           processed += 1
 
           if (Exit.isFailure(exit)) {
@@ -545,7 +546,8 @@ export const importSpotifyPlaylistEffect = (
           }),
         )
 
-        if (execution && Exit.hasInterrupts(exit)) return yield* Effect.failCause(exit.cause)
+        if (execution && Exit.isFailure(exit) && Exit.hasInterrupts(exit))
+          return yield* Effect.failCause(exit.cause)
         processed += 1
 
         if (execution)

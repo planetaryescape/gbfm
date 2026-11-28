@@ -1,9 +1,13 @@
 import { Option } from 'effect'
 import { expect, test } from 'vitest'
 
-import { clientLogoScript, clientLogoScriptHash, parseClientLogo } from './client-logo'
-import { appIdentity } from './document'
-import { connectionResponse } from './response'
+import {
+  clientLogoScript,
+  clientLogoScriptHash,
+  parseClientLogo,
+} from '../../domain/auth/client-logo'
+import { appIdentity } from '../../features/connect/document'
+import { connectionResponse } from '../../features/connect/response'
 
 test.each([
   'https://opencode.ai/web-app-manifest-512x512.png',

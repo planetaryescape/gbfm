@@ -8,7 +8,7 @@ import {
   authErrorMessages,
   parseAuthErrorKey,
   readAuthErrorCode,
-} from './errors'
+} from '../../domain/auth/errors'
 
 it('maps better-auth error codes to form error keys', () => {
   expect(authErrorKey(401, 'INVALID_EMAIL_OR_PASSWORD')).toBe('credentials')

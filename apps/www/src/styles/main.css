@@ -1237,13 +1237,17 @@
   color: var(--foreground);
   padding: 0;
 }
-.overlay-dialog:not([open]) {
+.overlay-dialog:not([open]):not(:popover-open) {
   display: none;
 }
 .overlay-dialog {
   margin: 0;
   overflow: hidden;
   color: var(--foreground);
+}
+.overlay-dialog:popover-open:has(.search-dialog) {
+  display: block;
+  overflow: visible;
 }
 .player-dialog {
   overflow: clip;

@@ -17,7 +17,7 @@
     "device:local": "expo run:ios --device --port 8091"
   },
   "dependencies": {
-    "@effect/atom-react": "4.0.6",
+    "@effect/atom-react": "4.1.6",
     "@gbfm/api": "workspace:*",
     "@gbfm/core": "workspace:*",
     "@gbfm/observability": "workspace:*",
@@ -28,7 +28,7 @@
     "@sentry/react-native": "8.33.0",
     "@planetaryescape/opensound": "npm:@jsr/planetaryescape__opensound@0.7.2",
     "babel-preset-expo": "~58.0.0",
-    "effect": "4.0.6",
+    "effect": "4.1.6",
     "expo": "^58.0.21",
     "expo-asset": "~58.0.19",
     "expo-audio": "~58.0.10",

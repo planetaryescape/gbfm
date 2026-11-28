@@ -2,8 +2,8 @@ import { GetFavoritesResponse } from '@gbfm/api/favorites'
 import { ShowSubscriptionStatusResponse } from '@gbfm/api/shows'
 import { Schema } from 'effect'
 
-import { Principal } from '../../model'
-import type { Document as PublicActionDocument } from '../../public-actions'
+import { Principal } from '../../domain/principal'
+import type { PublicActionDocument } from '../../domain/public-action'
 import { apiRequest } from '../api'
 import { json, record, text } from './shared'
 

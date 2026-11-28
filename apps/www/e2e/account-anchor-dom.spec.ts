@@ -48,10 +48,7 @@ test('account trigger identity and popup anchor survive parent renders and repea
     expect(bounds.x).toBeGreaterThan(0)
     expect(bounds.y + bounds.height).toBeLessThanOrEqual(anchor.y)
     expect(Math.abs(bounds.x + bounds.width - anchor.x - anchor.width)).toBeLessThanOrEqual(1)
-    await page
-      .locator('.station-desktop')
-      .getByRole('button', { name: /^Theme:/ })
-      .click()
+    await page.locator('main').click({ position: { x: 10, y: 10 } })
     await expect(menu).not.toBeVisible()
     await expect(trigger).toHaveAttribute('id', originalId ?? '')
   }

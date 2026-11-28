@@ -3,7 +3,9 @@ import { expect, test } from '@playwright/test'
 import { expectNativeReady } from './fixtures/native-ready'
 
 for (const theme of ['light', 'dark']) {
-  test(`${theme} mobile dock keeps its fade and active tint while collapsing`, async ({ page }) => {
+  test(`${theme} mobile dock keeps its fade and active tint while collapsing`, async ({
+    page,
+  }, testInfo) => {
     await page.addInitScript((theme) => {
       localStorage.setItem('vite-ui-theme', theme)
       localStorage.setItem(
@@ -37,6 +39,29 @@ for (const theme of ['light', 'dark']) {
     expect(await active.evaluate((element) => getComputedStyle(element, '::before').content)).toBe(
       'none',
     )
+    const tabAlignment = await navigation
+      .locator('.dock-tab:not(.dock-tabs-expand)')
+      .evaluateAll((elements) =>
+        elements.map((element) => {
+          const button = element.getBoundingClientRect()
+          const icon = element.querySelector('svg')?.getBoundingClientRect()
+          const label = element.querySelector('span')?.getBoundingClientRect()
+
+          return {
+            centerOffset: icon ? icon.x + icon.width / 2 - (button.x + button.width / 2) : null,
+            iconTop: icon?.top,
+            labelTop: label?.top,
+          }
+        }),
+      )
+    expect(tabAlignment).toHaveLength(5)
+    for (const tab of tabAlignment) {
+      expect(tab.centerOffset).not.toBeNull()
+      expect(Math.abs(tab.centerOffset ?? Infinity)).toBeLessThanOrEqual(0.5)
+      expect(tab.iconTop).toBe(tabAlignment[0]?.iconTop)
+      expect(tab.labelTop).toBe(tabAlignment[0]?.labelTop)
+    }
+    await page.screenshot({ path: testInfo.outputPath('dock-expanded.png') })
 
     const expandedFadeHeight = await dock.evaluate((element) =>
       parseFloat(getComputedStyle(element, '::before').height),
@@ -50,6 +75,7 @@ for (const theme of ['light', 'dark']) {
     await expect(expand).toBeVisible()
     await expect(expand).toHaveCSS('color', activeColor)
     await expect(expand).not.toHaveAttribute('aria-hidden', 'true')
+    await expect(expand).toHaveText('Nav')
 
     const glyph = (locator: typeof expand) =>
       locator.locator('svg path').evaluate((path) => path.getAttribute('d'))
@@ -59,6 +85,24 @@ for (const theme of ['light', 'dark']) {
     const hitArea = await expand.boundingBox()
     expect(hitArea?.width).toBeGreaterThanOrEqual(44)
     expect(hitArea?.height).toBeGreaterThanOrEqual(44)
+    await expect
+      .poll(async () => {
+        const container = await navigation.boundingBox()
+        const button = await expand.boundingBox()
+
+        if (!container || !button) return Infinity
+
+        return Math.abs(button.y + button.height / 2 - (container.y + container.height / 2))
+      })
+      .toBeLessThanOrEqual(0.5)
+    await expect
+      .poll(async () => {
+        const container = await navigation.boundingBox()
+
+        return container ? Math.abs(container.width - container.height) : Infinity
+      })
+      .toBeLessThanOrEqual(0.5)
+    await page.screenshot({ path: testInfo.outputPath('dock-collapsed.png') })
 
     const fade = await dock.evaluate((element) => {
       const style = getComputedStyle(element, '::before')

@@ -14,7 +14,7 @@
 
 `apps/www/src/page/tweet/position.ts` stores a validated slug in `localStorage` under `gbfm:tweet-checkpoint:<encoded-account-id>`. Storage denial degrades to in-memory progress and Latest on a fresh session. The former tab-only `sessionStorage` checkpoint was not durable.
 
-The reader already had chronological navigation, next unread, Latest, random unread, month navigation, reading-history writes and missing-checkpoint fallback. The resume change retains those behaviors while separating accounts. A visible **Newer unread tweets available** notice offers **View latest**. The earlier position is retained in memory during that visit, not advertised as a permanent saved bookmark. Focus, visibility and page-show events refresh neighbours without replacing the current tweet.
+The reader already had chronological navigation, next unread, Latest, random unread, month navigation, reading-history writes and missing-checkpoint fallback. The resume change retains those behaviors while separating accounts. A compact **View latest** link sits alongside the reader controls when newer unread tweets are available, with a screen-reader status instead of a full-width notice. The earlier position is retained in memory during that visit, not advertised as a permanent saved bookmark. Focus, visibility and page-show events refresh neighbours without replacing the current tweet.
 
 ## Mobile implementation
 

@@ -7,6 +7,7 @@ import { disconnected } from '../../spotify/connection'
 import { iconPaths, lucide } from '../../ui/icons'
 import { ReadSpotifyStatus } from './commands'
 import { SpotifyControlMessage, SpotifyProviderMessage } from './domain'
+import { SpotifyLoadRecovery } from './load-recovery'
 import { SpotifyProvider } from './provider'
 
 const SpotifyStatusControls = Html.component({
@@ -21,6 +22,7 @@ const SpotifyStatusControls = Html.component({
     busy: Schema.Boolean,
     target: Schema.NullOr(Schema.String),
     notice: Schema.String,
+    recovery: Schema.optional(Schema.Literal('reload')),
   }),
   model: Schema.Null,
   message: SpotifyControlMessage,
@@ -53,6 +55,12 @@ const SpotifyStatusControls = Html.component({
     )
 
     const unavailable = Predicate.isTagged(result, 'Failure')
+
+    const reload =
+      (unavailable || props.recovery === 'reload') &&
+      SpotifyLoadRecovery(h, {
+        props: { interactive: props.interactive, busy: props.busy },
+      })
 
     const refresh = h.button
       .attr('type', 'button')
@@ -90,6 +98,7 @@ const SpotifyStatusControls = Html.component({
             : button('connect', 'Connect Spotify', iconPaths.music),
           refresh,
           h.p.attr('role', 'status').children(props.notice),
+          reload,
         )
 
     if (props.mode === 'onboarding') {
@@ -111,6 +120,7 @@ const SpotifyStatusControls = Html.component({
           button('connect', 'Connect Spotify', iconPaths.music),
           props.target === props.url && h.p.attr('role', 'status').children(props.notice),
           unavailable && refresh,
+          reload,
         )
     }
 
@@ -154,6 +164,7 @@ const SpotifyStatusControls = Html.component({
           props.notice !== '' &&
           h.p.attr('role', 'status').class('text-xs text-muted-foreground').children(props.notice),
         unavailable && refresh,
+        reload,
       )
   },
 })

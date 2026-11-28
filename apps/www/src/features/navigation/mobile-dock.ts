@@ -18,7 +18,7 @@ const mobileTabs = [
 const tabClass =
   'dock-tab relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-sm border-0 bg-transparent p-0 no-underline text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring aria-[current=page]:text-highlight'
 
-const tabIconClass = 'size-[22px] shrink-0 [stroke-width:1.75]'
+const tabIconClass = 'block size-[22px] shrink-0 [stroke-width:1.75]'
 
 const DockEvents = UiSchema.TaggedEnum({
   RequestedSearch: {},
@@ -81,7 +81,7 @@ export const MobileDock = Html.component({
               .on('click', DockMessage.RequestedExpand())
               .attr('data-active', onTabRoute ? '' : undefined)
               .class(`dock-tabs-expand ${tabClass} data-[active]:text-highlight`)
-              .children(lucide(h, iconPaths.tabs, tabIconClass)),
+              .children(lucide(h, iconPaths.chevronUp, tabIconClass), tabLabel('Nav')),
             mobileTabs.map(({ href, label, icon }) =>
               h.a
                 .key(href)

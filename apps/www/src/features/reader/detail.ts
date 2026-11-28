@@ -100,11 +100,6 @@ export const ReaderDetail = ReaderPageDef.fragment((h, model: ReaderPageModel) =
         monthOf(post.createdAt),
       ),
       h.p.class('text-xs text-muted-foreground lg:hidden').children(hint),
-      h.progress
-        .attr('max', '100')
-        .attr('value', String(model.progress))
-        .attr('aria-label', 'Reading progress')
-        .class('h-1 w-full'),
       h.div
         .attr('data-reader-motion', '')
         .attr('data-tweet-motion', '')

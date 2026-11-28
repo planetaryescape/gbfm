@@ -18,6 +18,7 @@ import {
   dragOffset,
   isActiveNavLink,
   navigationPathname,
+  navigationLinks,
   shouldDismiss,
   visibleNavigationLinks,
 } from './links'
@@ -41,6 +42,7 @@ export const StationNavigation = Html.component({
   init: ({ props }) => ({
     url: props.url,
     principalId: props.principal?.id ?? null,
+    collectionsVisible: props.principal?.role === 'admin',
     interactive: false,
     menuOpen: false,
     menuOpenMethod: null,
@@ -60,9 +62,18 @@ export const StationNavigation = Html.component({
         }),
       ),
     ),
+    props.principalKnown &&
+      Subscription.make('navigation-collections', [props.principal?.role ?? null], () =>
+        Stream.make(
+          NavigationMessage.ChangedCollectionsVisibility({
+            visible: props.principal?.role === 'admin',
+          }),
+        ),
+      ),
   ],
   update: {
     Ready: ($) => $.evolve({ interactive: true }),
+    ChangedCollectionsVisibility: ($, { visible }) => $.evolve({ collectionsVisible: visible }),
     ChangedLocation: ($, { url, principalId }) => {
       if ($.model.url === url && $.model.principalId === principalId) return $.model
 
@@ -154,6 +165,23 @@ export const StationNavigation = Html.component({
         .attr('aria-current', isActiveNavLink(pathname, href) ? 'page' : undefined)
         .children(label)
 
+    const account = () => {
+      if (!h.props.principalKnown)
+        return h.span
+          .attr('role', 'status')
+          .attr('aria-label', 'Checking account')
+          .class('size-8 bg-muted motion-safe:animate-pulse')
+
+      if (principal) return accountMenu(h, principal, model.accountOpen, model.interactive)
+
+      return h.a
+        .attr('href', signInHref(pathname))
+        .class(
+          `inline-flex h-8 shrink-0 items-center rounded-sm px-2 text-xs font-semibold text-highlight no-underline transition-colors hover:bg-muted/60 ${focusRing}`,
+        )
+        .children('Log in')
+    }
+
     return ThemeControls(h, {
       view: (themeControls) =>
         h.div
@@ -177,7 +205,21 @@ export const StationNavigation = Html.component({
                 h.nav
                   .attr('aria-label', 'Primary')
                   .class('flex shrink-0 items-center gap-1')
-                  .children(links.map(([href, label]) => navLink(href, label))),
+                  .children(
+                    navigationLinks.map(([href, label]) => {
+                      if (href !== '/collections' || principal?.role === 'admin')
+                        return navLink(href, label)
+
+                      if (!h.props.principalKnown && model.collectionsVisible)
+                        return h.span
+                          .key(href)
+                          .attr('aria-hidden', 'true')
+                          .class(`${desktopLinkClass} invisible`)
+                          .children(label)
+
+                      return null
+                    }),
+                  ),
                 h.button
                   .attr('type', 'button')
                   .attr('aria-label', 'Search')
@@ -192,23 +234,9 @@ export const StationNavigation = Html.component({
                   .class('flex shrink-0 items-center gap-3')
                   .children(
                     DesktopNowPlaying(h, { key: 'station-now-playing' }),
-                    themeControls
-                      .button(h.button)
-                      .class(`btn btn-quiet shrink-0 text-xs ${focusRing}`)
-                      .children(themeControls.label),
-                    principal
-                      ? accountMenu(
-                          h,
-                          principal,
-                          model.accountOpen,
-                          model.interactive && h.props.principalKnown,
-                        )
-                      : h.a
-                          .attr('href', signInHref(pathname))
-                          .class(
-                            `inline-flex h-8 shrink-0 items-center rounded-sm px-2.5 text-xs font-semibold text-highlight no-underline transition-colors hover:bg-muted/60 ${focusRing}`,
-                          )
-                          .children('Log in'),
+                    h.div
+                      .class('flex h-11 w-14 shrink-0 items-center justify-end')
+                      .children(account()),
                   ),
               ),
             MobileDock(h, {
@@ -240,9 +268,10 @@ export const StationNavigation = Html.component({
                 links.map(([href, label]) => navLink(href, label)),
                 navLink('/mixes', 'Mixes'),
                 navLink('/subscribe', 'Subscribe'),
-                principal
-                  ? navLink('/dashboard', 'Dashboard')
-                  : navLink(signInHref(pathname), 'Log in'),
+                h.props.principalKnown &&
+                  (principal
+                    ? navLink('/dashboard', 'Dashboard')
+                    : navLink(signInHref(pathname), 'Log in')),
                 principal &&
                   h.form
                     .attr('method', 'post')

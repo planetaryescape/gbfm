@@ -767,6 +767,7 @@
 .dock-tabs > .dock-tabs-expand {
   position: absolute;
   inset: 0.25rem;
+  height: auto;
   opacity: 0;
   pointer-events: none;
 }
@@ -3074,8 +3075,8 @@
     color: var(--foreground);
   }
   .rich-content-music-link-icon {
-    width: 0.75rem;
-    height: 0.75rem;
+    width: 1.125rem;
+    height: 1.125rem;
     flex-shrink: 0;
   }
   a.music-stream-link {

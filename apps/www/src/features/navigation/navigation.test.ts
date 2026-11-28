@@ -14,26 +14,37 @@ const props = {
 }
 
 describe('StationNavigation', () => {
-  it.effect(
-    'places theme controls in desktop navigation and the existing mobile account section',
-    () =>
-      Effect.gen(function* () {
-        const scene = yield* Scene.make(StationNavigation, props)
-        scene.expectMount(NavigationReady())
-        scene.expectMount(TrackMenuDrag({ active: false }))
-        const theme = Locator.attr('aria-label', 'Theme: system')
-        assert.lengthOf(scene.all(theme), 2)
-        assert.lengthOf(
-          scene.all(
-            Locator.inside(Locator.attr('class', 'flex shrink-0 items-center gap-3'), theme),
-          ),
-          1,
-        )
-        assert.lengthOf(
-          scene.all(Locator.inside(Locator.attr('aria-label', 'Menu links'), theme)),
-          1,
-        )
-      }),
+  it.effect('keeps appearance settings in the menu, never in the desktop navbar', () =>
+    Effect.gen(function* () {
+      const scene = yield* Scene.make(StationNavigation, props)
+      scene.expectMount(NavigationReady())
+      scene.expectMount(TrackMenuDrag({ active: false }))
+      const theme = Locator.attr('aria-label', 'Theme: system')
+      assert.lengthOf(scene.all(theme), 1)
+      assert.lengthOf(
+        scene.all(Locator.inside(Locator.attr('class', 'flex shrink-0 items-center gap-3'), theme)),
+        0,
+      )
+      assert.lengthOf(scene.all(Locator.inside(Locator.attr('aria-label', 'Menu links'), theme)), 1)
+    }),
+  )
+
+  it.effect('does not advertise login while account identity is being checked', () =>
+    Effect.gen(function* () {
+      const scene = yield* Scene.make(StationNavigation, {
+        ...props,
+        principalKnown: false,
+      })
+
+      scene.expectMount(NavigationReady())
+      scene.expectMount(TrackMenuDrag({ active: false }))
+
+      assert.lengthOf(scene.all(Locator.attr('aria-label', 'Checking account')), 1)
+      assert.lengthOf(scene.all(Locator.attr('href', '/auth/sign-in?returnTo=%2Fabout')), 0)
+      scene.props(props)
+      assert.lengthOf(scene.all(Locator.attr('aria-label', 'Checking account')), 0)
+      assert.isAbove(scene.all(Locator.text('Log in')).length, 0)
+    }),
   )
 
   it.effect('keeps menu actions inert before hydration', () =>
@@ -160,6 +171,29 @@ describe('StationNavigation', () => {
         principal: { id: 'admin', name: 'Admin', username: 'admin', image: null, role: 'admin' },
       })
       assert.isAbove(scene.all(Locator.attr('href', '/collections')).length, 0)
+    }),
+  )
+
+  it.effect('reserves the admin link slot without exposing it while identity is pending', () =>
+    Effect.gen(function* () {
+      const scene = yield* Scene.make(StationNavigation, {
+        ...props,
+        principal: { id: 'admin', name: 'Admin', username: 'admin', image: null, role: 'admin' },
+      })
+
+      scene.expectMount(NavigationReady())
+      scene.expectMount(TrackMenuDrag({ active: false }))
+      scene.props({
+        ...props,
+        url: 'https://goosebumps.fm/editorial',
+        principalKnown: false,
+      })
+      assert.lengthOf(scene.all(Locator.attr('href', '/collections')), 0)
+      const primary = Locator.attr('aria-label', 'Primary')
+      assert.lengthOf(scene.all(Locator.inside(primary, Locator.text('Collections'))), 1)
+      assert.lengthOf(scene.all(Locator.attr('aria-label', 'Checking account')), 1)
+      scene.props({ ...props, url: 'https://goosebumps.fm/editorial' })
+      assert.lengthOf(scene.all(Locator.inside(primary, Locator.text('Collections'))), 0)
     }),
   )
 })

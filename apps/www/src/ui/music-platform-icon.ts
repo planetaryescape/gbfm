@@ -3,6 +3,15 @@ import type { Html } from '@effect/ui/html'
 
 import { iconPaths, lucide, spotifyIcon } from './icons'
 
+const colors = new Map([
+  ['apple_music', '#FA243C'],
+  ['bandcamp', '#408294'],
+  ['soundcloud', '#FF5500'],
+  ['deezer', '#A238FF'],
+  ['youtube', '#FF0000'],
+  ['youtube_music', '#FF0000'],
+])
+
 const paths = new Map([
   [
     'apple_music',
@@ -49,7 +58,7 @@ export const musicPlatformIcon = <Message>(
     .el('svg')
     .attr('class', className)
     .attr('viewBox', '0 0 24 24')
-    .attr('fill', 'currentColor')
+    .attr('fill', colors.get(platform) ?? 'currentColor')
     .attr('aria-hidden', String(true))
     .children([h.el('path').attr('d', path)])
 }

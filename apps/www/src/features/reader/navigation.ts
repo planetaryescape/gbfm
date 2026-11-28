@@ -47,10 +47,10 @@ export const ReaderNavigation = (
 ) =>
   h.nav
     .attr('aria-label', 'Tweet reader')
-    .class('tweet-reader-navigation relative shrink-0 space-y-3')
+    .class('tweet-reader-navigation relative flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2')
     .children(
       h.div
-        .class('flex gap-2')
+        .class('flex items-center gap-2')
         .children(
           NavigationArrow(h, 'newer', chronological?.newer),
           NavigationArrow(h, 'older', chronological?.older),
@@ -62,7 +62,7 @@ export const ReaderNavigation = (
         .children(
           h.summary
             .attr('aria-label', 'Reading options')
-            .class('btn btn-quiet cursor-pointer')
+            .class('btn btn-quiet cursor-pointer text-xs text-muted-foreground')
             .children('Options'),
           h.div
             .class(
@@ -130,10 +130,11 @@ export const ReaderNavigation = (
       (neighbours?.newerUnread || model.returnSlug) &&
         h.section
           .attr('aria-label', 'Reading progress')
-          .class('flex flex-wrap items-center justify-between gap-3 border border-border p-3')
+          .class('ml-auto flex flex-wrap items-center gap-3 text-xs text-muted-foreground')
           .children(
             h.p
               .attr('role', 'status')
+              .class('sr-only')
               .children(
                 neighbours?.newerUnread
                   ? 'Newer unread tweets available.'
@@ -143,12 +144,16 @@ export const ReaderNavigation = (
               h.a
                 .attr('href', '/tweet/latest')
                 .on('click', ReaderPageMessage.ClickedLatest())
-                .class('btn btn-primary')
+                .class(
+                  'inline-flex min-h-11 items-center gap-2 text-xs text-muted-foreground no-underline hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                )
                 .children('View latest'),
             model.returnSlug &&
               h.a
                 .attr('href', tweetHref(model.returnSlug))
-                .class('btn')
+                .class(
+                  'inline-flex min-h-11 items-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                )
                 .children('Back to where I was'),
           ),
       model.current !== null &&

@@ -6,6 +6,7 @@ import { Predicate, Schema } from 'effect'
 import { iconPaths, pixelIcon, pixelPlayPath } from '../../ui/icons'
 import { ReadSpotifyStatus } from '../spotify/commands'
 import { type SpotifyAction, SpotifyProviderMessage } from '../spotify/domain'
+import { SpotifyLoadRecovery } from '../spotify/load-recovery'
 import { SpotifyProvider } from '../spotify/provider'
 
 export const SpotlightSpotifyProps = Schema.Struct({
@@ -31,6 +32,7 @@ const SpotlightSpotifyControls = Html.component({
     busy: Schema.Boolean,
     target: Schema.NullOr(Schema.String),
     notice: Schema.String,
+    recovery: Schema.optional(Schema.Literal('reload')),
   }),
   model: Schema.Null,
   message: SpotlightSpotifyMessage,
@@ -114,6 +116,13 @@ const SpotlightSpotifyControls = Html.component({
           .children('Retry Spotify'),
       )
 
+    const reload =
+      (Predicate.isTagged(result, 'Failure') ||
+        (provider.target === h.props.url && provider.recovery === 'reload')) &&
+      SpotifyLoadRecovery(h, {
+        props: { interactive, busy: provider.busy },
+      })
+
     if (h.props.onboarding)
       return h.aside
         .class('spotlight-onboarding not-prose')
@@ -133,6 +142,7 @@ const SpotlightSpotifyControls = Html.component({
                 button('Connect Spotify', SpotlightSpotifyMessage.ClickedConnect(), null),
                 retry,
                 notice,
+                reload,
               ),
         )
 
@@ -150,6 +160,7 @@ const SpotlightSpotifyControls = Html.component({
               button('Save', SpotlightSpotifyMessage.ClickedSave(), iconPaths.heart),
           ),
         notice,
+        reload,
       )
   },
 })

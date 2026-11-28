@@ -31,6 +31,7 @@ export const SpotifyProviderModel = Schema.Struct({
   ),
   target: Schema.NullOr(Schema.String),
   notice: Schema.String,
+  recovery: Schema.optional(Schema.Literal('reload')),
 })
 
 export const SpotifyProviderMessage = UiSchema.TaggedEnum({
@@ -47,6 +48,7 @@ export const SpotifyProviderMessage = UiSchema.TaggedEnum({
     notice: Schema.String,
     revision: Schema.Number,
     status: Schema.NullOr(SpotifyStatus),
+    recovery: Schema.optional(Schema.Literal('reload')),
   },
 })
 

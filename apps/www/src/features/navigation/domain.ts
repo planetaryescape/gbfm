@@ -19,6 +19,7 @@ export const NavigationEvents = UiSchema.TaggedEnum({
 export const NavigationMessage = UiSchema.TaggedEnum({
   Ready: {},
   ChangedLocation: { url: Schema.String, principalId: Schema.NullOr(Schema.String) },
+  ChangedCollectionsVisibility: { visible: Schema.Boolean },
   RequestedSearch: {},
   OpenedMenu: { method: DialogInteraction },
   ClosedMenu: {},
@@ -42,6 +43,7 @@ export type NavigationMessage = typeof NavigationMessage.Type
 export const NavigationModel = Schema.Struct({
   url: Schema.String,
   principalId: Schema.NullOr(Schema.String),
+  collectionsVisible: Schema.Boolean,
   interactive: Schema.Boolean,
   menuOpen: Schema.Boolean,
   menuOpenMethod: Schema.NullOr(DialogInteraction),

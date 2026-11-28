@@ -491,15 +491,15 @@ describe('richContentView', () => {
 
   it('gives each streaming platform a distinct decorative icon without losing link labels or destinations', async () => {
     const platforms = [
-      { platform: 'spotify', label: 'Spotify' },
-      { platform: 'apple_music', label: 'Apple Music' },
-      { platform: 'bandcamp', label: 'Bandcamp' },
-      { platform: 'soundcloud', label: 'SoundCloud' },
-      { platform: 'tidal', label: 'Tidal' },
-      { platform: 'deezer', label: 'Deezer' },
-      { platform: 'amazon_music', label: 'Amazon Music' },
-      { platform: 'youtube', label: 'YouTube' },
-      { platform: 'youtube_music', label: 'YT Music' },
+      { platform: 'spotify', label: 'Spotify', color: '#1DB954' },
+      { platform: 'apple_music', label: 'Apple Music', color: '#FA243C' },
+      { platform: 'bandcamp', label: 'Bandcamp', color: '#408294' },
+      { platform: 'soundcloud', label: 'SoundCloud', color: '#FF5500' },
+      { platform: 'tidal', label: 'Tidal', color: 'currentColor' },
+      { platform: 'deezer', label: 'Deezer', color: '#A238FF' },
+      { platform: 'amazon_music', label: 'Amazon Music', color: 'currentColor' },
+      { platform: 'youtube', label: 'YouTube', color: '#FF0000' },
+      { platform: 'youtube_music', label: 'YT Music', color: '#FF0000' },
     ]
 
     const source = Schema.decodeUnknownSync(RichContentDocument)({
@@ -528,6 +528,9 @@ describe('richContentView', () => {
     expect(links.map(textContent)).toEqual(platforms.map(({ label }) => label))
     expect(links.map((link) => attribute(link, 'href'))).toEqual(
       platforms.map(({ platform }) => `https://example.com/${platform}`),
+    )
+    expect(links.map((link) => attribute(first(findAll(link, 'svg')), 'fill'))).toEqual(
+      platforms.map(({ color }) => color),
     )
 
     for (const link of links) {

@@ -107,9 +107,10 @@ export const mobileMenu = (
                   ]),
                   section('Account', [
                     appearance,
-                    principal
-                      ? link('/dashboard', 'Dashboard', iconPaths.dashboard)
-                      : link(signInHref(pathname), 'Log in', iconPaths.logIn),
+                    props.principalKnown &&
+                      (principal
+                        ? link('/dashboard', 'Dashboard', iconPaths.dashboard)
+                        : link(signInHref(pathname), 'Log in', iconPaths.logIn)),
                     principal &&
                       h.form
                         .attr('method', 'post')

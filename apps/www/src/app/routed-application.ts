@@ -16,6 +16,7 @@ import { SearchDialog } from '../features/search/dialog'
 import { SpotifyProviderMessage } from '../features/spotify/domain'
 import { spotifyCommandsLayer, SpotifyProvider } from '../features/spotify/provider'
 import { parseRoute, Route as PageRoute } from '../route'
+import { pageSkeleton } from '../ui/page-skeleton'
 import { siteHead } from './head'
 import { navigationCompleted, navigationStarted } from './navigation-events'
 import { PageContent, ReaderContent } from './page-content'
@@ -670,7 +671,7 @@ const RoutedChrome = Html.component({
               .children('Retry'),
           )
 
-      return h.section.class('page').attr('role', 'status').children('Loading page…')
+      return pageSkeleton(h)
     }
 
     const site = h.div.class('site').children(

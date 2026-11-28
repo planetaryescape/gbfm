@@ -78,13 +78,16 @@ test('real theme control cycles, persists across reloads and follows system pref
   page,
 }, info) => {
   await page.emulateMedia({ colorScheme: 'dark' })
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/about')
   await expect(page.locator('html')).toHaveAttribute('data-gbfm-hydrated', 'true')
+  await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await page.getByRole('button', { name: 'Theme: system', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Theme: light', exact: true })).toBeVisible()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await expect.poll(() => page.evaluate(() => localStorage.getItem('vite-ui-theme'))).toBe('light')
   await page.reload()
+  await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Theme: light', exact: true })).toBeVisible()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await page.getByRole('button', { name: 'Theme: light', exact: true }).click()

@@ -1,7 +1,7 @@
 import { Html } from '@effect/ui/html'
 import { Schema } from 'effect'
 
-import { iconPaths, lucide } from '../../ui/icons'
+import { iconPaths, pixelIcon, pixelPlayPath } from '../../ui/icons'
 import { PlayerControlMessage, PlayerProviderMessage } from '../player/domain'
 import { PlayerProvider } from '../player/provider'
 
@@ -47,11 +47,9 @@ export const DesktopNowPlaying = Html.component({
             .attr('aria-label', playing ? 'Pause' : 'Play')
             .on('click', PlayerProviderMessage.RequestedTogglePlayPause())
             .class(
-              'btn btn-quiet btn-icon shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring border border-border bg-transparent text-foreground',
+              'flex size-11 shrink-0 items-center justify-center border-0 bg-transparent p-0 text-foreground hover:text-highlight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             )
-            .children(
-              lucide(h, playing ? iconPaths.pause : iconPaths.play, 'h-3.5 w-3.5 fill-current'),
-            ),
+            .children(pixelIcon(h, playing ? iconPaths.pause : pixelPlayPath, 'size-6', true)),
           h.button
             .attr('type', 'button')
             .attr('aria-label', `Now playing: ${current.title}`)

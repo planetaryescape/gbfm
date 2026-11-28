@@ -1,3 +1,52 @@
+# [2.141.0](https://github.com/planetaryescape/gbfm/compare/v2.140.3...v2.141.0) (2026-11-28)
+
+
+### Bug Fixes
+
+* **challenge:** preserve explicit no-script verification guidance ([5607f57](https://github.com/planetaryescape/gbfm/commit/5607f57bd56c6ca5df5e9208b7fe107a22606d5a))
+* **content:** preserve spotlight focus and content lifetimes ([1aa0006](https://github.com/planetaryescape/gbfm/commit/1aa0006db456fce4b6424968b68a5a3bb4779e6d))
+* **creator:** preserve named-edit autosave without implicit recovery ([8fa5b46](https://github.com/planetaryescape/gbfm/commit/8fa5b463524efd808660d6116c8935e997a9b4bf))
+* **dashboard:** contain tables and preserve denied workspace views ([46dbfd0](https://github.com/planetaryescape/gbfm/commit/46dbfd0e4f768ef9c677f1058a1de7bdcf3d09bf))
+* **dashboard:** keep pinned removal retries available after refresh ([dbe19c7](https://github.com/planetaryescape/gbfm/commit/dbe19c796660895f48125fa50b756c0c14df3075))
+* **dashboard:** preserve focused password and account controls ([6cc82db](https://github.com/planetaryescape/gbfm/commit/6cc82dba95a940e798670445ae76245b3e380d49))
+* **http:** retain native origin and homepage metadata contracts ([9a9a5b4](https://github.com/planetaryescape/gbfm/commit/9a9a5b45813aae3289dd7ecf77d4b081c576d950))
+* **listening:** preserve import-panel native submission lifetimes ([c1a7c59](https://github.com/planetaryescape/gbfm/commit/c1a7c5981f93c40a8ea6acf9c6def31d3cbeab42))
+* **listening:** retain collection versions through untouched forms ([2727b1b](https://github.com/planetaryescape/gbfm/commit/2727b1b7f1ec8170856dc27141901acc5ea317c5))
+* **navigation:** preserve account activation and in-navigation theme controls ([f8ee883](https://github.com/planetaryescape/gbfm/commit/f8ee88392cf65fddcc56574875a00be11481b6ef))
+* **observability:** isolate SSR and preserve native navigation outcomes ([bb2e9d8](https://github.com/planetaryescape/gbfm/commit/bb2e9d831a9ed0557a33fbf7520cb5c29ba93f23))
+* **player:** preserve foreground contrast on track controls ([4bf0af3](https://github.com/planetaryescape/gbfm/commit/4bf0af30766b90bd53e1f4e2919108dafb26eb36))
+* **player:** retain pending seek ownership until completion ([d097686](https://github.com/planetaryescape/gbfm/commit/d097686c073f55736a3d0ea2b27c412126a9c40a))
+* **player:** suspend private playback on explicit authorization loss ([db39331](https://github.com/planetaryescape/gbfm/commit/db3933152a55a7de2bf978b78458135d12464e36))
+* **reader:** retain visible navigation and owned motion lifetimes ([d0d61d7](https://github.com/planetaryescape/gbfm/commit/d0d61d773e24c58caf97fc2f955d84451aa7cea8))
+* **root:** preserve private identity and owner-scoped recovery lifetimes ([0c40306](https://github.com/planetaryescape/gbfm/commit/0c4030603daea5915a6640dc901523e00b16caef))
+* **www:** preserve startup when browser storage is denied ([a59a192](https://github.com/planetaryescape/gbfm/commit/a59a1921eacb66deb97af7bf0a69b242f15e974f))
+* **www:** preserve textarea values during native hydration ([300a2d7](https://github.com/planetaryescape/gbfm/commit/300a2d715d2976f5fd3a3cf2da3fc0be10be0da7))
+* **www:** separate Bun browser probes from native DOM type programs ([3a2f9ab](https://github.com/planetaryescape/gbfm/commit/3a2f9ab04b627b79a8956135548253c73484c31f))
+* **www:** validate native development origin and HTTP entry handling ([138428a](https://github.com/planetaryescape/gbfm/commit/138428a1b7ecd42bec358abe5dcc964ca6bb2cc1))
+* **www:** wrap native preview navigation on mobile ([034c404](https://github.com/planetaryescape/gbfm/commit/034c40430ca5cf5cfc70a7fb58c9b6af6955cf5f))
+
+
+### Features
+
+* **connect:** render native consent and login documents ([551e444](https://github.com/planetaryescape/gbfm/commit/551e4443b11501abaa5797d467b5d0d60822e909))
+* **creator:** attach the native markdown editor with exact source proofs ([ec893e9](https://github.com/planetaryescape/gbfm/commit/ec893e985bdcb7496ed9a05998c7073a5059ae94))
+* **creator:** define revision-aware queries and commands ([5b9778e](https://github.com/planetaryescape/gbfm/commit/5b9778ed9486f05481fb624b4779e705e9d3aba9))
+* **creator:** preserve native composition and scoped recovery ([74620c0](https://github.com/planetaryescape/gbfm/commit/74620c0f7a1f1f207626ceb1a64a8cceae03cb7d))
+* **creator:** preserve native form authorization and revisions ([c788fab](https://github.com/planetaryescape/gbfm/commit/c788fabebca9c28cfb99a066ab29b5d0b1256540))
+* **creator:** retain resumable multipart ownership and checkpoints ([973d68b](https://github.com/planetaryescape/gbfm/commit/973d68b8c07db2ba1881870d0aefb9f48f939976))
+* **creator:** scope drafts and guidefari legacy recovery ([a7906dd](https://github.com/planetaryescape/gbfm/commit/a7906dd9010d3d53e60d6ba03bd9536c5cfac397))
+* **www:** add native account, listening and newsletter flows ([9b60f97](https://github.com/planetaryescape/gbfm/commit/9b60f9765cbc803a39241c1c06b3928e7a40a309))
+* **www:** add native Effect UI SSR and hydration preview ([0661c91](https://github.com/planetaryescape/gbfm/commit/0661c91e6cd4ffd0534a0d8200cf82a0ca47fea2))
+* **www:** assemble persistent native route and feature owners ([ec56b5d](https://github.com/planetaryescape/gbfm/commit/ec56b5da91b3074bd82f08bb2d79b1bfc497506b))
+* **www:** migrate Dashboard workflows to native Effect UI ([fd664a2](https://github.com/planetaryescape/gbfm/commit/fd664a2cd0a1bd125241bcbe52fc37fb5b845e77))
+* **www:** own native page queries and identity-scoped prefetch ([4986d3e](https://github.com/planetaryescape/gbfm/commit/4986d3eaae2857d767cb283d415ddd12f1a4ddbe))
+* **www:** own navigation and scoped search in native Effect UI ([1842c90](https://github.com/planetaryescape/gbfm/commit/1842c90a3e5100480aa27fc61499f2a11cf72c41))
+* **www:** preserve playback and media ownership in native Effect UI ([ec98f4f](https://github.com/planetaryescape/gbfm/commit/ec98f4fb21f39e46c453c0046792c87285329d71))
+* **www:** preserve Reader visits and checkpoints in native Effect UI ([0d5d18a](https://github.com/planetaryescape/gbfm/commit/0d5d18a8a646049880ccabdea634be0f63f437fd))
+* **www:** render public content and profiles with native Effect UI ([c2c51ac](https://github.com/planetaryescape/gbfm/commit/c2c51ac4484912beece6e56bdc1b39ceb210039b))
+* **www:** share native membership ownership across controls ([a25c9f6](https://github.com/planetaryescape/gbfm/commit/a25c9f6303ca7bb66af39c147701fd884cbca66e))
+* **www:** wire native Root and shared HTTP preparation into preview entries ([82aa9a9](https://github.com/planetaryescape/gbfm/commit/82aa9a95f3a7f14078ac049d62e563a85104b535))
+
 ## [2.140.3](https://github.com/planetaryescape/gbfm/compare/v2.140.2...v2.140.3) (2026-11-26)
 
 

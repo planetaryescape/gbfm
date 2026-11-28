@@ -17,6 +17,10 @@ on:
         description: Read migration history and aggregate safety counts without planning or deploying
         type: boolean
         default: false
+      bootstrap_state:
+        description: Upgrade the existing Cloudflare state store before planning
+        type: boolean
+        default: false
 
 concurrency:
   group: alchemy-deploy
@@ -77,6 +81,13 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_DEFAULT_ACCOUNT_ID }}
         run: python3 scripts/mcp-migration-preflight.py
+
+      - name: Upgrade Cloudflare state store
+        if: ${{ inputs.bootstrap_state && inputs.plan_only && !inputs.preflight_only }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_DEFAULT_ACCOUNT_ID }}
+        run: bunx alchemy state bootstrap --backend cloudflare --profile env-token --no-input
 
       - name: Deploy
         if: ${{ !inputs.preflight_only }}

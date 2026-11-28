@@ -145,6 +145,14 @@
   },
   "overrides": [
     {
+      "files": ["apps/www/src/entry.effect.client.ts", "apps/www/src/entry.effect.server.ts"],
+      "rules": {
+        "import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }],
+        "anti-slop-effect/no-service-constructor-imports": "off",
+        "effecttsgo/strict-effect-provide": "off"
+      }
+    },
+    {
       "files": ["apps/mobile/index.js"],
       "rules": {
         "import/no-unassigned-import": "off"
@@ -153,6 +161,10 @@
     {
       "files": ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/test/**"],
       "rules": {
+        "vitest/no-standalone-expect": [
+          "error",
+          { "additionalTestBlockFunctions": ["it.effect", "it.live"] }
+        ],
         "eslint/no-console": "off",
         "require-yield": "off",
         "unicorn/consistent-function-scoping": "off",

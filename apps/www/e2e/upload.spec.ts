@@ -19,8 +19,8 @@ test('multipart pause, reload reconciliation and expired URL retry preserve the 
 }, testInfo) => {
   const filePath = testInfo.outputPath('resumable-mix.mp3')
   await writeFile(filePath, 'abcdefghijk')
-  const received: string[] = []
-  const presigned: number[] = []
+  const received: Array<string> = []
+  const presigned: Array<number> = []
   let starts = 0
   let statusReads = 0
   let expired = false
@@ -36,33 +36,45 @@ test('multipart pause, reload reconciliation and expired URL retry preserve the 
     response.setHeader('Access-Control-Allow-Methods', 'PUT, OPTIONS')
     response.setHeader('Access-Control-Allow-Headers', '*')
     response.setHeader('Access-Control-Expose-Headers', 'ETag')
+
     if (request.method === 'OPTIONS') {
       response.writeHead(204).end()
+
       return
     }
-    const chunks: Buffer[] = []
+
+    const chunks: Array<Buffer> = []
+
     for await (const chunk of request) chunks.push(Buffer.from(chunk))
     const part = Number(request.url?.split('/').at(-1))
+
     if (part === 1) {
       firstPart.resolve()
       await release.promise
     }
+
     if (part === 2 && !expired) {
       expired = true
       response.writeHead(403).end()
+
       return
     }
+
     if (part === 2) {
       secondPart.resolve()
       await releaseSecond.promise
     }
+
     received.push(Buffer.concat(chunks).toString())
     response.setHeader('ETag', `etag-${part}`)
     response.writeHead(200).end()
   })
+
   await new Promise<void>((resolve) => storage.listen(0, '127.0.0.1', resolve))
-  const address = storage.address()
-  if (!address || typeof address === 'string') throw new Error('Expected local storage port')
+
+  const address = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(
+    storage.address(),
+  )
 
   try {
     await page.route('**/api/upload/multipart/init', async (route) => {
@@ -85,6 +97,7 @@ test('multipart pause, reload reconciliation and expired URL retry preserve the 
       const { partNumber } = Schema.decodeUnknownSync(Schema.Struct({ partNumber: Schema.Number }))(
         route.request().postDataJSON(),
       )
+
       presigned.push(partNumber)
       await route.fulfill({
         json: {
@@ -106,9 +119,11 @@ test('multipart pause, reload reconciliation and expired URL retry preserve the 
     await page.getByLabel('Mix audio', { exact: true }).setInputFiles(filePath)
     await firstPart.promise
     await page.getByRole('button', { name: 'Pause upload', exact: true }).click()
+
     const status = page
       .getByRole('region', { name: 'Audio upload', exact: true })
       .getByRole('status')
+
     await expect(status).toContainText('Pausing after the current part')
     release.resolve()
     await expect(status).toHaveText('Upload paused · 36%')

@@ -4,6 +4,8 @@
 
 Implementation was subsequently authorized in the dedicated `feat/personal-access-keys` worktree. The migration was later applied to production, as verified below. No production issuance, publication, migration or deployment was performed in the web UI task. The design records below describe the intended acceptance bar; they are not proof that every planned test has run.
 
+Current native frontend ownership is documented in [Operations](OPERATIONS.md#native-frontend-ownership) and [EFFECT-UI.md](../../../EFFECT-UI.md). The dated Foldkit and browser-verification entries below retain their original checkpoint context; they do not establish native conversion deployment or current WebKit coverage.
+
 ## Web management and production migration check, 2026-11-02
 
 - Follow-up: replaced the sign-out/sign-in instruction with an accessible password-confirmation dialog. Confirmation renews the same account's session through the existing auth endpoint before issuance, preserving the key form and the backend's recent-session rule. Wrong passwords can be retried in place; cancellation creates no key. Account changes and impersonated sessions are rejected, and passwords stay outside app state and telemetry. Verification passed: `bun precommit`, 343 WWW unit tests, WWW production build, and eight Mobile Chrome/Safari journeys against disposable local data. No server contracts, database schema or production services were changed.

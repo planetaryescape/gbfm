@@ -10,9 +10,26 @@ test('pulling the player follows the pointer, snaps back, and dismisses past the
     .getByRole('button', { name: 'Play', exact: true })
     .click()
   const player = page.getByRole('dialog', { name: 'Now playing', exact: true })
-  const panel = page.locator('#fullscreen-player-panel')
+  const panel = player.locator('.native-player-panel')
   await expect(player.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
-  await expect(panel).not.toHaveAttribute('data-transition')
+  await expect(player).toBeVisible()
+  const dialogBounds = await player.boundingBox()
+
+  const viewport = page.viewportSize()
+
+  if (!viewport) throw new Error('Expected a viewport for the fullscreen player')
+
+  expect(dialogBounds?.width).toBeGreaterThanOrEqual(viewport.width)
+  expect(dialogBounds?.height).toBeGreaterThanOrEqual(viewport.height)
+  expect(await player.evaluate((element) => element.matches(':popover-open'))).toBe(true)
+  await expect(panel).not.toHaveAttribute('data-starting-style')
+  await expect
+    .poll(() =>
+      panel.evaluate((panel) =>
+        panel.getAnimations().some((animation) => animation.playState === 'running'),
+      ),
+    )
+    .toBe(false)
   const handle = player.locator('.player-drag-surface').first()
   const bounds = await handle.boundingBox()
 
@@ -27,6 +44,7 @@ test('pulling the player follows the pointer, snaps back, and dismisses past the
   await page.mouse.up()
   await expect.poll(async () => (await panel.boundingBox())?.y).toBeCloseTo(0)
   await expect(player).toBeVisible()
+  expect(await player.evaluate((element) => element.matches(':popover-open'))).toBe(true)
   await page.mouse.move(x, y)
   await page.mouse.down()
   await expect(panel).toHaveAttribute('data-dragging')
@@ -35,6 +53,8 @@ test('pulling the player follows the pointer, snaps back, and dismisses past the
   await page.mouse.up()
   await expect(panel).not.toHaveAttribute('data-dragging')
   await expect.poll(async () => (await panel.boundingBox())?.y).toBeCloseTo(0)
+  await expect(player).toBeVisible()
+  expect(await player.evaluate((element) => element.matches(':popover-open'))).toBe(true)
   const artwork = player.locator('.player-drag-surface').nth(1)
   const artworkBounds = await artwork.boundingBox()
 
@@ -51,7 +71,14 @@ test('pulling the player follows the pointer, snaps back, and dismisses past the
     .poll(() => page.evaluate(() => getComputedStyle(document.documentElement).overflow))
     .not.toBe('hidden')
   await page.getByRole('button', { name: 'Now playing', exact: true }).click()
-  await expect(panel).not.toHaveAttribute('data-transition')
+  await expect(panel).not.toHaveAttribute('data-starting-style')
+  await expect
+    .poll(() =>
+      panel.evaluate((panel) =>
+        panel.getAnimations().some((animation) => animation.playState === 'running'),
+      ),
+    )
+    .toBe(false)
   await expect.poll(async () => (await panel.boundingBox())?.y).toBeCloseTo(0)
   await expect(player.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
   await player
@@ -64,7 +91,14 @@ test('pulling the player follows the pointer, snaps back, and dismisses past the
   await expect(player).not.toBeVisible()
   await page.getByRole('button', { name: 'Now playing', exact: true }).click()
   await expect(player).toBeVisible()
-  await expect(panel).not.toHaveAttribute('data-transition')
+  await expect(panel).not.toHaveAttribute('data-starting-style')
+  await expect
+    .poll(() =>
+      panel.evaluate((panel) =>
+        panel.getAnimations().some((animation) => animation.playState === 'running'),
+      ),
+    )
+    .toBe(false)
   await grip.focus()
   await page.keyboard.press('Enter')
   await expect(player).not.toBeVisible()
@@ -78,9 +112,16 @@ test('mobile touch pull dismisses the player', async ({ page, browserName }) => 
     .filter({ hasText: 'Local Frequencies' })
     .getByRole('button', { name: 'Play', exact: true })
     .click()
-  const panel = page.locator('#fullscreen-player-panel')
+  const panel = page.locator('.native-player-panel')
   await expect(panel).toBeVisible()
-  await expect(panel).not.toHaveAttribute('data-transition')
+  await expect(panel).not.toHaveAttribute('data-starting-style')
+  await expect
+    .poll(() =>
+      panel.evaluate((panel) =>
+        panel.getAnimations().some((animation) => animation.playState === 'running'),
+      ),
+    )
+    .toBe(false)
   const session = await page.context().newCDPSession(page)
   await session.send('Input.dispatchTouchEvent', {
     type: 'touchStart',

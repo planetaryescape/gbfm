@@ -3,7 +3,7 @@ import { parseRichContent } from '@gbfm/rich-content/source'
 import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 
-import { spotlightPresentation } from './spotlight-presentation'
+import { spotlightPresentation } from '../../domain/editorial/spotlight-presentation'
 
 const document = (source: string) =>
   Schema.decodeUnknownSync(RichContentDocument)(parseRichContent(source).document)

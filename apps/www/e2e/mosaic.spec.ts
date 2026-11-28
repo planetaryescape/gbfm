@@ -5,7 +5,10 @@ import { expect, test, type Page } from '@playwright/test'
 import { Schema } from 'effect'
 
 import type { SocialCardRenderAssets } from '../../social-image/src/render-runtime'
-import { renderMosaicFixture } from '../../social-image/test/mosaic-fixture'
+import { replaceCanvasSource } from './creator-editor'
+import { registerCreatorWasmFixture } from './creator-wasm-fixture-loader'
+
+registerCreatorWasmFixture()
 
 const signIn = async (page: Page) => {
   await page.goto('/auth/sign-in')
@@ -19,6 +22,8 @@ const signIn = async (page: Page) => {
 test('generate, preview, accept, save, reload and regenerate artwork without changing it on content edits', async ({
   page,
 }, testInfo) => {
+  const { renderMosaicFixture } = await import('../../social-image/test/mosaic-fixture')
+
   const assets: SocialCardRenderAssets = {
     loadWasm: async (name) =>
       new Uint8Array(await readFile(new URL(`../../social-image/assets/${name}`, import.meta.url)))
@@ -93,7 +98,11 @@ test('generate, preview, accept, save, reload and regenerate artwork without cha
       .getByRole('textbox', { name: 'Title', exact: true })
       .fill('Four records for a quiet evening')
     const canvas = page.getByRole('textbox', { name: 'Writing canvas' })
-    await canvas.fill('A selection of four records.\n\n![Cover](https://i.scdn.co/image/fixture)')
+
+    const originalSource =
+      'A selection of four records.\n\n![Cover](https://i.scdn.co/image/fixture)'
+
+    await replaceCanvasSource(canvas, { before: '', after: originalSource })
     await page.getByRole('button', { name: 'Continue', exact: true }).click()
     await page.getByRole('textbox', { name: 'Story URL', exact: true }).fill(slug)
     const artwork = page.getByRole('textbox', { name: 'Artwork URL', exact: true })
@@ -133,7 +142,10 @@ test('generate, preview, accept, save, reload and regenerate artwork without cha
     await page.getByRole('button', { name: 'Use mosaic', exact: true }).click()
     await expect(artwork).toHaveValue(`${origin}/mosaic-1.png`)
     await page.getByRole('button', { name: 'Close publish review', exact: true }).click()
-    await canvas.fill('Edited post. The saved artwork stays unchanged.')
+    await replaceCanvasSource(canvas, {
+      before: originalSource,
+      after: 'Edited post. The saved artwork stays unchanged.',
+    })
 
     const savedResponse = page.waitForResponse(
       (response) =>

@@ -30,6 +30,7 @@ test('audio detail transition stays client-side and updates metadata', async ({ 
   const errors: Array<string> = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.goto('/shows/e2e-local-radio')
+  await expect(page.locator('html')).toHaveAttribute('data-gbfm-hydrated', 'true')
   await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeEnabled()
   const timeOrigin = await page.evaluate(() => performance.timeOrigin)
 

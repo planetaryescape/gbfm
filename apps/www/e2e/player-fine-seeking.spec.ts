@@ -18,6 +18,7 @@ const longAudio = () => {
   audio.writeUInt16LE(8, 34)
   audio.write('data', 36)
   audio.writeUInt32LE(samples, 40)
+
   return audio
 }
 
@@ -27,16 +28,20 @@ const openLongMix = async (page: Page) => {
     const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range ?? '')
     const start = Number(range?.[1] ?? 0)
     const end = Math.min(Number(range?.[2] || audio.length - 1), audio.length - 1)
+
     const headers = {
       'content-type': 'audio/wav',
       'accept-ranges': 'bytes',
       'access-control-allow-origin': new URL(page.url()).origin,
       'access-control-allow-credentials': 'true',
     }
+
     if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start < 0) {
       await route.fulfill({ status: 416, headers, body: '' })
+
       return
     }
+
     await route.fulfill({
       status: range ? 206 : 200,
       headers: range
@@ -54,9 +59,18 @@ const openLongMix = async (page: Page) => {
   const player = page.getByRole('dialog', { name: 'Now playing', exact: true })
   await player.getByRole('button', { name: 'Pause', exact: true }).click()
   await expect(player.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
-  await expect(page.locator('#fullscreen-player-panel')).not.toHaveAttribute('data-transition')
+  const panel = player.locator('.native-player-panel')
+  await expect(panel).not.toHaveAttribute('data-starting-style')
+  await expect
+    .poll(() =>
+      panel.evaluate((panel) =>
+        panel.getAnimations().some((animation) => animation.playState === 'running'),
+      ),
+    )
+    .toBe(false)
   const slider = page.locator('.hill-scrubber-input')
   await expect(slider).toHaveAttribute('max', '7200')
+
   return { player, slider, hill: page.locator('.hill-scrubber') }
 }
 
@@ -65,6 +79,7 @@ test('holding shows the exact time and fine dragging commits the displayed secon
 }, testInfo) => {
   const { player, slider, hill } = await openLongMix(page)
   const bounds = await hill.boundingBox()
+
   if (!bounds) throw new Error('Expected the hill')
   const x = bounds.x + bounds.width / 2
   expect(Number.isInteger(x)).toBe(true)
@@ -77,11 +92,13 @@ test('holding shows the exact time and fine dragging commits the displayed secon
   await expect(bubble.locator('.hill-scrubber-preview-mode')).toHaveText('Fine seeking')
   await expect(slider).toHaveValue('3600')
   const initialBubble = await bubble.boundingBox()
+
   if (!initialBubble) throw new Error('Expected the preview bubble')
   await page.mouse.move(x + 40, y, { steps: 8 })
   await expect(bubble.locator('.hill-scrubber-preview-time')).toHaveText('1:00:10')
   await expect(slider).toHaveValue('3610')
   const movedBubble = await bubble.boundingBox()
+
   if (!movedBubble) throw new Error('Expected the moved preview bubble')
   expect(movedBubble.x - initialBubble.x).toBeCloseTo(40, 0)
   await page.screenshot({ path: testInfo.outputPath('fine-seeking-hour-mix.png') })
@@ -91,7 +108,7 @@ test('holding shows the exact time and fine dragging commits the displayed secon
   })
   await page.mouse.up()
   await expect(bubble).toHaveCount(0)
-  await expect(slider).toHaveAttribute('value', '3610')
+  await expect(slider).toHaveValue('3610')
   await player.getByRole('button', { name: 'Play', exact: true }).click()
   await expect.poll(async () => Number(await slider.inputValue())).toBeGreaterThan(3610.5)
   expect(Number(await slider.inputValue())).toBeLessThan(3615)
@@ -100,15 +117,18 @@ test('holding shows the exact time and fine dragging commits the displayed secon
 test('movement re-arms the hold and no late bubble survives release', async ({ page }) => {
   const { hill } = await openLongMix(page)
   const bounds = await hill.boundingBox()
+
   if (!bounds) throw new Error('Expected the hill')
   const y = bounds.y + 40
   await page.mouse.move(bounds.x + bounds.width / 2, y)
   await page.mouse.down()
   const mode = hill.locator('.hill-scrubber-preview-mode')
+
   for (let step = 1; step <= 8; step++) {
     await page.mouse.move(bounds.x + bounds.width / 2 + step * 8, y)
     await expect(mode).toHaveText('Hold to fine-seek')
   }
+
   await page.mouse.up()
   await page.waitForTimeout(600)
   await expect(hill.locator('.hill-scrubber-preview')).toHaveCount(0)
@@ -121,6 +141,7 @@ test('playback ticks do not overwrite a held fine preview or its reference time'
   await player.getByRole('button', { name: 'Play', exact: true }).click()
   await expect(player.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
   const bounds = await hill.boundingBox()
+
   if (!bounds) throw new Error('Expected the hill')
   const x = bounds.x + bounds.width / 2
   expect(Number.isInteger(x)).toBe(true)
@@ -143,8 +164,9 @@ test('touch cancellation in fine mode rolls back without a late hold callback', 
   const { hill, slider } = await openLongMix(page)
   await slider.focus()
   await page.keyboard.press('Home')
-  await expect(slider).toHaveAttribute('value', '0')
+  await expect(slider).toHaveValue('0')
   const bounds = await hill.boundingBox()
+
   if (!bounds) throw new Error('Expected the hill')
   const session = await page.context().newCDPSession(page)
   await session.send('Input.dispatchTouchEvent', {
@@ -167,6 +189,7 @@ test('hour-aware preview stays above the finger and inside a narrow viewport at 
   await page.setViewportSize({ width: 320, height: 844 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   const { hill, slider } = await openLongMix(page)
+
   for (const endpoint of [
     { key: 'Home', x: 56, time: '0:00:00' },
     { key: 'End', x: 264, time: '2:00:00' },
@@ -175,6 +198,7 @@ test('hour-aware preview stays above the finger and inside a narrow viewport at 
     await page.keyboard.press(endpoint.key)
     await expect(slider).toHaveAttribute('aria-valuetext', `${endpoint.time} of 2:00:00`)
     const bounds = await hill.boundingBox()
+
     if (!bounds) throw new Error('Expected the hill')
     const y = bounds.y + 40
     await page.mouse.move(bounds.x + (endpoint.x / 320) * bounds.width, y)
@@ -182,6 +206,7 @@ test('hour-aware preview stays above the finger and inside a narrow viewport at 
     const bubble = hill.locator('.hill-scrubber-preview')
     await expect(bubble.locator('.hill-scrubber-preview-time')).toHaveText(endpoint.time)
     const bubbleBounds = await bubble.boundingBox()
+
     if (!bubbleBounds) throw new Error('Expected the preview bubble')
     expect(bubbleBounds.x).toBeGreaterThanOrEqual(0)
     expect(bubbleBounds.x + bubbleBounds.width).toBeLessThanOrEqual(320)
@@ -194,6 +219,7 @@ test('hour-aware preview stays above the finger and inside a narrow viewport at 
     })
     await page.mouse.up()
   }
+
   await page.setViewportSize({ width: 1280, height: 800 })
   await expect(hill).toBeHidden()
   await expect(page.getByRole('slider', { name: 'Playback position' })).toBeVisible()

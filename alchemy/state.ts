@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 
+import * as Cloudflare from '@alchemy.run/cloudflare'
 import { AlchemyContext } from 'alchemy/AlchemyContext'
-import * as Cloudflare from 'alchemy/Cloudflare'
 import type { StackServices } from 'alchemy/Stack'
 import { Stage } from 'alchemy/Stage'
 import { localState } from 'alchemy/State/LocalState'

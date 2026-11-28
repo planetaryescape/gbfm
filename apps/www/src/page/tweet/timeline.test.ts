@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 
-import { monthLabel, monthOf, relativeAge, timelineMonths } from './timeline'
+import { monthLabel, monthOf, relativeAge, timelineMonths } from '../../features/reader/timeline'
 
 test('fills calendar gaps newest first', () => {
   const months = timelineMonths([

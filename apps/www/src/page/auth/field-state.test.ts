@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 
-import { fieldStates, formFields } from './field-state'
+import { fieldStates, formFields } from '../../domain/auth/field-state'
 
 const calm = { invalid: false, focus: false }
 

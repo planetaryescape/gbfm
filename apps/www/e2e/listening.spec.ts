@@ -2,6 +2,8 @@ import { ListeningDocument } from '@gbfm/api/listening'
 import { expect, test } from '@playwright/test'
 import { Schema } from 'effect'
 
+import { expectNativeReady } from './fixtures/native-ready'
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/auth/sign-in?returnTo=%2Flistening')
   await page.getByRole('textbox', { name: 'Email', exact: true }).fill('listener@gbfm.local')
@@ -10,7 +12,7 @@ test.beforeEach(async ({ page }) => {
   await expect(
     page.getByRole('heading', { name: 'Your listening pile', exact: true }),
   ).toBeVisible()
-  await expect(page.locator('[data-interactive="true"]')).toBeVisible()
+  await expectNativeReady(page)
 })
 
 test('listeners capture privately, annotate, collect, publish and unpublish without exposing drafts', async ({
@@ -30,7 +32,7 @@ test('listeners capture privately, annotate, collect, publish and unpublish with
       page.getByRole('button', { name: buttonName, exact: true }).click(),
     ])
     await page.waitForLoadState('load')
-    await expect(page.locator('[data-interactive="true"]')).toBeVisible()
+    await expectNativeReady(page)
   }
 
   await page.locator('summary').filter({ hasText: '+ New collection' }).click()
@@ -49,7 +51,7 @@ test('listeners capture privately, annotate, collect, publish and unpublish with
   await expect(
     page.getByRole('heading', { name: 'Import preview · 1 mixes', exact: true }),
   ).toBeVisible()
-  await expect(page.locator('[data-interactive="true"]')).toBeVisible()
+  await expectNativeReady(page)
   await submit('save-import', 'Save selected mixes privately')
   await page
     .getByRole('link')
@@ -72,10 +74,15 @@ test('listeners capture privately, annotate, collect, publish and unpublish with
   await submit('edit-mix', 'Save notes & status')
   expect(new URL(page.url()).searchParams.get('mix')).toBe(selectedMix)
   await expect(editor.getByRole('textbox', { name: 'Mix title' })).toHaveValue(title)
-  await page
-    .getByRole('navigation', { name: 'Listening status' })
-    .getByRole('link', { name: /^Listening / })
-    .click()
+
+  const listeningStatus = page
+    .getByRole('navigation', { name: 'Listening status', exact: true })
+    .getByRole('link', { name: 'Listening', exact: true })
+
+  await expect(listeningStatus).toHaveCount(1)
+  await expect(listeningStatus).toHaveAttribute('href', '/listening?status=listening')
+  await listeningStatus.click()
+  await expect(page).toHaveURL(/\/listening\?status=listening$/)
   await page.getByRole('link').filter({ hasText: title }).click()
   await expect(editor.getByRole('textbox', { name: 'Mix title' })).toHaveValue(title)
   await editor.locator('summary').filter({ hasText: 'Collections & more' }).click()
@@ -84,12 +91,15 @@ test('listeners capture privately, annotate, collect, publish and unpublish with
 
   await page.getByRole('link', { name: `${collectionName} · public`, exact: true }).click()
   await page.locator('summary').filter({ hasText: 'Collection settings' }).click()
+
   const publicPath = await page
     .getByRole('link', { name: 'View public collection ↗', exact: true })
     .getAttribute('href')
+
   if (!publicPath) throw new Error('Public collection link missing')
   await page.getByRole('link').filter({ hasText: title }).click()
   const anonymous = await browser.newContext()
+
   try {
     const publicPage = await anonymous.newPage()
     await publicPage.goto(new URL(publicPath, page.url()).href)
@@ -132,22 +142,35 @@ test('switching collections discards the previous collection’s unsaved setting
 }) => {
   const suffix = crypto.randomUUID()
   const titles = [`Collection A ${suffix}`, `Collection B ${suffix}`] as const
+
   for (const title of titles) {
     const response = await page.request.post('/api/listening/collections', {
       data: { title, description: `Description for ${title}`, published: false },
     })
+
     await expect(response).toBeOK()
   }
+
   const document = Schema.decodeUnknownSync(ListeningDocument)(
     await (await page.request.get('/api/listening')).json(),
   )
+
   const collections = document.collections.filter((collection) =>
     titles.some((title) => title === collection.title),
   )
+
+  expect(collections).toHaveLength(2)
+
+  for (const collection of collections) expect(collection.version).toBe('revision:1')
+
+  const selectedCollection = collections.find((collection) => collection.title === titles[1])
+
+  if (!selectedCollection) throw new Error('The second fixture collection must exist')
+
   try {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto('/listening')
-    await expect(page.locator('[data-interactive="true"]')).toBeVisible()
+    await expectNativeReady(page)
     await page.getByRole('link', { name: `${titles[0]} · private`, exact: true }).click()
     await page.locator('summary').filter({ hasText: 'Collection settings' }).click()
     const form = page.locator('form[action$="edit-collection"]')
@@ -162,9 +185,11 @@ test('switching collections discards the previous collection’s unsaved setting
     await expect(form.locator('input[name="id"]')).toHaveValue(
       collections.find((collection) => collection.title === titles[1])?.id ?? '',
     )
+
     const settings = page
       .locator('details')
       .filter({ has: page.locator('form[action$="edit-collection"]') })
+
     if ((await settings.getAttribute('open')) === null) await settings.locator('summary').click()
     await expect(form.getByRole('textbox', { name: 'Collection name', exact: true })).toHaveValue(
       titles[1],
@@ -175,6 +200,7 @@ test('switching collections discards the previous collection’s unsaved setting
     await expect(
       form.getByRole('checkbox', { name: 'Make collection public', exact: true }),
     ).not.toBeChecked()
+    await expect(form.locator('input[name="expectedVersion"]')).toHaveValue('revision:1')
     await Promise.all([
       page.waitForResponse(
         (response) =>
@@ -183,11 +209,18 @@ test('switching collections discards the previous collection’s unsaved setting
       ),
       form.getByRole('button', { name: 'Save collection', exact: true }).click(),
     ])
+
     const saved = Schema.decodeUnknownSync(ListeningDocument)(
       await (await page.request.get('/api/listening')).json(),
     )
+
     for (const collection of collections) {
-      expect(saved.collections.find((item) => item.id === collection.id)).toEqual(collection)
+      const expected =
+        collection.id === selectedCollection.id
+          ? { ...collection, version: 'revision:2' }
+          : collection
+
+      expect(saved.collections.find((item) => item.id === collection.id)).toEqual(expected)
     }
   } finally {
     for (const collection of collections) {
@@ -200,6 +233,7 @@ test('selecting a lower queue row reveals its notes without another interaction'
   page,
 }) => {
   const suffix = crypto.randomUUID()
+
   const response = await page.request.post('/api/listening/mixes', {
     data: {
       items: Array.from({ length: 24 }, (_, index) => ({
@@ -208,18 +242,24 @@ test('selecting a lower queue row reveals its notes without another interaction'
       })),
     },
   })
+
   await expect(response).toBeOK()
+
   const document = Schema.decodeUnknownSync(ListeningDocument)(
     await (await page.request.get('/api/listening')).json(),
   )
+
   const mixes = document.mixes.filter((mix) => mix.title.startsWith(`Queue regression ${suffix}`))
+
   try {
     await page.goto('/listening')
-    await expect(page.locator('[data-interactive="true"]')).toBeVisible()
+    await expectNativeReady(page)
+
     const row = page
       .getByRole('link')
       .filter({ hasText: `Queue regression ${suffix}` })
       .last()
+
     await row.scrollIntoViewIfNeeded()
     expect(await page.evaluate(() => scrollY)).toBeGreaterThan(1000)
     await row.click()

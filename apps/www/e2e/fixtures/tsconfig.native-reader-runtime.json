@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [
+    "../../src/vite-env.d.ts",
+    "../../src/cloudflare-workers.d.ts",
+    "../../src/virtual-modules.d.ts",
+    "./native-reader-runtime.ts",
+    "../spotlight.spec.ts",
+    "../tweet-swipe-runtime.spec.ts"
+  ]
+}

@@ -64,6 +64,139 @@ const status = (audio: AudioPort, finished: boolean, generation: number | null):
 
 const hasMediaSession = () => 'navigator' in globalThis && 'mediaSession' in navigator
 
+export type PrivatePlaybackSnapshot = {
+  readonly principalId: string | null
+  readonly principalKnown: boolean
+  readonly revision: number
+  readonly authorizedUrls: ReadonlyArray<string>
+}
+
+export type PrivatePlaybackAccess = {
+  readonly getSnapshot: () => PrivatePlaybackSnapshot
+  readonly subscribe: (listener: (snapshot: PrivatePlaybackSnapshot) => void) => () => void
+  readonly confirmPrincipal: (principalId: string | null, known: boolean) => Effect.Effect<boolean>
+  readonly suspendAuthorization: Effect.Effect<boolean>
+}
+
+const makePrivatePlaybackAccess = () => {
+  let snapshot: PrivatePlaybackSnapshot = {
+    principalId: null,
+    principalKnown: false,
+    revision: 0,
+    authorizedUrls: [],
+  }
+
+  let closed = false
+  let authorizationSuspended = false
+  const listeners = new Set<(snapshot: PrivatePlaybackSnapshot) => void>()
+  const waiters = new Set<() => void>()
+  const invalidators = new Set<() => void>()
+
+  const emit = () => {
+    for (const listener of listeners) listener(snapshot)
+  }
+
+  const current = (revision: number) =>
+    !closed &&
+    !authorizationSuspended &&
+    snapshot.principalKnown &&
+    snapshot.principalId !== null &&
+    snapshot.revision === revision
+
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: (listener: (snapshot: PrivatePlaybackSnapshot) => void) => {
+      listeners.add(listener)
+      listener(snapshot)
+
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+    confirmPrincipal: (principalId: string | null, known: boolean) =>
+      Effect.sync(() => {
+        if (!known || closed || (snapshot.principalKnown && snapshot.principalId === principalId))
+          return false
+        const changed = snapshot.principalKnown || authorizationSuspended
+        authorizationSuspended = false
+        snapshot = {
+          principalId,
+          principalKnown: true,
+          revision: snapshot.revision + 1,
+          authorizedUrls: [],
+        }
+
+        if (changed) for (const invalidate of invalidators) invalidate()
+        emit()
+
+        for (const resume of waiters) resume()
+        waiters.clear()
+
+        return changed
+      }),
+    suspendAuthorization: Effect.sync(() => {
+      if (closed) return false
+      authorizationSuspended = true
+      snapshot = {
+        principalId: null,
+        principalKnown: false,
+        revision: snapshot.revision + 1,
+        authorizedUrls: [],
+      }
+
+      for (const invalidate of invalidators) invalidate()
+      emit()
+
+      for (const resume of waiters) resume()
+      waiters.clear()
+
+      return true
+    }),
+    ready: async () => {
+      if (authorizationSuspended || closed) return null
+
+      if (!snapshot.principalKnown && !closed)
+        await new Promise<void>((resolve) => {
+          waiters.add(resolve)
+        })
+
+      return current(snapshot.revision) ? snapshot.revision : null
+    },
+    current,
+    grant: (url: string, revision: number) => {
+      if (!current(revision) || snapshot.authorizedUrls.includes(url)) return
+      snapshot = { ...snapshot, authorizedUrls: [...snapshot.authorizedUrls, url] }
+      emit()
+    },
+    revoke: (url: string) => {
+      snapshot = {
+        ...snapshot,
+        authorizedUrls: snapshot.authorizedUrls.filter((value) => value !== url),
+      }
+      emit()
+    },
+    onInvalidate: (invalidate: () => void) => {
+      invalidators.add(invalidate)
+
+      return () => {
+        invalidators.delete(invalidate)
+      }
+    },
+    dispose: () => {
+      closed = true
+
+      for (const invalidate of invalidators) invalidate()
+
+      for (const resume of waiters) resume()
+      waiters.clear()
+      listeners.clear()
+      invalidators.clear()
+    },
+  }
+}
+
+type PrivatePlaybackGuard = ReturnType<typeof makePrivatePlaybackAccess>
+
 type BrowserSource =
   | { readonly _tag: 'Empty'; readonly generation: null }
   | { readonly _tag: 'Public'; readonly generation: number }
@@ -76,6 +209,7 @@ type BrowserSource =
   | {
       readonly _tag: 'PrivateReady'
       readonly generation: number
+      readonly url: string
       readonly preview: PreviewSession
     }
 
@@ -85,6 +219,8 @@ export const makeHtmlAudioEngineLayer = (
   createAudio: () => AudioPort,
   createPreview: (url: string, onDenied: () => void) => PreviewSession = browserPreviewSession,
   observer: JourneyObserver = noJourneys,
+  privateAccess?: PrivatePlaybackGuard,
+  setMediaSessionMetadata?: (metadata: NowPlayingMetadata | null) => void,
 ) =>
   Layer.effect(
     AudioEngine,
@@ -102,7 +238,38 @@ export const makeHtmlAudioEngineLayer = (
       let source: BrowserSource = BrowserSource.Empty({ generation: null })
       let playVersion = 0
       let playRequestedVersion: number | null = null
+
+      let withheldMetadata: {
+        readonly generation: number
+        readonly metadata: NowPlayingMetadata
+      } | null = null
+
       const journey = playbackJourney(observer)
+
+      const publishMetadata = (metadata: NowPlayingMetadata | null) => {
+        if (setMediaSessionMetadata) {
+          setMediaSessionMetadata(
+            metadata && privateAccess && metadata.artworkUrl && isPrivateMedia(metadata.artworkUrl)
+              ? { title: metadata.title, artist: metadata.artist }
+              : metadata,
+          )
+
+          return
+        }
+
+        if (!hasMediaSession()) return
+        navigator.mediaSession.metadata =
+          metadata === null
+            ? null
+            : new MediaMetadata({
+                title: metadata.title,
+                artist: metadata.artist,
+                artwork:
+                  metadata.artworkUrl && (!privateAccess || !isPrivateMedia(metadata.artworkUrl))
+                    ? [{ src: metadata.artworkUrl }]
+                    : [],
+              })
+      }
 
       const resetSource = () => {
         playRequestedVersion = null
@@ -112,6 +279,9 @@ export const makeHtmlAudioEngineLayer = (
         const previousSource = source
         active = null
         source = BrowserSource.Empty({ generation: null })
+        withheldMetadata = null
+
+        if (privateAccess) publishMetadata(null)
 
         if ('preview' in previousSource) previousSource.preview.dispose()
         previous?.dispose()
@@ -127,9 +297,20 @@ export const makeHtmlAudioEngineLayer = (
         audio.src = pending.url
         source = BrowserSource.PrivateReady({
           generation: pending.generation,
+          url: pending.url,
           preview: pending.preview,
         })
         audio.load()
+      }
+
+      if (privateAccess) {
+        const unsubscribe = privateAccess.onInvalidate(() => {
+          if (!('preview' in source)) return
+          resetSource()
+          publishMetadata(null)
+        })
+
+        yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
       }
 
       yield* Effect.addFinalizer(() =>
@@ -274,19 +455,51 @@ export const makeHtmlAudioEngineLayer = (
               const audio = owned.audio
 
               if (isPrivateMedia(url)) {
+                audio.pause()
+                const revision = privateAccess ? await privateAccess.ready() : undefined
+
+                if (disposed || active !== owned) return
+
+                if (
+                  revision === null ||
+                  (privateAccess && revision !== undefined && !privateAccess.current(revision))
+                ) {
+                  resetSource()
+
+                  return
+                }
+
                 const pending = BrowserSource.PrivatePending({
                   generation: nextGeneration,
                   url,
                   preview: createPreview(url, () => {
-                    if (active === owned) audio.pause()
+                    if (active !== owned) return
+
+                    if (privateAccess) {
+                      privateAccess.revoke(url)
+
+                      if ('preview' in source)
+                        source = BrowserSource.PrivatePending({
+                          generation: owned.generation,
+                          url,
+                          preview: source.preview,
+                        })
+                      audio.pause()
+                      audio.removeAttribute('src')
+                      audio.load()
+                      publishMetadata(null)
+                    } else audio.pause()
                   }),
                 })
 
                 source = pending
-                audio.pause()
                 const result = await pending.preview.ensure()
 
-                if (source !== pending) return
+                if (
+                  source !== pending ||
+                  (privateAccess && revision !== undefined && !privateAccess.current(revision))
+                )
+                  return
 
                 if (!result.ok) {
                   journey.fail()
@@ -295,6 +508,8 @@ export const makeHtmlAudioEngineLayer = (
                 }
 
                 installPrivateSource(pending)
+
+                if (privateAccess && revision !== undefined) privateAccess.grant(url, revision)
 
                 return
               }
@@ -308,7 +523,13 @@ export const makeHtmlAudioEngineLayer = (
               if (version === playVersion) journey.fail()
               throw error
             }
-          }),
+          }).pipe(
+            Effect.andThen(() =>
+              privateAccess && source.generation !== nextGeneration
+                ? Effect.interrupt
+                : Effect.void,
+            ),
+          ),
         clearSource: Effect.sync(() => {
           resetSource()
         }),
@@ -325,14 +546,30 @@ export const makeHtmlAudioEngineLayer = (
             const preview = 'preview' in source ? source.preview : undefined
 
             if (preview) {
+              const revision = privateAccess
+                ? yield* Effect.promise(() => privateAccess.ready())
+                : undefined
+
+              if (revision === null) return yield* new PlaybackRejected({})
               const result = yield* Effect.promise(() => preview.ensure())
 
-              if (version !== playVersion || !('preview' in source) || source.preview !== preview)
+              if (
+                version !== playVersion ||
+                !('preview' in source) ||
+                source.preview !== preview ||
+                (privateAccess && revision !== undefined && !privateAccess.current(revision))
+              )
                 return yield* new PlaybackRejected({ reason: 'superseded' })
 
               if (!result.ok) return yield* new PlaybackRejected({})
 
               if (BrowserSource.$is('PrivatePending')(source)) installPrivateSource(source)
+
+              if (privateAccess && revision !== undefined && 'url' in source)
+                privateAccess.grant(source.url, revision)
+
+              if (privateAccess && withheldMetadata?.generation === source.generation)
+                publishMetadata(withheldMetadata.metadata)
             }
 
             yield* Effect.tryPromise({
@@ -395,15 +632,23 @@ export const makeHtmlAudioEngineLayer = (
         changes,
         setNowPlaying: (metadata: NowPlayingMetadata | null) =>
           Effect.sync(() => {
-            if (!hasMediaSession()) return
-            navigator.mediaSession.metadata =
-              metadata === null
-                ? null
-                : new MediaMetadata({
-                    title: metadata.title,
-                    artist: metadata.artist,
-                    artwork: metadata.artworkUrl ? [{ src: metadata.artworkUrl }] : [],
-                  })
+            if (privateAccess)
+              withheldMetadata =
+                metadata && source.generation !== null
+                  ? { generation: source.generation, metadata }
+                  : null
+
+            const withheld =
+              privateAccess &&
+              (BrowserSource.$is('Empty')(source) ||
+                BrowserSource.$is('PrivatePending')(source) ||
+                (BrowserSource.$is('PrivateReady')(source) &&
+                  !privateAccess.getSnapshot().authorizedUrls.includes(source.url)) ||
+                (BrowserSource.$is('Public')(source) &&
+                  metadata?.artworkUrl &&
+                  isPrivateMedia(metadata.artworkUrl)))
+
+            publishMetadata(withheld ? null : metadata)
           }),
         setPositionState: (duration: number, position: number) =>
           Effect.sync(() => {
@@ -424,7 +669,10 @@ export const makeHtmlAudioEngineLayer = (
     }),
   )
 
-export type PlayerClientValue = { readonly controller: AudioPlaybackController }
+export type PlayerClientValue = {
+  readonly controller: AudioPlaybackController
+  readonly privateAccess?: PrivatePlaybackAccess
+}
 
 export class PlayerClient extends Context.Service<PlayerClient, PlayerClientValue>()(
   '@gbfm/www/PlayerClient',
@@ -440,6 +688,9 @@ export type BrowserDependencies = {
   readonly deliverPlay: (trackId: string) => Effect.Effect<void, PlayDeliveryFailed>
   readonly reporter: AudioPlaybackReporter
   readonly lookupCreators?: CreatorLookup
+  readonly isolatePrivateMedia?: boolean
+  readonly createPreview?: (url: string, onDenied: () => void) => PreviewSession
+  readonly setMediaSessionMetadata?: (metadata: NowPlayingMetadata | null) => void
 }
 
 export const makePlayerClientLayer = (dependencies: BrowserDependencies) =>
@@ -448,13 +699,19 @@ export const makePlayerClientLayer = (dependencies: BrowserDependencies) =>
     Effect.flatMap(Observability, (observability) =>
       Effect.acquireRelease(
         Effect.promise(async () => {
+          const privateAccess = dependencies.isolatePrivateMedia
+            ? makePrivatePlaybackAccess()
+            : undefined
+
           const storage = layerFromAdapter(createWebAudioStorageAdapter(dependencies.storage))
 
           const services = Layer.mergeAll(
             makeHtmlAudioEngineLayer(
               dependencies.createAudio,
-              browserPreviewSession,
+              dependencies.createPreview ?? browserPreviewSession,
               journeyObserver(observability),
+              privateAccess,
+              dependencies.setMediaSessionMetadata,
             ),
             storage,
             makePlayReporterLayer(dependencies.deliverPlay).pipe(Layer.provide(storage)),
@@ -485,18 +742,19 @@ export const makePlayerClientLayer = (dependencies: BrowserDependencies) =>
             ),
           )
 
-          return { runtime, controller: await controllerPromise }
+          return { runtime, controller: await controllerPromise, privateAccess }
         }),
-        ({ runtime }) =>
+        ({ runtime, privateAccess }) =>
           Effect.promise(async () => {
+            privateAccess?.dispose()
             await runtime.dispose()
           }),
-      ).pipe(Effect.map(({ controller }) => ({ controller }))),
+      ).pipe(Effect.map(({ controller, privateAccess }) => ({ controller, privateAccess }))),
     ),
   )
 
 /** Whole-application browser resource. It is lazy: no browser global is read at module evaluation. */
-export const playerClientLayer = makePlayerClientLayer({
+const browserDependencies: BrowserDependencies = {
   createAudio: () => new Audio(),
   storage: () => ('window' in globalThis ? window.localStorage : undefined),
   deliverPlay: (trackId) =>
@@ -519,4 +777,11 @@ export const playerClientLayer = makePlayerClientLayer({
     onError: () => Effect.sync(() => reportPlayerTelemetry('error')),
   },
   lookupCreators: createCreatorLookup((...args) => fetch(...args)),
+}
+
+export const playerClientLayer = makePlayerClientLayer(browserDependencies)
+
+export const isolatedPlayerClientLayer = makePlayerClientLayer({
+  ...browserDependencies,
+  isolatePrivateMedia: true,
 })

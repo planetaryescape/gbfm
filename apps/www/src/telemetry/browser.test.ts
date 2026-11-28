@@ -161,3 +161,68 @@ it('flushes once on disposal and ignores later vital and navigation callbacks', 
     vi.unstubAllGlobals()
   }
 })
+
+it('starts with a random anonymous session when acquiring browser storage is denied', async () => {
+  const bodies: Array<Blob> = []
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+
+  let stopped = 0
+  vi.useFakeTimers()
+  vi.stubGlobal('window', new EventTarget())
+  vi.stubGlobal('document', new EventTarget())
+  vi.stubGlobal('navigator', {
+    sendBeacon: (_endpoint: string, body: Blob) => {
+      bodies.push(body)
+
+      return true
+    },
+  })
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    get() {
+      throw new DOMException('Synthetic denied browser storage', 'SecurityError')
+    },
+  })
+
+  try {
+    const dispose = startBrowserTelemetry({
+      release: 'fixture',
+      sampleRate: 1,
+      navigation: {
+        current: () => ({
+          routeId: '/mixes/[slug]',
+          pathname: '/mixes/synthetic-private-slug',
+        }),
+        subscribe: () => () => {
+          stopped += 1
+        },
+      },
+      observeVitals: () => undefined,
+    })
+
+    dispose()
+    dispose()
+    expect(stopped).toBe(1)
+    expect(bodies).toHaveLength(1)
+    const body = bodies[0]
+
+    if (!body) throw new Error('Expected an anonymous disposal batch')
+    const batch = decodeBrowserTelemetryBatch(JSON.parse(await body.text()))
+
+    expect(batch.session).toMatch(/^[a-f0-9]{32}$/)
+    expect(batch.events).toHaveLength(1)
+    expect(batch.events[0]).toMatchObject({
+      kind: 'navigation',
+      name: 'initial-load',
+      route: '/mixes/[slug]',
+    })
+    expect(await body.text()).not.toContain('synthetic-private-slug')
+    await vi.runAllTimersAsync()
+    expect(bodies).toHaveLength(1)
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor)
+    else Reflect.deleteProperty(globalThis, 'localStorage')
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  }
+})

@@ -147,10 +147,15 @@ describe('AudioService.create idempotency', () => {
   test('normalizes creator order without hiding changed content', async () => {
     const audio = makeAudio('fingerprint')
 
-    const fingerprint = (data: typeof audio, creatorIds: ReadonlyArray<string>) =>
-      Effect.runPromise(withTestLayer(createAudioFingerprint(data, creatorIds), CryptoLive))
+    const fingerprint = (
+      data: Parameters<typeof createAudioFingerprint>[0],
+      creatorIds: ReadonlyArray<string>,
+    ) => Effect.runPromise(withTestLayer(createAudioFingerprint(data, creatorIds), CryptoLive))
 
-    expect(await fingerprint(audio, ['b', 'a'])).toBe(await fingerprint(audio, ['a', 'b']))
+    const expected = '6bbe8d50ac398413bfdef5265398942d41fca558630cc40ae888a5bb68105084'
+
+    expect(await fingerprint(audio, ['b', 'a'])).toBe(expected)
+    expect(await fingerprint({ ...audio, description: undefined }, ['a', 'b'])).toBe(expected)
     expect(await fingerprint(audio, ['a'])).not.toBe(
       await fingerprint({ ...audio, title: 'Changed' }, ['a']),
     )

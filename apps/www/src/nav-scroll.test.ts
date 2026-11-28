@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { nextScrollState } from './nav-scroll'
+import { nextScrollState } from './features/navigation/links'
 
 describe('mobile navigation scroll minimizing', () => {
   it('minimizes after scrolling down past the top zone', () => {

@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 
+import { ProviderOutcome } from '../../domain/auth/connect'
 import { loginOAuthQuery, oauthQuery, providerRedirect } from './continuation'
-import { ProviderOutcome } from './domain'
 
 it('preserves repeated signed resource and ba_param entries without ambient flow state', () => {
   const first = new URLSearchParams(

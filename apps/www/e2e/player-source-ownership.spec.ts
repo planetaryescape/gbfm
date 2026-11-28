@@ -1,6 +1,26 @@
+import { execFile } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
+
 import { expect, test, type Page } from '@playwright/test'
 
 import type * as Fixture from './fixtures/player-source-ownership'
+
+let fixtureBundle = ''
+
+test.beforeAll(async () => {
+  const { stdout } = await promisify(execFile)(
+    'bun',
+    [
+      'build',
+      fileURLToPath(new URL('./fixtures/player-source-ownership.ts', import.meta.url)),
+      '--target=browser',
+    ],
+    { maxBuffer: 4 * 1024 * 1024, timeout: 15_000 },
+  )
+
+  fixtureBundle = stdout
+})
 
 const wave = (seconds: number) => {
   const samples = 8000 * seconds
@@ -26,7 +46,7 @@ const wave = (seconds: number) => {
 
 const inspect = (page: Page) =>
   page.evaluate(async () => {
-    const path = '/e2e/fixtures/player-source-ownership.ts'
+    const path = '/__e2e/player-source-ownership.js'
     const fixture: typeof Fixture = await import(path)
 
     return fixture.inspect()
@@ -44,23 +64,24 @@ const command = async (
 }
 
 const start = async (page: Page, duration = 8) => {
+  await page.route('**/__e2e/player-source-ownership.js', (route) =>
+    route.fulfill({ contentType: 'text/javascript', body: fixtureBundle }),
+  )
   await page.route('**/fixture-one.wav', (route) =>
     route.fulfill({ contentType: 'audio/wav', body: wave(duration) }),
   )
   await page.route('**/fixture-two.wav', (route) =>
     route.fulfill({ contentType: 'audio/wav', body: wave(8) }),
   )
-  await page.route('**/@vite/client', (route) =>
-    route.request().isNavigationRequest()
-      ? route.fulfill({
-          contentType: 'text/html',
-          body: '<!doctype html><title>Source ownership fixture</title>',
-        })
-      : route.continue(),
+  await page.route('**/__e2e/player-source-ownership', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><title>Source ownership fixture</title>',
+    }),
   )
-  await page.goto('/@vite/client')
+  await page.goto('/__e2e/player-source-ownership')
   await page.evaluate(async () => {
-    const path = '/e2e/fixtures/player-source-ownership.ts'
+    const path = '/__e2e/player-source-ownership.js'
     const fixture: typeof Fixture = await import(path)
     fixture.mountPlayerSourceFixture()
   })
@@ -79,7 +100,7 @@ test('real media instances play independently and stale old DOM events cannot co
   expect(before.instances[1]).toMatchObject({ playing: true, volume: 0.35, muted: false })
 
   const barrier = await page.evaluate(async () => {
-    const path = '/e2e/fixtures/player-source-ownership.ts'
+    const path = '/__e2e/player-source-ownership.js'
     const fixture: typeof Fixture = await import(path)
 
     return fixture.deliverOldEvents()

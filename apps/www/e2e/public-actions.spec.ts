@@ -50,7 +50,9 @@ test('favorite and subscription controls persist and mutations do not interrupt 
   const timeOrigin = await page.evaluate(() => performance.timeOrigin)
   await page.route('**/api/favorites', (route) => route.fulfill({ status: 403, body: 'Forbidden' }))
   await page.getByRole('button', { name: 'Add to favorites', exact: true }).click()
-  await expect(page.getByText('Action failed. Please try again.', { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('status').filter({ hasText: /^Could not save\. Try again\.$/ }),
+  ).toBeVisible()
   await expect(page.getByRole('button', { name: 'Add to favorites', exact: true })).toBeEnabled()
   await expect(page.getByRole('link', { name: 'Sign in to favorite', exact: true })).toHaveCount(0)
   await page.unroute('**/api/favorites')
@@ -59,7 +61,9 @@ test('favorite and subscription controls persist and mutations do not interrupt 
     route.fulfill({ status: 503, body: 'Unavailable' }),
   )
   await page.getByRole('button', { name: 'Add to favorites', exact: true }).click()
-  await expect(page.getByText('Action failed. Please try again.', { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('status').filter({ hasText: /^Could not save\. Try again\.$/ }),
+  ).toBeVisible()
   await expect(page.getByRole('button', { name: 'Add to favorites', exact: true })).toBeEnabled()
   await page.unroute('**/api/favorites')
   await page.getByRole('button', { name: 'Add to favorites', exact: true }).click()

@@ -1,7 +1,9 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { Match, Schema } from 'effect'
 
 let fixtureClient = 1
+
+const expectCanvas = (canvas: Locator, text: string) => expect(canvas).toHaveText(text)
 
 test.beforeEach(async ({ context }, info) => {
   const subnet = Match.value(info.project.name).pipe(
@@ -10,15 +12,26 @@ test.beforeEach(async ({ context }, info) => {
     Match.orElse(() => 2),
   )
 
-  await context.setExtraHTTPHeaders({ 'cf-connecting-ip': `198.18.${subnet}.${fixtureClient++}` })
+  await context.setExtraHTTPHeaders({
+    'cf-connecting-ip': `198.18.${(info.workerIndex * 3 + subnet) % 256}.${fixtureClient++}`,
+  })
   await context.route(
     (url) => !url.hostname.endsWith('.localhost'),
-    (route) =>
-      route.continue({
+    (route) => {
+      const target = new URL(route.request().url())
+
+      if (target.href === 'https://opencode.ai/web-app-manifest-512x512.png')
+        return route.fulfill({ contentType: 'image/svg+xml', body: logoSvg })
+
+      if (!['127.0.0.1', '[::1]', 'localhost'].includes(target.hostname))
+        return route.abort('blockedbyclient')
+
+      return route.continue({
         headers: Object.fromEntries(
           Object.entries(route.request().headers()).filter(([name]) => name !== 'cf-connecting-ip'),
         ),
-      }),
+      })
+    },
   )
 })
 
@@ -211,8 +224,8 @@ test('a post first saved from the new-editor URL can recover a conflict in a new
   await page.getByRole('link', { name: 'Open latest saved version (new tab)', exact: true }).click()
   const latest = await opened
   const latestCanvas = latest.getByRole('textbox', { name: 'Writing canvas', exact: true })
-  await expect(latestCanvas).toHaveValue('Latest remote version')
-  await expect(canvas).toHaveValue('Keep my local unsaved changes')
+  await expectCanvas(latestCanvas, 'Latest remote version')
+  await expectCanvas(canvas, 'Keep my local unsaved changes')
   await latestCanvas.fill('Compared and recovered text')
 
   const saved = latest.waitForResponse(
@@ -246,7 +259,7 @@ test('the editorial editor retains local text and reports a stale-save conflict'
   expect(created.ok()).toBe(true)
   await page.goto(`/new/editorial?edit=${slug}`)
   const canvas = page.getByRole('textbox', { name: 'Writing canvas', exact: true })
-  await expect(canvas).toHaveValue('Initial fixture text')
+  await expectCanvas(canvas, 'Initial fixture text')
 
   for (const content of ['First browser save', 'Second browser save']) {
     await canvas.fill(content)
@@ -283,7 +296,7 @@ test('the editorial editor retains local text and reports a stale-save conflict'
       .getByRole('alert')
       .filter({ hasText: 'This post changed in another editor or connected app.' }),
   ).toBeVisible()
-  await expect(canvas).toHaveValue('My unsaved browser text')
+  await expectCanvas(canvas, 'My unsaved browser text')
   const stored = await page.request.get(`/api/content/posts/${slug}/edit`)
   expect(
     Schema.decodeUnknownSync(Schema.Struct({ content: Schema.String }))(await stored.json())
@@ -359,11 +372,21 @@ test('draft-write consent accurately limits editing to owned unpublished drafts'
     page.getByRole('heading', { name: 'Read and draft-write access', exact: true }),
   ).toBeVisible()
   await expect(
-    page.getByText('Create and edit your own unpublished editorial drafts'),
+    page.getByText(
+      'Create and edit your own unpublished editorial drafts, including private artwork',
+      { exact: true },
+    ),
   ).toBeVisible()
   await expect(
-    page.getByText('Cannot publish, delete, upload files or edit published posts.'),
+    page.getByText('Cannot publish, delete or edit published posts.', { exact: true }),
   ).toBeVisible()
+  await expect(
+    page.getByText('Upload files for your authorized content', { exact: true }),
+  ).toHaveCount(0)
+  await expect(
+    page.getByText('Publish or unpublish your authored content', { exact: true }),
+  ).toHaveCount(0)
+  await expect(page.getByText('Delete your authored content', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Read-only access', { exact: true })).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
@@ -377,7 +400,8 @@ test('draft-write consent accurately limits editing to owned unpublished drafts'
   await page.getByRole('button', { name: 'Allow connection', exact: true }).click()
   await expect(
     page.getByText(
-      'Connected to local GBFM. Available tools: create_draft, update_draft, list_drafts, get_post.',
+      'Connected to local GBFM. Available tools: create_draft, update_draft, list_drafts, get_post, prepare_draft_image_upload, attach_draft_artwork.',
+      { exact: true },
     ),
   ).toBeVisible()
 })

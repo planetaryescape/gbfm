@@ -1,5 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
 
+test.beforeEach(async ({ page }) => {
+  await page.route(/^https:\/\/(?:[^/]+\.)?spotify\.com\//, (route) =>
+    route.abort('blockedbyclient'),
+  )
+})
+
 const connect = async (page: Page) => {
   await page.addInitScript(() =>
     localStorage.setItem(
@@ -44,12 +50,9 @@ test('a Spotify music card offers connection separately from its external link',
   const response = await page.goto('/tweet/e2e-music-thread')
   expect(response?.status()).toBe(200)
   await expect(page.getByRole('button', { name: 'Connect Spotify', exact: true })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Spotify', exact: true })).toHaveAttribute(
-    'target',
-    '_blank',
-  )
+  await expect(page.getByRole('link', { name: /^spotify$/i })).toHaveAttribute('target', '_blank')
   await expect(page.getByRole('button', { name: 'Play on Spotify', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('link', { name: 'Bandcamp', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: /^bandcamp$/i })).toBeVisible()
   await page.route('https://accounts.spotify.com/authorize?**', (route) =>
     route.fulfill({ body: 'Public OAuth fixture' }),
   )

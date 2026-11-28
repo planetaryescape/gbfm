@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { skipsSeenTweets } from './navigation'
+import { skipsSeenTweets } from '../../features/reader/location'
 
 describe('tweet read-mode cookie', () => {
   it('defaults to skipping seen tweets without accepting a similarly named cookie', () => {

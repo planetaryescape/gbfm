@@ -1,0 +1,25 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [
+    "../src/vite-env.d.ts",
+    "../src/cloudflare-workers.d.ts",
+    "../src/virtual-modules.d.ts",
+    "../src/entry.effect.client.ts",
+    "../src/entry.effect.server.ts",
+    "../src/app/application.test.ts",
+    "../src/app/theme-button.test.ts",
+    "../src/server/effect-ui/**/*.ts",
+    "../plugins/effect-ui*.ts",
+    "../vite.effect.config.ts",
+    "../scripts/effect-ui-*.ts",
+    "./**/*.ts"
+  ],
+  "exclude": [
+    "./dashboard/browser-check.ts",
+    "./dashboard/grid-browser-check.ts",
+    "./dashboard/lifetime-browser-check.ts"
+  ]
+}

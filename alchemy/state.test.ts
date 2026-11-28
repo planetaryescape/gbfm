@@ -16,6 +16,37 @@ const localLayer = (directory: string, stage = 'dev') =>
   )
 
 describe('local Alchemy state isolation', () => {
+  it('reopens the pre-provider-split local state path without relocating its output', async () => {
+    const runtime = ManagedRuntime.make(NodeServices.layer)
+
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const directory = yield* fs.makeTempDirectoryScoped({ prefix: 'gbfm-state-upgrade-' })
+          const stageDirectory = `${directory}/local-state/state/gbfm/dev`
+          const outputFile = `${stageDirectory}/__stack_output__.json`
+          yield* fs.makeDirectory(stageDirectory, { recursive: true })
+          yield* fs.writeFileString(outputFile, '{"fixture":"before-provider-split"}')
+
+          const context = yield* Layer.build(localLayer(directory))
+          const state = yield* Context.get(context, State)
+
+          expect(state.id).toBe('local')
+          expect(yield* state.listStacks()).toEqual(['gbfm'])
+          expect(yield* state.listStages('gbfm')).toEqual(['dev'])
+          expect(yield* state.getOutput({ stack: 'gbfm', stage: 'dev' })).toEqual({
+            fixture: 'before-provider-split',
+          })
+          expect(yield* fs.readFileString(outputFile)).toBe('{"fixture":"before-provider-split"}')
+          expect(yield* fs.exists(`${directory}/state`)).toBe(false)
+        }).pipe(Effect.scoped),
+      )
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
   it('persists local output separately and leaves existing deployment state untouched', async () => {
     const runtime = ManagedRuntime.make(NodeServices.layer)
 

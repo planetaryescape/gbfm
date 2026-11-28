@@ -1,5 +1,7 @@
 # Future file ownership and delivery map
 
+This map records the earlier Foldkit implementation and its proposed ownership. Current WWW ownership is documented in [EFFECT-UI.md](../../EFFECT-UI.md); inspect the native implementation before applying the historical file paths or framework instructions below.
+
 All entries below are **proposed implementation work, not reservations or permission to edit**. P4 edits only this spec folder. Actual E1/P1 exports and storage direction must be agreed before E3 claims files. P1 coordinates the dependent foundation/document stack; the corrected delivery rules in [07-pr-slices.md](07-pr-slices.md) supersede earlier merge-before-consumer guidance.
 
 | File / module | Owner and future change |

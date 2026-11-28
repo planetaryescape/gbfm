@@ -1,8 +1,11 @@
 import { AudioResponse } from '@gbfm/api/audio'
-import { CompiledPostResponse, PostResponse } from '@gbfm/api/post'
+import { CompiledPostResponse, PostResponse, ResolvePostMusicResponse } from '@gbfm/api/post'
 import { expect, test, type Page } from '@playwright/test'
 import { Schema } from 'effect'
 import { HttpApiError } from 'effect/http-api'
+
+import { expectCanvasSource, replaceCanvasSource } from './creator-editor'
+import { expectModalOpen } from './fixtures/native-ready'
 
 const signIn = async (page: Page, email = 'admin@gbfm.local') => {
   await page.goto('/auth/sign-in')
@@ -22,6 +25,7 @@ const signIn = async (page: Page, email = 'admin@gbfm.local') => {
   expect(creatorIds).toHaveLength(2)
 
   return {
+    principalId: identity.user.id,
     creatorIds,
     creatorNames: [identity.user.name, ...(mix.creators ?? []).map(({ name }) => name)],
     audioUrl: mix.url,
@@ -72,6 +76,7 @@ test('tweet attachments are intentional, focused, retained and restored without 
   await expect(musicUrl).toBeVisible()
   await expect(title).toHaveValue('One thought, not a form.')
   await page.getByRole('button', { name: 'Discard', exact: true }).click()
+  await page.getByRole('button', { name: 'Discard changes', exact: true }).click()
   await expect(title).toHaveValue('')
   await expect(musicUrl).toHaveCount(0)
 })
@@ -84,6 +89,7 @@ test('tweet composition stays cohesive at phone, tablet and desktop sizes', asyn
   await page
     .getByRole('textbox', { name: 'Title', exact: true })
     .fill('Where jazz and ambient meet. On repeat tonight.')
+
   for (const viewport of [
     { name: 'phone', width: 390, height: 844 },
     { name: 'tablet', width: 768, height: 1024 },
@@ -109,25 +115,29 @@ test('source diagnostics update after editing and restoring a local draft', asyn
   await page.goto('/new/editorial')
   const canvas = page.getByRole('textbox', { name: 'Writing canvas' })
   const diagnostics = page.getByRole('list', { name: 'Source diagnostics' })
-  await canvas.fill('<div>Unsupported markup</div>')
+  await replaceCanvasSource(canvas, { before: '', after: '<div>Unsupported markup</div>' })
   await expect(diagnostics).toContainText('Raw HTML is unsupported')
   await expect(page.getByRole('status').filter({ hasText: 'Draft saved locally' })).toBeVisible()
   await page.reload()
-  await expect(canvas).toHaveValue('<div>Unsupported markup</div>')
+  await expectCanvasSource(canvas, '<div>Unsupported markup</div>')
   await expect(diagnostics).toContainText('Raw HTML is unsupported')
-  await canvas.fill('Ordinary **Markdown**')
+  await replaceCanvasSource(canvas, {
+    before: '<div>Unsupported markup</div>',
+    after: 'Ordinary **Markdown**',
+  })
   await expect(diagnostics).toHaveCount(0)
 })
 
 test('remote draft save retains edits made while its response is pending', async ({
   page,
 }, testInfo) => {
-  await signIn(page)
+  const { principalId } = await signIn(page)
+  const storageKey = `gbfm:creator:${principalId}:post:new`
   await page.goto('/new/editorial')
   const canvas = page.getByRole('textbox', { name: 'Writing canvas', exact: true })
   const original = `Original fixture ${crypto.randomUUID()}`
   await page.getByRole('textbox', { name: 'Title', exact: true }).fill(original)
-  await canvas.fill(original)
+  await replaceCanvasSource(canvas, { before: '', after: original })
   await expect(page.getByRole('status').filter({ hasText: 'Draft saved locally' })).toBeVisible()
   const accepted = Promise.withResolvers<void>()
   const release = Promise.withResolvers<void>()
@@ -146,14 +156,14 @@ test('remote draft save retains edits made while its response is pending', async
     await accepted.promise
     await expect(page.getByRole('status').filter({ hasText: 'Saving…' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Save draft', exact: true })).toBeDisabled()
-    await canvas.fill('Newer unsaved fixture content')
+    await replaceCanvasSource(canvas, { before: original, after: 'Newer unsaved fixture content' })
     release.resolve()
     await expect(page.getByRole('status').filter({ hasText: 'Unsaved changes' })).toBeVisible()
-    await expect(canvas).toHaveValue('Newer unsaved fixture content')
+    await expectCanvasSource(canvas, 'Newer unsaved fixture content')
     expect(requests).toBe(1)
     await expect
       .poll(async () => {
-        const value = await page.evaluate(() => localStorage.getItem('gbfm:creator:post:new'))
+        const value = await page.evaluate((key) => localStorage.getItem(key), storageKey)
 
         return value === null
           ? null
@@ -172,7 +182,7 @@ test('remote draft save retains edits made while its response is pending', async
         editSlug: expect.stringMatching(/\S/),
         postId: expect.stringMatching(/\S/),
       })
-    const retained = await page.evaluate(() => localStorage.getItem('gbfm:creator:post:new'))
+    const retained = await page.evaluate((key) => localStorage.getItem(key), storageKey)
 
     const draft = Schema.decodeUnknownSync(
       Schema.fromJsonString(
@@ -192,7 +202,7 @@ test('remote draft save retains edits made while its response is pending', async
     await page.getByRole('button', { name: 'Save draft', exact: true }).click()
     await expect(page.getByRole('status').filter({ hasText: 'All changes saved' })).toBeVisible()
     await expect
-      .poll(() => page.evaluate(() => localStorage.getItem('gbfm:creator:post:new')))
+      .poll(() => page.evaluate((key) => localStorage.getItem(key), storageKey))
       .toBeNull()
   } finally {
     release.resolve()
@@ -223,12 +233,22 @@ test('a creator resolves a saved draft from the dashboard without saving other e
     contentType: 'image/png',
   })
   const canvas = page.getByRole('textbox', { name: 'Writing canvas', exact: true })
-  await canvas.fill('An unsaved edit must stay in the editor.')
+  await replaceCanvasSource(canvas, {
+    before: content,
+    after: 'An unsaved edit must stay in the editor.',
+  })
   const endpoint = `**/api/content/posts/${post.id}/resolve-music-entity`
   await page.route(endpoint, async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 700))
     await route.continue()
   })
+
+  const resolutionResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/posts/${post.id}/resolve-music-entity`) &&
+      response.request().method() === 'POST',
+  )
+
   await page.getByRole('button', { name: 'Resolve saved post music', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Resolving music…', exact: true })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Save draft', exact: true })).toBeDisabled()
@@ -243,8 +263,8 @@ test('a creator resolves a saved draft from the dashboard without saving other e
   await expect(
     page.getByRole('status').filter({ hasText: 'Music attachment saved.' }),
   ).toBeVisible()
-  await expect(page.locator('.creator-music-card')).toContainText('Grapefruit')
-  await expect(canvas).toHaveValue('An unsaved edit must stay in the editor.')
+  await expect(page.getByRole('article', { name: 'Attached music' })).toContainText('Grapefruit')
+  await expectCanvasSource(canvas, 'An unsaved edit must stay in the editor.')
   await expect(page.getByRole('region', { name: 'Previous music references' })).toBeVisible()
   await testInfo.attach('post-music-success', {
     body: await page.screenshot({ path: testInfo.outputPath('post-music-success.png') }),
@@ -255,15 +275,21 @@ test('a creator resolves a saved draft from the dashboard without saving other e
     await (await page.request.get(`/api/content/posts/${slug}/edit`)).json(),
   )
 
+  const resolvedMusic = Schema.decodeUnknownSync(ResolvePostMusicResponse)(
+    await (await resolutionResponse).json(),
+  )
+
   expect(saved).toMatchObject({
     content,
     draft: true,
-    musicEntityId: '00000000-0000-4000-8000-000000000003',
+    musicEntityId: resolvedMusic.entityId,
     musicEntityType: 'track',
   })
   await page.reload()
-  await expect(page.locator('.creator-music-card')).toContainText('Attached music')
-  await expect(canvas).toHaveValue(content)
+  await expect(page.getByRole('article', { name: 'Attached music' })).toContainText(
+    'Attached music',
+  )
+  await expectCanvasSource(canvas, content)
   await page.getByRole('button', { name: 'Music', exact: true }).click()
   await page.getByRole('button', { name: 'Re-resolve saved post music', exact: true }).click()
   await expect(
@@ -275,6 +301,7 @@ test('a creator resolves a saved draft from the dashboard without saving other e
   await expect(page.locator('.creator-published')).toContainText('Published.')
 
   await page.getByRole('button', { name: 'Music', exact: true }).click()
+
   const resolvedAfterPublication = page.waitForResponse(
     (response) =>
       response.url().endsWith(`/posts/${post.id}/resolve-music-entity`) &&
@@ -304,6 +331,7 @@ test('saved-post resolution explains missing links and provider retry delays, th
   expect(created.ok()).toBe(true)
   const post = Schema.decodeUnknownSync(PostResponse)(await created.json())
   await page.goto(`/new/editorial?edit=${slug}`)
+  await page.getByRole('button', { name: 'Music', exact: true }).click()
   const resolve = page.getByRole('button', { name: 'Resolve saved post music', exact: true })
   await resolve.click()
   await expect(page.getByRole('alert')).toContainText('No music link found in the saved post.')
@@ -364,16 +392,27 @@ test('author selection supports keyboard search, removal, retry and saved identi
   const authors = page.getByRole('list', { name: 'Authors', exact: true })
   await expect(authors).toContainText('Local Admin')
   await expect(authors.getByRole('button', { name: 'Remove' })).toBeDisabled()
-  await page.getByText('Add authors', { exact: true }).press('Enter')
+
+  const addAuthors = page
+    .getByRole('dialog', { name: 'Publish post', exact: true })
+    .getByText('Add authors', { exact: true })
+
+  await expect(addAuthors).toHaveCount(1)
+  await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveCount(0)
+  await addAuthors.press('Enter')
   const query = page.getByRole('textbox', { name: 'Search authors', exact: true })
   await query.fill('no-such-author')
   await expect(page.getByRole('button', { name: 'Search authors', exact: true })).toBeEnabled()
   await query.press('Enter')
-  await expect(page.getByText('No authors found. Try another name or username.')).toBeVisible()
+  const portal = page.getByRole('dialog', { name: 'Publish post', exact: true })
+  const review = portal.locator('.creator-review')
+  await expect(portal).toHaveCount(1)
+  await expectModalOpen(portal, review)
+  await expect(review.getByText('No authors found. Try another name or username.')).toBeVisible()
   await page.route('**/api/user/search?*', (route) => route.fulfill({ status: 403 }))
   await query.fill('Local Creator')
   await page.getByRole('button', { name: 'Search authors', exact: true }).click()
-  await expect(page.getByText('Could not search authors.', { exact: false })).toBeVisible()
+  await expect(review.getByText('Could not search authors.', { exact: false })).toBeVisible()
   await page.unroute('**/api/user/search?*')
   await page.getByRole('button', { name: 'Search authors', exact: true }).click()
   const result = page.getByRole('button', { name: 'Local Creator · @local-creator', exact: true })
@@ -381,7 +420,7 @@ test('author selection supports keyboard search, removal, retry and saved identi
   await expect(result).toHaveCount(0)
 
   const selectedResult = page.getByRole('button', {
-    name: 'Local Creator · @local-creator — Selected',
+    name: 'Local Creator · @local-creator · Selected',
     exact: true,
   })
 
@@ -393,7 +432,7 @@ test('author selection supports keyboard search, removal, retry and saved identi
     .click()
   await expect(authors).not.toContainText('Local Creator')
   await result.click()
-  await page.getByRole('textbox', { name: 'Story URL', exact: true }).fill(slug)
+  await review.getByRole('textbox', { name: 'Story URL', exact: true }).fill(slug)
   await page.getByRole('button', { name: 'Publish', exact: true }).click()
   await expect(page.locator('.creator-published')).toContainText('Published.')
 
@@ -433,7 +472,14 @@ test('mix creation satisfies the API contract and editing preserves audio and co
   await page.getByRole('spinbutton', { name: 'Episode number', exact: true }).fill('7')
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await page.getByRole('textbox', { name: 'Story URL', exact: true }).fill(slug)
-  await page.getByText('Add authors', { exact: true }).click()
+
+  const addAuthors = page
+    .getByRole('dialog', { name: 'Publish post', exact: true })
+    .getByText('Add authors', { exact: true })
+
+  await expect(addAuthors).toHaveCount(1)
+  await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveCount(0)
+  await addAuthors.click()
   await page.getByRole('textbox', { name: 'Search authors', exact: true }).fill('Local Creator')
   await page.getByRole('button', { name: 'Search authors', exact: true }).click()
   await page.getByRole('button', { name: 'Local Creator · @local-creator', exact: true }).click()
@@ -470,7 +516,7 @@ test('mix creation satisfies the API contract and editing preserves audio and co
 
 test('editorial editing with empty artwork preserves co-creators and saved content', async ({
   page,
-}) => {
+}, info) => {
   const { creatorIds } = await signIn(page)
   const slug = `e2e-composer-editorial-${Date.now()}`
 
@@ -486,11 +532,34 @@ test('editorial editing with empty artwork preserves co-creators and saved conte
   })
 
   expect(created.ok()).toBe(true)
-  await page.goto(`/new/editorial?edit=${slug}`)
+  const editable = await page.request.get(`/api/content/posts/${slug}/edit`)
+  const initial = Schema.decodeUnknownSync(CompiledPostResponse)(await editable.json())
+  expect(initial.content).toBe('Original body')
+  const navigation = await page.goto(`/new/editorial?edit=${slug}`)
+  const serverHtml = await navigation?.text()
   await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue(
     'Original editorial',
   )
-  await page.getByRole('textbox', { name: 'Writing canvas' }).fill('The revised editorial body.')
+  const canvas = page.getByRole('textbox', { name: 'Writing canvas' })
+  await expect(canvas).toHaveCount(1)
+  await info.attach('initial-editorial-boundary', {
+    body: JSON.stringify({
+      status: editable.status(),
+      contentLength: initial.content?.length,
+      serverContainsExpectedBody: serverHtml?.includes('Original body'),
+      serverTextarea: serverHtml?.match(
+        /<textarea\b[^>]*name="content"[^>]*>([^<]*)<\/textarea>/,
+      )?.[1],
+      canvasCount: await canvas.count(),
+      beforeScroll: await canvas.innerText(),
+      formSource: await page.locator('textarea[name="content"]').inputValue(),
+    }),
+    contentType: 'application/json',
+  })
+  await replaceCanvasSource(canvas, {
+    before: 'Original body',
+    after: 'The revised editorial body.',
+  })
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
   await page.getByRole('button', { name: 'Update', exact: true }).click()
   await expect(page.locator('.creator-published')).toContainText('Published.')
@@ -535,7 +604,7 @@ test('artwork upload failures are accessible in the open editorial review and ca
   }
 
   await artwork.setInputFiles(file)
-  await expect(review).toBeVisible()
+  await expect(review.locator('.creator-review')).toBeVisible()
   await expect(review.getByRole('alert')).toHaveText('artwork upload: Artwork upload failed')
   await expect(artwork).toBeEnabled()
 
@@ -563,7 +632,7 @@ test('artwork upload failures are accessible in the open editorial review and ca
     'https://cdn.example.test/editorial.png',
   )
   await expect(review.getByRole('alert')).toHaveCount(0)
-  await expect(review).toBeVisible()
+  await expect(review.locator('.creator-review')).toBeVisible()
 })
 
 test('composer restores metadata, reviews type changes and publishes a quoted tweet with co-creators', async ({
@@ -580,9 +649,10 @@ test('composer restores metadata, reviews type changes and publishes a quoted tw
   await page.getByRole('textbox', { name: 'Title', exact: true }).fill('A quoted signal')
   await page.getByRole('button', { name: '+ Add a longer note', exact: true }).click()
   await expect(page.getByRole('textbox', { name: 'Writing canvas', exact: true })).toBeFocused()
-  await page
-    .getByRole('textbox', { name: 'Writing canvas', exact: true })
-    .fill('Listening to **independent radio**.')
+  await replaceCanvasSource(page.getByRole('textbox', { name: 'Writing canvas', exact: true }), {
+    before: '',
+    after: 'Listening to **independent radio**.',
+  })
   await page
     .getByRole('group', { name: 'Add to your tweet' })
     .getByRole('button', { name: 'Quote', exact: true })
@@ -593,12 +663,22 @@ test('composer restores metadata, reviews type changes and publishes a quoted tw
   await page.getByRole('button', { name: 'Attach quote', exact: true }).click()
   await expect(page.getByText('Quoted tweet', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
-  await page.getByRole('textbox', { name: 'Story URL', exact: true }).fill(slug)
-  await page.getByText('Add authors', { exact: true }).click()
+  const portal = page.getByRole('dialog', { name: 'Publish post', exact: true })
+  const review = portal.locator('.creator-review')
+  await expectModalOpen(portal, review)
+  await review.getByRole('textbox', { name: 'Story URL', exact: true }).fill(slug)
+
+  const addAuthors = page
+    .getByRole('dialog', { name: 'Publish post', exact: true })
+    .getByText('Add authors', { exact: true })
+
+  await expect(addAuthors).toHaveCount(1)
+  await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveCount(0)
+  await addAuthors.click()
   await page.getByRole('textbox', { name: 'Search authors', exact: true }).fill('Local Creator')
   await page.getByRole('button', { name: 'Search authors', exact: true }).click()
   await page.getByRole('button', { name: 'Local Creator · @local-creator', exact: true }).click()
-  const tags = page.getByRole('textbox', { name: 'Tags', exact: true })
+  const tags = review.getByRole('textbox', { name: 'Tags', exact: true })
   await tags.pressSequentially('radio, community')
   await tags.press('Tab')
   await expect(tags).toHaveValue('radio, community')
@@ -612,27 +692,26 @@ test('composer restores metadata, reviews type changes and publishes a quoted tw
     'https://goosebumps.fm/tweet/e2e-music-thread',
   )
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
+  await expectModalOpen(portal, review)
   await expect(
-    page.getByRole('list', { name: 'Authors', exact: true }).getByRole('listitem'),
+    review.getByRole('list', { name: 'Authors', exact: true }).getByRole('listitem'),
   ).toHaveText([
     `${creatorNames[0]}Remove`,
-    'Author name unavailable — retained from saved draftRemove',
+    'Author name unavailable, retained from saved draftRemove',
   ])
-  await expect(page.getByRole('textbox', { name: 'Tags', exact: true })).toHaveValue(
-    'radio, community',
-  )
-  await expect(page.locator('.creator-review-body')).toContainText('independent radio')
-  await page.getByRole('button', { name: 'Editorial', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Editorial', exact: true })).toHaveAttribute(
+  await expect(tags).toHaveValue('radio, community')
+  await expect(review.locator('.creator-review-body')).toContainText('independent radio')
+  await review.getByRole('button', { name: 'Editorial', exact: true }).click()
+  await expect(review.getByRole('button', { name: 'Editorial', exact: true })).toHaveAttribute(
     'aria-pressed',
     'true',
   )
-  await page.getByRole('button', { name: 'Tweet', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Tweet', exact: true })).toHaveAttribute(
+  await review.getByRole('button', { name: 'Tweet', exact: true }).click()
+  await expect(review.getByRole('button', { name: 'Tweet', exact: true })).toHaveAttribute(
     'aria-pressed',
     'true',
   )
-  await page.getByRole('button', { name: 'Publish', exact: true }).scrollIntoViewIfNeeded()
+  await review.getByRole('button', { name: 'Publish', exact: true }).scrollIntoViewIfNeeded()
   await testInfo.attach('composer-review-dark', {
     body: await page.screenshot(),
     contentType: 'image/png',
@@ -647,7 +726,7 @@ test('composer restores metadata, reviews type changes and publishes a quoted tw
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     ),
   ).toBe(true)
-  await page.getByRole('button', { name: 'Publish', exact: true }).click()
+  await review.getByRole('button', { name: 'Publish', exact: true }).click()
   await expect(page.locator('.creator-published')).toContainText('Published.')
 
   const saved = Schema.decodeUnknownSync(CompiledPostResponse)(
@@ -666,7 +745,18 @@ test('music references show published tweets without losing the draft and recove
 }, testInfo) => {
   await signIn(page)
   const suffix = crypto.randomUUID()
-  const entityId = '00000000-0000-4000-8000-000000000001'
+  const catalogue = await page.request.get('/api/music/tracks')
+  expect(catalogue.ok()).toBe(true)
+
+  const tracks = Schema.decodeUnknownSync(
+    Schema.Array(Schema.Struct({ id: Schema.String, title: Schema.String })),
+  )(await catalogue.json())
+
+  const track = tracks.find(({ title }) => title === 'Root Frequency')
+  expect(track).toBeDefined()
+
+  if (!track) throw new Error('The disposable Root Frequency fixture is missing.')
+  const entityId = track.id
 
   for (const draft of [false, true]) {
     const response = await page.request.post('/api/content/post', {
@@ -790,7 +880,8 @@ test('an attached track and an embedded Bandcamp page preview and publish as pla
   await expect(page.getByRole('alert')).toContainText('no embeddable player')
   await media.fill(bandcamp)
   await media.press('Enter')
-  await expect(page.getByRole('textbox', { name: 'Writing canvas', exact: true })).toHaveValue(
+  await expectCanvasSource(
+    page.getByRole('textbox', { name: 'Writing canvas', exact: true }),
     `::media{url="${bandcamp}"}`,
   )
 
@@ -834,13 +925,13 @@ test('a failed preview hides the previous revision and retries the current sourc
   const preview = page.locator('.creator-preview')
   await expect(canvas).toHaveCount(0)
   await page.getByRole('button', { name: '+ Add a longer note', exact: true }).click()
-  await canvas.fill('Previous revision')
+  await replaceCanvasSource(canvas, { before: '', after: 'Previous revision' })
   await page.getByRole('button', { name: 'Preview', exact: true }).click()
   await expect(preview).toContainText('Previous revision')
 
   await page.route('**/api/content/posts/preview', (route) => route.abort())
   await page.getByRole('button', { name: 'Source', exact: true }).click()
-  await canvas.fill('Current **revision**')
+  await replaceCanvasSource(canvas, { before: 'Previous revision', after: 'Current **revision**' })
   await page.getByRole('button', { name: 'Preview', exact: true }).click()
   await expect(preview.getByRole('alert')).toContainText('The preview could not load')
   await expect(preview).not.toContainText('Previous revision')

@@ -1,4 +1,4 @@
-import type { WorkerObservability } from 'alchemy/Cloudflare'
+import type { WorkerObservability } from '@alchemy.run/cloudflare'
 
 const LOGS_DESTINATION = 'planetaryescape-logs'
 

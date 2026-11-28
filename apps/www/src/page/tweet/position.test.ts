@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { checkpointKey, readPosition, savePosition } from './position'
+import { checkpointKey, readPosition, savePosition } from '../../features/reader/position'
 
 const memoryStorage = () => {
   const values = new Map<string, string>()

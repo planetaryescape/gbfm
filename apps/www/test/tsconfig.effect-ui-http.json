@@ -1,0 +1,20 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "types": ["node", "vite/client"]
+  },
+  "include": [
+    "../src/vite-env.d.ts",
+    "../src/cloudflare-workers.d.ts",
+    "../src/virtual-modules.d.ts",
+    "../src/server/http-result.ts",
+    "../src/server/http-dispatch.ts",
+    "../src/server/http-dispatch.test.ts",
+    "../src/server/http-imports.test.ts",
+    "../src/server/http-routes.ts",
+    "../src/server/http-routes.test.ts",
+    "../src/server/prepare-page-response.ts",
+    "../src/server/prepare-page-response.test.ts"
+  ]
+}

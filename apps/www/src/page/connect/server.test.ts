@@ -3,8 +3,8 @@ import { createServer } from 'node:http'
 import { Schema } from 'effect'
 import { afterEach, expect, it, vi } from 'vitest'
 
+import { safeReturnPath } from '../../domain/auth/links'
 import { handleFormAction } from '../../server/form-actions'
-import { safeReturnPath } from '../auth/links'
 import { handleConnection } from './server'
 
 afterEach(() => vi.unstubAllEnvs())

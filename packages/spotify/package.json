@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@planetaryescape/opensound": "npm:@jsr/planetaryescape__opensound@0.7.2",
-    "effect": "4.0.6"
+    "effect": "4.1.6"
   },
   "devDependencies": {
     "@types/bun": "1.4.4",

@@ -8,7 +8,7 @@ import {
   pageRange,
   plural,
   relativeTimeLabel,
-} from './ui'
+} from '../../features/dashboard/formatting'
 
 const now = Date.parse('2026-10-23T12:00:00.000Z')
 

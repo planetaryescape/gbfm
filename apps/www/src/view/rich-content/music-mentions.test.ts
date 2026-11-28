@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { musicMentions } from './music-mentions'
+import { musicMentions } from '../../domain/editorial/music-mentions'
 
 describe('musicMentions', () => {
   it('connects case-insensitive title mentions without changing their text ranges', () => {

@@ -1,6 +1,6 @@
 # `@gbfm/www`
 
-Foldkit renders public pages on the server and keeps the audio player alive across client navigation. Effect owns application services and commands. The Cloudflare Worker forwards API requests through its `API` service binding; browser credentials remain same-origin.
+Native Effect UI renders public pages on the server and keeps the application shell and audio player alive across client navigation. Components, queries and service Layers own browser state and effects. The Cloudflare Worker forwards API requests through its `API` service binding; browser credentials remain same-origin. See [EFFECT-UI.md](../../EFFECT-UI.md) for ownership and pinned framework guidance.
 
 ## Development and verification
 
@@ -15,9 +15,9 @@ bun run --cwd apps/www build
 
 `VPS_PROXY_TARGET` selects the development API origin (default `http://127.0.0.1:3003`). Do not set a browser API origin: it would bypass the same-origin session cookie. `VITE_SPOTIFY_CLIENT_ID` configures Spotify PKCE.
 
-Newsletter subscriptions and account signup require Turnstile. For local development, explicitly set `TURNSTILE_SITE_KEY=1x00000000000000000000AA` (Cloudflare's official always-pass test widget). Playwright config sets this for its web server; when using `PLAYWRIGHT_BASE_URL`, configure the existing web server yourself. The disposable local API accepts only the official dummy token; production uses its configured real sitekey and server-side validation, never a browser bypass. The public sitekey is read by SSR and passed through page flags, not a build-time secret.
+Newsletter subscriptions and account signup require Turnstile. For local development, explicitly set `TURNSTILE_SITE_KEY=1x00000000000000000000AA` (Cloudflare's official always-pass test widget). Playwright config sets this for its web server; when using `PLAYWRIGHT_BASE_URL`, configure the existing web server yourself. The disposable local API accepts only the official dummy token; production uses its configured real sitekey and server-side validation, never a browser bypass. The public sitekey is read by SSR and passed through the request-owned page document, not a build-time secret.
 
-Development uses Foldkit's standalone SSR and view-identity plugins. The aggregate plugin's reload preservation caches a model on the Vite server by runtime ID, not browser session; it can replace a fresh visitor's SSR state after code changes. We deliberately forgo that preservation for this authenticated app. Production still uses the aggregate build plugin.
+The default Vite configuration uses the native adapter with request-local SSR state, not a model cached across visitors. Builds emit `dist/client` and `dist/server`, preserving the Worker hosting contract. `vite.effect.config.ts` remains a compatibility alias for that same configuration, not a second renderer. This conversion branch is unmerged and undeployed.
 
 Browser tests use `PLAYWRIGHT_BASE_URL` and an optional `CHROMIUM_PATH`. `bun run --cwd apps/server dev:e2e` starts the disposable, migrated D1 fixture API, including local creator/admin/listener accounts. This does not seed a shared database. Set `FRONTEND_URL` to the test web origin and `PORT` to the API port; point the web process's `VPS_PROXY_TARGET` at that API. Then run `bun run --cwd apps/www e2e`.
 
@@ -29,4 +29,4 @@ In Vite development, Effect exports SSR spans to `http://127.0.0.1:4318/v1/trace
 
 ## Changelog
 
-The repository root `CHANGELOG.md` is the only source of truth. `plugins/repo-changelog.ts` parses it into the shared inert rich-content document exposed by `virtual:repo-changelog` and watches it in development. `src/entry.server.ts` supplies it only to the changelog route. Do not create a second tracked changelog copy.
+The repository root `CHANGELOG.md` is the only source of truth. `plugins/repo-changelog.ts` parses it into the shared inert rich-content document exposed by `virtual:repo-changelog` and watches it in development. The native server page loader supplies it only to the changelog route. Do not create a second tracked changelog copy.

@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-import type * as Cloudflare from 'alchemy/Cloudflare'
+import type * as Cloudflare from '@alchemy.run/cloudflare'
 import { Schema } from 'effect'
 
 import { pendingCloneMigrationName } from './clone-sql'

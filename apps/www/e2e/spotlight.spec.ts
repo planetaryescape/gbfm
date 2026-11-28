@@ -1,20 +1,23 @@
-import { RichContentDocument } from '@gbfm/rich-content/schema'
+import { RichContentDocument, type RichContentBlock } from '@gbfm/rich-content/schema'
 import { parseRichContent } from '@gbfm/rich-content/source'
 import { expect, test, type Page } from '@playwright/test'
-import { Schema } from 'effect'
+import { Data, Schema } from 'effect'
 
-import type { Flags } from '../src/model'
+import type { PageDocument } from '../src/domain/page'
 
 const path = '/editorial/review-fixture'
+
 const storageKey = `gbfm:spotlight:${path}`
+
+const { MusicEmbed } = Data.taggedEnum<RichContentBlock>()
+
 const richContent = Schema.decodeUnknownSync(RichContentDocument)({
   version: 1,
   blocks: [
     ...parseRichContent(
       'A synthetic introduction.\n\n## First chapter\n\nAn opener.\n\n### First record\n\nA listening note.\n\n### Second record\n\nAnother note.',
     ).document.blocks,
-    {
-      _tag: 'MusicEmbed',
+    MusicEmbed({
       music: {
         entityType: 'track',
         entityId: 'fixture-track',
@@ -29,7 +32,7 @@ const richContent = Schema.decodeUnknownSync(RichContentDocument)({
       genres: [],
       blurb: null,
       showTracks: false,
-    },
+    }),
   ],
   layout: 'spotlight',
 })
@@ -41,7 +44,7 @@ const open = async (
   options: { draft?: boolean; document?: typeof RichContentDocument.Type } = {},
 ) => {
   await page.goto('/editorial')
-  await expect(page.locator('.site')).toHaveAttribute('data-interactive', 'true')
+  await expect(page.locator('html')).toHaveAttribute('data-gbfm-hydrated', 'true')
   await page.evaluate(
     ({ key, stored }) => {
       localStorage.setItem(key, JSON.stringify({ at: stored, seen: ['intro', 'obsolete'] }))
@@ -51,7 +54,8 @@ const open = async (
   await page.route(`**${path}?*`, (route) => {
     const url = new URL(route.request().url())
     url.searchParams.delete('__data')
-    const flags: Flags = {
+
+    const document: PageDocument = {
       url: url.href,
       status: 200,
       principal: null,
@@ -91,7 +95,7 @@ const open = async (
       failure: null,
     }
 
-    return route.fulfill({ json: flags })
+    return route.fulfill({ json: document })
   })
   await page.evaluate(
     (href) => {
@@ -181,6 +185,7 @@ for (const action of ['Play', 'Queue', 'Save']) {
     )
     await page.route('https://api.spotify.com/v1/**', (route) => {
       const url = new URL(route.request().url())
+
       if (url.pathname === '/v1/me')
         return route.fulfill({
           json: {
@@ -194,6 +199,7 @@ for (const action of ['Play', 'Queue', 'Save']) {
             images: [],
           },
         })
+
       if (url.pathname === '/v1/me/player/devices')
         return route.fulfill({
           json: {
@@ -218,6 +224,7 @@ for (const action of ['Play', 'Queue', 'Save']) {
     })
     await open(page, '1.2')
     await page.getByRole('button', { name: action, exact: true }).click()
+
     if (action === 'Save') {
       await expect(page.getByRole('status').filter({ hasText: 'Reconnect Spotify' })).toBeVisible()
     } else {
@@ -295,6 +302,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
         const stage = document.querySelector('.spotlight-stage')
         stage?.setAttribute('data-focus-identity', 'original')
       })
+
       for (const [key, position, direction] of [
         ['ArrowRight', '1.1', 'forward'],
         ['l', '1.2', 'forward'],
@@ -314,6 +322,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
           'animation-duration',
           reducedMotion === 'reduce' ? '0s' : '0.18s',
         )
+
         if (width === 1280) expect(await page.locator('.spotlight').boundingBox()).toEqual(frame)
       }
     })

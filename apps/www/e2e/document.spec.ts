@@ -1,12 +1,30 @@
 import { expect, test } from '@playwright/test'
 
+import { parseDocumentBootstrap, parseDocumentState } from './fixtures/native-document'
+
 test.describe('without JavaScript', () => {
   test.use({ javaScriptEnabled: false })
 
   test('document styles load before the client, including mobile navigation', async ({ page }) => {
     await page.goto('/mixes/e2e-local-frequencies')
-    await expect(page.locator('.mobile-dock')).toHaveCSS('position', 'fixed')
-    await expect(page.getByRole('navigation', { name: 'Primary', exact: true })).toBeVisible()
+
+    const dock = page.locator('.station-navigation .mobile-dock').filter({
+      has: page.locator('nav.dock-tabs'),
+    })
+
+    await expect(dock).toHaveCSS('position', 'fixed')
+    await expect(dock).toBeHidden()
+
+    const navigation = page.getByRole('navigation', {
+      name: 'Navigation without JavaScript',
+      exact: true,
+    })
+
+    await expect(navigation).toBeVisible()
+    await expect(navigation.getByRole('link', { name: 'Home', exact: true })).toHaveAttribute(
+      'href',
+      '/',
+    )
     await expect(
       page.getByRole('heading', { name: 'Local Frequencies', exact: true }),
     ).toBeVisible()
@@ -33,7 +51,10 @@ test('whole-document responses preserve head metadata, HEAD, redirects, and JSON
   expect(html.match(/name="viewport"/g)).toHaveLength(1)
   expect(html).toContain('viewport-fit=cover')
   expect(html).toContain('MusicRecording')
-  expect(html).toContain('data-foldkit-build=')
+  expect(html.match(/id="gbfm-ui-state"/g)).toHaveLength(1)
+  expect(html.match(/id="gbfm-ui-props"/g)).toHaveLength(1)
+  expect(html).toContain('type="application/json" id="gbfm-ui-state"')
+  expect(html).toContain('type="application/json" id="gbfm-ui-props"')
   const head = await request.head('/mixes/e2e-local-frequencies')
   expect(head.status()).toBe(200)
   expect(await head.body()).toHaveLength(0)
@@ -85,7 +106,20 @@ for (const theme of ['light', 'dark']) {
       await page.goto('/mixes/e2e-local-frequencies', { waitUntil: 'commit' })
       const root = page.locator('.site')
       await expect(root).toHaveCount(1)
-      await expect(root).toHaveAttribute('data-foldkit-build', /.+/)
+      await expect(page.locator('html')).not.toHaveAttribute('data-gbfm-hydrated')
+      const stateScript = page.locator('script#gbfm-ui-state[type="application/json"]')
+      const propsScript = page.locator('script#gbfm-ui-props[type="application/json"]')
+      await expect(stateScript).toHaveCount(1)
+      await expect(propsScript).toHaveCount(1)
+      const state = parseDocumentState((await stateScript.textContent()) ?? '')
+      const props = parseDocumentBootstrap((await propsScript.textContent()) ?? '')
+      expect(Object.keys(state)).toContain('/RoutedApplication')
+      expect(props).toMatchObject({
+        kind: 'routed',
+        url: expect.stringContaining('/mixes/e2e-local-frequencies'),
+        realm: expect.any(String),
+      })
+      expect(props.realm.length).toBeGreaterThan(0)
       const original = await root.elementHandle()
 
       if (!original) throw new Error('Missing SSR root')
@@ -99,14 +133,16 @@ for (const theme of ['light', 'dark']) {
         await page.locator('html').evaluate((html) => html.style.getPropertyValue('--queued-art')),
       ).toContain(theme === 'light' ? '/gb-default-v1.webp' : 'art.png?w=96&q=80&f=webp')
       gate.resolve()
-      await expect(root).not.toHaveAttribute('data-foldkit-build')
+      await expect(page.locator('html')).toHaveAttribute('data-gbfm-hydrated', 'true')
       expect(await original.evaluate((node) => node.isConnected)).toBe(true)
-      await expect(root).toHaveAttribute('data-interactive', 'true')
+      expect(await original.evaluate((node) => node === document.querySelector('.site'))).toBe(true)
+      await expect(root).toHaveCount(1)
       await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
         'content',
         theme === 'dark' ? '#16415a' : '#e4ecf6',
       )
-      await expect(page.locator('[data-foldkit-refused]')).toHaveCount(0)
+      await expect(stateScript).toHaveCount(1)
+      await expect(propsScript).toHaveCount(1)
       await page
         .getByRole('region', { name: 'Mini player', exact: true })
         .getByRole('button', { name: 'Now playing', exact: true })
@@ -123,7 +159,7 @@ for (const theme of ['light', 'dark']) {
 
 test('browser chrome follows theme changes and the page surface', async ({ page }) => {
   await page.goto('/shows/e2e-local-radio')
-  await expect(page.locator('.site')).toHaveAttribute('data-interactive', 'true')
+  await expect(page.locator('html')).toHaveAttribute('data-gbfm-hydrated', 'true')
 
   for (const theme of ['light', 'dark', 'system']) {
     await page.evaluate((theme) => {
@@ -163,7 +199,7 @@ test('browser chrome follows theme changes and the page surface', async ({ page 
 
 test('keyboard search stream opens after hydration', async ({ page }) => {
   await page.goto('/mixes')
-  await expect(page.locator('.site')).toHaveAttribute('data-interactive', 'true')
+  await expect(page.locator('html')).toHaveAttribute('data-gbfm-hydrated', 'true')
   await page.keyboard.press('Control+k')
   await expect(page.getByRole('dialog', { name: 'Search', exact: true })).toBeVisible()
 })
@@ -172,7 +208,7 @@ test('failed responsive artwork recovers to the local cover and does not retry a
   page,
 }) => {
   await page.goto('/')
-  await expect(page.locator('.site')).toHaveAttribute('data-interactive', 'true')
+  await expect(page.locator('html')).toHaveAttribute('data-gbfm-hydrated', 'true')
   const cover = page.locator('.featured-art img.artwork')
   await cover.evaluate((image: HTMLImageElement) => {
     image.srcset = '/missing-cover.png 640w'

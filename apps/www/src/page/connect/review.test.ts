@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import { Match, Schema } from 'effect'
 import { afterEach, expect, it, vi } from 'vitest'
 
-import { renderResponse } from '../../server/request-dispatch'
+import { renderPage as renderResponse } from '../../entry.effect.server'
 import { handleConnection } from './server'
 
 afterEach(() => vi.unstubAllEnvs())

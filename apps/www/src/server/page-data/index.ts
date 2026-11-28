@@ -5,21 +5,39 @@ import { ListDjsResponse } from '@gbfm/api/user'
 import { Schema } from 'effect'
 import changelog from 'virtual:repo-changelog'
 
-import type { Flags } from '../../model'
+import type { PageDocument } from '../../domain/page'
+import type { Principal } from '../../domain/principal'
+import type { PublicActionDocument } from '../../domain/public-action'
+import { staticPages } from '../../domain/static/pages'
+import { isEntry, skipsSeenTweets } from '../../features/reader/location'
 import { loadAudioDetailData } from '../../page/content/page-data'
 import { loadDashboardData } from '../../page/dashboard/page-data'
 import { loadListeningPage } from '../../page/listening/page-data'
 import { loadShowDetailData } from '../../page/shows/detail-page-data'
 import { loadShowsData } from '../../page/shows/page-data'
-import { staticPages } from '../../page/static/pages'
-import { skipsSeenTweets } from '../../page/tweet/navigation'
 import { loadTweetData } from '../../page/tweet/page-data'
-import { isEntry } from '../../page/tweet/reader'
-import type { Document as PublicActionDocument } from '../../public-actions'
 import { Route } from '../../route'
 import { apiRequest, endpointFor } from '../api'
 import { loadIdentity, loadPublicActionState } from './identity'
 import { contentItems, json } from './shared'
+
+export interface LoadedPage {
+  readonly redirect: null
+  readonly flags: PageDocument
+  readonly identity: {
+    readonly principal: Principal | null
+    readonly cookies: ReadonlyArray<string>
+  }
+  readonly response: Response | null
+  readonly neighbourResponse: Response | null
+  readonly tweetData: Awaited<ReturnType<typeof loadTweetData>>
+  readonly showDetailSlug: string | null
+  readonly showMetadata: PageDocument['metadata']
+  readonly profile: PageDocument['profile']
+  readonly route: Route
+  readonly url: URL
+  readonly requestId: string
+}
 
 export const loadPageData = async (
   ownedRequest: Request,
@@ -27,7 +45,7 @@ export const loadPageData = async (
   url: URL,
   route: Route,
   requestId: string,
-) => {
+): Promise<LoadedPage | { readonly redirect: string }> => {
   if (Route.guards.Detail(route) && route.kind === 'shows')
     return loadShowDetailData(ownedRequest, request, url, route, requestId, route.slug)
 
@@ -186,7 +204,7 @@ export const loadPageData = async (
         ? 503
         : 200)
 
-  const flags: Flags = {
+  const flags: PageDocument = {
     url: url.pathname === '/spotify/callback' ? `${url.origin}${url.pathname}` : url.href,
     turnstileSiteKey:
       url.pathname === '/subscribe' || url.pathname === '/auth/sign-up'

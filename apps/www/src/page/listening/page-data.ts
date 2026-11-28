@@ -1,9 +1,9 @@
 import { ImportPreview, ListeningDocument } from '@gbfm/api/listening'
 import { Option, Schema } from 'effect'
 
+import type { ListeningPage } from '../../domain/listening'
 import { Route } from '../../route'
 import { apiRequest } from '../../server/api'
-import type { ListeningPage } from './document'
 
 /** Loads private workspace data only with a principal, public data through public endpoints. */
 export const loadListeningPage = async (

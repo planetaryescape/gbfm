@@ -19,7 +19,8 @@ import {
 } from '@gbfm/core/personal-access-keys'
 import { Role } from '@gbfm/core/roles'
 import { and, count, desc, eq, gt, isNull, lt, or, sql } from 'drizzle-orm'
-import { Clock, Context, Crypto, Effect, Layer, Redacted, Schema } from 'effect'
+import { Clock, Context, Effect, Layer, Redacted, Schema } from 'effect'
+import { Digest, SecureRandom } from 'effect/crypto'
 import { HttpApiError } from 'effect/http-api'
 
 import { user } from '@/db/auth.schema'
@@ -87,17 +88,21 @@ const makePersonalAccessKeys = Effect.gen(function* () {
   const db = yield* Database
   const config = yield* ConfigService
   const clock = yield* Clock.Clock
-  const crypto = yield* Crypto.Crypto
+  const hashing = yield* Digest.Digest
+  const secureRandom = yield* SecureRandom.SecureRandom
 
   const environment = Schema.decodeUnknownEffect(KeyEnvironment)(config.app.stage).pipe(
     Effect.mapError(() => new KeyStoreUnavailable()),
   )
 
   const digest = (token: Redacted.Redacted) =>
-    crypto.digest('SHA-256', new TextEncoder().encode(Redacted.value(token))).pipe(
-      Effect.orDie,
-      Effect.map((bytes) => [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')),
-    )
+    hashing
+      .digest(Digest.sha256, new TextEncoder().encode(Redacted.value(token)))
+      .pipe(
+        Effect.map((bytes) =>
+          [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join(''),
+        ),
+      )
 
   const owned = (ownerUserId: UserId, stage: KeyEnvironment) =>
     and(eq(keys.ownerUserId, ownerUserId), eq(keys.environment, stage))
@@ -124,8 +129,8 @@ const makePersonalAccessKeys = Effect.gen(function* () {
       return yield* new KeyAccessDenied()
     const name = input.name.trim()
 
-    const id = yield* crypto.randomUUIDv4().pipe(Effect.orDie)
-    const bytes = yield* crypto.randomBytes(32).pipe(Effect.orDie)
+    const id = yield* secureRandom.uuidV4()
+    const bytes = yield* secureRandom.randomBytes(32)
 
     const random = btoa(String.fromCharCode(...bytes))
       .replaceAll('+', '-')

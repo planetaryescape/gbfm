@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 
-import { authHref, safeReturnPath, signInHref } from './links'
+import { authHref, safeReturnPath, signInHref } from '../../domain/auth/links'
 
 it('carries only the params that have a value', () => {
   expect(authHref('/auth/sign-up', { returnTo: '/privacy' })).toBe(

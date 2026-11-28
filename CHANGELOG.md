@@ -1,3 +1,10 @@
+## [2.141.2](https://github.com/planetaryescape/gbfm/compare/v2.141.1...v2.141.2) (2026-11-28)
+
+
+### Bug Fixes
+
+* **www:** stabilize navigation and simplify reader controls ([bd4dc2f](https://github.com/planetaryescape/gbfm/commit/bd4dc2f3cb1811a3f5005f4b1c2aa1d64bfcbd2d))
+
 ## [2.141.1](https://github.com/planetaryescape/gbfm/compare/v2.141.0...v2.141.1) (2026-11-28)
 
 

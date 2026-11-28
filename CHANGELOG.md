@@ -1,3 +1,11 @@
+## [2.141.1](https://github.com/planetaryescape/gbfm/compare/v2.141.0...v2.141.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **navigation:** center the mobile dock and label its expand control ([4abd5c2](https://github.com/planetaryescape/gbfm/commit/4abd5c2641a04b6ab44e336e7651b99060de7d35))
+* **spotify:** recover failed runtime loads without replaying actions ([3439d16](https://github.com/planetaryescape/gbfm/commit/3439d16d8dff7216f7cdf253136eb6ca38d9f99b))
+
 # [2.141.0](https://github.com/planetaryescape/gbfm/compare/v2.140.3...v2.141.0) (2026-11-28)
 
 

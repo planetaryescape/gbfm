@@ -9,6 +9,7 @@ export const disconnected = { connected: false, name: '' }
 
 export class SpotifyConnectionError extends Data.TaggedError('SpotifyConnectionError')<{
   readonly message: string
+  readonly recovery?: 'reload'
 }> {}
 
 export class SpotifyConnection extends Context.Service<
@@ -33,7 +34,8 @@ const withConnection = <A>(
     try: () => import('./runtime'),
     catch: () =>
       new SpotifyConnectionError({
-        message: 'Spotify could not load. Check your connection and try again.',
+        message: 'Spotify could not load. Reload this page and try again.',
+        recovery: 'reload',
       }),
   }).pipe(
     Effect.flatMap(({ browserConnectionLayer }) =>

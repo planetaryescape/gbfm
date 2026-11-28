@@ -5,6 +5,16 @@ import { Stream } from 'effect'
 import { PerformSpotify, StartSpotifyClient } from './commands'
 import { SpotifyProviderMessage, SpotifyProviderModel, SpotifyProviderProps } from './domain'
 
+interface SpotifyProviderValue {
+  readonly identity: string
+  readonly interactive: boolean
+  readonly revision: number
+  readonly busy: boolean
+  readonly target: string | null
+  readonly notice: string
+  readonly recovery?: 'reload'
+}
+
 const SpotifyProviderDef = Html.component({
   name: 'SpotifyProvider',
   props: SpotifyProviderProps,
@@ -12,13 +22,14 @@ const SpotifyProviderDef = Html.component({
   message: SpotifyProviderMessage,
   restore: false,
   shares: {
-    value: ({ model, props }) => ({
+    value: ({ model, props }): SpotifyProviderValue => ({
       identity: props.identity,
       interactive: model.interactive && model.identity === props.identity,
       revision: model.revision,
       busy: model.operation !== null,
       target: model.operation?.url ?? model.target,
       notice: model.operation ? 'Working…' : model.notice,
+      recovery: model.operation === null ? model.recovery : undefined,
     }),
     receives: [
       'RequestedPlayback',
@@ -39,6 +50,7 @@ export const updateSpotifyProvider = SpotifyProviderDef.update({
           identity: $.props.identity,
           operation: null,
           notice: '',
+          recovery: undefined,
           target: null,
           operationId: $.model.operationId + 1,
           revision: $.model.operationId + 1,
@@ -63,6 +75,7 @@ export const updateSpotifyProvider = SpotifyProviderDef.update({
       operationId: requestId,
       target: null,
       notice: '',
+      recovery: undefined,
     }).run(
       PerformSpotify.make({
         action: 'synchronize',
@@ -85,6 +98,7 @@ export const updateSpotifyProvider = SpotifyProviderDef.update({
     return $.evolve({
       operation: null,
       notice: message.notice,
+      recovery: message.recovery,
       target: $.model.operation.url,
       revision: message.status === null ? $.model.revision : message.revision,
     })
@@ -105,6 +119,7 @@ export const updateSpotifyProvider = SpotifyProviderDef.update({
       operation,
       operationId: operation.requestId,
       notice: '',
+      recovery: undefined,
     }).run(PerformSpotify.make(operation))
   },
   RequestedDisconnect: ($) => {
@@ -122,6 +137,7 @@ export const updateSpotifyProvider = SpotifyProviderDef.update({
       operation,
       operationId: operation.requestId,
       notice: '',
+      recovery: undefined,
     }).run(PerformSpotify.make(operation))
   },
   RequestedCompleteCallback: ($) => {
@@ -139,6 +155,7 @@ export const updateSpotifyProvider = SpotifyProviderDef.update({
       operation,
       operationId: operation.requestId,
       notice: '',
+      recovery: undefined,
     }).run(PerformSpotify.make(operation))
   },
 })
@@ -153,7 +170,7 @@ export const SpotifyProvider = SpotifyProviderDef.make({
       operation: null,
       target: null,
       notice: '',
-    }).run(StartSpotifyClient.make()),
+    }).run(StartSpotifyClient.make({ identity: $.props.identity, revision: 0 })),
   subscriptions: ({ props }) => [
     Subscription.make('SpotifyIdentity', props.identity, () =>
       Stream.succeed(SpotifyProviderMessage.ChangedIdentity()),

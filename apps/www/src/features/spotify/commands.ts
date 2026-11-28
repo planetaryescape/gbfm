@@ -117,6 +117,7 @@ export class PerformSpotify extends Command.Service<PerformSpotify>()('spotify/P
                   revision,
                   status: null,
                   notice: error.message,
+                  recovery: error.recovery,
                 }),
             }),
           )
@@ -125,8 +126,11 @@ export class PerformSpotify extends Command.Service<PerformSpotify>()('spotify/P
   )
 }
 
-export const StartSpotifyClient = Command.make('StartSpotifyClient', { args: {} }, () =>
-  Effect.succeed(SpotifyProviderMessage.StartedClient()),
+export const StartSpotifyClient = Command.make(
+  'StartSpotifyClient',
+  { args: { identity: Schema.String, revision: Schema.Number } },
+  (args) =>
+    ReadSpotifyStatus.invalidate(args).pipe(Effect.as(SpotifyProviderMessage.StartedClient())),
 )
 
 export const spotifyCommandsLayer = Layer.mergeAll(

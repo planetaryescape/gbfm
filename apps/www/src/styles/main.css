@@ -767,6 +767,7 @@
 .dock-tabs > .dock-tabs-expand {
   position: absolute;
   inset: 0.25rem;
+  height: auto;
   opacity: 0;
   pointer-events: none;
 }
